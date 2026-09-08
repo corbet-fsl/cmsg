@@ -1,0 +1,11 @@
+# Component composition experiment
+
+This local synthetic harness executes actual cvld AnonCreds issuance and presentation, software-authenticator WebAuthn enrollment/login, cfrm certified onion rendezvous, RFC9474 blind first-contact permits, and the native cmsg OpenMLS participant. Two separately certified members discover each other, consume a finite permit, exchange authenticated text, and restore an encrypted snapshot. Negative checks reject copied certificates, permit replay, message replay and reconnect-based allowance refill. Expired presence is removed by timers.
+
+The workflow pins both sibling repositories by full commit and installs only their locked public dependencies on a standard public runner. It uses no real phone number, payment, production key or paid provider. The test was introduced before its implementation. The initial workflow failed during checkout because abbreviated sibling revisions were unsuitable for checkout; it is not counted as a behavioral red run. The actual composition passed in [run 34258756285](https://github.com/corbet-labs/cmsg/actions/runs/34258756285), commit `7d10044`.
+
+This is a process-level composition, not a network deployment. Provider attestations are signed synthetic fixtures, PRF output is synthetic input to the real wallet derivation, and onion addresses are validated test endpoints with no connection attempted here. Actual browser PRF and Tor circuits have their own experiments. The harness temporarily holds both clients' state to drive the test; this is not an operator-service architecture.
+
+The trusted harness sequences allowance redemption before first contact. It does not yet provide a recipient-enforced, anonymous proof of spending, private reciprocity, a provider uniqueness service, mobile lifecycle management or production telemetry. Bearer permits remain transferable, and timing correlation remains outside their cryptographic blindness guarantee. Do not expose this harness as a service.
+
+To reproduce on a permitted build runner, check out cmsg, cvld and cfrm as siblings at the workflow revisions, install cvld and the cfrm anonymous-permit experiment dependencies, build `cargo build --locked --example composition` in cmsg, then run `node --test experiments/composition/composition.test.mjs`.

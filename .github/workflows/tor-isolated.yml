@@ -1,0 +1,23 @@
+name: Isolated Tor onion experiment
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  onion:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Ephemeral public runner tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y tor
+          python3 -m venv /tmp/cmsg-chutney-env
+          /tmp/cmsg-chutney-env/bin/pip install 'git+https://gitlab.torproject.org/tpo/core/chutney.git@6cc158868d722e652975cb4efd5b278d95ff2fbb'
+          rustup update stable --no-self-update
+          rustup default stable
+      - name: Build synthetic probe
+        run: cargo build --locked --example tor_roundtrip
+      - name: Genuine Tor circuit inside an isolated test network
+        run: /tmp/cmsg-chutney-env/bin/python experiments/tor_isolated.py

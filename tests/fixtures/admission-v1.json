@@ -1,0 +1,15 @@
+{
+  "publicKey": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+  "now": 1800000060,
+  "grant": {
+    "version": 1,
+    "issuerKeyId": "If4x36FUomFia_hUBG_SJxt77UtqvkWqWId-9H-XIbk",
+    "communityId": "community.example",
+    "memberId": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+    "chatPublicKey": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+    "policyDigest": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+    "issuedAt": 1800000000,
+    "expiresAt": 1800000120,
+    "signature": "bdUo6PKgvimrheWqJizeVWUaBBTFbroLEZqyk4PO_TKATGbkUr6uRCE6NHc9wLQvWSFq10CYK-Fo9Xy1Wx7bCQ"
+  }
+}

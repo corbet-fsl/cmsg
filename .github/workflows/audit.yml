@@ -1,0 +1,18 @@
+name: Dependency advisory audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  advisory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Ephemeral advisory tool
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          cargo install cargo-audit --version 0.22.2 --locked
+      - name: Check public dependency lock against RustSec
+        run: cargo audit

@@ -1,0 +1,21 @@
+name: Live Tor onion experiment
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  onion:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Ephemeral public runner tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y tor
+          rustup update stable --no-self-update
+          rustup default stable
+      - name: Build synthetic probe
+        run: cargo build --locked --example tor_roundtrip
+      - name: Real onion circuit with independent client and service processes
+        run: python3 experiments/tor_roundtrip.py
