@@ -1,0 +1,28 @@
+# Explicit manual synthetic Tor round trip. No host daemon or real user state.
+# A successful run is routing evidence from this runtime, not an anonymity audit.
+when:
+  - event: manual
+skip_clone: true
+steps:
+  - name: verified-source-checkout
+    image: bash
+    commands:
+      - |
+        ci_source_dir="/workspaces/component-sources/cmsg"
+        ci_source_archive="$ci_source_dir/$CI_COMMIT_SHA.tar"
+        (cd "$ci_source_dir" && sha256sum --check "$CI_COMMIT_SHA.tar.sha256")
+        test "$(git get-tar-commit-id < "$ci_source_archive")" = "$CI_COMMIT_SHA"
+        tar --extract --touch --file "$ci_source_archive" --no-same-owner
+  - name: bounded-public-onion-round-trip
+    image: bash
+    depends_on: [verified-source-checkout]
+    environment:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_TARGET_DIR: /caches/cargo/component-targets/cmsg
+    commands:
+      - |
+        mkdir -p "$CARGO_TARGET_DIR"
+        flock "$CARGO_TARGET_DIR.ci.lock" bash -euc '
+          timeout 1800 cargo build --locked --manifest-path experiments/embedded-onion/Cargo.toml
+          python3 experiments/embedded-onion/run-network.py
+        '

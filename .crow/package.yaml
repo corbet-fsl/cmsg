@@ -1,0 +1,55 @@
+# Build and verify an exact release candidate on an existing trusted worker.
+# Registry credentials and publication stay outside this workflow.
+when:
+  - event: manual
+skip_clone: true
+steps:
+  - name: verified-source-checkout
+    image: bash
+    commands:
+      - |
+        ci_source_dir="/workspaces/component-sources/cmsg"
+        ci_source_archive="$ci_source_dir/$CI_COMMIT_SHA.tar"
+        (cd "$ci_source_dir" && sha256sum --check "$CI_COMMIT_SHA.tar.sha256")
+        test "$(git get-tar-commit-id < "$ci_source_archive")" = "$CI_COMMIT_SHA"
+        tar --extract --touch --file "$ci_source_archive" --no-same-owner
+  - name: package-and-external-consumer
+    image: bash
+    depends_on: [verified-source-checkout]
+    environment:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_TARGET_DIR: /caches/cargo/component-targets/cmsg
+    commands:
+      - rustc --version
+      - cargo --version
+      - |
+        mkdir -p "$CARGO_TARGET_DIR"
+        flock "$CARGO_TARGET_DIR.ci.lock" bash -euo pipefail <<'PACKAGE_VERIFY'
+        timeout 1200 cargo package --locked --offline --no-verify
+        ci_package_path="$CARGO_TARGET_DIR/package/cmsg-0.1.0-alpha.1.crate"
+        timeout 1200 python3 experiments/package-consumer/check.py "$ci_package_path" --expected-commit "$CI_COMMIT_SHA"
+        ci_release_dir="/workspaces/component-releases/cmsg/$CI_COMMIT_SHA"
+        mkdir -p "$ci_release_dir"
+        cp "$ci_package_path" "$ci_release_dir/"
+        (cd "$ci_release_dir" && sha256sum cmsg-0.1.0-alpha.1.crate > SHA256SUMS)
+        python3 - "$ci_release_dir" "$CI_COMMIT_SHA" <<'PACKAGE_METADATA'
+        import hashlib, json, pathlib, subprocess, sys
+        release = pathlib.Path(sys.argv[1])
+        commit = sys.argv[2]
+        archive = release / 'cmsg-0.1.0-alpha.1.crate'
+        source = pathlib.Path('/workspaces/component-sources/cmsg') / (commit + '.tar')
+        metadata = {
+            'sourceCommit': commit,
+            'sourceArchiveSha256': hashlib.sha256(source.read_bytes()).hexdigest(),
+            'package': archive.name,
+            'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
+            'bytes': archive.stat().st_size,
+            'rustc': subprocess.check_output(['rustc', '--version'], text=True).strip(),
+            'cargo': subprocess.check_output(['cargo', '--version'], text=True).strip(),
+            'externalConsumerPassed': True,
+            'mobileDeviceTests': False,
+        }
+        (release / 'pack-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
+        print(json.dumps(metadata))
+        PACKAGE_METADATA
+        PACKAGE_VERIFY

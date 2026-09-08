@@ -1,0 +1,19 @@
+# Read-only prerequisite inventory on the existing CI runtime.
+# No tool installation, host configuration or network service is performed.
+when:
+  - event: manual
+skip_clone: true
+steps:
+  - name: installed-transport-tools
+    image: bash
+    commands:
+      - |
+        for ci_transport_tool in tor tor-gencert arti python3 timeout; do
+          if command -v "$ci_transport_tool" >/dev/null 2>&1; then
+            printf '%s: installed\n' "$ci_transport_tool"
+          else
+            printf '%s: unavailable\n' "$ci_transport_tool"
+          fi
+        done
+        if command -v tor >/dev/null 2>&1; then tor --version; fi
+        python3 --version

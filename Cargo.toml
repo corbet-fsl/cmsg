@@ -2,11 +2,24 @@
 name = "cmsg"
 version = "0.1.0-alpha.1"
 edition = "2021"
-rust-version = "1.91"
+rust-version = "1.97.1"
 description = "Experimental anonymous-transport MLS text messaging core"
 repository = "https://github.com/corbet-labs/cmsg"
 license-file = "LICENSE.md"
-publish = false
+readme = "README.md"
+publish = ["crates-io"]
+include = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "LICENSE.md",
+    "README.md",
+    "src/**",
+    "tests/**",
+    "examples/*.rs",
+    "docs/*.md",
+    "studies/*.md",
+    "experiments/**/*.md",
+]
 
 [dependencies]
 openmls = "=0.9.0"

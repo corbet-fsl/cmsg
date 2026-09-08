@@ -10,6 +10,15 @@ fn valid_signed_community_identity_and_chat_key_are_bound() {
         grant.member_id
     );
 }
+
+#[test]
+fn zero_issuance_time_is_rejected_like_the_cvld_javascript_verifier() {
+    let key = [23; 32];
+    let mut certificate = grant(&key, 7);
+    certificate.issued_at = 0;
+    sign(&mut certificate);
+    assert!(verify_admission(&certificate, &trust(), &key, 100).is_err());
+}
 #[test]
 fn altered_identity_key_policy_issuer_and_expiry_are_rejected() {
     let key = [23; 32];

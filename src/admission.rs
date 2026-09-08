@@ -37,6 +37,7 @@ pub fn verify_admission(
                 .is_ok_and(|b| b.len() == 32)
     };
     if grant.version != 1
+        || grant.issued_at == 0
         || grant.community_id != trust.community_id
         || grant.policy_digest != trust.policy_digest
         || grant.issued_at > now

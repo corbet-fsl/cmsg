@@ -1,0 +1,16 @@
+[package]
+name = "cmsg-package-consumer"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.97.1"
+publish = false
+
+# The checker creates this sibling layout from the actual .crate archive.
+[dependencies]
+cmsg = { path = "../unpacked" }
+data-encoding = "2.9"
+ed25519-dalek = "2.2"
+serde_json = "1.0"
+sha2 = "0.10"
+
+[workspace]

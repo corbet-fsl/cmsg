@@ -30,11 +30,14 @@ struct InboxState {
     community_id: String,
     recipient_id: String,
     known: BTreeSet<String>,
+    #[serde(default)]
+    blocked: BTreeSet<String>,
     pending: Option<Pending>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Pending {
     welcome: Vec<u8>,
+    inviter: String,
     welcome_hash: [u8; 32],
     recipient_redemption: Vec<u8>,
 }
@@ -42,6 +45,7 @@ impl Drop for Pending {
     fn drop(&mut self) {
         self.recipient_redemption.zeroize();
         self.welcome.zeroize();
+        self.inviter.zeroize();
     }
 }
 impl Drop for InboxState {
@@ -49,6 +53,9 @@ impl Drop for InboxState {
         self.community_id.zeroize();
         self.recipient_id.zeroize();
         for mut value in std::mem::take(&mut self.known) {
+            value.zeroize();
+        }
+        for mut value in std::mem::take(&mut self.blocked) {
             value.zeroize();
         }
     }
@@ -65,6 +72,7 @@ impl Inbox {
                     .clone(),
                 recipient_id: recipient.member_id()?,
                 known: BTreeSet::new(),
+                blocked: BTreeSet::new(),
                 pending: None,
             },
         })
@@ -116,6 +124,9 @@ impl Inbox {
         // persistence or debit. Merely possessing a public certificate is not enough.
         let prepared = recipient.prepare_join(welcome)?;
         let inviter = prepared.inviter.clone();
+        if self.state.blocked.contains(&inviter) {
+            return Ok(Acceptance::Blocked);
+        }
         let hash: [u8; 32] = Sha256::digest(welcome).into();
         if let Some(pending) = &self.state.pending {
             if pending.welcome_hash != hash
@@ -134,6 +145,7 @@ impl Inbox {
             }
             self.state.pending = Some(Pending {
                 welcome: welcome.to_vec(),
+                inviter: inviter.clone(),
                 welcome_hash: hash,
                 recipient_redemption: attempt.to_vec(),
             });
@@ -185,25 +197,63 @@ impl Inbox {
         *self = committed;
         Ok(Acceptance::Joined)
     }
+    /// Locally discard an unresolved invitation after durably clearing it. A spent
+    /// permit is forfeited; cancellation never refunds allowance or calls cfrm.
     pub fn cancel_pending(
         &mut self,
-        _recipient: &Member,
-        _key: &[u8; 32],
-        _context: &[u8],
-        _persist: impl FnMut(&[u8]) -> Result<(), Error>,
+        recipient: &Member,
+        key: &[u8; 32],
+        context: &[u8],
+        mut persist: impl FnMut(&[u8]) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        Err(Error::InvalidState)
+        self.check_binding(recipient)?;
+        let mut cleared = self.duplicate();
+        cleared.state.pending = None;
+        persist(&cleared.seal(recipient, key, context)?)?;
+        *self = cleared;
+        Ok(())
     }
+    /// Private stable-ID invitation blocking, including previously known contacts.
+    /// Existing conversation output must separately honor the client's block state;
+    /// this method does not modify raw Member::receive or report anything to cfrm.
+    #[allow(clippy::too_many_arguments)]
     pub fn set_blocked(
         &mut self,
-        _member_id: &str,
-        _blocked: bool,
-        _recipient: &Member,
-        _key: &[u8; 32],
-        _context: &[u8],
-        _persist: impl FnMut(&[u8]) -> Result<(), Error>,
+        member_id: &str,
+        blocked: bool,
+        recipient: &Member,
+        key: &[u8; 32],
+        context: &[u8],
+        mut persist: impl FnMut(&[u8]) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        Err(Error::InvalidState)
+        self.check_binding(recipient)?;
+        if member_id.len() != 43
+            || !data_encoding::BASE64URL_NOPAD
+                .decode(member_id.as_bytes())
+                .is_ok_and(|bytes| bytes.len() == 32)
+        {
+            return Err(Error::Admission);
+        }
+        let mut changed = self.duplicate();
+        if blocked {
+            changed.state.blocked.insert(member_id.to_owned());
+            if changed
+                .state
+                .pending
+                .as_ref()
+                .is_some_and(|p| p.inviter == member_id)
+            {
+                changed.state.pending = None;
+            }
+        } else {
+            changed.state.blocked.remove(member_id);
+        }
+        persist(&changed.seal(recipient, key, context)?)?;
+        *self = changed;
+        Ok(())
+    }
+    pub fn is_blocked(&self, member_id: &str) -> bool {
+        self.state.blocked.contains(member_id)
     }
 
     fn check_binding(&self, recipient: &Member) -> Result<(), Error> {
@@ -231,7 +281,7 @@ impl Inbox {
         };
         let plaintext =
             Zeroizing::new(serde_json::to_vec(&bundle).map_err(|_| Error::InvalidStore)?);
-        crate::vault::seal(&plaintext, key, &inbox_context(context))
+        crate::vault::seal(&plaintext, key, &inbox_context(context)?)
     }
     pub fn restore(sealed: &[u8], key: &[u8; 32], context: &[u8]) -> Result<(Self, Member), Error> {
         #[derive(Deserialize)]
@@ -239,7 +289,7 @@ impl Inbox {
             inbox: InboxState,
             member: Vec<u8>,
         }
-        let plaintext = crate::vault::open(sealed, key, &inbox_context(context))?;
+        let plaintext = crate::vault::open(sealed, key, &inbox_context(context)?)?;
         let bundle: Bundle = serde_json::from_slice(&plaintext).map_err(|_| Error::InvalidStore)?;
         let member = Member::restore(&bundle.member, key, context)?;
         let inbox = Self {
@@ -249,8 +299,12 @@ impl Inbox {
         Ok((inbox, member))
     }
 }
-fn inbox_context(context: &[u8]) -> Vec<u8> {
-    let mut result = b"cmsg.inbox.v1\0".to_vec();
-    result.extend_from_slice(context);
-    result
+fn inbox_context(context: &[u8]) -> Result<[u8; 32], Error> {
+    if context.is_empty() || context.len() > 128 {
+        return Err(Error::InvalidStore);
+    }
+    let mut hash = Sha256::new();
+    hash.update(b"cmsg.inbox.v1\0");
+    hash.update(context);
+    Ok(hash.finalize().into())
 }

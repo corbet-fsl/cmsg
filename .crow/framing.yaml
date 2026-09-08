@@ -1,0 +1,26 @@
+when:
+  - event: manual
+skip_clone: true
+steps:
+  - name: verified-source-checkout
+    image: bash
+    commands:
+      - |
+        ci_source_dir="/workspaces/component-sources/cmsg"
+        ci_source_archive="$ci_source_dir/$CI_COMMIT_SHA.tar"
+        (cd "$ci_source_dir" && sha256sum --check "$CI_COMMIT_SHA.tar.sha256")
+        test "$(git get-tar-commit-id < "$ci_source_archive")" = "$CI_COMMIT_SHA"
+        tar --extract --touch --file "$ci_source_archive" --no-same-owner
+  - name: bounded-frame-tests
+    image: bash
+    depends_on: [verified-source-checkout]
+    environment:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_TARGET_DIR: /caches/cargo/component-targets/cmsg
+    commands:
+      - |
+        mkdir -p "$CARGO_TARGET_DIR"
+        flock "$CARGO_TARGET_DIR.ci.lock" bash -euc '
+          cargo fmt --all -- --check
+          timeout 600 cargo test --locked --test framing -- --nocapture
+        '

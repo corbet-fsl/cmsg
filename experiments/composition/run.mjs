@@ -22,7 +22,7 @@ export async function runComposition() {
   ]);
   const dir = mkdtempSync(join(tmpdir(), 'component-composition-'));
   const ledger = permits.openLedger(join(dir, 'allowances.sqlite'));
-  const child = spawn(resolve(root, 'target/debug/examples/composition'), [], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.env.CMSG_COMPOSITION_BINARY ?? resolve(root, 'target/debug/examples/composition'), [], { stdio: ['pipe', 'pipe', 'pipe'] });
   let childError;
   let errorOutput = '';
   child.on('error', error => { childError = error; });

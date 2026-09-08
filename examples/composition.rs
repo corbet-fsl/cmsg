@@ -174,7 +174,8 @@ struct Checkpoint {
 impl Checkpoint {
     fn new() -> std::io::Result<Self> {
         let mut random = [0; 16];
-        getrandom::fill(&mut random).map_err(std::io::Error::other)?;
+        getrandom::fill(&mut random)
+            .map_err(|_| std::io::Error::other("randomness unavailable"))?;
         let directory = std::env::temp_dir().join(format!(
             "cmsg-composition-{}",
             data_encoding::HEXLOWER.encode(&random)

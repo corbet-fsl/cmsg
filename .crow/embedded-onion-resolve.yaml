@@ -1,0 +1,26 @@
+# Resolve the isolated experiment on the existing worker, then retrieve and
+# commit its lockfile before claiming a reproducible test or network result.
+when:
+  - event: manual
+skip_clone: true
+steps:
+  - name: verified-source-checkout
+    image: bash
+    commands:
+      - |
+        ci_source_dir="/workspaces/component-sources/cmsg"
+        ci_source_archive="$ci_source_dir/$CI_COMMIT_SHA.tar"
+        (cd "$ci_source_dir" && sha256sum --check "$CI_COMMIT_SHA.tar.sha256")
+        test "$(git get-tar-commit-id < "$ci_source_archive")" = "$CI_COMMIT_SHA"
+        tar --extract --touch --file "$ci_source_archive" --no-same-owner
+  - name: resolve-experiment-lock
+    image: bash
+    depends_on: [verified-source-checkout]
+    commands:
+      - |
+        timeout 300 cargo generate-lockfile --manifest-path experiments/embedded-onion/Cargo.toml
+        ci_artifact_dir="/workspaces/component-releases/cmsg/$CI_COMMIT_SHA"
+        mkdir -p "$ci_artifact_dir"
+        cp experiments/embedded-onion/Cargo.lock "$ci_artifact_dir/embedded-onion-Cargo.lock"
+        (cd "$ci_artifact_dir" && sha256sum embedded-onion-Cargo.lock > embedded-onion-Cargo.lock.sha256)
+        cat "$ci_artifact_dir/embedded-onion-Cargo.lock.sha256"
