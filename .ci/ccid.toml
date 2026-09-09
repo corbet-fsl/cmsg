@@ -1,0 +1,9 @@
+schema = 1
+project = "cmsg"
+
+# Network/Tor/mobile/component-composition checks retain their existing explicit Crow lanes and dependency source pins.
+
+[checks.rust]
+kind = "cargo"
+actions = ["fmt", "test"]
+all_targets = true
