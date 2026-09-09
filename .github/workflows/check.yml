@@ -9,6 +9,8 @@ permissions:
   contents: read
 jobs:
   test:
+    # Routine Linux check: Crow .ci/ccid.toml (rust); hosted fallback is explicit.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
