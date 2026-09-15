@@ -1,0 +1,38 @@
+{
+  "torJs": {
+    "repository": "https://github.com/privacy-ethereum/tor-js.git",
+    "revision": "65bb21d536a405ba706689ca384fad2ee25e60a7",
+    "baseVersion": "0.4.1",
+    "registryIntegrity": "sha512-cUF55sKfPt4ORFaB7sT+8dPLPZqHHnit7H5NKwq05nF9e2SY8O2CyoTbZ6bYbhCfUFV7ejHmYD/o26WuptETBw==",
+    "patches": ["tor-js-onion-client.patch"],
+    "rawStreamStage": {
+      "patch": "tor-js-onion-stream.patch",
+      "overlay": { "onion_stream.rs": "crates/tor-js-wasm/src/onion_stream.rs" },
+      "status": "source application and full service Wasm check verified Crow run45 at cmsg755d83b1a; generated bindings/browser/native Tor round-trip unverified"
+    },
+    "serviceStage": {
+      "patch": "tor-js-onion-service.patch",
+      "overlay": { "onion_service.rs": "crates/tor-js-wasm/src/onion_service.rs" },
+      "status": "source application and full service Wasm check verified Crow run45 at cmsg755d83b1a; generated bindings/browser/native Tor round-trip unverified"
+    },
+    "testNetworkStage": {
+      "patch": "tor-js-test-network.patch",
+      "overlay": { "test_network.rs": "crates/tor-js-wasm/src/test_network.rs" },
+      "requiredFeature": "browser-test-network",
+      "status": "isolated CI only; not a production networking API; unverified"
+    }
+  },
+  "arti": {
+    "repository": "https://github.com/voltrevo/arti.git",
+    "revision": "2be5b51e895a687d1e7fc3ce1c01896730bcb9d3",
+    "serviceStage": {
+      "patch": "arti-browser-service.patch",
+      "overlay": { "state_dir_wasm.rs": "crates/tor-persist/src/state_dir_wasm.rs" }
+    }
+  },
+  "evidence": {
+    "stockOnionClientFeature": false,
+    "patchedOnionClientBuild": "full service Wasm cargo check passed Crow run45 at cmsg755d83b1a; generated artifact pending",
+    "browserOnionServiceHosting": "unverified"
+  }
+}

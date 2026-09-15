@@ -2,25 +2,25 @@
 
 ## Required behavior
 
-Messages are end-to-end encrypted between two or more participants. Groups must support at least 100 participants with configurable practical limits. Each participant can authenticate the same stable pseudonymous identity shown in the forum; a self-asserted display name is insufficient. The application payload is bounded UTF-8 text. There are no attachments, pictures, video, embedded HTML, automatic link previews or remote assets. Text can encode arbitrary information; the protocol cannot prove that plaintext is semantically human prose.
+Messages are end-to-end encrypted between two or more participants. Groups must support at least 100 participants with configurable practical limits. Each participant can authenticate the same stable pseudonymous identity shown in the forum; a self-asserted display name is insufficient. The universal library carries bounded opaque bytes and offers a UTF-8 text API. The community application selects text-only payloads: no attachments, pictures, video, embedded HTML, automatic link previews or remote assets. Text can encode arbitrary information; the protocol cannot prove that plaintext is semantically human prose.
 
 The operator holds no content keys or plaintext message store. Local history and private credentials are encrypted. Passkey-based local key wrapping is a candidate; the passkey signing key is not itself a database encryption key. Device recovery and PRF support need validation.
 
-Admission requires cvld eligibility and cfrm's applicable rules capability. Limits concern first contacts under an explicit policy; ordinary replies and existing conversations require separately specified rules. Clients must not be trusted to self-report counts honestly. Cryptographically authenticated accounting and double-spend prevention remain unsolved integration work.
+Admission requires external eligibility, member-root device authorization and cfrm's applicable rules capability. First contact requires an answer or a member-owned block, with an explicitly configured response deadline. A block applies to that member across their devices within the community. The blocking member may explicitly start a fresh contact; the blocked member cannot clear the block. An optional expiry permits a later fresh initiative, and expiry alone never revives queued messages. If both members blocked, both must consent. A fresh initiative starts another one-introduction limit with a new nonce. Established conversations reconnect privately. Clients must not be trusted to self-report counts honestly. Aggregate blind-permit issuance/redemption is implemented; private member-bound reciprocal accounting remains unfinished. See the [exact capability and evidence boundaries](browser-first.md).
 
 ## Network identity boundary
 
 A malicious participant must not learn another participant's IP by discovering a profile, establishing a conversation, choosing a relay or sending content. This applies to the discovery layer as well as messaging.
 
-All relevant connections require a validated anonymity transport. There is no silent direct fallback. Loading a profile or receiving a message must never cause sender-selected URLs, previews, images or other external resources to be fetched. Opening an external link is a separate boundary and must not happen automatically.
+All relevant connections require validated Tor transport. There is no silent direct fallback. Loading a profile or receiving a message must never cause sender-selected URLs, previews, images or other external resources to be fetched. Opening an external link is a separate boundary and must not happen automatically.
 
-Peers hold and exchange application state, but direct network sockets between them are not required. Anonymity relays may carry encrypted traffic. Exact queue lifetime and offline private-message behavior remain open; online-only profile discovery does not settle offline message delivery.
+Peers hold and exchange application state. Tor relays carry encrypted traffic; the application operator has no message relay, queue or archive. Offline catch-up relies on client-owned peer retention. The all-devices-offline case and retention duration remain open.
 
 No design can prevent a recipient from copying deliberately shared content or identify every correlation attack. Resistance to a global timing observer is a separate threat-model question, not an automatic consequence of encryption or Tor.
 
 ## Portability
 
-The library must support future native Android and iOS applications. Server runtimes need not run on the device. Mobile compatibility requires executable build/integration evidence for cryptographic bindings, protected local keys and anonymous transport; desktop success alone is insufficient. App suspension and reconnection must preserve identity and cryptographic state without a direct-network fallback.
+The primary client runs in an ordinary browser using Rust/Wasm. Native Android and iOS reuse the same portable core. Browser and mobile compatibility require executable build/integration evidence for cryptographic bindings, protected local keys and Tor transport; desktop success alone is insufficient. App suspension and reconnection must preserve identity and cryptographic state without a direct-network fallback.
 
 ## Accounting and telemetry
 
@@ -37,7 +37,7 @@ These are tests to implement, not reported passing checks:
 1. A malicious contact-selected endpoint cannot observe the participant's source IP.
 2. An unavailable anonymity route produces failure and zero direct fallback traffic.
 3. Profile and message payloads containing URLs, markup or image syntax cause zero external fetches.
-4. Non-text application payloads and invalid or oversized UTF-8 are rejected at the endpoint boundary.
+4. The universal byte API enforces its binary bound; the community text endpoint rejects non-text, invalid UTF-8 and oversized text.
 5. Altered ciphertext fails authentication; replay and out-of-order handling follow the selected protocol.
 6. Group membership changes preserve the chosen forward-secrecy and recovery properties.
 7. A copied local store is unreadable without an authorized local key; unavailable PRF support never causes plaintext fallback.
@@ -45,3 +45,5 @@ These are tests to implement, not reported passing checks:
 9. Reconnection does not replenish allowance or erase outstanding rules state.
 10. Telemetry and error transcripts contain no plaintext, account-pair mapping or private keys.
 11. No trusted server-side hosted client holds the user's decryption keys.
+12. A blocked member and their other devices cannot reopen; the blocking member can explicitly initiate a fresh contact, subject to any block the peer also owns.
+13. Old queued messages, device synchronization and expiry cannot turn an old introduction into an answer to a fresh one.

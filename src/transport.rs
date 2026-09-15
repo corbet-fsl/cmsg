@@ -1,11 +1,15 @@
 use crate::Error;
 use sha3::{Digest, Sha3_256};
+#[cfg(not(target_arch = "wasm32"))]
 use std::{net::SocketAddr, time::Duration};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::net::TcpStream;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_socks::tcp::Socks5Stream;
 
 /// A checksum-validated v3 onion service address. No URLs, IPs, DNS names,
 /// alternate routing hints or redirects can be represented by this type.
+#[derive(Clone)]
 pub struct OnionEndpoint {
     host: String,
     port: u16,
@@ -40,15 +44,25 @@ impl OnionEndpoint {
             port,
         })
     }
+
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
 }
 
 /// Only talks to a trusted local Tor SOCKS listener. Configure Tor with
 /// `IsolateSOCKSAuth`; fresh credentials isolate each connection. A loopback
 /// address is a containment check, not cryptographic proof the process is Tor.
 /// The application/OS must own and verify that listener; no peer may configure it.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct OnionTransport {
     proxy: SocketAddr,
 }
+#[cfg(not(target_arch = "wasm32"))]
 impl OnionTransport {
     pub fn new(proxy: SocketAddr) -> Result<Self, Error> {
         if !proxy.ip().is_loopback() || proxy.port() == 0 {

@@ -1,0 +1,107 @@
+diff --git a/crates/tor-js-wasm/Cargo.toml b/crates/tor-js-wasm/Cargo.toml
+--- a/crates/tor-js-wasm/Cargo.toml
++++ b/crates/tor-js-wasm/Cargo.toml
+@@ -9,6 +9,9 @@
+ 
+ [lib]
+ crate-type = ["cdylib", "rlib"]
++
++[features]
++browser-test-network = []
+ 
+ [dependencies]
+ # Arti crates come from the voltrevo/arti fork, pinned to a commit. These are
+diff --git a/crates/tor-js-wasm/src/lib.rs b/crates/tor-js-wasm/src/lib.rs
+--- a/crates/tor-js-wasm/src/lib.rs
++++ b/crates/tor-js-wasm/src/lib.rs
+@@ -32,6 +32,10 @@
+ // is covered by a plain `cargo test` instead of needing a browser/Node harness.
+ #![cfg(any(target_arch = "wasm32", test))]
+ 
++#[cfg(not(feature = "browser-test-network"))]
++compile_error!("the test-network source stage requires browser-test-network; use the service stage for production");
++mod test_network;
++
+ mod error;
+ mod fast_bootstrap;
+ mod fetch;
+@@ -234,10 +238,18 @@
+     storage: Option<JsStorageInterface>,
+     /// Optional callback returning bootstrap.zip bytes for fast directory pre-population
+     fast_bootstrap: Option<js_sys::Function>,
++    test_network: Option<String>,
+ }
+ 
+ #[wasm_bindgen]
+ impl TorClientOptions {
++    /// Isolated CI only. No implicit public-network configuration is available.
++    #[wasm_bindgen(js_name = withTestNetwork)]
++    pub fn with_test_network(mut self, json: String) -> Self {
++        self.test_network = Some(json);
++        self
++    }
++
+     /// Create options with a connect function.
+     ///
+     /// The connect function receives a target address string (e.g. "198.51.100.1:9001")
+@@ -254,6 +266,7 @@
+             connect,
+             storage: None,
+             fast_bootstrap: None,
++            test_network: None,
+         }
+     }
+ 
+@@ -400,7 +413,7 @@
+     info!("Creating TorClient");
+ 
+     // 1. Configure arti-client (no bridge — connects to regular relays via JS connect callback)
+-    let mut config_builder = TorClientConfig::builder();
++    let mut config_builder = test_network::config(options.test_network.as_deref())?;
+     config_builder.storage().keystore().primary().kind(
+         tor_config::ExplicitOrAuto::Explicit(tor_keymgr::config::ArtiKeystoreKind::Ephemeral),
+     );
+diff --git a/src/TorClient.ts b/src/TorClient.ts
+--- a/src/TorClient.ts
++++ b/src/TorClient.ts
+@@ -61,6 +61,9 @@
+   }
+ 
+   constructor(options: TorClientOptions = {}) {
++    if (!options.testNetwork || !options.storage || options.socketProvider) {
++      throw new Error('tor-js:TestNetworkConfig');
++    }
+     const hasGateway = Array.isArray(options.gateway)
+       ? options.gateway.length > 0
+       : !!options.gateway;
+@@ -96,7 +99,8 @@
+       (addr: string) => sp.connect(addr),
+     );
+ 
+-    const storage = options.storage ?? createAutoStorage();
++    wasmOptions = wasmOptions.withTestNetwork(options.testNetwork!);
++    const storage = options.storage!;
+     wasmOptions = wasmOptions.withStorage(storage);
+ 
+     // Auto-attempt fast bootstrap from gateway — only when one is configured.
+@@ -104,7 +108,7 @@
+     // Go through the provider rather than capturing a gateway: it picks per
+     // attempt (one gateway on the happy path) and falls over if that one is
+     // down, instead of silently degrading to slow bootstrap.
+-    if (sp.gateway) {
++    if (sp.gateway && !options.testNetwork) {
+       wasmOptions = wasmOptions.withFastBootstrap(async (): Promise<Uint8Array> => {
+         this.log.info('Fast bootstrap: fetching bootstrap.zip.zst...');
+         const res = await sp.gatewayFetch('/bootstrap.zip.zst');
+diff --git a/src/types.ts b/src/types.ts
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -13,6 +13,8 @@
+  * additionally requires the optional `@kpstreams/quic-client` package).
+  */
+ export type TorClientOptions = {
++  /** Isolated CI fixture only; unavailable in the production service stage. */
++  testNetwork?: string;
+   /**
+    * Gateway KPS address(es) (`ip:port:certhash`, e.g.
+    * `"198.51.100.7:12298:uEiAxk...9Qw"` — printed by tor-js-gateway at

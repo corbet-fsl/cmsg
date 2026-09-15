@@ -1,8 +1,7 @@
 //! Certified-key authorization for cfrm's immutable Semaphore enrollment.
 //! Semaphore identity derivation, curve validation and the second possession proof stay in cfrm.
-use crate::{verify_admission, AdmissionGrant, Error, Member};
+use crate::{verify_admission, Error, Member};
 use data_encoding::BASE64URL_NOPAD as B64;
-use openmls::prelude::BasicCredential;
 use openmls_traits::signatures::Signer;
 use serde::{Deserialize, Serialize};
 
@@ -36,11 +35,17 @@ impl Member {
     ) -> Result<String, Error> {
         let now = self.authorization_time()?;
         let trust = self.trust.as_ref().ok_or(Error::Admission)?;
-        let basic = BasicCredential::try_from(self.credential.credential.clone())
-            .map_err(|_| Error::Admission)?;
-        let grant: AdmissionGrant =
-            serde_json::from_slice(basic.identity()).map_err(|_| Error::Admission)?;
+        let grant = self.admission_grant()?;
         let member_id = verify_admission(&grant, trust, &self.chat_public_key(), now)?;
+        if let Some(device) = self.device_authorization()? {
+            crate::verify_device_authorization(
+                &device,
+                &trust.community_id,
+                &member_id,
+                &self.chat_public_key(),
+                now,
+            )?;
+        }
         let c = challenge;
         if c.community_id != trust.community_id
             || c.member_id != member_id

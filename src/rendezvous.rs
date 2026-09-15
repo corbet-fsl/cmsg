@@ -29,12 +29,8 @@ impl Member {
         now: u64,
     ) -> Result<String, Error> {
         use data_encoding::BASE64URL_NOPAD;
-        use openmls::prelude::BasicCredential;
         use openmls_traits::signatures::Signer;
-        let basic = BasicCredential::try_from(self.credential.credential.clone())
-            .map_err(|_| Error::Admission)?;
-        let grant: crate::AdmissionGrant =
-            serde_json::from_slice(basic.identity()).map_err(|_| Error::Admission)?;
+        let grant = self.admission_grant()?;
         let trust = self.trust.as_ref().ok_or(Error::Admission)?;
         if challenge.member_id != self.member_id()?
             || challenge.community_id != trust.community_id

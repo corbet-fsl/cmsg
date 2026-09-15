@@ -1,7 +1,6 @@
 //! Narrow owner signatures for cfrm's member-held profile experiment.
-use crate::{verify_admission, AdmissionGrant, Error, Member};
+use crate::{verify_admission, Error, Member};
 use data_encoding::BASE64URL_NOPAD;
-use openmls::prelude::BasicCredential;
 use openmls_traits::signatures::Signer;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -64,12 +63,18 @@ impl Member {
         c: &ProfileChallenge,
         now: u64,
     ) -> Result<Vec<u8>, Error> {
-        let basic = BasicCredential::try_from(self.credential.credential.clone())
-            .map_err(|_| Error::Admission)?;
-        let grant: AdmissionGrant =
-            serde_json::from_slice(basic.identity()).map_err(|_| Error::Admission)?;
+        let grant = self.admission_grant()?;
         let trust = self.trust.as_ref().ok_or(Error::Admission)?;
         let owner = verify_admission(&grant, trust, &self.chat_public_key(), now)?;
+        if let Some(device) = self.device_authorization()? {
+            crate::verify_device_authorization(
+                &device,
+                &trust.community_id,
+                &owner,
+                &self.chat_public_key(),
+                now,
+            )?;
+        }
         if c.version != 1
             || c.owner_member_id != owner
             || c.community_id != trust.community_id

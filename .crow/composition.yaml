@@ -1,39 +1,38 @@
-# Actual components and synthetic identities on an existing trusted worker.
-# The maintainer stages each pinned Git archive; no account credential is used.
 when:
   - event: manual
 skip_clone: true
+variables:
+  SOURCE_ARCHIVE: {default: ""}
+  SOURCE_SHA256: {default: ""}
+  CFRM_SOURCE_ARCHIVE: {default: ""}
+  CFRM_SOURCE_SHA256: {default: ""}
+  ARTIFACT_ROOT: {default: ""}
+  CARGO_TARGET_DIR: {default: ""}
+  RESOLVE_DEPENDENCIES: {default: "0"}
+  CHECK_SUITE: {default: "composition"}
+  OPENSSL_INCLUDE_DIR: {default: ""}
+  OPENSSL_LIB_DIR: {default: ""}
 steps:
-  - name: verified-component-sources
+  - name: verified-source
     image: bash
     commands:
       - |
-        for ci_component in cmsg cvld cfrm; do
-          case "$ci_component" in
-            cmsg) ci_source_commit="$CI_COMMIT_SHA" ;;
-            cvld) ci_source_commit=9d8dfb642a0a9e53eed8069a757d400c82cd4b11 ;;
-            cfrm) ci_source_commit=507b63c775c4869d08f255d0a0c11866a2bf9249 ;;
-          esac
-          ci_source_dir="/workspaces/component-sources/$ci_component"
-          ci_source_archive="$ci_source_dir/$ci_source_commit.tar"
-          (cd "$ci_source_dir" && sha256sum --check "$ci_source_commit.tar.sha256")
-          test "$(git get-tar-commit-id < "$ci_source_archive")" = "$ci_source_commit"
-          mkdir "$ci_component"
-          tar --extract --touch --file "$ci_source_archive" --directory "$ci_component" --no-same-owner
-        done
-  - name: gated-component-composition
+        set -eu
+        test -n "$SOURCE_ARCHIVE"
+        test -n "$SOURCE_SHA256"
+        printf '%s  %s\n' "$SOURCE_SHA256" "$SOURCE_ARCHIVE" | sha256sum --check --strict
+        test "$(git get-tar-commit-id < "$SOURCE_ARCHIVE")" = "$CI_COMMIT_SHA"
+        tar --extract --touch --file "$SOURCE_ARCHIVE" --no-same-owner
+  - name: component-composition
     image: bash
-    depends_on: [verified-component-sources]
+    depends_on: [verified-source]
     environment:
       CARGO_BUILD_JOBS: "2"
-      CARGO_TARGET_DIR: /caches/cargo/component-targets/cmsg
+      RUST_TEST_THREADS: "2"
     commands:
-      - npm ci --prefix cvld --ignore-scripts --no-audit --no-fund
-      - npm run prepare:native --prefix cvld
-      - npm ci --prefix cfrm/experiments/anonymous-permits --ignore-scripts --no-audit --no-fund
       - |
+        set -eu
+        test -n "$CARGO_TARGET_DIR"
+        test -n "$ARTIFACT_ROOT"
         mkdir -p "$CARGO_TARGET_DIR"
-        flock "$CARGO_TARGET_DIR.ci.lock" bash -euc '
-          timeout 1200 cargo build --locked --manifest-path cmsg/Cargo.toml --example composition
-          CMSG_COMPOSITION_BINARY="$CARGO_TARGET_DIR/debug/examples/composition" timeout 600 node --test cmsg/experiments/composition/composition.test.mjs
-        '
+        flock "$CARGO_TARGET_DIR.ci.lock" bash .ci/portable-checks.sh

@@ -76,14 +76,12 @@ fn handles_cannot_cross_conversations_even_at_the_same_epoch_and_leaf() {
     other.remove_participant(&legitimate).unwrap();
 }
 #[test]
-fn duplicate_ids_are_rejected_before_local_addition_advances_the_epoch() {
+fn duplicate_device_keys_are_rejected_before_local_addition_advances_the_epoch() {
     let (mut a, mut b) = pair();
-    let duplicate_b = member(2);
-    assert!(a.add(&duplicate_b.key_package().unwrap()).is_err());
+    assert!(a.add(&b.key_package().unwrap()).is_err());
     let c = member(3);
-    let duplicate_c = member(3);
     assert!(a
-        .add_many(&[c.key_package().unwrap(), duplicate_c.key_package().unwrap()])
+        .add_many(&[c.key_package().unwrap(), c.key_package().unwrap()])
         .is_err());
     assert!(matches!(
         b.receive(&a.send(b"no rejected epoch advance").unwrap())
@@ -148,37 +146,38 @@ impl RawGroup {
     }
 }
 #[test]
-fn duplicate_identity_in_a_welcome_is_rejected_without_consuming_another_invitation() {
+fn independent_devices_of_one_identity_can_join_together() {
     let mut recipient = member(20);
     let duplicate = member(20);
     let package = recipient.key_package().unwrap();
-    let mut honest = member(21);
-    honest.create_group().unwrap();
-    let good = honest.add(&package).unwrap().welcome;
-    let mut malicious = RawGroup::new();
-    let bad = malicious
+    let mut owner = RawGroup::new();
+    let welcome = owner
         .add(&[package, duplicate.key_package().unwrap()])
         .welcome;
-    assert!(recipient.join(&bad).is_err());
-    recipient.join(&good).unwrap();
+    recipient.join(&welcome).unwrap();
+    assert_eq!(
+        recipient
+            .participants()
+            .unwrap()
+            .iter()
+            .filter(|p| p.member_id == recipient.member_id().unwrap())
+            .count(),
+        2
+    );
 }
 #[test]
-fn duplicate_identity_commit_is_rejected_and_legitimate_control_can_still_follow() {
-    use openmls_traits::OpenMlsProvider;
+fn independently_certified_second_device_is_accepted_by_existing_members() {
     let mut recipient = member(20);
     let duplicate = member(20);
     let mut owner = RawGroup::new();
     recipient
         .join(&owner.add(&[recipient.key_package().unwrap()]).welcome)
         .unwrap();
-    let saved = owner.provider.storage().values.read().unwrap().clone();
-    let group_id = owner.group.group_id().clone();
-    let invalid = owner.add(&[duplicate.key_package().unwrap()]).commit;
-    assert!(recipient.receive(&invalid).is_err());
-    *owner.provider.storage().values.write().unwrap() = saved;
-    owner.group = openmls::prelude::MlsGroup::load(owner.provider.storage(), &group_id)
-        .unwrap()
-        .unwrap();
+    let addition = owner.add(&[duplicate.key_package().unwrap()]).commit;
+    assert!(matches!(
+        recipient.receive(&addition).unwrap(),
+        Received::MembershipChanged
+    ));
     let legitimate = member(21);
     let valid = owner.add(&[legitimate.key_package().unwrap()]).commit;
     assert!(matches!(

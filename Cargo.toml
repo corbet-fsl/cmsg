@@ -2,8 +2,8 @@
 name = "cmsg"
 version = "0.1.0-alpha.1"
 edition = "2021"
-rust-version = "1.97.1"
-description = "Experimental anonymous-transport MLS text messaging core"
+rust-version = "1.97"
+description = "Experimental browser and native MLS information transport core"
 repository = "https://github.com/corbet-labs/cmsg"
 license-file = "LICENSE.md"
 readme = "README.md"
@@ -14,12 +14,16 @@ include = [
     "LICENSE.md",
     "README.md",
     "src/**",
+    "browser/**",
     "tests/**",
     "examples/*.rs",
     "docs/*.md",
     "studies/*.md",
     "experiments/**/*.md",
 ]
+
+[lib]
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 openmls = "=0.9.0"
@@ -36,8 +40,22 @@ sha3 = "0.10"
 sha2 = "0.10"
 ed25519-dalek = "2.2"
 data-encoding = "2.9"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
 tokio-socks = "0.5.3"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+openmls = { version = "=0.9.0", features = ["js"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
+# OpenMLS' provider uses rand_core 0.6 as well as the current RNG API.
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
 
 [dev-dependencies]
 

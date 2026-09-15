@@ -408,7 +408,7 @@ fn local_cancel_durably_clears_pending_without_a_refund_or_redemption_call() {
 #[test]
 fn local_blocks_persist_and_stop_unknown_and_previously_known_inviters_before_spending() {
     let mut a = member_with_id(230);
-    let mut b = member_with_id(231);
+    let b = member_with_id(231);
     a.create_group().unwrap();
     let welcome = a.add(&b.key_package().unwrap()).unwrap().welcome;
     let sender = a.member_id().unwrap();

@@ -11,8 +11,10 @@
 //! logging relay. This alpha does not provide mobile bindings, storage rollback
 //! protection, guaranteed delivery or an audited anonymity system.
 mod admission;
+mod board;
 mod enrollment;
 mod framing;
+mod identity;
 mod inbox;
 mod lifecycle;
 mod member;
@@ -23,23 +25,37 @@ mod roster;
 mod transport;
 mod vault;
 
+#[cfg(target_arch = "wasm32")]
+pub mod browser;
+
 pub use admission::{verify_admission, AdmissionGrant, AdmissionTrust};
+pub use board::{AllocationRequest, PresenceEndpoint, PresenceUpdate};
 pub use enrollment::SemaphoreEnrollmentChallenge;
+pub use framing::FrameCodec;
+#[cfg(not(target_arch = "wasm32"))]
 pub use framing::FramedStream;
-pub use inbox::{Acceptance, Inbox, Redemption};
+pub use identity::{
+    member_id_for_root, verify_device_authorization, DeviceAuthorization, MemberIdentity,
+};
+pub use inbox::{Acceptance, FirstContactPolicy, FirstContactRole, Inbox, Redemption};
 pub use lifecycle::Clock;
-pub use member::{Invitation, Member, Received, TextMessage};
+pub use member::{DataMessage, Invitation, Member, Received, TextMessage};
 pub use profile::ProfileChallenge;
 pub use release::{
+    ContactDirective, ContactDirectiveKind, ContactResolution, ContactResolutionKind,
     DirectionalReceiveAuthorization, DirectionalSendAuthorization, ReleaseAuthorizationTiming,
     ReleaseContext, ReleasePeer, ReleasePreflight, ReleaseReceipt,
 };
 pub use rendezvous::{RendezvousChallenge, RendezvousEndpoint};
 pub use roster::{Participant, ParticipantHandle};
-pub use transport::{OnionEndpoint, OnionTransport};
+pub use transport::OnionEndpoint;
+#[cfg(not(target_arch = "wasm32"))]
+pub use transport::OnionTransport;
 
 /// Maximum application text length in UTF-8 bytes, not characters.
 pub const MAX_TEXT_BYTES: usize = 16 * 1024;
+/// Maximum opaque application payload length in bytes.
+pub const MAX_DATA_BYTES: usize = 64 * 1024;
 /// Bound untrusted serialized MLS objects before parsing.
 pub const MAX_WIRE_BYTES: usize = 1024 * 1024;
 

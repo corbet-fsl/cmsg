@@ -1,0 +1,64 @@
+name: Portable Rust and browser contracts
+on:
+  push:
+    branches: [main]
+    paths: ["Cargo.*", "src/**", "tests/**", "examples/**", "browser/**", ".ci/**", ".github/workflows/portable.yml"]
+  pull_request:
+    paths: ["Cargo.*", "src/**", "tests/**", "examples/**", "browser/**", ".ci/**", ".github/workflows/portable.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  contract:
+    # GHA is primary; .crow/portable-core.yaml invokes the same script as fallback.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [core, browser]
+    env:
+      CARGO_BUILD_JOBS: '2'
+      RUST_TEST_THREADS: '2'
+      CI_COMMIT_SHA: ${{ github.sha }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      ARTIFACT_ROOT: ${{ runner.temp }}/contract-evidence
+      CHECK_SUITE: ${{ matrix.suite }}
+      RESOLVE_DEPENDENCIES: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Prepare isolated runner dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+          printf 'OPENSSL_INCLUDE_DIR=%s\n' "$(pkg-config --variable=includedir openssl)" >> "$GITHUB_ENV"
+          printf 'OPENSSL_LIB_DIR=%s\n' "$(pkg-config --variable=libdir openssl)" >> "$GITHUB_ENV"
+          if test "$CHECK_SUITE" = browser; then
+            printf 'BROWSER_BIN=%s\n' "$(command -v google-chrome || command -v chromium)" >> "$GITHUB_ENV"
+            compiler_host="$(rustc -vV | sed -n 's/^host: //p')"
+            printf 'WASM_LINKER=%s/lib/rustlib/%s/bin/rust-lld\n' "$(rustc --print sysroot)" "$compiler_host" >> "$GITHUB_ENV"
+          fi
+      - name: Check Rust formatting
+        if: matrix.suite == 'core'
+        run: cargo fmt --all -- --check
+      - name: Run the shared contract
+        run: bash .ci/portable-checks.sh
+      - name: Retain exact dependency and runtime evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: contract-${{ matrix.suite }}
+          path: ${{ runner.temp }}/contract-evidence
+          if-no-files-found: warn
+          retention-days: 7

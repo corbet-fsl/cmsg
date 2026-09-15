@@ -1,0 +1,25 @@
+schema = 1
+
+[archives.cfrm]
+revision = "5ce49969b5208dc2b6fd8f7e4e86223d3d7372f3"
+archive_variable = "CFRM_SOURCE_ARCHIVE"
+digest_variable = "CFRM_SOURCE_SHA256"
+workflows = ["composition"]
+
+[archives.torjs]
+revision = "65bb21d536a405ba706689ca384fad2ee25e60a7"
+archive_variable = "TORJS_SOURCE_ARCHIVE"
+digest_variable = "TORJS_SOURCE_SHA256"
+workflows = ["tor-browser"]
+
+[archives.chutney]
+revision = "6cc158868d722e652975cb4efd5b278d95ff2fbb"
+archive_variable = "CHUTNEY_SOURCE_ARCHIVE"
+digest_variable = "CHUTNEY_SOURCE_SHA256"
+workflows = ["tor-tools"]
+
+[archives.arti]
+revision = "2be5b51e895a687d1e7fc3ce1c01896730bcb9d3"
+archive_variable = "ARTI_SOURCE_ARCHIVE"
+digest_variable = "ARTI_SOURCE_SHA256"
+workflows = ["tor-browser"]

@@ -1,0 +1,15 @@
+[package]
+name = "cmsg-tor-test-bindgen"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "cmsg-tor-test-bindgen"
+path = "../browser-bindgen/src/main.rs"
+
+[dependencies]
+anyhow = "1"
+wasm-bindgen-cli-support = "=0.2.122"
