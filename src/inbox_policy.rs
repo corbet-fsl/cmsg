@@ -35,6 +35,12 @@ fn expired_for(block: &ContactDirective, initiative: Option<&ContactDirective>) 
 }
 
 impl DirectionalContact {
+    pub(super) fn accounting_tips(&self) -> Result<([u8; 32], [u8; 32]), Error> {
+        if self.conflict {
+            return Err(Error::InvalidState);
+        }
+        Ok((tip(&self.local)?, tip(&self.peer)?))
+    }
     pub(super) fn blocked(&self) -> bool {
         self.conflict
             || self.peer_legacy_block.is_some()
@@ -421,6 +427,7 @@ impl Inbox {
                     sent: false,
                     received: false,
                     close_sent: false,
+                    accounting_group_id: Some(directive.group_id.clone()),
                 }),
             },
         );

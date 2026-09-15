@@ -33,10 +33,13 @@ if test "${CHECK_SUITE:-core}" = browser; then
     "$CARGO_TARGET_DIR/wasm32-unknown-unknown/debug/cmsg.wasm" browser/pkg cmsg
   export BROWSER_BIN BROWSER_EVIDENCE="$artifact_dir/browser-evidence.json"
   timeout 300 node .ci/browser-check.mjs || result=$?
-  tar --create --file "$artifact_dir/browser-package.tar" browser/pkg browser/index.mjs browser/package.json
+  cargo fmt --all
+  tar --create --file "$artifact_dir/formatted-browser-source.tar" src/browser_accounting.rs
+  tar --create --file "$artifact_dir/browser-package.tar" browser/pkg browser/index.mjs browser/index.d.ts browser/package.json \
+    browser/live-stream.mjs browser/live-stream.d.ts browser/indexeddb-store.mjs browser/indexeddb-store.d.ts
   (
     cd "$artifact_dir"
-    sha256sum Cargo.lock browser-helper-Cargo.lock browser-package.tar > SHA256SUMS
+    sha256sum Cargo.lock browser-helper-Cargo.lock browser-package.tar formatted-browser-source.tar > SHA256SUMS
     if test -f browser-evidence.json; then sha256sum browser-evidence.json >> SHA256SUMS; fi
   )
   exit "$result"
@@ -74,7 +77,7 @@ else
 fi
 cp browser/package-lock.json "$artifact_dir/browser-package-lock.json"
 cargo fmt --all
-tar --create --file "$artifact_dir/formatted-source.tar" src/*.rs tests/*.rs tests/common/mod.rs examples/*.rs
+tar --create --file "$artifact_dir/formatted-source.tar" src/*.rs tests/*.rs tests/common/*.rs examples/*.rs
 (cd "$artifact_dir" && sha256sum Cargo.lock browser-package-lock.json formatted-source.tar > SHA256SUMS)
 printf 'Validation status: %s\n' "$result"
 exit "$result"

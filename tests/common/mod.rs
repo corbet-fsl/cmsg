@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+pub mod accounting;
 use cmsg::{AdmissionGrant, AdmissionTrust};
 use data_encoding::BASE64URL_NOPAD;
 use ed25519_dalek::{Signer, SigningKey};

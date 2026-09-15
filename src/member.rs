@@ -63,6 +63,8 @@ pub enum Received {
     ContactClosed,
     /// A signed owner block or fresh-initiative transition was durably applied.
     ContactPolicyChanged,
+    /// Session or delivery evidence changed; this contains no application data.
+    LiveControl,
 }
 impl fmt::Debug for Received {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -72,6 +74,7 @@ impl fmt::Debug for Received {
             Self::MembershipChanged => f.write_str("MembershipChanged"),
             Self::ContactClosed => f.write_str("ContactClosed"),
             Self::ContactPolicyChanged => f.write_str("ContactPolicyChanged"),
+            Self::LiveControl => f.write_str("LiveControl"),
         }
     }
 }
@@ -613,7 +616,8 @@ impl Member {
             Received::Text(_)
             | Received::Bytes(_)
             | Received::ContactClosed
-            | Received::ContactPolicyChanged => Err(Error::InvalidMessage),
+            | Received::ContactPolicyChanged
+            | Received::LiveControl => Err(Error::InvalidMessage),
         }
     }
 
@@ -1179,6 +1183,22 @@ struct DeviceCredential {
 
 fn credential_grant(credential: &Credential) -> Result<AdmissionGrant, Error> {
     Ok(credential_parts(credential)?.0)
+}
+
+pub(crate) fn verify_bound_identity_bytes(
+    bytes: &[u8],
+    key: &[u8],
+    trust: &AdmissionTrust,
+    at: u64,
+) -> Result<String, Error> {
+    if bytes.len() > 8192 {
+        return Err(Error::Admission);
+    }
+    let credential: Credential = BasicCredential::new(bytes.to_vec()).into();
+    if credential_parts(&credential)?.1.is_none() {
+        return Err(Error::Admission);
+    }
+    verify_credential(&credential, key, trust, at)
 }
 
 fn credential_parts(

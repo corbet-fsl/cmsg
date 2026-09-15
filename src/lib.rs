@@ -10,6 +10,7 @@
 //! onion networking. Raw MLS objects must not be routed through an operator's
 //! logging relay. This alpha does not provide mobile bindings, storage rollback
 //! protection, guaranteed delivery or an audited anonymity system.
+mod accounting;
 mod admission;
 mod board;
 mod enrollment;
@@ -17,17 +18,29 @@ mod framing;
 mod identity;
 mod inbox;
 mod lifecycle;
+mod live;
 mod member;
 mod profile;
 mod release;
 mod rendezvous;
+mod reservation;
 mod roster;
+pub use reservation::{
+    ReservationContext, ReservationContexts, ReservationExpectation, ReservationPolicy,
+    ReservationVerifier, VerifiedReservation,
+};
 mod transport;
 mod vault;
 
 #[cfg(target_arch = "wasm32")]
 pub mod browser;
 
+pub use accounting::{
+    verify_accounting_acknowledgment, verify_accounting_acknowledgment_historical,
+    verify_accounting_delegation, verify_accounting_receipt, verify_accounting_receipt_historical,
+    AccountRequestAuthorization, AccountingAcknowledgment, AccountingContactContext,
+    AccountingDelegation, AccountingIntroduction, AccountingKey, AccountingReceipt,
+};
 pub use admission::{verify_admission, AdmissionGrant, AdmissionTrust};
 pub use board::{AllocationRequest, PresenceEndpoint, PresenceUpdate};
 pub use enrollment::SemaphoreEnrollmentChallenge;
@@ -42,6 +55,7 @@ pub use inbox::{
     ReplacementPreview,
 };
 pub use lifecycle::Clock;
+pub use live::{DeliveryStatus, LiveDelivery};
 pub use member::{DataMessage, Invitation, Member, Received, TextMessage};
 pub use profile::ProfileChallenge;
 pub use release::{

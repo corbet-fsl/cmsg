@@ -14,6 +14,13 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use zeroize::Zeroizing;
 
+#[path = "browser_accounting.rs"]
+mod accounting_bindings;
+#[path = "browser_live.rs"]
+mod live_bindings;
+#[path = "browser_reservation.rs"]
+mod reservation_bindings;
+
 fn js_error(error: Error) -> JsValue {
     JsValue::from_str(&format!("cmsg:{error:?}"))
 }
@@ -301,17 +308,23 @@ pub struct BrowserInbox {
 // Requiring Promise<true> prevents a forgotten `return` or an unawaited write
 // from accidentally being interpreted as a durable acknowledgement. The host
 // remains trusted to implement atomic durable storage and prevent rollback.
-async fn persist_browser(
+async fn persist_browser_metadata(
     persist: &Function,
     checkpoint: &[u8],
     outbound: &[Vec<u8>],
+    metadata: &JsValue,
 ) -> Result<(), JsValue> {
     let wires = Array::new();
     for wire in outbound {
         wires.push(&Uint8Array::from(wire.as_slice()));
     }
     let promise: Promise = persist
-        .call2(&JsValue::UNDEFINED, &Uint8Array::from(checkpoint), &wires)
+        .call3(
+            &JsValue::UNDEFINED,
+            &Uint8Array::from(checkpoint),
+            &wires,
+            metadata,
+        )
         .map_err(|_| js_error(Error::InvalidStore))?
         .dyn_into()
         .map_err(|_| js_error(Error::InvalidStore))?;
@@ -341,10 +354,37 @@ impl BrowserInbox {
             .inbox
             .snapshot(member, key, context)
             .map_err(js_error)?;
-        let (inbox, member) =
+        let (mut inbox, member) =
             Inbox::restore_with_clock(&sealed, key, context, Arc::new(BrowserClock))
                 .map_err(js_error)?;
+        inbox.copy_live_runtime(&self.inbox);
         Ok(Self { inbox, member })
+    }
+
+    async fn persist_candidate(
+        &self,
+        candidate: &mut Self,
+        key: &[u8; 32],
+        context: &[u8],
+        persist: &Function,
+        outbound: &[Vec<u8>],
+    ) -> Result<(), JsValue> {
+        let expected = self.inbox.publication_version();
+        let next = candidate
+            .inbox
+            .advance_publication(expected)
+            .map_err(js_error)?;
+        let checkpoint = candidate
+            .inbox
+            .snapshot(&candidate.member, key, context)
+            .map_err(js_error)?;
+        let mut metadata = candidate.inbox.live_outbox_metadata(outbound);
+        metadata["expectedVersion"] = expected.into();
+        metadata["nextVersion"] = next.into();
+        metadata["devicePublicKey"] = serde_json::json!(candidate.member.chat_public_key());
+        let metadata = js_sys::JSON::parse(&metadata.to_string())
+            .map_err(|_| js_error(Error::InvalidStore))?;
+        persist_browser_metadata(persist, &checkpoint, outbound, &metadata).await
     }
 
     async fn update<T>(
@@ -358,11 +398,8 @@ impl BrowserInbox {
         let mut candidate = self.duplicate(&key, context)?;
         let (output, outbound) =
             operation(&mut candidate.inbox, &mut candidate.member).map_err(js_error)?;
-        let checkpoint = candidate
-            .inbox
-            .snapshot(&candidate.member, &key, context)
-            .map_err(js_error)?;
-        persist_browser(persist, &checkpoint, &outbound).await?;
+        self.persist_candidate(&mut candidate, &key, context, persist, &outbound)
+            .await?;
         *self = candidate;
         Ok(output)
     }
@@ -411,8 +448,9 @@ impl BrowserInbox {
                 },
             )
             .map_err(js_error)?;
-        if let Some(checkpoint) = checkpoint {
-            persist_browser(persist, &checkpoint, &[]).await?;
+        if checkpoint.is_some() {
+            self.persist_candidate(&mut candidate, &key, context, persist, &[])
+                .await?;
             // A pending replacement already owns its KeyPackage private state.
             // Retire the external handle only after this first durable write.
             if let (Some(replacement), Some(retirement)) = (replacement, retirement) {
@@ -460,8 +498,9 @@ impl BrowserInbox {
                 },
             )
             .map_err(js_error)?;
-        if let Some(checkpoint) = checkpoint {
-            persist_browser(persist, &checkpoint, &[]).await?;
+        if checkpoint.is_some() {
+            self.persist_candidate(&mut candidate, &key, context, persist, &[])
+                .await?;
             *self = candidate;
         }
         Ok(acceptance_name(result))
@@ -485,19 +524,20 @@ impl BrowserInbox {
     #[wasm_bindgen(constructor)]
     pub fn new(member: BrowserMember) -> Result<BrowserInbox, JsValue> {
         Ok(Self {
-            inbox: Inbox::new(&member.member).map_err(js_error)?,
+            inbox: Inbox::new_live(&member.member).map_err(js_error)?,
             member: member.member,
         })
     }
 
     pub fn restore(sealed: &[u8], key: &[u8], context: &[u8]) -> Result<BrowserInbox, JsValue> {
-        let (inbox, member) = Inbox::restore_with_clock(
+        let (mut inbox, member) = Inbox::restore_with_clock(
             sealed,
             &*wrapping_key(key)?,
             context,
             Arc::new(BrowserClock),
         )
         .map_err(js_error)?;
+        inbox.require_live_delivery();
         Ok(Self { inbox, member })
     }
 
@@ -720,8 +760,9 @@ impl BrowserInbox {
                 Ok(())
             })
             .map_err(js_error)?;
-        if let Some(checkpoint) = checkpoint {
-            persist_browser(&persist, &checkpoint, &[]).await?;
+        if checkpoint.is_some() {
+            self.persist_candidate(&mut candidate, &key, context, &persist, &[])
+                .await?;
             *self = candidate;
         }
         Ok(count)
@@ -836,7 +877,10 @@ impl BrowserInbox {
                 changed = true;
                 Ok(())
             }) {
-                Ok(received) => Ok((Ok(BrowserReceived { received }), Vec::new())),
+                Ok(received) => Ok((
+                    Ok(BrowserReceived { received }),
+                    inbox.pending_live_controls(),
+                )),
                 Err(error) if changed => Ok((Err(error), Vec::new())),
                 Err(error) => Err(error),
             }
@@ -944,10 +988,12 @@ impl BrowserInbox {
                 },
             )
             .map_err(js_error)?;
-        let checkpoint = checkpoint.ok_or_else(|| js_error(Error::InvalidStore))?;
-        persist_browser(
+        checkpoint.ok_or_else(|| js_error(Error::InvalidStore))?;
+        self.persist_candidate(
+            &mut candidate,
+            &key,
+            context,
             &persist,
-            &checkpoint,
             &[invitation.welcome.clone(), invitation.control.clone()],
         )
         .await?;
@@ -1075,8 +1121,9 @@ impl BrowserInbox {
                 },
             )
             .map_err(js_error)?;
-        if let Some(checkpoint) = checkpoint {
-            persist_browser(&persist, &checkpoint, &[]).await?;
+        if checkpoint.is_some() {
+            self.persist_candidate(&mut candidate, &key, context, &persist, &[])
+                .await?;
             *self = candidate;
         }
         let Some(request) = request else {
@@ -1121,8 +1168,9 @@ impl BrowserInbox {
                 },
             )
             .map_err(js_error)?;
-        if let Some(checkpoint) = checkpoint {
-            persist_browser(&persist, &checkpoint, &[]).await?;
+        if checkpoint.is_some() {
+            self.persist_candidate(&mut candidate, &key, context, &persist, &[])
+                .await?;
             *self = candidate;
         }
         Ok(acceptance_name(result))
@@ -1276,6 +1324,7 @@ impl BrowserReceived {
             Received::MembershipChanged => "membershipChanged",
             Received::ContactClosed => "contactClosed",
             Received::ContactPolicyChanged => "contactPolicyChanged",
+            Received::LiveControl => "liveControl",
         }
         .into()
     }
@@ -1287,7 +1336,8 @@ impl BrowserReceived {
             Received::Bytes(message) => Some(message.member_id.clone()),
             Received::MembershipChanged
             | Received::ContactClosed
-            | Received::ContactPolicyChanged => None,
+            | Received::ContactPolicyChanged
+            | Received::LiveControl => None,
         }
     }
 
@@ -1299,7 +1349,8 @@ impl BrowserReceived {
             Received::Bytes(message) => message.bytes.clone(),
             Received::MembershipChanged
             | Received::ContactClosed
-            | Received::ContactPolicyChanged => Vec::new(),
+            | Received::ContactPolicyChanged
+            | Received::LiveControl => Vec::new(),
         }
     }
 

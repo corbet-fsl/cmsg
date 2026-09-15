@@ -52,7 +52,7 @@ The experimental service overlay uses per-session onion keys and in-memory
 service state. Every restart creates fresh service/introduction keys; the wrapper
 offers no independent key restore. Permanent cmsg identity remains a different
 member root key. Compilation and native state tests have passed as detailed
-below; browser service reachability still requires the runtime contract.
+below; browser service reachability passed the isolated runtime contract in Crow run 68.
 
 ## Raw stream stage
 
@@ -66,8 +66,10 @@ cmsg `addbe4c0f1` built the actual Wasm modules, matching generated bindings,
 TorJS TypeScript/declarations, experimental npm package and native gateway/peer.
 Crow run 62 at cmsg `6b494416a6` reached the actual browser and bootstrapped
 both Arti clients over WebRTC/KPS on the signed isolated network. The first
-onion service launched, then reached the 60-second publication deadline;
-browser onion reachability remains unverified.
+onion service launched, then reached the 60-second publication deadline.
+Crow run 68 at `b23221271f7170a4f665e3834f4302a4a1a33ff0` passed
+actual browser onion publication, dial/accept and browser/native MLS transport
+on the isolated signed network after the fixture initialization corrections.
 The stock dependency is not enabled by the cmsg production adapter.
 
 `connectOnion(host, port, deadlineMs)` accepts only canonical checksum-valid
@@ -200,8 +202,10 @@ cycle durations plus four voting rounds (1520 seconds with the existing
 20-second interval), covering an initial partial cycle and two full cycles.
 The outer fixture supervisor allows 3000 seconds for this warmup, existing
 bootstrap/driver limits and cleanup. Tor voting settings and the browser's
-60-second service readiness deadline remain unchanged. This new gate still
-needs its runtime check.
+60-second service readiness deadline remain unchanged. Crow run 68 passed:
+the gate opened after 484.184 seconds with both shared-random values and
+Arti period offsets `[0, 1]`. The subsequent browser contract passed all seven
+checks; the run also passed all 52 KPS parser and 11 native gateway tests.
 
 Run the pinned gateway as a disposable test child using explicit configuration,
 `run --no-sync`, a temporary synthetic KPS identity and
@@ -257,15 +261,17 @@ and browser parser tests, preserving their output. Run 66 passed the native
 gateway tests, all 52 browser parser tests, the real non-relay canary assertion,
 and actual Wasm rejection of the malformed route inputs. It established working
 introduction circuits, then timed out with the descriptor publisher still
-bootstrapping. Browser onion reachability remains unverified.
+bootstrapping. Run 68 passed all these boundaries and the onion reachability
+contract below after waiting for the signed shared-random generations.
 An independent gateway assertion failure is retained in the runtime evidence
 while service diagnostics continue; it still fails the overall result.
 
-The remaining contract requires two browser clients to publish different onions
-and exchange byte frames. A separate native
+The passing run 68 contract has two browser clients publish different onions
+with full vanguards and exchange byte frames. A separate native
 cmsg process then connects through its test Tor SOCKS endpoint to a browser-owned
 onion, exchanges MLS key-package/welcome data over that route, and authenticates
-binary cmsg ciphertext in both directions. This checks the generic core and
+binary cmsg ciphertext in both directions, rejecting replay. Closing the
+browser service also cancels pending accept. This checks the generic core and
 native framing; the strict contact-policy API has its separate browser contract.
 The browser's localhost control request only launches the synthetic native test
 participant. It is fixture orchestration, not an application transport endpoint.

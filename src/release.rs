@@ -230,7 +230,7 @@ impl Drop for ContactResolution {
 }
 
 impl ContactResolution {
-    fn signing_bytes(&self) -> Result<Vec<u8>, Error> {
+    pub(crate) fn signing_bytes(&self) -> Result<Vec<u8>, Error> {
         serde_json::to_vec(&serde_json::json!([
             "cmsg.contact-resolution.v1",
             self.community_id,

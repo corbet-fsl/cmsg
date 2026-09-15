@@ -46,25 +46,40 @@ snapshots does not detect rollback or merge concurrent device state.
 take a wrapping key, context bytes and an async persistence function:
 
 ```js
-async function persist(checkpoint, outboundFrames) {
-  await storage.commitCheckpointAndOutbox(checkpoint, outboundFrames);
-  return true;
-}
+import { openIndexedDbInboxStore } from '@corbet-labs/cmsg';
+const storage = await openIndexedDbInboxStore('my-cmsg-inboxes');
+// Reuse this stable local ID for the same Inbox across reloads and tabs.
+const persist = storage.persist(localInboxId);
 await inbox.createGroup(wrappingKey, context, persist);
 // After authenticating the unique peer, both endpoints register the same nonce
 // and bounds, with roles "initiator" and "recipient" respectively.
 await inbox.beginFirstContact(peerMemberId, introductionId, role,
   responseDeadline, maxIntroductionBytes, wrappingKey, context, persist);
-const wire = await inbox.sendBytes(payload, wrappingKey, context, persist);
+// Complete the authenticated live handshake before sending application data.
 ```
 
-The storage function must atomically write the encrypted checkpoint and every
-outbound frame, and resolve `true` only after the write is durable. IndexedDB
-applications wait for transaction completion, not an individual request's
-success event. Storage is application supplied. cmsg never treats a synchronous
-return, a missing return, or a rejected Promise as successful persistence.
-Failed writes leave the published session unchanged. Store and retry exact
-outbound ciphertext; generating another send advances the ratchet again.
+The supplied IndexedDB adapter commits the encrypted checkpoint and outbound
+records in one transaction with strict durability, resolving `true` only after
+transaction completion. The third persistence argument contains native-generated
+`expectedVersion`, `nextVersion`, device identity and live outbox metadata. A
+write succeeds only if the stored version matches; competing tabs cannot both
+publish successors. On conflict, reload the stored checkpoint before retrying.
+A missing row accepts only version zero: deleting storage cannot silently import
+an older nonzero chain. `read(localInboxId)` returns the stored record, and
+`close()` closes the database without deleting its contents.
+The stored `outbound` array belongs to that latest publication; it is not an
+accumulating queue. Send returned frames while their live session permits it,
+and use the Inbox's retained control journal for control recovery. An embedding
+that adds a separate queue must atomically apply cancellation metadata too.
+
+Alternative hosts must implement the same atomic version check and commit
+contract. cmsg never treats a synchronous return, missing return or rejected
+Promise as successful persistence. Failed writes leave the published session
+unchanged. The adapter serializes local tabs sharing one database; independent
+devices and rollback of all storage require separate recovery guarantees.
+Persisted application ciphertext is eligible only for its still-live session.
+Restoring or losing that session cancels pending delivery; it must not be blindly
+retransmitted from the outbox. Control and accepted-history recovery are separate.
 
 `accept(welcome, recipientRedemption, key, context, persist, redeem)` returns
 `joined`, `rejected`, `pending`, `needsPermit`, `busy` or `blocked`. The recipient's
@@ -147,8 +162,10 @@ board statements. There is no generic device-signing or private-key export API.
 
 The `/tor-streams` entrypoint uses the separate pinned `service` build described
 in `upstream/`. Its source provides browser-owned onion publication and raw
-Arti streams. Patch application, compilation and a real browser/native Tor
-round trip remain required evidence; the stock npm TorJS package is rejected.
+Arti streams. The [isolated browser/native Tor contract](upstream/README.md)
+passed at `b23221271f71`, including browser-owned publication and bidirectional
+MLS traffic. That run uses the explicit private-network build; a public-network
+deployment remains unvalidated. The stock npm TorJS package is rejected.
 
 ```js
 import { createTorJsOnionNode } from '@corbet-labs/cmsg/tor-streams';

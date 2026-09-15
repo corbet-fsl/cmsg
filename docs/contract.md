@@ -6,7 +6,7 @@ Messages are end-to-end encrypted between two or more participants. Groups must 
 
 The operator holds no content keys or plaintext message store. Local history and private credentials are encrypted. Passkey-based local key wrapping is a candidate; the passkey signing key is not itself a database encryption key. Device recovery and PRF support need validation.
 
-Admission requires external eligibility, member-root device authorization and cfrm's applicable rules capability. First contact requires an answer or a member-owned block, with an explicitly configured response deadline. A block applies to that member across their devices within the community. The blocking member may explicitly start a fresh contact; the blocked member cannot clear the block. An optional expiry permits a later fresh initiative, and expiry alone never revives queued messages. If both members blocked, both must consent. A fresh initiative starts another one-introduction limit with a new nonce. Established conversations reconnect privately. Clients must not be trusted to self-report counts honestly. Aggregate blind-permit issuance/redemption is implemented; private member-bound reciprocal accounting remains unfinished. See the [exact capability and evidence boundaries](browser-first.md).
+Admission requires external eligibility, member-root device authorization and cfrm's applicable rules capability. First contact requires an answer or a member-owned block, with an explicitly configured response deadline. A block applies to that member across their devices within the community. The blocking member may explicitly start a fresh contact; the blocked member cannot clear the block. An optional expiry permits a later fresh initiative, and expiry alone never revives queued messages. If both members blocked, both must consent. A fresh initiative starts another one-introduction limit with a new nonce. Established conversations reconnect privately. Clients must not be trusted to self-report counts honestly. Aggregate blind-permit issuance/redemption and a separate experimental private reciprocal-accounting path are implemented. [Accounted introductions](reservation-release.md) require actual Active reservation proofs through a trusted verifier before application release. See the [exact capability and evidence boundaries](browser-first.md).
 
 Owner reopening can use a retained group or a replacement group with fresh root-authorized devices. Replacement admission requires a new recipient-prepared redemption and preserves both owners' journal history. The recipient authenticates the invitation's nonce, group and policy before preparing its claim. Lost message ratchets do not authorize forgetting blocks or pending obligations, and old-group ciphertext cannot satisfy a replacement introduction. Ordinary established-group reconnects do not invoke this new-admission flow.
 
@@ -16,7 +16,7 @@ A malicious participant must not learn another participant's IP by discovering a
 
 All relevant connections require validated Tor transport. There is no silent direct fallback. Loading a profile or receiving a message must never cause sender-selected URLs, previews, images or other external resources to be fetched. Opening an external link is a separate boundary and must not happen automatically.
 
-Peers hold and exchange application state. Tor relays carry encrypted traffic; the application operator has no message relay, queue or archive. Offline catch-up relies on client-owned peer retention. The all-devices-offline case and retention duration remain open.
+Peers hold and exchange application state. Tor relays carry encrypted traffic; the application operator has no message relay, queue or archive. [Application delivery is live-only](live-delivery.md): disconnect or restore cancels pending delivery without resetting accounting. Devices can synchronize authenticated accepted history and recovery controls privately; this does not queue new application messages for offline recipients. Retention of accepted history remains a client policy.
 
 No design can prevent a recipient from copying deliberately shared content or identify every correlation attack. Resistance to a global timing observer is a separate threat-model question, not an automatic consequence of encryption or Tor.
 
@@ -28,7 +28,7 @@ The primary client runs in an ordinary browser using Rust/Wasm. Native Android a
 
 Operational telemetry should consist of aggregate success/failure counts and coarse latency buckets, with a privacy budget and release threshold to be defined. Do not attach account, recipient, group or conversation IDs to events. Even apparently anonymous timing can correlate activity.
 
-cfrm must validate permitted resource use without receiving the private contact graph. Candidate mechanisms include anonymous one-use capabilities and private state transitions. Neither conventional E2EE nor a messaging library supplies this automatically. Persistent spent-token or state-commitment records may be necessary; they must be scoped and retained only as required.
+cfrm validates permitted resource use without receiving the private contact graph through separate experimental anonymous-capability and private-state-transition paths. The [private account ledger](https://github.com/corbet-labs/cfrm/blob/main/docs/account-ledger.md) retains accepted state commitments and owner-specific replay markers; peer proofs remain private. Neither conventional E2EE nor a messaging library supplies these checks automatically. Production activation, audit and retention guarantees require separate validation.
 
 Rules control participation in this protocol. They cannot prevent consenting people from communicating through a modified client or unrelated channel outside it.
 
@@ -36,7 +36,7 @@ Rules control participation in this protocol. They cannot prevent consenting peo
 
 These define deployment acceptance, not a claim that every item has passed.
 The [evidence record](browser-first.md#evidence-as-of-the-current-development-work)
-separates current core/browser checks from outstanding Tor runtime, protected-key,
+separates current core/browser and isolated Tor checks from outstanding deployment, protected-key,
 telemetry and production private-accounting validation.
 
 1. A malicious contact-selected endpoint cannot observe the participant's source IP.

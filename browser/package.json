@@ -14,6 +14,10 @@
   "files": [
     "index.mjs",
     "index.d.ts",
+    "live-stream.mjs",
+    "live-stream.d.ts",
+    "indexeddb-store.mjs",
+    "indexeddb-store.d.ts",
     "tor-js.mjs",
     "tor-js.d.ts",
     "tor-streams.mjs",
