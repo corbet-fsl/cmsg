@@ -1,0 +1,126 @@
+diff --git a/crates/tor-hsservice/src/status.rs b/crates/tor-hsservice/src/status.rs
+--- a/crates/tor-hsservice/src/status.rs
++++ b/crates/tor-hsservice/src/status.rs
+@@ -1,6 +1,52 @@
+ //! Support for reporting the status of an onion service.
+ 
+ use crate::internal_prelude::*;
++
++// Applied only to the isolated test-network build. These are runtime-wide last
++// observations across concurrent uploads, not a per-service event history.
++// Retain static categories only: no addresses, identities, paths or payloads.
++static FIXTURE_PUBLISHER: std::sync::Mutex<[&'static str; 5]> =
++    std::sync::Mutex::new(["none"; 5]);
++
++pub(crate) fn fixture_publisher_note(index: usize, value: &'static str) {
++    FIXTURE_PUBLISHER.lock().expect("poisoned fixture diagnostic")[index] = value;
++}
++
++pub(crate) fn fixture_publisher_error(stage: &'static str, error: tor_error::ErrorKind) {
++    use tor_error::ErrorKind as K;
++    let kind = match error {
++        K::TorAccessFailed => "tor-access",
++        K::BootstrapRequired => "bootstrap-required",
++        K::DirectoryExpired => "directory-expired",
++        K::LocalNetworkError => "local-network",
++        K::LocalResourceExhausted => "local-resource",
++        K::RelayIdMismatch => "relay-id-mismatch",
++        K::CircuitCollapse => "circuit-collapse",
++        K::TorNetworkTimeout => "tor-network-timeout",
++        K::TorDirectoryError => "tor-directory",
++        K::RelayTooBusy => "relay-busy",
++        K::CircuitRefused => "circuit-refused",
++        K::NoPath => "no-path",
++        K::TorDirectoryUnusable => "directory-unusable",
++        K::ClockSkew => "clock-skew",
++        K::TorProtocolViolation => "tor-protocol",
++        K::RemoteProtocolViolation => "remote-protocol",
++        K::Internal => "internal",
++        _ => "other",
++    };
++    let mut labels = FIXTURE_PUBLISHER.lock().expect("poisoned fixture diagnostic");
++    labels[3] = stage;
++    labels[4] = kind;
++}
++
++impl OnionServiceStatus {
++    /// Isolated fixture categories: scheduling, period count, last upload step,
++    /// and latest per-attempt error stage/kind across this runtime.
++    #[doc(hidden)]
++    pub fn fixture_publisher_labels(&self) -> [&'static str; 5] {
++        *FIXTURE_PUBLISHER.lock().expect("poisoned fixture diagnostic")
++    }
++}
+ 
+ /// The current reported status of an onion service.
+ #[derive(Debug, Clone, Eq, PartialEq)]
+diff --git a/crates/tor-hsservice/src/publish/reactor.rs b/crates/tor-hsservice/src/publish/reactor.rs
+--- a/crates/tor-hsservice/src/publish/reactor.rs
++++ b/crates/tor-hsservice/src/publish/reactor.rs
+@@ -1161,6 +1161,12 @@
+ 
+     /// Unconditionally update the `PublishStatus` of the reactor with `new_state`.
+     async fn update_publish_status(&mut self, new_state: PublishStatus) -> Result<(), Bug> {
++        crate::status::fixture_publisher_note(0, match new_state {
++            PublishStatus::Idle => "idle",
++            PublishStatus::UploadScheduled => "scheduled",
++            PublishStatus::AwaitingIpts => "awaiting-ipts",
++            PublishStatus::RateLimited(_) => "rate-limited",
++        });
+         let onion_status = match new_state {
+             PublishStatus::Idle => None,
+             PublishStatus::UploadScheduled
+@@ -1373,6 +1379,9 @@
+ 
+         let _ = inner.last_uploaded.insert(now);
+ 
++        crate::status::fixture_publisher_note(1, match inner.time_periods.len() {
++            0 => "zero", 1 => "one", _ => "multiple",
++        });
+         for period_ctx in inner.time_periods.iter_mut() {
+             let upload_task_complete_tx = self.upload_task_complete_tx.clone();
+ 
+@@ -1732,6 +1741,7 @@
+         hsdir: &Relay<'_>,
+         imm: Arc<Immutable<R, M>>,
+     ) -> Result<(), UploadError> {
++        crate::status::fixture_publisher_note(2, "build-circuit");
+         let request = HsDescUploadRequest::new(hsdesc);
+ 
+         trace!(nickname=%imm.nickname, hsdir_id=%hsdir.id(), hsdir_rsa_id=%hsdir.rsa_id(),
+@@ -1746,11 +1756,13 @@
+             .source_info()
+             .map_err(into_internal!("Couldn't get SourceInfo for circuit"))?;
+ 
++        crate::status::fixture_publisher_note(2, "open-directory-stream");
+         let mut stream = tunnel
+             .begin_dir_stream()
+             .await
+             .map_err(UploadError::Stream)?;
+ 
++        crate::status::fixture_publisher_note(2, "send-request");
+         let _response: String = send_request(&imm.runtime, &request, &mut stream, source)
+             .await
+             .map_err(|dir_error| -> UploadError {
+@@ -1803,6 +1815,13 @@
+             let r = Self::upload_descriptor(hsdesc.clone(), netdir, hsdir, Arc::clone(&imm)).await;
+ 
+             if let Err(e) = &r {
++                let (stage, kind) = match e {
++                    UploadError::Request(e) => ("request", tor_error::HasKind::kind(&e.error)),
++                    UploadError::Circuit(e) => ("circuit", tor_error::HasKind::kind(e)),
++                    UploadError::Stream(e) => ("stream", tor_error::HasKind::kind(e)),
++                    UploadError::Bug(_) => ("bug", tor_error::ErrorKind::Internal),
++                };
++                crate::status::fixture_publisher_error(stage, kind);
+                 if e.should_report_as_suspicious() {
+                     // Note that not every protocol violation is suspicious:
+                     // we only warn on the protocol violations that look like attempts
+@@ -1816,6 +1835,7 @@
+                     );
+                 }
+             }
++            if r.is_ok() { crate::status::fixture_publisher_note(2, "complete"); }
+             r
+         };
+ 

@@ -1,6 +1,7 @@
 // Run the real browser Arti/onion fixture using generated, pinned artifacts.
 // No npm packages, browser downloads, persistent browser profiles or services.
 import { createServer } from 'node:http';
+import { createServer as createTcpServer } from 'node:net';
 import { readFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -17,6 +18,7 @@ const nativeSocks = process.env.TOR_NATIVE_SOCKS;
 if (!process.env.TORJS_DIST || !fixturePath || !nativeBinary || !nativeSocks) throw new Error('runtime fixture paths required');
 let nativeStarted = false;
 let nativeChild;
+let nativeClosed;
 async function startNative(request, response) {
   if (nativeStarted) { response.writeHead(409).end(); return; }
   nativeStarted = true;
@@ -30,13 +32,14 @@ async function startNative(request, response) {
     response.writeHead(400).end(); return;
   }
   nativeChild = spawn(nativeBinary, [nativeSocks, input.host, String(input.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  nativeClosed = new Promise(resolve => nativeChild.once('close', resolve));
   let output = '';
   let nativeError = '';
   nativeChild.stdout.on('data', bytes => { output = (output + bytes.toString()).slice(-4096); });
   nativeChild.stderr.on('data', bytes => { nativeError = (nativeError + bytes.toString()).slice(-4096); });
   const timer = setTimeout(() => nativeChild.kill('SIGKILL'), 120_000);
   try {
-    const [code] = await once(nativeChild, 'exit');
+    const [code] = await once(nativeChild, 'close');
     if (code !== 0) {
       await writeFile(artifact + '.native-error.txt', nativeError);
       response.writeHead(500).end('native fixture failed'); return;
@@ -47,13 +50,26 @@ async function startNative(request, response) {
   } finally { clearTimeout(timer); }
 }
 if (!binary || !artifact) throw new Error('BROWSER_BIN and BROWSER_EVIDENCE are required');
+let canaryConnections = 0;
+const canary = createTcpServer(socket => {
+  canaryConnections += 1;
+  socket.destroy();
+});
+canary.listen(0, '127.0.0.1');
+await once(canary, 'listening');
+const canaryTarget = `127.0.0.1:${canary.address().port}`;
 const mime = { '.mjs': 'text/javascript', '.js': 'text/javascript', '.wasm': 'application/wasm' };
 const server = createServer(async (request, response) => {
   try {
     const pathname = new URL(request.url, 'http://localhost').pathname;
     if (pathname === '/fixture.json') {
       response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      response.end(await readFile(fixturePath)); return;
+      const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
+      response.end(JSON.stringify({ ...fixture, nonRelayCanary: canaryTarget })); return;
+    }
+    if (pathname === '/__canary') {
+      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      response.end(JSON.stringify({ connections: canaryConnections })); return;
     }
     if (pathname === '/__native-peer' && request.method === 'POST') {
       await startNative(request, response); return;
@@ -83,8 +99,10 @@ await once(server, 'listening');
 const origin = `http://127.0.0.1:${server.address().port}`;
 const profile = await mkdtemp(join(tmpdir(), 'cmsg-browser-test-'));
 let browser;
+let browserClosed;
 let socket;
 let stderr = '';
+let browserMetadata;
 let nextId = 1;
 const pending = new Map();
 const forbiddenRequests = [];
@@ -105,6 +123,7 @@ try {
     '--no-default-browser-check', '--disable-extensions', '--remote-debugging-address=127.0.0.1',
     '--remote-debugging-port=0', `--user-data-dir=${profile}`, `--disk-cache-dir=${join(profile, 'cache')}`, 'about:blank',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  browserClosed = new Promise(resolve => browser.once('close', resolve));
   let launchError;
   browser.on('error', error => { launchError = error; });
   browser.stderr.on('data', bytes => { stderr = (stderr + bytes.toString()).slice(-8000); });
@@ -117,6 +136,7 @@ try {
   }
   if (!port) throw new Error(`Chromium did not expose its test interface: ${stderr}`);
   const metadata = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
+  browserMetadata = metadata;
   const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
   const page = targets.find(target => target.type === 'page');
   if (!page) throw new Error('Chromium has no test page');
@@ -164,26 +184,48 @@ try {
   if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
   if (!result.result || !('value' in result.result)) throw new Error('Browser contract returned no evidence');
   if (forbiddenRequests.length) throw new Error(`Unexpected external requests: ${JSON.stringify(forbiddenRequests)}`);
+  if (canaryConnections !== 0) throw new Error('Non-relay canary received a TCP connection');
   const evidence = { source: process.env.CI_COMMIT_SHA, browser: metadata.Browser,
-    runtime: process.version, contract: result.result.value, unexpectedExternalRequests: forbiddenRequests };
+    runtime: process.version, contract: result.result.value, nonRelayCanaryConnections: canaryConnections,
+    unexpectedExternalRequests: forbiddenRequests };
   await writeFile(artifact, JSON.stringify(evidence, null, 2) + '\n');
   process.stdout.write(JSON.stringify(evidence) + '\n');
+} catch (error) {
+  let progress = null;
+  let traceTimer;
+  try {
+    if (socket?.readyState === WebSocket.OPEN) {
+      const result = await Promise.race([
+        command('Runtime.evaluate', { expression: 'globalThis.__cmsgTorRuntime ?? null', returnByValue: true }),
+        new Promise((_, reject) => { traceTimer = setTimeout(() => reject(new Error('diagnostic deadline')), 2000); }),
+      ]);
+      progress = result.result?.value ?? null;
+    }
+  } catch {} finally { clearTimeout(traceTimer); }
+  await writeFile(artifact + '.failure.json', JSON.stringify({
+    source: process.env.CI_COMMIT_SHA, testNetworkOnly: true,
+    browser: browserMetadata?.Browser, runtime: process.version, progress,
+    nonRelayCanaryConnections: canaryConnections,
+    failure: String(error).slice(0, 8192), chromiumStderr: stderr.slice(-8000),
+    unexpectedExternalRequests: forbiddenRequests.slice(0, 16).map(url => url.slice(0, 512)),
+  }, null, 2) + '\n');
+  throw error;
 } finally {
   clearTimeout(deadline);
-  if (nativeChild?.pid && nativeChild.exitCode === null) {
-    const reaped = once(nativeChild, 'exit');
+  if (nativeChild?.pid && nativeChild.exitCode === null && nativeChild.signalCode === null) {
     nativeChild.kill('SIGKILL');
-    await reaped;
   }
+  await nativeClosed;
   socket?.close();
-  if (browser?.pid && browser.exitCode === null) {
-    const exited = once(browser, 'exit');
+  if (browser?.pid && browser.exitCode === null && browser.signalCode === null) {
     browser.kill('SIGTERM');
     const force = setTimeout(() => browser.kill('SIGKILL'), 5000);
-    await exited;
+    await browserClosed;
     clearTimeout(force);
   }
+  await browserClosed;
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
-  await rm(profile, { recursive: true, force: true });
+  await new Promise(resolve => canary.close(resolve));
+  await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

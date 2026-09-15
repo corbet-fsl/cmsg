@@ -21,6 +21,12 @@ if test -n "${OPENSSL_INCLUDE_DIR:-}"; then
   export OPENSSL_INCLUDE_DIR OPENSSL_LIB_DIR
   export LD_LIBRARY_PATH="$OPENSSL_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
+if test -n "${SQLITE3_LIB_DIR:-}"; then
+  test -f "$SQLITE3_LIB_DIR/libsqlite3.so"
+  test -f "$SQLITE3_INCLUDE_DIR/sqlite3.h"
+  export SQLITE3_LIB_DIR SQLITE3_INCLUDE_DIR
+  export LD_LIBRARY_PATH="$SQLITE3_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 torjs_manifest="$scratch/source/tor-js/Cargo.toml"
 arti_manifest="$scratch/source/arti/Cargo.toml"
 # Convert the pinned upstream graph to the explicit patched path dependencies.
@@ -75,7 +81,9 @@ PY
   export TOR_NATIVE_PEER_BIN="$CARGO_TARGET_DIR/debug/examples/tor_browser_peer"
   export TORJS_DIST="$scratch/source/tor-js/dist"
   export TOR_RUNTIME_ARTIFACT="$artifact_dir/runtime"
-  timeout --kill-after=15 1500 "${fixture_tools[2]}" browser/upstream/runtime-fixture.py \
+  # 360s bootstrap + 1520s signed-SRV warmup + 30s gateway + 1000s driver,
+  # plus 90s for startup and cleanup. Inner browser deadlines are unchanged.
+  timeout --kill-after=15 3000 "${fixture_tools[2]}" browser/upstream/runtime-fixture.py \
     2>&1 | tee "$artifact_dir/runtime/network.log" || result=$?
   (cd "$artifact_dir/runtime" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 fi

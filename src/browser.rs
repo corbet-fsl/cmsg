@@ -1,10 +1,12 @@
 //! Browser bindings for the same MLS core and wire format used by native peers.
 //! JavaScript owns the UI, durable ciphertext storage and Tor transport. These
 //! bindings never call browser fetch, render messages or choose a gateway.
+use crate::inbox::ReopeningInvitation;
 use crate::{
-    Acceptance, AdmissionGrant, AdmissionTrust, Clock, DeviceAuthorization, Error,
-    FirstContactPolicy, FirstContactRole, FrameCodec, Inbox, Invitation, Member, MemberIdentity,
-    OnionEndpoint, Participant, Received, Redemption, MAX_DATA_BYTES, MAX_WIRE_BYTES,
+    Acceptance, AdmissionGrant, AdmissionTrust, Clock, ContactResolution, DeviceAuthorization,
+    Error, FirstContactPolicy, FirstContactRole, FrameCodec, Inbox, Invitation, Member,
+    MemberIdentity, OnionEndpoint, Participant, Received, Redemption, MAX_DATA_BYTES,
+    MAX_WIRE_BYTES,
 };
 use js_sys::{Array, Function, Promise, Uint8Array};
 use std::sync::Arc;
@@ -326,9 +328,18 @@ async fn persist_browser(
 
 impl BrowserInbox {
     fn duplicate(&self, key: &[u8; 32], context: &[u8]) -> Result<Self, JsValue> {
+        self.duplicate_with_member(&self.member, key, context)
+    }
+
+    fn duplicate_with_member(
+        &self,
+        member: &Member,
+        key: &[u8; 32],
+        context: &[u8],
+    ) -> Result<Self, JsValue> {
         let sealed = self
             .inbox
-            .snapshot(&self.member, key, context)
+            .snapshot(member, key, context)
             .map_err(js_error)?;
         let (inbox, member) =
             Inbox::restore_with_clock(&sealed, key, context, Arc::new(BrowserClock))
@@ -354,6 +365,106 @@ impl BrowserInbox {
         persist_browser(persist, &checkpoint, &outbound).await?;
         *self = candidate;
         Ok(output)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn accept_replacement_candidate(
+        &mut self,
+        replacement: Option<&mut BrowserMember>,
+        welcome: &[u8],
+        control: &[u8],
+        recipient_redemption: Option<Vec<u8>>,
+        key: &[u8],
+        context: &[u8],
+        persist: &Function,
+        redeem: &Function,
+    ) -> Result<String, JsValue> {
+        let key = wrapping_key(key)?;
+        let retirement = if replacement.is_some() {
+            Some(Member::new_with_clock(Arc::new(BrowserClock)).map_err(js_error)?)
+        } else {
+            None
+        };
+        let mut candidate = match replacement.as_deref() {
+            Some(member) => self.duplicate_with_member(&member.member, &key, context)?,
+            None => self.duplicate(&key, context)?,
+        };
+        let recipient_redemption = recipient_redemption.map(Zeroizing::new);
+        let mut checkpoint = None;
+        let mut request = None;
+        let result = candidate
+            .inbox
+            .accept_replacement(
+                &mut candidate.member,
+                welcome,
+                control,
+                recipient_redemption.as_ref().map(|bytes| bytes.as_slice()),
+                &key,
+                context,
+                |bytes| {
+                    checkpoint = Some(bytes.to_vec());
+                    Ok(())
+                },
+                |bytes| {
+                    request = Some(Zeroizing::new(bytes.to_vec()));
+                    Redemption::Indeterminate
+                },
+            )
+            .map_err(js_error)?;
+        if let Some(checkpoint) = checkpoint {
+            persist_browser(persist, &checkpoint, &[]).await?;
+            // A pending replacement already owns its KeyPackage private state.
+            // Retire the external handle only after this first durable write.
+            if let (Some(replacement), Some(retirement)) = (replacement, retirement) {
+                replacement.member = retirement;
+            }
+            *self = candidate;
+        }
+        let Some(request) = request else {
+            return Ok(acceptance_name(result));
+        };
+        let outcome = match redeem.call1(&JsValue::UNDEFINED, &Uint8Array::from(request.as_slice()))
+        {
+            Ok(value) => match value.dyn_into::<Promise>() {
+                Ok(promise) => JsFuture::from(promise)
+                    .await
+                    .ok()
+                    .and_then(|value| value.as_string()),
+                Err(_) => None,
+            },
+            Err(_) => None,
+        };
+        let outcome = match outcome.as_deref() {
+            Some("accepted") => Redemption::Accepted,
+            Some("rejected") => Redemption::Rejected,
+            _ => return Ok("pending".into()),
+        };
+        let mut candidate = self.duplicate(&key, context)?;
+        let mut checkpoint = None;
+        let result = candidate
+            .inbox
+            .accept_replacement(
+                &mut candidate.member,
+                welcome,
+                control,
+                None,
+                &key,
+                context,
+                |bytes| {
+                    checkpoint = Some(bytes.to_vec());
+                    Ok(())
+                },
+                |_| match outcome {
+                    Redemption::Accepted => Redemption::Accepted,
+                    _ => Redemption::Rejected,
+                },
+            )
+            .map_err(js_error)?;
+        if let Some(checkpoint) = checkpoint {
+            persist_browser(persist, &checkpoint, &[]).await?;
+            *self = candidate;
+        }
+        Ok(acceptance_name(result))
     }
 }
 
@@ -479,6 +590,11 @@ impl BrowserInbox {
         self.inbox.pending_welcome().map(<[u8]>::to_vec)
     }
 
+    #[wasm_bindgen(js_name = pendingReplacementControl)]
+    pub fn pending_replacement_control(&self) -> Option<Vec<u8>> {
+        self.inbox.pending_replacement_control().map(<[u8]>::to_vec)
+    }
+
     #[wasm_bindgen(js_name = needsResolution)]
     pub fn needs_resolution(&self, peer: &str) -> bool {
         self.inbox.needs_resolution(peer)
@@ -503,6 +619,30 @@ impl BrowserInbox {
         self.inbox
             .outbound_resolution_receipt(peer)
             .map(<[u8]>::to_vec)
+    }
+
+    /// Apply a private peer receipt and save the resulting encrypted checkpoint.
+    /// Receipt identities never enter the message transport outbox.
+    #[wasm_bindgen(js_name = applyResolution)]
+    pub async fn apply_resolution(
+        &mut self,
+        receipt_json: &str,
+        key: &[u8],
+        context: &[u8],
+        persist: Function,
+    ) -> Result<bool, JsValue> {
+        if receipt_json.len() > MAX_WIRE_BYTES {
+            return Err(js_error(Error::InvalidMessage));
+        }
+        let receipt: ContactResolution =
+            serde_json::from_str(receipt_json).map_err(|_| js_error(Error::InvalidMessage))?;
+        let wrapping = wrapping_key(key)?;
+        self.update(key, context, &persist, |inbox, member| {
+            let first_resolution =
+                inbox.apply_resolution(&receipt, member, &wrapping, context, |_| Ok(()))?;
+            Ok((first_resolution, Vec::new()))
+        })
+        .await
     }
 
     #[wasm_bindgen(js_name = refreshOutboundResolution)]
@@ -765,6 +905,125 @@ impl BrowserInbox {
         .await
     }
 
+    /// Start a new group while preserving the member-owned contact journal.
+    /// A successful durable write moves the replacement into this Inbox and
+    /// resets its external handle to a fresh, unbound low-level member.
+    #[wasm_bindgen(js_name = initiateReplacement)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn initiate_replacement(
+        &mut self,
+        replacement: &mut BrowserMember,
+        peer_key_package: &[u8],
+        introduction_id: &[u8],
+        response_deadline: f64,
+        max_intro_bytes: f64,
+        key: &[u8],
+        context: &[u8],
+        persist: Function,
+    ) -> Result<BrowserReopeningInvitation, JsValue> {
+        let introduction_id: &[u8; 32] = introduction_id
+            .try_into()
+            .map_err(|_| js_error(Error::Admission))?;
+        let policy = contact_policy(response_deadline, max_intro_bytes)?;
+        let key = wrapping_key(key)?;
+        let retirement = Member::new_with_clock(Arc::new(BrowserClock)).map_err(js_error)?;
+        let mut candidate = self.duplicate_with_member(&replacement.member, &key, context)?;
+        let mut checkpoint = None;
+        let invitation = candidate
+            .inbox
+            .initiate_replacement(
+                &mut candidate.member,
+                peer_key_package,
+                introduction_id,
+                policy,
+                &key,
+                context,
+                |bytes, _| {
+                    checkpoint = Some(bytes.to_vec());
+                    Ok(())
+                },
+            )
+            .map_err(js_error)?;
+        let checkpoint = checkpoint.ok_or_else(|| js_error(Error::InvalidStore))?;
+        persist_browser(
+            &persist,
+            &checkpoint,
+            &[invitation.welcome.clone(), invitation.control.clone()],
+        )
+        .await?;
+        replacement.member = retirement;
+        *self = candidate;
+        Ok(BrowserReopeningInvitation { invitation })
+    }
+
+    /// Authenticate the complete replacement before preparing a private
+    /// recipient admission claim. This consumes neither state nor KeyPackage.
+    #[wasm_bindgen(js_name = previewReplacement)]
+    pub fn preview_replacement(
+        &self,
+        replacement: &BrowserMember,
+        welcome: &[u8],
+        control: &[u8],
+    ) -> Result<String, JsValue> {
+        let preview = self
+            .inbox
+            .preview_replacement(&replacement.member, welcome, control)
+            .map_err(js_error)?;
+        serde_json::to_string(&preview).map_err(|_| js_error(Error::InvalidMessage))
+    }
+
+    #[wasm_bindgen(js_name = acceptReplacement)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn accept_replacement(
+        &mut self,
+        replacement: &mut BrowserMember,
+        welcome: &[u8],
+        control: &[u8],
+        recipient_redemption: Option<Vec<u8>>,
+        key: &[u8],
+        context: &[u8],
+        persist: Function,
+        redeem: Function,
+    ) -> Result<String, JsValue> {
+        self.accept_replacement_candidate(
+            Some(replacement),
+            welcome,
+            control,
+            recipient_redemption,
+            key,
+            context,
+            &persist,
+            &redeem,
+        )
+        .await
+    }
+
+    /// Retry the exact durable pending replacement with its internal member and
+    /// original opaque claim, including after encrypted checkpoint recovery.
+    #[wasm_bindgen(js_name = retryPendingReplacement)]
+    pub async fn retry_pending_replacement(
+        &mut self,
+        key: &[u8],
+        context: &[u8],
+        persist: Function,
+        redeem: Function,
+    ) -> Result<String, JsValue> {
+        let welcome = self
+            .inbox
+            .pending_welcome()
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| js_error(Error::InvalidState))?;
+        let control = self
+            .inbox
+            .pending_replacement_control()
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| js_error(Error::InvalidState))?;
+        self.accept_replacement_candidate(
+            None, &welcome, &control, None, key, context, &persist, &redeem,
+        )
+        .await
+    }
+
     #[wasm_bindgen(js_name = consentContact)]
     pub async fn consent_contact(
         &mut self,
@@ -981,6 +1240,24 @@ impl BrowserInvitation {
     #[wasm_bindgen(getter)]
     pub fn welcome(&self) -> Vec<u8> {
         self.invitation.welcome.clone()
+    }
+}
+
+#[wasm_bindgen]
+pub struct BrowserReopeningInvitation {
+    invitation: ReopeningInvitation,
+}
+
+#[wasm_bindgen]
+impl BrowserReopeningInvitation {
+    #[wasm_bindgen(getter)]
+    pub fn welcome(&self) -> Vec<u8> {
+        self.invitation.welcome.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn control(&self) -> Vec<u8> {
+        self.invitation.control.clone()
     }
 }
 

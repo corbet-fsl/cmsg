@@ -80,7 +80,8 @@ def main():
         if git(checkout, "status", "--porcelain"):
             raise SystemExit(f"{section} checkout must be clean and isolated")
 
-    patches = [(tor_js, "tor-js-onion-client.patch")]
+    patches = [(tor_js, "tor-js-onion-client.patch"), (tor_js, "tor-js-gateway-response.patch")]
+    post_overlay_patches = []
     overlays = []
     if stage in {"streams", "service", "test-network"}:
         patches.append((tor_js, "tor-js-onion-stream.patch"))
@@ -92,13 +93,19 @@ def main():
             ("onion_service.rs", tor_js / "crates/tor-js-wasm/src/onion_service.rs"),
         ])
     if stage == "test-network":
-        patches.append((tor_js, "tor-js-test-network.patch"))
+        patches.extend([(tor_js, "tor-js-test-network.patch"), (arti, "arti-service-diagnostics.patch"),
+                        (arti, "arti-publisher-diagnostics.patch")])
+        post_overlay_patches.append((tor_js, "tor-js-service-diagnostics.patch"))
+        post_overlay_patches.append((tor_js, "tor-js-publisher-diagnostics.patch"))
         overlays.append(("test_network.rs", tor_js / "crates/tor-js-wasm/src/test_network.rs"))
     for checkout, patch in patches:
         git(checkout, "apply", "--check", str(source / patch))
         git(checkout, "apply", str(source / patch))
     for overlay, target in overlays:
         shutil.copyfile(source / overlay, target)
+    for checkout, patch in post_overlay_patches:
+        git(checkout, "apply", "--check", str(source / patch))
+        git(checkout, "apply", str(source / patch))
 
     # Every direct Arti dependency must use the same sibling checkout. Replacing
     # only selected crates mixes git/path Runtime types and is not a valid build.
@@ -121,7 +128,7 @@ def main():
             replacements += count
     if replacements < 10:
         raise SystemExit("unexpected pinned dependency layout")
-    inputs = [patch for _, patch in patches] + [overlay for overlay, _ in overlays]
+    inputs = [patch for _, patch in patches + post_overlay_patches] + [overlay for overlay, _ in overlays]
     print(json.dumps({
         "stage": stage,
         "testNetworkOnly": stage == "test-network",

@@ -1,7 +1,7 @@
 schema = 1
 
 [archives.cfrm]
-revision = "5ce49969b5208dc2b6fd8f7e4e86223d3d7372f3"
+revision = "2c4fa47c59dfd8eb2fdc058ee171836ebc097d99"
 archive_variable = "CFRM_SOURCE_ARCHIVE"
 digest_variable = "CFRM_SOURCE_SHA256"
 workflows = ["composition"]

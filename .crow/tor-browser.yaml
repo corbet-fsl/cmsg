@@ -18,6 +18,8 @@ variables:
   TOR_TOOLS_RECEIPT_SHA256: {default: ""}
   OPENSSL_INCLUDE_DIR: {default: ""}
   OPENSSL_LIB_DIR: {default: ""}
+  SQLITE3_LIB_DIR: {default: ""}
+  SQLITE3_INCLUDE_DIR: {default: ""}
 steps:
   - name: verified-source
     image: bash

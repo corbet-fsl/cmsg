@@ -1,0 +1,23 @@
+when:
+  - event: manual
+skip_clone: true
+variables:
+  SOURCE_ARCHIVE: {default: ""}
+  SOURCE_SHA256: {default: ""}
+  ARTIFACT_ROOT: {default: ""}
+steps:
+  - name: verified-source
+    image: bash
+    commands:
+      - |
+        set -eu
+        test -n "$SOURCE_ARCHIVE"
+        test -n "$SOURCE_SHA256"
+        printf '%s  %s\n' "$SOURCE_SHA256" "$SOURCE_ARCHIVE" | sha256sum --check --strict
+        test "$(git get-tar-commit-id < "$SOURCE_ARCHIVE")" = "$CI_COMMIT_SHA"
+        tar --extract --touch --file "$SOURCE_ARCHIVE" --no-same-owner
+  - name: isolated-network-capability
+    image: bash
+    depends_on: [verified-source]
+    commands:
+      - bash .ci/browser-isolation-checks.sh

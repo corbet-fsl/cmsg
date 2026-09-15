@@ -71,8 +71,9 @@ state, and any expiry. Fresh initiatives bind a new introduction identifier,
 policy and MLS group. When both parties have blocked, one cannot erase the
 other's restriction. Authenticated sibling synchronization retains the history;
 devices must receive it before they can enforce the latest decision. Conflicting
-owner histories fail closed. These directional changes are under validation and
-supersede the earlier pair-wide irreversible prototype.
+owner histories fail closed. The current native and browser checks cover these
+directional rules, including signed attempts to substitute consent fields and
+sender cancellation followed by another introduction.
 
 This is a private contact restriction, not an operator-wide behavioral ban.
 
@@ -81,12 +82,41 @@ in the conversation. Generic `Member` still supports groups, including the
 100-participant tests. Group admission must account for every unfamiliar pair;
 the pair adapter does not claim to implement that policy.
 
+## Reopening after group loss
+
+Ordinary reconnects and enrolled-device catchup retain their existing MLS group
+and require no new admission callback. Owner reopening can instead establish a
+replacement group when the original group state is unavailable. This requires
+the preserved contact journal or authenticated sibling history; the identity key
+alone cannot reconstruct forgotten blocks or unpaid obligations.
+
+`initiate_replacement` creates a Welcome plus an encrypted fresh directive using
+a new device authorized by the same member root. The initial replacement group
+contains exactly two currently authorized device leaves. The recipient calls
+`preview_replacement` to authenticate the actual inviter, nonce, group and policy
+before constructing its private cfrm claim. `accept_replacement` requires a fresh
+redemption even for a known contact. A block owned by the recipient still requires
+its exact consent before data can pass. Additional devices use normal enrollment.
+
+Replacement state and both outbound frames become visible only after durable
+persistence. A pending recipient checkpoint retains the original Welcome,
+control and private claim across recovery. Retry and post-redemption acceptance
+recheck current credentials and policy. A delayed receipt updates only its exact
+archived introduction; old-group ciphertext cannot carry the new nonce. Current
+stored receipts can be refreshed after renewal; an archived outbound receipt
+has no automatic refresh API.
+
 ## Storage and failure ordering
 
 `Inbox::accept` saves the exact pending redemption before spending and saves
 the resulting joined/rejected state before exposing it. Ambiguous results retain
 the same pending claim for an idempotent retry. A failed final write does not
 authorize another spend.
+
+Replacement acceptance uses the same ordering. Restore authenticates the complete
+saved bundle at its sealed, locally recorded validation time; incoming requests
+cannot choose historical authorization. Network retries use the live clock.
+An expired pending request remains available for cancellation without a refund.
 
 Strict data methods stage MLS state, then require atomic persistence of the
 encrypted checkpoint and exact outgoing ciphertext before returning output.
@@ -115,6 +145,10 @@ uses actual cmsg device signatures and cfrm verification, issuance and redemptio
 4. The authority spends the serial once and signs the commitment. The recipient
    verifies that stamp against its private claim before cmsg joins.
 
+The current composition also exercises owner-initiated replacement groups. It
+uses the authenticated replacement preview to prepare the claim and rejects
+reuse of the initial permit for the replacement admission.
+
 This is an aggregate bearer gate: permits can be transferred, and an authority
 holding the signing keys can issue outside its ledger. Common pinned epochs,
 authoritative shared spent state, and separation of issuance from anonymous
@@ -129,6 +163,13 @@ couple incoming obligations to acceptance so a modified recipient cannot omit
 them. Local booleans, generic membership proofs and bearer permits do not prove
 those statements. cfrm rejects `resolve_private` until a real proof backend is
 selected, implemented and independently reviewed.
+
+The [private accounting review](https://github.com/corbet-labs/cfrm/blob/main/docs/private-accounting.md)
+specifies the required proof relation and an isolated browser experiment.
+An account's latest hiding state commitment can be public without revealing
+its contact map. Public markers shared by two named accounts would reconnect
+those accounts, so event markers must be owner-specific and peer proofs stay
+private. The proposed proof backend is not enabled in production.
 
 ## Tor and browser evidence
 
@@ -149,11 +190,12 @@ trust model: JavaScript in the same execution context can access Wasm memory.
 
 ## Evidence as of the current development work
 
-- cmsg `985487b`: [113 native tests and a Wasm target check](https://crow.corbet.ch/repos/10/pipeline/38).
-- cfrm `5ce4996`: [21 Rust tests, 55 historical JavaScript tests, and portable permit Wasm checking](https://crow.corbet.ch/repos/9/pipeline/29).
-- cmsg `4a5f826`: [actual Chromium/Wasm contract](https://crow.corbet.ch/repos/10/pipeline/44): identity and MLS cryptography, sealed recovery, tamper/replay rejection, durable IndexedDB checkpoint/outbox operations, and separately labeled scripted transport cases. Chrome152.0.7977.64; no unexpected tab requests. This run covers the earlier closure semantics.
-- cmsg `d7d8f77` with cfrm `5ce4996`: [four actual composition tests](https://crow.corbet.ch/repos/10/pipeline/42), including member/device signature verification and blind permits gating recipient MLS admission.
-- Directional blocker-controlled reopening/timers, cfrm browser bindings and live Tor hosting require their own passing evidence. Earlier runs do not validate later edits.
+- cmsg `1e70a802b54c04ba4815c7f124390ce4a2aeaf7a`: [138 native tests and the Wasm target check](https://crow.corbet.ch/repos/10/pipeline/59), step `23959`. The total is the sum of the passing test-result lines across 24 nonempty executables. It includes 16 directional-contact tests, authenticated replacement preview, both-owner consent, pending recovery/expiry, archived receipts, malicious sender cancellation, old-group rejection and the 100-member group test. Rust `1.97.1`, Cargo `1.97.0`.
+- The same cmsg revision: [actual Chromium/Wasm contract](https://crow.corbet.ch/repos/10/pipeline/60), step `23961`, on Chrome `152.0.7977.64` and Node `24.19.0`. Its 12 named contract groups cover generated bindings, real MLS cryptography, identity/recovery, IndexedDB checkpoint/outbox durability, replacement-handle transfer and restored pending retries. Transport cases are explicitly scripted. The harness observed no unexpected tab requests; this is neither a host packet capture nor live Tor evidence.
+- The same cmsg revision with cfrm `2c4fa47c59dfd8eb2fdc058ee171836ebc097d99`: [four actual library-composition tests](https://crow.corbet.ch/repos/10/pipeline/61), step `23963`. Real member/device signatures, blind issuance and verified redemption gate initial and replacement groups; exact retries and independent devices cannot multiply the member allowance. This does not implement the private reciprocal budget.
+- cfrm `3bc89d0`: [21 Rust tests, 55 historical JavaScript tests, and portable permit Wasm checking](https://crow.corbet.ch/repos/9/pipeline/33), plus [63 actual Chromium checks](https://crow.corbet.ch/repos/9/pipeline/32) for the signed public roster, blind-permit flow, encrypted checkpoints and tampering.
+- cmsg `755d83b`: [pinned TorJS/Arti service Wasm compilation and three ephemeral-state tests](https://crow.corbet.ch/repos/10/pipeline/45). The separate private-test-network artifact [passed these checks](https://crow.corbet.ch/repos/10/pipeline/49) at `20a55ac8`. Generated-binding and network behavior require separate runtime evidence.
+- A completed passing browser onion dial/accept and MLS-over-Tor runtime result is still outstanding. The [Tor overlay record](../browser/upstream/README.md) tracks separate build and isolated-network attempts. Earlier successful compilation does not validate later patches or establish onion reachability.
 
 GHA is the primary executor; Crow supplies the same core/browser scripts as a
 fallback. The results above were produced on Crow while GHA was unavailable.

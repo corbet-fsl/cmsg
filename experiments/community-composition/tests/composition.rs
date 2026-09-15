@@ -256,7 +256,7 @@ fn typed_board_signers_refuse_legacy_identity_and_expired_authorizations() {
 }
 
 #[test]
-fn an_actual_blind_permit_gates_mls_join_and_cannot_admit_a_second_recipient() {
+fn actual_blind_permits_gate_initial_and_replacement_groups_without_reuse() {
     use cfrm::permit_issuer::{PermitIssuer, PermitRedeemer};
     use cfrm::permits::{PermitEpoch, PreparedPermit, RecipientClaim};
     use cmsg::{Acceptance, FirstContactPolicy, FirstContactRole, Inbox, Received, Redemption};
@@ -485,4 +485,169 @@ fn an_actual_blind_permit_gates_mls_join_and_cannot_admit_a_second_recipient() {
     );
     assert!(!charlie_inbox.is_known(alice_identity.member_id()));
     assert!(charlie.send_bytes(b"not admitted").is_err());
+
+    // The original recipient owns the block and initiates a replacement after
+    // group loss. Admission binds the nonce authenticated inside the new group.
+    let close = bob_inbox
+        .close_contact(&mut bob, &storage_key, context, |_, _| Ok(()))
+        .unwrap();
+    alice_inbox
+        .receive_contact(&mut alice, &close, &storage_key, context, |_| Ok(()))
+        .unwrap();
+    let (mut recovered_bob, recovered_grant, recovered_auth) = device(&bob_identity);
+    let (mut recovered_alice, _, _) = device(&alice_identity);
+    let recovered_key_package = recovered_alice.key_package().unwrap();
+    let reopening = bob_inbox
+        .initiate_replacement(
+            &mut recovered_bob,
+            &recovered_key_package,
+            &[27; 32],
+            FirstContactPolicy {
+                response_deadline: 1_100,
+                max_intro_bytes: 1024,
+            },
+            &storage_key,
+            context,
+            |_, _| Ok(()),
+        )
+        .unwrap();
+    let preview = alice_inbox
+        .preview_replacement(&recovered_alice, &reopening.welcome, &reopening.control)
+        .unwrap();
+    assert_eq!(preview.inviter, bob_identity.member_id());
+    assert_eq!(preview.introduction_id, [27; 32]);
+    assert!(!preview.group_id.is_empty());
+    assert_eq!(
+        alice_inbox
+            .accept_replacement(
+                &mut recovered_alice,
+                &reopening.welcome,
+                &reopening.control,
+                None,
+                &storage_key,
+                context,
+                |_| panic!("missing permit must not persist"),
+                |_| panic!("missing permit must not redeem"),
+            )
+            .unwrap(),
+        Acceptance::NeedsPermit
+    );
+
+    let prepared = PreparedPermit::new(&epoch, NOW).unwrap();
+    let request = wire(
+        &recovered_bob
+            .authorize_allocation(
+                &policy_digest(&policy()).unwrap(),
+                &[29; 32],
+                &prepared.issuance_request(),
+                1_050,
+            )
+            .unwrap(),
+    );
+    let issued = issuer
+        .issue(
+            &mut ledger,
+            &wire(&recovered_grant),
+            &wire(&recovered_auth),
+            &request,
+            || NOW,
+        )
+        .unwrap();
+    let replacement_permit = prepared.finalize(&issued.blind_signature, NOW).unwrap();
+    let replacement_claim = RecipientClaim::new(
+        &epoch,
+        replacement_permit,
+        &preview.inviter,
+        alice_identity.member_id(),
+        preview.introduction_id,
+        [28; 32],
+        NOW,
+    )
+    .unwrap();
+    ordering.borrow_mut().clear();
+    assert_eq!(
+        alice_inbox
+            .accept_replacement(
+                &mut recovered_alice,
+                &reopening.welcome,
+                &reopening.control,
+                Some(&serde_json::to_vec(&replacement_claim).unwrap()),
+                &storage_key,
+                context,
+                |_| {
+                    ordering.borrow_mut().push("durable");
+                    Ok(())
+                },
+                |local_claim| {
+                    assert_eq!(ordering.borrow().as_slice(), ["durable"]);
+                    let claim: RecipientClaim = serde_json::from_slice(local_claim).unwrap();
+                    assert_eq!(claim.binding.sender_id, preview.inviter);
+                    assert_eq!(claim.binding.recipient_id, alice_identity.member_id());
+                    assert_eq!(
+                        claim.binding.introduction_id,
+                        BASE64URL_NOPAD.encode(&preview.introduction_id)
+                    );
+                    let transmitted = serde_json::to_string(&claim.request).unwrap();
+                    assert!(!transmitted.contains(&preview.inviter));
+                    assert!(!transmitted.contains(alice_identity.member_id()));
+                    let stamp = redeemer
+                        .redeem(&serde_json::from_str(&transmitted).unwrap(), || NOW)
+                        .unwrap();
+                    claim.verify_stamp(&epoch, &stamp, NOW).unwrap();
+                    ordering.borrow_mut().push("redeemed");
+                    Redemption::Accepted
+                },
+            )
+            .unwrap(),
+        Acceptance::Joined
+    );
+    assert_eq!(
+        ordering.borrow().as_slice(),
+        ["durable", "redeemed", "durable"]
+    );
+    assert!(alice_inbox
+        .receive_contact(
+            &mut recovered_alice,
+            &ciphertext,
+            &storage_key,
+            context,
+            |_| panic!("old group ciphertext cannot revive")
+        )
+        .is_err());
+    let new_intro = bob_inbox
+        .send_contact_bytes(
+            &mut recovered_bob,
+            b"new admitted introduction",
+            &storage_key,
+            context,
+            |_, _| Ok(()),
+        )
+        .unwrap();
+    alice_inbox
+        .receive_contact(
+            &mut recovered_alice,
+            &new_intro,
+            &storage_key,
+            context,
+            |_| Ok(()),
+        )
+        .unwrap();
+    let new_answer = alice_inbox
+        .send_contact_bytes(
+            &mut recovered_alice,
+            b"answer in the replacement group",
+            &storage_key,
+            context,
+            |_, _| Ok(()),
+        )
+        .unwrap();
+    bob_inbox
+        .receive_contact(
+            &mut recovered_bob,
+            &new_answer,
+            &storage_key,
+            context,
+            |_| Ok(()),
+        )
+        .unwrap();
 }

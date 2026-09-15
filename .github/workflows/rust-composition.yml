@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: corbet-labs/cfrm
-          ref: 5ce49969b5208dc2b6fd8f7e4e86223d3d7372f3
+          ref: 2c4fa47c59dfd8eb2fdc058ee171836ebc097d99
           path: .ci-dependencies/cfrm-source
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -38,7 +38,7 @@ jobs:
           set -euo pipefail
           rustup update stable --no-self-update
           rustup default stable
-          git -C .ci-dependencies/cfrm-source archive --format=tar 5ce49969b5208dc2b6fd8f7e4e86223d3d7372f3 > "$RUNNER_TEMP/cfrm-source.tar"
+          git -C .ci-dependencies/cfrm-source archive --format=tar 2c4fa47c59dfd8eb2fdc058ee171836ebc097d99 > "$RUNNER_TEMP/cfrm-source.tar"
           printf 'CFRM_SOURCE_ARCHIVE=%s/cfrm-source.tar\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           printf 'CFRM_SOURCE_SHA256=%s\n' "$(sha256sum "$RUNNER_TEMP/cfrm-source.tar" | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
           printf 'OPENSSL_INCLUDE_DIR=%s\n' "$(pkg-config --variable=includedir openssl)" >> "$GITHUB_ENV"

@@ -15,12 +15,17 @@ timeout 1800 cargo build --locked --manifest-path "$torjs/Cargo.toml" \
 "$TOR_BINDGEN_BINARY" "$CARGO_TARGET_DIR/wasm32-unknown-unknown/debug/tor_js.wasm" \
   "$torjs/crates/tor-js-wasm/pkg" tor_js
 timeout 1800 cargo build --locked --manifest-path "$torjs/Cargo.toml" -p tor-js-gateway
+timeout 1800 cargo test --locked --manifest-path "$torjs/Cargo.toml" \
+  -p tor-js-gateway tunnel::tests:: -- --nocapture \
+  2>&1 | tee "$artifact/gateway-tunnel-tests.log"
 timeout 1800 cargo build --locked --target wasm32-unknown-unknown --lib
 "$CMSG_BINDGEN_BINARY" "$CARGO_TARGET_DIR/wasm32-unknown-unknown/debug/cmsg.wasm" browser/pkg cmsg
 timeout 1800 cargo build --locked --example tor_browser_peer
 (
   cd "$torjs"
   timeout 600 npm ci --ignore-scripts --no-audit --no-fund
+  timeout 120 node --test test/unit/kpsGateway.test.mjs \
+    2>&1 | tee "$artifact/gateway-browser-parser-tests.log"
   # The exact upstream build includes a README gzip-size comparison against the
   # stock artifact. Preserve every code/declaration build check; omit only that
   # historical size assertion for this explicitly labelled experimental package.

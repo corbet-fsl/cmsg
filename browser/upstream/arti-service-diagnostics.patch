@@ -1,0 +1,125 @@
+diff --git a/crates/tor-hsservice/src/ipt_establish.rs b/crates/tor-hsservice/src/ipt_establish.rs
+--- a/crates/tor-hsservice/src/ipt_establish.rs
++++ b/crates/tor-hsservice/src/ipt_establish.rs
+@@ -17,6 +17,51 @@
+ use tor_circmgr::ServiceOnionServiceIntroTunnel;
+ use tor_proto::TargetHop;
+ use tracing::instrument;
++
++// Isolated test-network diagnostic only: retain two static labels for the
++// latest IPT failure across this runtime, never error payloads or relay details.
++static FIXTURE_LAST_IPT_ERROR: Mutex<Option<(&'static str, &'static str)>> = Mutex::new(None);
++
++pub(crate) fn fixture_last_ipt_error() -> Option<(&'static str, &'static str)> {
++    *FIXTURE_LAST_IPT_ERROR.lock().expect("poisoned fixture diagnostic")
++}
++
++fn fixture_note_ipt_error(err: &IptEstablisherError) {
++    use IptEstablisherError as E;
++    use tor_error::ErrorKind as K;
++    let stage = match err {
++        E::Ipt(_) => "ipt",
++        E::NetdirProviderShutdown(_) => "netdir-shutdown",
++        E::BuildCircuit(_) => "build-circuit",
++        E::CircuitState(_) => "circuit-state",
++        E::CreateEstablishIntro(_) => "create-establish",
++        E::EstablishTimeout => "establish-timeout",
++        E::SendEstablishIntro(_) => "send-establish",
++        E::ClosedWithoutAck => "closed-without-ack",
++        E::Bug(_) => "bug",
++    };
++    let kind = match tor_error::HasKind::kind(err) {
++        K::TorAccessFailed => "tor-access",
++        K::BootstrapRequired => "bootstrap-required",
++        K::DirectoryExpired => "directory-expired",
++        K::LocalNetworkError => "local-network",
++        K::LocalResourceExhausted => "local-resource",
++        K::RelayIdMismatch => "relay-id-mismatch",
++        K::CircuitCollapse => "circuit-collapse",
++        K::TorNetworkTimeout => "tor-network-timeout",
++        K::TorDirectoryError => "tor-directory",
++        K::RelayTooBusy => "relay-busy",
++        K::CircuitRefused => "circuit-refused",
++        K::NoPath => "no-path",
++        K::TorDirectoryUnusable => "directory-unusable",
++        K::ClockSkew => "clock-skew",
++        K::TorProtocolViolation => "tor-protocol",
++        K::RemoteProtocolViolation => "remote-protocol",
++        K::Internal => "internal",
++        _ => "other",
++    };
++    *FIXTURE_LAST_IPT_ERROR.lock().expect("poisoned fixture diagnostic") = Some((stage, kind));
++}
+ 
+ /// Handle onto the task which is establishing and maintaining one IPT
+ pub(crate) struct IptEstablisher {
+@@ -519,6 +564,7 @@
+ 
+     /// Record that an error has occurred.
+     fn note_error(&mut self, err: &IptEstablisherError, now: Instant) {
++        fixture_note_ipt_error(err);
+         use IptStatusStatus::*;
+         let failing_since = *self.failing_since.get_or_insert(now);
+         #[allow(clippy::if_same_then_else)]
+diff --git a/crates/tor-hsservice/src/status.rs b/crates/tor-hsservice/src/status.rs
+--- a/crates/tor-hsservice/src/status.rs
++++ b/crates/tor-hsservice/src/status.rs
+@@ -241,6 +241,58 @@
+             | (DegradedReachable, DegradedReachable, _)
+             | (Running, Running, _) => DegradedReachable,
+         }
++    }
++
++    /// Static diagnostics for the isolated browser test network only.
++    /// The final two labels summarize the latest IPT failure across this runtime.
++    #[doc(hidden)]
++    pub fn fixture_status_labels(&self) -> [&'static str; 6] {
++        fn state(value: State) -> &'static str {
++            match value {
++                State::Shutdown => "shutdown",
++                State::Bootstrapping => "bootstrapping",
++                State::DegradedReachable => "degraded-reachable",
++                State::DegradedUnreachable => "degraded-unreachable",
++                State::Running => "running",
++                State::Recovering => "recovering",
++                State::Broken => "broken",
++            }
++        }
++        fn problem(value: Option<&Problem>) -> &'static str {
++            match value {
++                None => "none",
++                Some(Problem::Runtime(FatalError::Spawn { .. })) => "runtime-spawn",
++                Some(Problem::Runtime(FatalError::Keystore(_))) => "runtime-keystore",
++                Some(Problem::Runtime(FatalError::KeystoreRace { .. })) => "runtime-keystore-race",
++                Some(Problem::Runtime(FatalError::MissingHsIdKeypair(_))) => "runtime-missing-identity",
++                Some(Problem::Runtime(FatalError::IptKeysFoundUnexpectedly(_))) => "runtime-unexpected-ipt-key",
++                Some(Problem::Runtime(FatalError::NetdirProviderShutdown(_))) => "runtime-netdir-shutdown",
++                Some(Problem::Runtime(FatalError::HsDescTooLong)) => "runtime-descriptor-length",
++                Some(Problem::Runtime(FatalError::Bug(_))) => "runtime-bug",
++                Some(Problem::Runtime(_)) => "runtime-other",
++                Some(Problem::DescriptorUpload(errors)) => match errors.first() {
++                    None => "descriptor-empty",
++                    Some(DescUploadRetryError::FatalError(_)) => "descriptor-fatal",
++                    Some(DescUploadRetryError::MaxRetryCountExceeded(_)) => "descriptor-retries",
++                    Some(DescUploadRetryError::Timeout(_)) => "descriptor-timeout",
++                    Some(DescUploadRetryError::Bug(_)) => "descriptor-bug",
++                },
++                Some(Problem::Ipt(errors)) => match errors.first() {
++                    None => "ipt-empty",
++                    Some(IptError::IntroPointNotListed) => "ipt-unlisted",
++                    Some(IptError::BadEstablished) => "ipt-bad-established",
++                    Some(IptError::BadMessage(_)) => "ipt-bad-message",
++                    Some(IptError::Timeout) => "ipt-timeout",
++                },
++                #[cfg(feature = "hs-pow-full")]
++                Some(Problem::Pow(_)) => "pow",
++            }
++        }
++        let (last_stage, last_kind) = crate::ipt_establish::fixture_last_ipt_error()
++            .unwrap_or(("none", "none"));
++        [state(self.ipt_mgr.state), problem(self.ipt_mgr.latest_error.as_ref()),
++         state(self.publisher.state), problem(self.publisher.latest_error.as_ref()),
++         last_stage, last_kind]
+     }
+ 
+     /// Return the most severe current problem

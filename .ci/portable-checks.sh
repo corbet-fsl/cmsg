@@ -45,7 +45,7 @@ if test "${CHECK_SUITE:-core}" = composition; then
   test -n "$CFRM_SOURCE_ARCHIVE"
   test -n "$CFRM_SOURCE_SHA256"
   printf '%s  %s\n' "$CFRM_SOURCE_SHA256" "$CFRM_SOURCE_ARCHIVE" | sha256sum --check --strict
-  test "$(git get-tar-commit-id < "$CFRM_SOURCE_ARCHIVE")" = 5ce49969b5208dc2b6fd8f7e4e86223d3d7372f3
+  test "$(git get-tar-commit-id < "$CFRM_SOURCE_ARCHIVE")" = 2c4fa47c59dfd8eb2fdc058ee171836ebc097d99
   mkdir -p .ci-dependencies/cfrm
   tar --extract --touch --file "$CFRM_SOURCE_ARCHIVE" --directory .ci-dependencies/cfrm --no-same-owner
   test -d "$OPENSSL_INCLUDE_DIR/openssl"

@@ -8,6 +8,8 @@ The operator holds no content keys or plaintext message store. Local history and
 
 Admission requires external eligibility, member-root device authorization and cfrm's applicable rules capability. First contact requires an answer or a member-owned block, with an explicitly configured response deadline. A block applies to that member across their devices within the community. The blocking member may explicitly start a fresh contact; the blocked member cannot clear the block. An optional expiry permits a later fresh initiative, and expiry alone never revives queued messages. If both members blocked, both must consent. A fresh initiative starts another one-introduction limit with a new nonce. Established conversations reconnect privately. Clients must not be trusted to self-report counts honestly. Aggregate blind-permit issuance/redemption is implemented; private member-bound reciprocal accounting remains unfinished. See the [exact capability and evidence boundaries](browser-first.md).
 
+Owner reopening can use a retained group or a replacement group with fresh root-authorized devices. Replacement admission requires a new recipient-prepared redemption and preserves both owners' journal history. The recipient authenticates the invitation's nonce, group and policy before preparing its claim. Lost message ratchets do not authorize forgetting blocks or pending obligations, and old-group ciphertext cannot satisfy a replacement introduction. Ordinary established-group reconnects do not invoke this new-admission flow.
+
 ## Network identity boundary
 
 A malicious participant must not learn another participant's IP by discovering a profile, establishing a conversation, choosing a relay or sending content. This applies to the discovery layer as well as messaging.
@@ -32,7 +34,10 @@ Rules control participation in this protocol. They cannot prevent consenting peo
 
 ## Acceptance specifications
 
-These are tests to implement, not reported passing checks:
+These define deployment acceptance, not a claim that every item has passed.
+The [evidence record](browser-first.md#evidence-as-of-the-current-development-work)
+separates current core/browser checks from outstanding Tor runtime, protected-key,
+telemetry and production private-accounting validation.
 
 1. A malicious contact-selected endpoint cannot observe the participant's source IP.
 2. An unavailable anonymity route produces failure and zero direct fallback traffic.

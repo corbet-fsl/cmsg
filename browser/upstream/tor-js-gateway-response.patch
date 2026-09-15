@@ -1,0 +1,264 @@
+diff --git a/src/kpsGateway.ts b/src/kpsGateway.ts
+--- a/src/kpsGateway.ts
++++ b/src/kpsGateway.ts
+@@ -24,6 +24,8 @@
+  * openStream() has no default timeout and can hang forever if the
+  * connection dies mid-open (kps ISSUES #14), so always bound it. */
+ const OPEN_STREAM_TIMEOUT_MS = 20_000;
++const MAX_RESPONSE_HEAD_BYTES = 64 * 1024;
++const MAX_CONNECT_ERROR_BYTES = 4096;
+ 
+ /**
+  * Reject as soon as `signal` aborts, without disturbing `p` itself. Used to
+@@ -53,6 +55,7 @@
+  */
+ async function readHead(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<ResponseHead> {
+   let buf = new Uint8Array(0);
++  let remainder: Uint8Array = new Uint8Array(0);
+   for (;;) {
+     const sep = findHeadEnd(buf);
+     if (sep !== -1) {
+@@ -64,21 +67,32 @@
+       for (const line of lines.slice(1)) {
+         const i = line.indexOf(':');
+         if (i === -1) continue;
+-        headers[line.slice(0, i).toLowerCase()] = line.slice(i + 1).trim();
++        const name = line.slice(0, i).toLowerCase();
++        if ((name === 'content-length' || name === 'transfer-encoding')
++            && Object.prototype.hasOwnProperty.call(headers, name)) {
++          throw new Error('ambiguous response framing');
++        }
++        headers[name] = line.slice(i + 1).trim();
+       }
+       return {
+         status: parseInt(m[1], 10),
+         statusText: m[2],
+         headers,
+-        extra: buf.subarray(sep + 4),
++        extra: remainder.length === 0 ? buf.subarray(sep + 4)
++          : concat([buf.subarray(sep + 4), remainder], buf.length - sep - 4 + remainder.length),
+       };
+     }
++    if (buf.length >= MAX_RESPONSE_HEAD_BYTES) throw new Error('response head too large');
+     const { done, value } = await reader.read();
+     if (done) throw new Error('stream ended before response head');
+-    const next = new Uint8Array(buf.length + value.length);
++    const take = Math.min(value.length, MAX_RESPONSE_HEAD_BYTES - buf.length);
++    const next = new Uint8Array(buf.length + take);
+     next.set(buf, 0);
+-    next.set(value, buf.length);
++    next.set(value.subarray(0, take), buf.length);
+     buf = next;
++    // Retain a body arriving with the head without growing the head accumulator.
++    // If the bounded prefix contains no complete head, the next loop rejects.
++    remainder = value.subarray(take);
+   }
+ }
+ 
+@@ -99,6 +113,43 @@
+     off += c.length;
+   }
+   return out;
++}
++
++/** Bounded CONNECT refusal body. A known length completes without stream FIN. */
++async function readConnectError(
++  reader: ReadableStreamDefaultReader<Uint8Array>, head: ResponseHead, signal: AbortSignal,
++): Promise<string> {
++  if (head.headers['transfer-encoding'] !== undefined) {
++    throw new Error('unsupported CONNECT error body framing');
++  }
++  const length = head.headers['content-length'];
++  let expected: number | undefined;
++  if (length !== undefined) {
++    if (!/^[0-9]+$/.test(length)) throw new Error('invalid CONNECT error body length');
++    expected = Number(length);
++    if (!Number.isSafeInteger(expected) || expected > MAX_CONNECT_ERROR_BYTES) {
++      throw new Error('CONNECT error body too large');
++    }
++  }
++  const chunks = [head.extra];
++  let size = head.extra.length;
++  const checkSize = () => {
++    if (size > MAX_CONNECT_ERROR_BYTES || (expected !== undefined && size > expected)) {
++      throw new Error('CONNECT error body too large');
++    }
++  };
++  checkSize();
++  while (expected === undefined || size < expected) {
++    const { done, value } = await abortRace(reader.read(), signal, 'CONNECT error body');
++    if (done) {
++      if (expected !== undefined && size !== expected) throw new Error('incomplete CONNECT error body');
++      break;
++    }
++    size += value.length;
++    checkSize();
++    chunks.push(value);
++  }
++  return dec.decode(concat(chunks, size)).trim();
+ }
+ 
+ export interface GatewayResponse {
+@@ -261,33 +312,34 @@
+    *   it does not affect the tunnel once established.
+    */
+   async connect(target: string, opts: { signal?: AbortSignal } = {}): Promise<ArtiSocket> {
+-    const { signal } = opts;
++    const deadline = AbortSignal.timeout(OPEN_STREAM_TIMEOUT_MS);
++    const signal = opts.signal ? AbortSignal.any([opts.signal, deadline]) : deadline;
+     const conn = await this.#connection(signal);
+-    const stream = await this.#openStream(conn, signal);
++    const opening = this.#openStream(conn, signal);
++    opening.then(stream => {
++      if (signal.aborted) stream.close().catch(() => {});
++    }, () => {});
++    const stream = await abortRace(opening, signal, 'CONNECT stream');
+     const reader = stream.readable.getReader();
+     const writer = stream.writable.getWriter();
+-    // No FIN here — the write half stays open for tunnel bytes.
+-    await writer.write(enc.encode(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`));
+ 
+     let head: ResponseHead;
+     try {
++      // No FIN for a successful tunnel. Refusals use their explicit body length
++      // or bounded EOF handling, and always release this one CONNECT stream.
++      await abortRace(writer.write(enc.encode(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`)),
++        signal, `CONNECT ${target}`);
+       head = await abortRace(readHead(reader), signal, `CONNECT ${target}`);
++      if (head.status !== 200) {
++        const text = await readConnectError(reader, head, signal);
++        throw new Error(`CONNECT ${target}: ${head.status} ${text || head.statusText}`);
++      }
+     } catch (e) {
++      reader.cancel().catch(() => {});
++      try { reader.releaseLock(); } catch { /* cancellation can still be pending */ }
++      try { writer.releaseLock(); } catch { /* pending write is ended by stream close */ }
+       stream.close().catch(() => {});
+       throw e;
+-    }
+-    if (head.status !== 200) {
+-      // Error responses carry a short text/plain diagnostic; read it to EOF.
+-      let text = dec.decode(head.extra);
+-      try {
+-        for (;;) {
+-          const { done, value } = await reader.read();
+-          if (done) break;
+-          text += dec.decode(value, { stream: true });
+-        }
+-      } catch { /* best-effort diagnostic */ }
+-      stream.close().catch(() => {});
+-      throw new Error(`CONNECT ${target}: ${head.status} ${text.trim() || head.statusText}`);
+     }
+ 
+     // The CONNECT exchange is done; hand the raw tunnel to the consumer as
+diff --git a/test/unit/kpsGateway.test.mjs b/test/unit/kpsGateway.test.mjs
+--- a/test/unit/kpsGateway.test.mjs
++++ b/test/unit/kpsGateway.test.mjs
+@@ -551,3 +551,107 @@
+     await assert.rejects(gw.fetch('/x'), /openStream refused/)
+   })
+ })
++
++
++describe('bounded CONNECT refusal parsing', () => {
++  test('Content-Length refusal completes on a keep-alive stream', { timeout: 1000 }, async () => {
++    const body = 'target is not an advertised Tor relay'
++    const conn = makeConn([{ pieces: [
++      `HTTP/1.1 403 Forbidden\r\nContent-Length: ${enc.encode(body).length}\r\n\r\n`, body,
++    ], endAfterPieces: false }])
++    const gw = new KpsGateway(ADDR, { dial: makeDial({ conn }) })
++    await assert.rejects(gw.connect('127.0.0.1:12345'),
++      /^Error: CONNECT 127\.0\.0\.1:12345: 403 target is not an advertised Tor relay$/)
++    assert.equal(conn.streams[0].state.closed, true)
++    assert.equal(conn.streams[0].readable.locked, false)
++    assert.equal(conn.streams[0].writable.locked, false)
++    gw.close()
++  })
++
++  test('zero-length refusal needs no EOF', { timeout: 1000 }, async () => {
++    const conn = makeConn([{ pieces: ['HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n'],
++      endAfterPieces: false }])
++    const gw = new KpsGateway(ADDR, { dial: makeDial({ conn }) })
++    await assert.rejects(gw.connect('127.0.0.1:12345'), /403 Forbidden/)
++    assert.equal(conn.streams[0].state.closed, true)
++    gw.close()
++  })
++
++  test('ambiguous, oversized and truncated refusal bodies fail closed', async () => {
++    for (const response of [
++      'HTTP/1.1 403 Forbidden\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\nx',
++      'HTTP/1.1 403 Forbidden\r\nContent-Length: 1,1\r\n\r\nx',
++      'HTTP/1.1 403 Forbidden\r\nContent-Length: 4097\r\n\r\n',
++      'HTTP/1.1 403 Forbidden\r\nContent-Length: 2\r\n\r\nx',
++      'HTTP/1.1 403 Forbidden\r\nContent-Length: 1\r\n\r\nxx',
++      'HTTP/1.1 403 Forbidden\r\nTransfer-Encoding: chunked\r\nContent-Length: 0\r\n\r\n',
++      'HTTP/1.1 403 Forbidden\r\n\r\n' + 'x'.repeat(4097),
++    ]) {
++      const conn = makeConn([{ pieces: [response] }])
++      const gw = new KpsGateway(ADDR, { dial: makeDial({ conn }) })
++      await assert.rejects(gw.connect('127.0.0.1:12345'), /framing|body/)
++      assert.equal(conn.streams[0].state.closed, true)
++      gw.close()
++    }
++  })
++
++  test('the caller abort still applies after the refusal head', { timeout: 1000 }, async () => {
++    const conn = makeConn([{ pieces: ['HTTP/1.1 403 Forbidden\r\nContent-Length: 1\r\n\r\n'],
++      endAfterPieces: false }])
++    const gw = new KpsGateway(ADDR, { dial: makeDial({ conn }) })
++    const controller = new AbortController()
++    const timer = setTimeout(() => controller.abort(), 20)
++    try {
++      await assert.rejects(gw.connect('127.0.0.1:12345', { signal: controller.signal }),
++        /CONNECT error body: timed out/)
++      assert.equal(conn.streams[0].state.closed, true)
++    } finally { clearTimeout(timer); gw.close() }
++  })
++
++  test('response head cap does not discard a large coalesced tunnel body', async () => {
++    const body = 'z'.repeat(100_000)
++    const conn = makeConn([{ pieces: [OK + body] }])
++    const gw = new KpsGateway(ADDR, { dial: makeDial({ conn }) })
++    const socket = await gw.connect('127.0.0.1:12345')
++    assert.equal(dec.decode((await socket.readable.getReader().read()).value), body)
++    socket.close(); gw.close()
++  })
++
++  test('oversized incomplete response heads are rejected', async () => {
++    const conn = makeConn([{ pieces: ['HTTP/1.1 403 Forbidden\r\nX-Large: ' + 'x'.repeat(65536)] }])
++    const gw = new KpsGateway(ADDR, { dial: makeDial({ conn }) })
++    await assert.rejects(gw.connect('127.0.0.1:12345'), /response head too large/)
++    assert.equal(conn.streams[0].state.closed, true)
++    gw.close()
++  })
++})
++
++
++describe('hard CONNECT setup deadline', () => {
++  test('a caller without a deadline cannot disable the built-in limit', { timeout: 25_000 }, async () => {
++    const conn = makeConn([{ pieces: ['HTTP/1.1 403 Forbidden\r\nContent-Length: 1\r\n\r\n'],
++      endAfterPieces: false }])
++    const gw = new KpsGateway(ADDR, { dial: makeDial({ conn }) })
++    const keepAlive = setTimeout(() => {}, 25_000)
++    try {
++      await assert.rejects(gw.connect('127.0.0.1:12345', { signal: new AbortController().signal }),
++        /CONNECT error body: timed out/)
++      assert.equal(conn.streams[0].state.closed, true)
++    } finally { clearTimeout(keepAlive); gw.close() }
++  })
++
++  test('an aborted open rejects promptly and disposes a late stream', { timeout: 1000 }, async () => {
++    const conn = makeConn([{ pieces: [OK], endAfterPieces: false }])
++    const open = conn.openStream.bind(conn)
++    conn.openStream = async options => { await tick(40); return open(options) }
++    const gw = new KpsGateway(ADDR, { dial: makeDial({ conn }) })
++    const controller = new AbortController()
++    const timer = setTimeout(() => controller.abort(), 10)
++    try {
++      await assert.rejects(gw.connect('127.0.0.1:12345', { signal: controller.signal }),
++        /CONNECT stream: timed out/)
++      await tick(60)
++      assert.equal(conn.streams[0].state.closed, true)
++    } finally { clearTimeout(timer); gw.close() }
++  })
++})

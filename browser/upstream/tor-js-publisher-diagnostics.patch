@@ -1,0 +1,17 @@
+diff --git a/crates/tor-js-wasm/src/onion_service.rs b/crates/tor-js-wasm/src/onion_service.rs
+--- a/crates/tor-js-wasm/src/onion_service.rs
++++ b/crates/tor-js-wasm/src/onion_service.rs
+@@ -36,9 +36,11 @@
+     let running = service.state.service.borrow();
+     let Some(running) = running.as_ref() else { return stage_failure("missing-running-service"); };
+     let labels = running.status().fixture_status_labels();
++    let publisher = running.status().fixture_publisher_labels();
+     JsValue::from_str(&format!(
+-        "tor-js:OnionService:{stage}:ipt={}/{}:publisher={}/{}:last-ipt={}/{}",
+-        labels[0], labels[1], labels[2], labels[3], labels[4], labels[5]
++        "tor-js:OnionService:{stage}:ipt={}/{}:publisher={}/{}:last-ipt={}/{}:schedule={}:periods={}:last-upload={}:upload-error={}/{}",
++        labels[0], labels[1], labels[2], labels[3], labels[4], labels[5],
++        publisher[0], publisher[1], publisher[2], publisher[3], publisher[4]
+     ))
+ }
+ fn integer(value: f64, maximum: u32) -> Result<u32, JsValue> {

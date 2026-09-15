@@ -104,9 +104,35 @@ encrypted channel authenticated to another root-authorized device of the same
 member. `renewDeviceAdmission` saves its new credential and outbound MLS commit
 together. `restore` restores the combined encrypted inbox and session.
 
+After group-state loss, `initiateReplacement` starts an owner-authorized fresh
+group using a separately prepared, root-authorized `BrowserMember` and the peer's
+fresh KeyPackage. The returned `BrowserReopeningInvitation` contains `welcome`
+and encrypted `control`; both frames enter the durable outbox together. The
+existing contact journal stays in force, including either member's block.
+Before preparing that recipient claim, `previewReplacement` authenticates the
+complete welcome/control bundle without consuming the replacement member. Its
+private JSON result contains `inviter`, `introductionId`, `groupId`, and `policy`
+with `response_deadline` and `max_intro_bytes`. Prepare admission from these
+authenticated fields; keep the identifying context at the endpoint.
+`acceptReplacement` always needs a fresh recipient-prepared admission claim,
+including for a known contact. It saves the exact pending bundle before external
+redemption. `retryPendingReplacement` resumes that same intent and claim after
+ambiguity or encrypted checkpoint recovery. `pendingReplacementControl` pairs
+with `pendingWelcome` for local recovery; neither goes to the policy operator.
+
+The replacement handle is borrowed during each operation. A failed initial write
+leaves it usable for retry. After the first successful durable checkpoint, the
+Inbox owns that member's state and the external handle becomes a fresh, unbound
+member. This transfer also occurs for durable pending acceptance. Reopening gets
+one new introduction; a reply or explicit block is still required.
+
 `awaitingPeerResolution` distinguishes an unresolved remote obligation from
 local conversation closure. Private inbound/outbound receipt accessors retain
-the signed result for recovery. After device-certificate renewal,
+the signed result for recovery. `applyResolution(receiptJson, key, context,
+persist)` verifies a privately delivered peer receipt and saves its encrypted
+checkpoint before returning whether it resolved a previously unresolved
+introduction. Receipts for archived introductions cannot change the current
+contact gate. No raw receipt enters the transport outbox. After device-certificate renewal,
 `refreshOutboundResolution` can renew an expired stored decision without
 changing its pair, nonce or outcome; `closeContact` can then send a fresh
 encrypted close. Raw receipt bytes contain contact identities, are not MLS wire

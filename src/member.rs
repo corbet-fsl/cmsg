@@ -584,7 +584,7 @@ impl Member {
     }
 
     pub fn receive(&mut self, wire: &[u8]) -> Result<Received, Error> {
-        self.process_incoming(wire, false, &BTreeSet::new())
+        self.process_incoming(wire, false, false, &BTreeSet::new())
     }
 
     pub(crate) fn receive_excluding(
@@ -592,13 +592,23 @@ impl Member {
         wire: &[u8],
         excluded: &BTreeSet<String>,
     ) -> Result<Received, Error> {
-        self.process_incoming(wire, false, excluded)
+        self.process_incoming(wire, false, false, excluded)
+    }
+
+    /// Decode the bounded internal contact envelope only inside the guarded
+    /// inbox. Generic receive must retain its public text/data size contract.
+    pub(crate) fn receive_policy_excluding(
+        &mut self,
+        wire: &[u8],
+        excluded: &BTreeSet<String>,
+    ) -> Result<Received, Error> {
+        self.process_incoming(wire, false, true, excluded)
     }
 
     /// Process only authenticated control while a local certificate is expired.
     /// Application messages are rejected without changing ratchets or history.
     pub fn receive_control(&mut self, wire: &[u8]) -> Result<(), Error> {
-        match self.process_incoming(wire, true, &BTreeSet::new())? {
+        match self.process_incoming(wire, true, false, &BTreeSet::new())? {
             Received::MembershipChanged => Ok(()),
             Received::Text(_)
             | Received::Bytes(_)
@@ -611,6 +621,7 @@ impl Member {
         &mut self,
         wire: &[u8],
         control_only: bool,
+        allow_policy: bool,
         excluded: &BTreeSet<String>,
     ) -> Result<Received, Error> {
         if control_only {
@@ -676,10 +687,12 @@ impl Member {
                         member_id,
                         bytes: body.to_vec(),
                     }),
-                    2 if body.len() <= MAX_WIRE_BYTES / 2 => Received::Bytes(DataMessage {
-                        member_id,
-                        bytes: body.to_vec(),
-                    }),
+                    2 if allow_policy && body.len() <= MAX_WIRE_BYTES / 2 => {
+                        Received::Bytes(DataMessage {
+                            member_id,
+                            bytes: body.to_vec(),
+                        })
+                    }
                     _ => return Err(Error::InvalidMessage),
                 }
             }
@@ -921,6 +934,70 @@ impl Member {
             context,
             self.clock.clone(),
         )
+    }
+
+    /// Revalidate private sealed pending state at its locally recorded time.
+    /// The returned candidate always resumes the caller's live clock. Network
+    /// callers must supply the current time, never a peer-claimed timestamp.
+    pub(crate) fn inspect_at<T>(
+        &self,
+        at: u64,
+        inspect: impl FnOnce(&mut Self) -> Result<T, Error>,
+    ) -> Result<(Self, T), Error> {
+        struct InspectionClock(u64);
+        impl Clock for InspectionClock {
+            fn now(&self) -> Result<u64, Error> {
+                Ok(self.0)
+            }
+        }
+        let mut key = Zeroizing::new([0u8; 32]);
+        getrandom::fill(&mut *key).map_err(|_| Error::Randomness)?;
+        let context = b"cmsg.private-replacement-inspection.v1";
+        let mut candidate = Self::restore_with_clock(
+            &self.snapshot(&key, context)?,
+            &key,
+            context,
+            Arc::new(InspectionClock(at)),
+        )?;
+        let result = inspect(&mut candidate)?;
+        candidate.clock = self.clock.clone();
+        Ok((candidate, result))
+    }
+
+    /// A replacement invitation starts with exactly two current root-authorized
+    /// device leaves. Additional devices require normal authenticated enrollment.
+    pub(crate) fn replacement_peer(&self) -> Result<String, Error> {
+        let own = self.member_id()?;
+        if self.device_authorization()?.is_none() {
+            return Err(Error::Admission);
+        }
+        let group = self.group.as_ref().ok_or(Error::InvalidState)?;
+        let trust = self.trust.as_ref().ok_or(Error::Admission)?;
+        let now = self.clock.now()?;
+        let members: Vec<_> = group.members().collect();
+        if members.len() != 2 {
+            return Err(Error::Admission);
+        }
+        let mut peer = None;
+        let mut self_found = false;
+        for leaf in members {
+            let id = verify_credential(&leaf.credential, &leaf.signature_key, trust, now)?;
+            if credential_parts(&leaf.credential)?.1.is_none() {
+                return Err(Error::Admission);
+            }
+            if id == own {
+                if self_found || leaf.signature_key != self.chat_public_key() {
+                    return Err(Error::Admission);
+                }
+                self_found = true;
+            } else if peer.replace(id).is_some() {
+                return Err(Error::Admission);
+            }
+        }
+        if !self_found {
+            return Err(Error::Admission);
+        }
+        peer.ok_or(Error::Admission)
     }
 
     /// Restores the exact saved ratchet state. Authenticating an old valid snapshot

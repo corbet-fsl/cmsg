@@ -190,6 +190,8 @@ impl ContactDirective {
 #[serde(rename_all = "kebab-case")]
 pub enum ContactResolutionKind {
     Answered,
+    /// Closes this introduction permanently. A different introduction requires
+    /// the separate owner-controlled contact policy and any required consent.
     ClosedForever,
 }
 

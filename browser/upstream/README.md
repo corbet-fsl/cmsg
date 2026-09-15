@@ -16,6 +16,15 @@ that checkout, preserve it as an artifact, and build the Wasm and JS together.
 The released npm artifact must not be relabeled as a patched build. Record the
 patched source revision, patch hash, Cargo/npm locks and artifact hash.
 
+`tor-js-gateway-response.patch` bounds response heads to 64 KiB and CONNECT
+refusal bodies to 4 KiB, rejects ambiguous length fields, honors a declared body
+length without waiting for FIN, and keeps the caller's abort active through the
+refusal body. Each rejected CONNECT releases its own KPS stream. Run 64 exposed
+the upstream bug: the gateway returned non-relay 403 and the canary saw zero TCP
+connections, but its browser client hung waiting for EOF on the kept-open stream.
+Crow run 66 at cmsg `6dfadad9af` passed all 52 browser parser tests and the
+actual WebRTC/KPS non-relay 403 with zero canary connections.
+
 ## Security review boundary
 
 The Tor protocol and circuit cryptography come from Arti. This integration does
@@ -39,11 +48,11 @@ backend must preserve introduction replay protection for the full lifetime of
 each introduction key, enforce one service owner per active state, expose
 bounded cancellable streams, and stop accepting streams when closed.
 
-Per-session onion keys could make in-memory service state valid, provided every
-restart generates fresh service/introduction keys and old key material is never
-restored independently of its replay state. Permanent cmsg identity remains a
-different member root key. This is an implementation path requiring tests,
-not a current hosting capability or a settled persistence policy.
+The experimental service overlay uses per-session onion keys and in-memory
+service state. Every restart creates fresh service/introduction keys; the wrapper
+offers no independent key restore. Permanent cmsg identity remains a different
+member root key. Compilation and native state tests have passed as detailed
+below; browser service reachability still requires the runtime contract.
 
 ## Raw stream stage
 
@@ -51,8 +60,14 @@ After the onion-client patch, `tor-js-onion-stream.patch` plus the
 `onion_stream.rs` overlay expose actual Arti `DataStream` bytes. Copy the overlay
 to `crates/tor-js-wasm/src/onion_stream.rs` in the isolated pinned checkout.
 The client, stream and service patches applied to the exact source archives in
-Crow run 45 at cmsg `755d83b1a`. Its full service stage also passed the Wasm
-compilation check. Generated TorJS bindings and a network test remain pending.
+Crow run 45 at cmsg `755d83b1a`. Its full service stage passed the Wasm
+compilation check and all three native ephemeral-state tests. Crow run 52 at
+cmsg `addbe4c0f1` built the actual Wasm modules, matching generated bindings,
+TorJS TypeScript/declarations, experimental npm package and native gateway/peer.
+Crow run 62 at cmsg `6b494416a6` reached the actual browser and bootstrapped
+both Arti clients over WebRTC/KPS on the signed isolated network. The first
+onion service launched, then reached the 60-second publication deadline;
+browser onion reachability remains unverified.
 The stock dependency is not enabled by the cmsg production adapter.
 
 `connectOnion(host, port, deadlineMs)` accepts only canonical checksum-valid
@@ -63,21 +78,22 @@ deadlineMs)` accepts at most one cmsg-sized chunk. One read and one write can
 proceed concurrently; overlapping operations in the same direction fail.
 `close()` aborts both outstanding operations and drops their stream halves.
 The cmsg frame codec can then interoperate directly with native `FramedStream`.
-The embedding factory still needs a whole-bootstrap deadline and a dedicated
-client shutdown policy, since the TypeScript client waits for bootstrap before
-entering the Wasm connect deadline.
+The embedding factory must also enforce a whole-bootstrap deadline and client
+shutdown, since the TypeScript client waits for bootstrap before entering the
+Wasm connect deadline. Its scripted factory tests are separate from this actual
+network runtime contract.
 
-The service stage must produce the same stream type from Arti's accepted
-onion-service streams. It additionally needs fresh ephemeral key/state ownership
-and full-lifetime introduction replay protection. No JavaScript callback or
-local echo is accepted as evidence that a browser onion service is reachable.
+The service stage produces the same stream type from Arti's accepted
+onion-service streams, with fresh ephemeral key/state ownership and
+full-lifetime introduction replay protection. No JavaScript callback or local
+echo is accepted as evidence that a browser onion service is reachable.
 
 ## Isolated source application and compilation
 
 The `service` source stage now includes an in-memory state backend, target
 gates for filesystem replay code, one-shot ephemeral introduction ownership,
 and a bounded Arti service/stream API. Patch application is verified as above;
-the new browser runtime behavior still requires generated-binding and network tests.
+the generated package build is verified as above, while network tests remain.
 The memory store keeps at most 16 MiB of service metadata per instance and
 rejects replacement atomically when full. It exports neither raw directories
 nor state recovery. It rejects reacquisition even after all handles drop.
@@ -126,12 +142,25 @@ native peer using the generated artifact and explicitly configured test gateway.
 
 `test-network` adds a separate source patch after `service`. Build it with
 `--features browser-test-network`; omitting that feature fails compilation.
+Crow run 49 at cmsg `20a55ac815` passed this stage's Wasm compilation check
+and all three native ephemeral-state tests. These checks do not run the network.
 This artifact requires an explicit `testNetwork` JSON option and fresh fixture
 storage in its TorJS constructor. It disables gateway bootstrap archives and
 rejects missing configuration, non-loopback fallback sockets, retained public
 authority upload/download/vote endpoints, or a vanguard mode other than `full`.
 The ephemeral keystore is still forced after reading test configuration.
 The production `service` stage has no test-network option or this module.
+
+This stage also applies `arti-service-diagnostics.patch` and, after copying the
+service overlay, `tor-js-service-diagnostics.patch`. Readiness failures retain
+only fixed labels for the introduction-point manager and descriptor publisher,
+plus the latest introduction-circuit error category across the fixture runtime.
+The test stage also records static publisher scheduling, period-count, upload
+step and per-attempt error categories. Runtime-wide labels describe the latest
+observed event; they do not identify a particular service or peer.
+These labels contain no error payloads, keys, onion addresses or paths. They
+do not relax readiness or deadlines and are absent from the production service
+stage.
 
 Use at least four disposable directory authorities, twenty guard relays and
 two exits with the fixture's own signed consensus. Full vanguards keep the
@@ -141,6 +170,38 @@ disabled with `path_rules.ipv4_subnet_family_prefix = 33` and its IPv6 value
 flat RSA identity strings. Fallback `rsa_identity`, unpadded standard-base64
 `ed_identity` and `orports` come from the generated relay keys, not invented
 fixture identities. Keep HSDir parameters consistent with the test consensus.
+In particular, C Tor's `TestingTorNetwork` internally changes `hsdir_interval`
+without advertising that change in the consensus parameters. The fixture now
+uses `chutney.arti.config.tor_config(network)["override_net_params"]` from the
+pinned source. Its 20-second voting interval derives an eight-minute onion
+directory period; leaving Arti at the public-network 1440-minute default is
+incompatible. The public signed consensus and this derivation are retained
+before browser execution, including on later failure. Crow run 67 confirmed
+the eight-minute override and 26 HSDirs, but the browser service still timed
+out with its publisher bootstrapping. That run's startup consensus contained
+neither shared-random generation.
+
+The fixture now waits for a currently valid consensus in the native Tor client's
+accepted cache containing both canonical 32-byte shared-random values. It
+rejects duplicate fields and bounds each `num-reveals` to the four fixture
+authorities; that count is not a signature quorum. Native Tor validates the
+consensus signatures. Freshness is recorded separately: a consensus can remain
+valid after its `fresh-until` time while the client awaits an update. The fixture
+also checks that the signed values cover
+Arti's current and an adjacent publication period. It retains the public
+consensus and a bounded `shared-random-readiness.json` receipt, even on timeout.
+
+In the pinned C Tor 0.4.9.12 source, `shared_random_state.c:164` selects 12
+commit and 12 reveal rounds; `new_protocol_run()` at line 770 rotates values
+only at the reveal-to-commit transition. `shared_random.c:766` requires
+authority agreement before including a value in the consensus. An incomplete
+startup cycle can therefore leave values absent. Warmup allows three complete
+cycle durations plus four voting rounds (1520 seconds with the existing
+20-second interval), covering an initial partial cycle and two full cycles.
+The outer fixture supervisor allows 3000 seconds for this warmup, existing
+bootstrap/driver limits and cleanup. Tor voting settings and the browser's
+60-second service readiness deadline remain unchanged. This new gate still
+needs its runtime check.
 
 Run the pinned gateway as a disposable test child using explicit configuration,
 `run --no-sync`, a temporary synthetic KPS identity and
@@ -180,12 +241,40 @@ available in the isolated CI environment; `TOR_BIN`, `TOR_GENCERT_BIN`,
 `TOR_RUNTIME_ARTIFACT` must be explicit paths. It adds one native client to the
 26-relay network. Generated authorities, KPS keys and browser profiles are
 temporary; shutdown confirms the owned processes exit before deleting state.
+The fixture explicitly selects the local Chutney launcher and loopback IPv4
+listeners, with IPv6 disabled, regardless of inherited Chutney defaults.
+Listener blocks stay outside the worker's ephemeral source-port range, read
+without changing kernel settings. Bounded startup/final diagnostics retain
+synthetic listener settings, process status and log tails; private keys and
+control authentication files are excluded.
 
-The contract uses the actual generated TorJS APIs and cmsg framing. Two browser
-clients publish different onions and exchange byte frames. A separate native
+The contract uses the actual generated TorJS APIs and cmsg framing. It first
+requires the real KPS gateway to reject a CONNECT to an owned non-relay TCP
+canary with 403 while the canary records zero connections. It also requires
+the actual Wasm onion API to reject IP, URL, malformed onion and injected route
+inputs. The build runs the gateway's existing tunnel validation/resource tests
+and browser parser tests, preserving their output. Run 66 passed the native
+gateway tests, all 52 browser parser tests, the real non-relay canary assertion,
+and actual Wasm rejection of the malformed route inputs. It established working
+introduction circuits, then timed out with the descriptor publisher still
+bootstrapping. Browser onion reachability remains unverified.
+An independent gateway assertion failure is retained in the runtime evidence
+while service diagnostics continue; it still fails the overall result.
+
+The remaining contract requires two browser clients to publish different onions
+and exchange byte frames. A separate native
 cmsg process then connects through its test Tor SOCKS endpoint to a browser-owned
 onion, exchanges MLS key-package/welcome data over that route, and authenticates
 binary cmsg ciphertext in both directions. This checks the generic core and
 native framing; the strict contact-policy API has its separate browser contract.
 The browser's localhost control request only launches the synthetic native test
 participant. It is fixture orchestration, not an application transport endpoint.
+
+The tab's HTTP request interception does not observe every worker, WebRTC ICE,
+UDP or browser background request. An empty tab request list does not establish
+process-wide network silence; run 62's Chromium diagnostics included background
+GCM errors. Gateway restriction and malformed-route assertions support their
+specific boundaries, not a general browser anonymity claim.
+The separate Crow run 65 isolation probe was denied by the worker's existing
+security policy (`unshare: Operation not permitted`). It changed no host network
+configuration. Process-wide network confinement remains unverified.

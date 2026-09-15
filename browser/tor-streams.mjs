@@ -4,17 +4,32 @@ import { OnionFramedStream } from './internal/streams.mjs';
 const failed = () => new Error('cmsg:Transport');
 const bounded = (value, maximum) => Number.isInteger(value) && value >= 1 && value <= maximum;
 
-async function beforeDeadline(operation, deadlineMs, close) {
+function dispose(value) {
+  try { value.close(); } catch { /* disposal must not expose upstream context */ }
+  try { value.free(); } catch { /* freeing is still attempted after close fails */ }
+}
+
+async function beforeDeadline(operation, deadlineMs, close, discard) {
   let timer;
+  let active = true;
+  const expires = performance.now() + deadlineMs;
   try {
     return await Promise.race([
-      operation,
+      Promise.resolve().then(operation).then(value => {
+        if (!active || performance.now() >= expires) {
+          discard?.(value);
+          throw failed();
+        }
+        return value;
+      }),
       new Promise((_, reject) => {
-        timer = setTimeout(() => { close(); reject(failed()); }, deadlineMs);
+        timer = setTimeout(() => reject(failed()), deadlineMs);
       }),
     ]);
-  } catch { close(); throw failed(); }
-  finally { clearTimeout(timer); }
+  } catch {
+    try { close(); } catch { /* coarse errors only */ }
+    throw failed();
+  } finally { active = false; clearTimeout(timer); }
 }
 
 /** Owns actual browser Arti circuits and a fresh, optional onion service.
@@ -24,22 +39,29 @@ async function beforeDeadline(operation, deadlineMs, close) {
 export async function createTorJsOnionNode({ gateway, storage, bootstrapDeadlineMs, operationDeadlineMs } = {}) {
   const gateways = typeof gateway === 'string' ? [gateway] : gateway;
   if (!Array.isArray(gateways) || gateways.length === 0
-      || gateways.some((address) => typeof address !== 'string' || address.length === 0)
+      || [...gateways].some((address) => typeof address !== 'string' || address.length === 0)
       || !bounded(bootstrapDeadlineMs, 300_000) || !bounded(operationDeadlineMs, 60_000)) {
     throw new Error('cmsg:InvalidState');
   }
-  const { TorClient, Log } = await import('tor-js/wasm-file');
-  if (typeof TorClient.onionClientSupported !== 'function'
-      || typeof TorClient.onionStreamSupported !== 'function'
-      || typeof TorClient.onionServiceSupported !== 'function'
-      || !await TorClient.onionClientSupported()
-      || !await TorClient.onionStreamSupported()
-      || !await TorClient.onionServiceSupported()) {
-    throw new Error('cmsg:TorOnionSupportRequired');
-  }
+  const entryGateways = [...gateways];
+  const bootstrapEnd = performance.now() + bootstrapDeadlineMs;
+  const implementation = await beforeDeadline(async () => {
+    const implementation = await import('tor-js/wasm-file');
+    const { TorClient } = implementation;
+    if (typeof TorClient?.onionClientSupported !== 'function'
+        || typeof TorClient.onionStreamSupported !== 'function'
+        || typeof TorClient.onionServiceSupported !== 'function'
+        || await TorClient.onionClientSupported() !== true
+        || await TorClient.onionStreamSupported() !== true
+        || await TorClient.onionServiceSupported() !== true) return null;
+    return implementation;
+  }, bootstrapDeadlineMs, () => {});
+  if (!implementation) throw new Error('cmsg:TorOnionSupportRequired');
+  const { TorClient, Log } = implementation;
+  if (performance.now() >= bootstrapEnd) throw failed();
   let client;
   try {
-    client = new TorClient({ gateway: [...gateways], storage,
+    client = new TorClient({ gateway: entryGateways, storage,
       log: new Log({ rawLog: () => {} }), logLevel: 'error' });
   } catch { throw failed(); }
   let closed = false;
@@ -55,19 +77,21 @@ export async function createTorJsOnionNode({ gateway, storage, bootstrapDeadline
   };
   const own = (raw) => {
     if (closed) {
-      try { raw.close(); raw.free(); } catch { /* already closed */ }
+      dispose(raw);
       throw failed();
     }
     for (const stream of streams) if (stream.closed) streams.delete(stream);
     if (streams.size >= 64) {
-      try { raw.close(); raw.free(); } catch { /* already closed */ }
+      dispose(raw);
       throw failed();
     }
     const stream = new OnionFramedStream(raw, operationDeadlineMs);
     streams.add(stream);
     return stream;
   };
-  await beforeDeadline(client.ready(), bootstrapDeadlineMs, close);
+  const remainingBootstrap = bootstrapEnd - performance.now();
+  if (remainingBootstrap <= 0) { close(); throw failed(); }
+  await beforeDeadline(() => client.ready(), remainingBootstrap, close);
   if (closed) throw failed();
   return {
     async connect(host, port) {
@@ -76,7 +100,7 @@ export async function createTorJsOnionNode({ gateway, storage, bootstrapDeadline
       const validatedHost = endpoint.host;
       const validatedPort = endpoint.port;
       endpoint.free();
-      const raw = await beforeDeadline(client.connectOnion(validatedHost, validatedPort, operationDeadlineMs), operationDeadlineMs, close);
+      const raw = await beforeDeadline(() => client.connectOnion(validatedHost, validatedPort, operationDeadlineMs), operationDeadlineMs, close, dispose);
       return own(raw);
     },
     async listen({ port, maximumStreams, deadlineMs } = {}) {
@@ -84,30 +108,30 @@ export async function createTorJsOnionNode({ gateway, storage, bootstrapDeadline
           || !bounded(deadlineMs, 60_000)) throw new Error('cmsg:InvalidState');
       // Reserve the single launch before awaiting to prevent concurrent launch.
       listener = { close: () => {} };
-      const service = await beforeDeadline(client.hostOnion(port, maximumStreams, deadlineMs), deadlineMs, close);
-      if (closed) { try { service.close(); service.free(); } catch {} throw failed(); }
+      const service = await beforeDeadline(() => client.hostOnion(port, maximumStreams, deadlineMs), deadlineMs, close, dispose);
+      if (closed) { dispose(service); throw failed(); }
       let endpoint;
       try { endpoint = new BrowserOnionEndpoint(service.host, service.port); }
-      catch { try { service.close(); service.free(); } catch {} close(); throw failed(); }
+      catch { dispose(service); close(); throw failed(); }
       const host = endpoint.host;
       const actualPort = endpoint.port;
       endpoint.free();
-      if (actualPort !== port) { try { service.close(); service.free(); } catch {} close(); throw failed(); }
+      if (actualPort !== port) { dispose(service); close(); throw failed(); }
       let listening = true;
       listener = {
         host, port: actualPort,
         async accept() {
           if (closed || !listening) throw failed();
           try {
-            const raw = await service.accept(operationDeadlineMs);
-            if (!listening) { raw.close(); raw.free(); throw failed(); }
+            const raw = await beforeDeadline(() => service.accept(operationDeadlineMs), operationDeadlineMs, close, dispose);
+            if (!listening) { dispose(raw); throw failed(); }
             return own(raw);
           } catch { throw failed(); }
         },
         close() {
           if (!listening) return;
           listening = false;
-          try { service.close(); service.free(); } catch { /* coarse public errors only */ }
+          dispose(service);
         },
       };
       return listener;
