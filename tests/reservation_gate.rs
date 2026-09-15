@@ -368,62 +368,97 @@ fn original_reservation_expiry_and_capacity_release_never_restart_the_contact() 
             bad_role: false,
             local_current: true,
         };
-        p.bi.authorize_incoming_reservation(
-            &p.b, b"a", &mut verifier, &KEY, CONTEXT, |_| Ok(()),
-        ).unwrap();
-        p.ai.bind_active_reservations(
-            &p.a, b"a", b"b", &mut verifier, &KEY, CONTEXT, |_| Ok(()),
-        ).unwrap();
-        p.bi.bind_active_reservations(
-            &p.b, b"a", b"b", &mut verifier, &KEY, CONTEXT, |_| Ok(()),
-        ).unwrap();
-        let queued = p.ai.send_contact(
-            &mut p.a, b"original introduction", &KEY, CONTEXT, |_, _| Ok(()),
-        ).unwrap();
+        p.bi.authorize_incoming_reservation(&p.b, b"a", &mut verifier, &KEY, CONTEXT, |_| Ok(()))
+            .unwrap();
+        p.ai.bind_active_reservations(&p.a, b"a", b"b", &mut verifier, &KEY, CONTEXT, |_| Ok(()))
+            .unwrap();
+        p.bi.bind_active_reservations(&p.b, b"a", b"b", &mut verifier, &KEY, CONTEXT, |_| Ok(()))
+            .unwrap();
+        let queued =
+            p.ai.send_contact(&mut p.a, b"original introduction", &KEY, CONTEXT, |_, _| {
+                Ok(())
+            })
+            .unwrap();
         if recipient_closed {
-            p.bi.receive_contact(&mut p.b, &queued, &KEY, CONTEXT, |_| Ok(())).unwrap();
-            let close = p.bi.close_contact(&mut p.b, &KEY, CONTEXT, |_, _| Ok(())).unwrap();
-            p.ai.receive_contact(&mut p.a, &close, &KEY, CONTEXT, |_| Ok(())).unwrap();
+            p.bi.receive_contact(&mut p.b, &queued, &KEY, CONTEXT, |_| Ok(()))
+                .unwrap();
+            let close =
+                p.bi.close_contact(&mut p.b, &KEY, CONTEXT, |_, _| Ok(()))
+                    .unwrap();
+            p.ai.receive_contact(&mut p.a, &close, &KEY, CONTEXT, |_| Ok(()))
+                .unwrap();
         }
         p.time.0.store(500, std::sync::atomic::Ordering::Relaxed);
         // The embedding invalidates its gate after an external capacity release.
         // This tests cmsg's journal boundary, not an accounting refund proof.
-        p.ai.invalidate_reservation(&p.a, &KEY, CONTEXT, |_| Ok(())).unwrap();
+        p.ai.invalidate_reservation(&p.a, &KEY, CONTEXT, |_| Ok(()))
+            .unwrap();
         let sealed = p.ai.snapshot(&p.a, &KEY, CONTEXT).unwrap();
-        let (inbox, member) = cmsg::Inbox::restore_with_clock(
-            &sealed, &KEY, CONTEXT, p.time.clone(),
-        ).unwrap();
+        let (inbox, member) =
+            cmsg::Inbox::restore_with_clock(&sealed, &KEY, CONTEXT, p.time.clone()).unwrap();
         p.ai = inbox;
         p.a = member;
         assert_eq!(p.ai.is_closed(p.br.member_id()), recipient_closed);
-        assert_eq!(p.ai.awaiting_peer_resolution(p.br.member_id()), !recipient_closed);
-        assert!(p.ai.bind_active_reservations(
-            &p.a, b"a", b"b", &mut verifier, &KEY, CONTEXT,
-            |_| panic!("old Active evidence cannot restart its deadline"),
-        ).is_err());
-        assert!(p.ai.require_active_reservations(
-            &p.a,
-            ReservationPolicy {
-                state_policy_digest: [7; 32],
-                opened_at: 500,
-                abandon_after: 400,
-            },
-            &KEY, CONTEXT, |_| panic!("same introduction cannot get a later deadline"),
-        ).is_err());
-        assert!(p.ai.begin_first_contact(
-            p.br.member_id(), &[96; 32], cmsg::FirstContactRole::Initiator,
-            cmsg::FirstContactPolicy { response_deadline: 1000, max_intro_bytes: 128 },
-            &p.a, &KEY, CONTEXT, |_| panic!("capacity release is not a new turn"),
-        ).is_err());
-        assert!(p.ai.initiate_contact(
-            &mut p.a, &[96; 32],
-            cmsg::FirstContactPolicy { response_deadline: 1000, max_intro_bytes: 128 },
-            &KEY, CONTEXT, |_, _| panic!("sender cannot override silence or recipient block"),
-        ).is_err());
-        assert!(p.bi.receive_contact(
-            &mut p.b, &queued, &KEY, CONTEXT,
-            |_| panic!("queued old data cannot arrive after its reservation deadline"),
-        ).is_err());
+        assert_eq!(
+            p.ai.awaiting_peer_resolution(p.br.member_id()),
+            !recipient_closed
+        );
+        assert!(p
+            .ai
+            .bind_active_reservations(&p.a, b"a", b"b", &mut verifier, &KEY, CONTEXT, |_| panic!(
+                "old Active evidence cannot restart its deadline"
+            ),)
+            .is_err());
+        assert!(p
+            .ai
+            .require_active_reservations(
+                &p.a,
+                ReservationPolicy {
+                    state_policy_digest: [7; 32],
+                    opened_at: 500,
+                    abandon_after: 400,
+                },
+                &KEY,
+                CONTEXT,
+                |_| panic!("same introduction cannot get a later deadline"),
+            )
+            .is_err());
+        assert!(p
+            .ai
+            .begin_first_contact(
+                p.br.member_id(),
+                &[96; 32],
+                cmsg::FirstContactRole::Initiator,
+                cmsg::FirstContactPolicy {
+                    response_deadline: 1000,
+                    max_intro_bytes: 128
+                },
+                &p.a,
+                &KEY,
+                CONTEXT,
+                |_| panic!("capacity release is not a new turn"),
+            )
+            .is_err());
+        assert!(p
+            .ai
+            .initiate_contact(
+                &mut p.a,
+                &[96; 32],
+                cmsg::FirstContactPolicy {
+                    response_deadline: 1000,
+                    max_intro_bytes: 128
+                },
+                &KEY,
+                CONTEXT,
+                |_, _| panic!("sender cannot override silence or recipient block"),
+            )
+            .is_err());
+        assert!(p
+            .bi
+            .receive_contact(&mut p.b, &queued, &KEY, CONTEXT, |_| panic!(
+                "queued old data cannot arrive after its reservation deadline"
+            ),)
+            .is_err());
     }
 }
 
@@ -439,34 +474,55 @@ fn waiting_default_changes_apply_only_to_new_gates_and_expiry_is_verified() {
         opened_at: 100,
         abandon_after: 200,
     };
-    assert!(p.ai.require_active_reservations(
-        &p.a, prospective.clone(), &KEY, CONTEXT,
-        |_| panic!("waiting default cannot shorten an existing lease"),
-    ).is_err());
+    assert!(p
+        .ai
+        .require_active_reservations(&p.a, prospective.clone(), &KEY, CONTEXT, |_| panic!(
+            "waiting default cannot shorten an existing lease"
+        ),)
+        .is_err());
     let sealed = p.ai.snapshot(&p.a, &KEY, CONTEXT).unwrap();
-    let (restored, member) = cmsg::Inbox::restore_with_clock(
-        &sealed, &KEY, CONTEXT, p.time.clone(),
-    ).unwrap();
+    let (restored, member) =
+        cmsg::Inbox::restore_with_clock(&sealed, &KEY, CONTEXT, p.time.clone()).unwrap();
     assert_eq!(restored.reservation_contexts(&member).unwrap(), original);
     let mut next = Pair::configured(10_000);
-    let future = next.ai.require_active_reservations(
-        &next.a, prospective, &KEY, CONTEXT, |_| Ok(()),
-    ).unwrap();
+    let future = next
+        .ai
+        .require_active_reservations(&next.a, prospective, &KEY, CONTEXT, |_| Ok(()))
+        .unwrap();
     assert_eq!(future.outgoing.expected.expires_at, 300);
 
     struct WrongExpiry;
     impl ReservationVerifier for WrongExpiry {
-        fn verify_remote(&mut self, e: &[u8], c: &ReservationContext) -> Result<VerifiedReservation, Error> {
-            let mut value = Verifier { bad_role: false, local_current: true }.verify_remote(e, c)?;
+        fn verify_remote(
+            &mut self,
+            e: &[u8],
+            c: &ReservationContext,
+        ) -> Result<VerifiedReservation, Error> {
+            let mut value = Verifier {
+                bad_role: false,
+                local_current: true,
+            }
+            .verify_remote(e, c)?;
             value.expected.expires_at += 1;
             Ok(value)
         }
-        fn verify_current_local(&mut self, e: &[u8], c: &ReservationContext) -> Result<VerifiedReservation, Error> {
+        fn verify_current_local(
+            &mut self,
+            e: &[u8],
+            c: &ReservationContext,
+        ) -> Result<VerifiedReservation, Error> {
             self.verify_remote(e, c)
         }
     }
-    assert!(p.bi.authorize_incoming_reservation(
-        &p.b, b"changed expiry", &mut WrongExpiry, &KEY, CONTEXT,
-        |_| panic!("a different authenticated expiry cannot authorize incoming capacity"),
-    ).is_err());
+    assert!(p
+        .bi
+        .authorize_incoming_reservation(
+            &p.b,
+            b"changed expiry",
+            &mut WrongExpiry,
+            &KEY,
+            CONTEXT,
+            |_| panic!("a different authenticated expiry cannot authorize incoming capacity"),
+        )
+        .is_err());
 }

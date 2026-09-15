@@ -87,7 +87,11 @@ and `waiting_default_changes_apply_only_to_new_gates_and_expiry_is_verified`
 check these boundaries for both silence and explicit recipient Close, including
 restore, attempted deadline extension, new nonce/reopen and queued ciphertext.
 They model host authorization/storage boundaries, not accounting settlement
-proofs, and are not part of the earlier cited CI counts.
+proofs. Crow10/78 at `ef1483c0a709e86975c44f6f8c84e833e7aa6ac4`
+passed all 163 native tests including these two regressions and portable Wasm
+checking. Crow10/79 at that source passed 21 actual Chromium contract groups;
+scripted transport cases remain labeled separately. Revised cfrm account/peer
+proof integration has its own source pin and validation.
 
 The peer reservation schema is version 3: it uses `statePolicyDigest` and an
 explicit `expiresAt`. The stable digest excludes only the prospective waiting

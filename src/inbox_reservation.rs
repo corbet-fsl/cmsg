@@ -77,7 +77,8 @@ impl Journal {
                 || a.history_digest != b.history_digest
                 || a.opened_at != gate.policy.opened_at
                 || b.opened_at != a.opened_at
-                || Some(a.expires_at) != gate.policy.opened_at.checked_add(gate.policy.abandon_after)
+                || Some(a.expires_at)
+                    != gate.policy.opened_at.checked_add(gate.policy.abandon_after)
                 || b.expires_at != a.expires_at
                 || a.challenge == [0; 32]
                 || b.challenge == [0; 32]
@@ -203,7 +204,10 @@ impl Inbox {
             history_digest: contact.contact.history_digest(),
             phase: 2,
             opened_at: policy.opened_at,
-            expires_at: policy.opened_at.checked_add(policy.abandon_after).ok_or(Error::Admission)?,
+            expires_at: policy
+                .opened_at
+                .checked_add(policy.abandon_after)
+                .ok_or(Error::Admission)?,
             challenge: crate::live::random()?,
         };
         let mut incoming = outgoing.clone();
