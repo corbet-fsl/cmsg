@@ -57,12 +57,13 @@ The native participant is an onion client in this test; the browser owns the
 onion service. Native onion hosting has separate earlier experiment evidence.
 The fixture does not deploy a service or publish the experimental package.
 
-Long-running publication has a separate pinned-upstream code-review finding:
-`tor-hsservice/src/publish/reactor.rs` returns from its time-period loop when
-one period has no dirty directories, potentially skipping a later period
-that needs reupload. This is not the initial-publication timeout observed in
-these runs and is not exercised by this short exchange. It remains follow-up
-work before claiming long-running service reliability.
+The separate skipped-period publication defect in pinned Arti is now
+[fixed and validated across renewal](onion-renewal.md). Its regression rejects
+the original early return, and the signed private-network test retains an
+authenticated stream across a period transition before making fresh browser
+and native connections. This short public-network run did not exercise that
+transition; ordinary public-network renewal and long-running reliability
+remain separate validation work.
 
 ## Result
 

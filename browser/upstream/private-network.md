@@ -1,5 +1,11 @@
 # Signed private Tor fixture
 
+The extended renewal contract passed [Crow run 86](https://crow.corbet.ch/repos/10/pipeline/86)
+at cmsg `b63a1941ac286c9313e1bb9340e28af30bb40b54`: both services published
+for a later period without changing their onions, a retained stream completed
+37 authenticated MLS round trips, and fresh browser/native messaging passed.
+See [renewal configuration and evidence](../../docs/onion-renewal.md).
+
 `test-network` adds a separate source patch after `service`. Build it with
 `--features browser-test-network`; omitting that feature fails compilation.
 Crow run 49 at cmsg `20a55ac815` passed this stage's Wasm compilation check

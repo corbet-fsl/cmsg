@@ -33,6 +33,7 @@
   "evidence": {
     "stockOnionClientFeature": false,
     "patchedOnionClientBuild": "generated service artifact and actual public-network client/service operation passed Crow run84 at cmsg d39022b35ebe4a1bc2569acaa5f7ac2f206b29c3",
-    "browserOnionServiceHosting": "public Tor browser/browser framing and native/browser MLS with replay rejection passed Crow run84; diagnostic service build, both services running; not process-wide confinement or long-running reliability evidence"
+    "browserOnionServiceHosting": "public Tor browser/browser framing and native/browser MLS with replay rejection passed Crow run84; diagnostic service build, both services running; not process-wide confinement or long-running reliability evidence",
+    "browserOnionPublicationRenewal": "skipped-period fix, publisher regression and private signed-network renewal passed Crow run86 at cmsg b63a1941ac286c9313e1bb9340e28af30bb40b54; both services advanced publication and directory periods, retained-stream MLS and fresh browser/native exchange passed; see docs/onion-renewal.md"
   }
 }

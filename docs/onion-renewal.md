@@ -59,5 +59,51 @@ The artifact manifest SHA-256 is
 Downloaded test logs, source receipt and negative-control receipt were checked
 against that manifest; this is a partial artifact download.
 
-The live renewal check is pending. The earlier successful
-[public Tor exchange](public-tor-validation.md) is separate evidence.
+### Live renewal passed
+
+[Crow run 86](https://crow.corbet.ch/repos/10/pipeline/86), step `24784`,
+passed on 2026-09-17 at cmsg `b63a1941ac286c9313e1bb9340e28af30bb40b54`.
+It passed all 12 live contract checks on the signed 27-node private network.
+Both services initially reported `running` and retained their onion addresses.
+
+For **each service**, the snapshot changed as follows:
+
+| Evidence | Before | After |
+| --- | ---: | ---: |
+| Current directory period | 3728439 | 3728440 |
+| Latest successfully published period | 3728440 | 3728441 |
+| Accepted batches containing successful uploads | 2 | 3 |
+
+The observed transition wait was **537.232 seconds**. The retained stream
+completed **37 authenticated MLS request/reply round trips**, including traffic
+before, during and after renewal. A fresh browser Arti client with empty storage
+then bootstrapped, connected and exchanged authenticated MLS in both directions
+in 1.213 seconds. A second native connection and MLS exchange took 0.437 seconds
+and rejected replay. The native Tor client was reused; its descriptor cache
+was not cleared. Both native invocations exited successfully.
+
+This run also passed 13 publisher tests, the negative control, one diagnostic
+isolation/late-batch test, three ephemeral-state tests, two process-cleanup
+regressions, 52 KPS parser tests, 11 gateway tunnel tests and nine gateway
+configuration tests. The gateway canary received zero connections and there
+were no unexpected page HTTP requests. All owned-process cleanup succeeded.
+
+Signed-randomness warmup took 804.360 seconds. The fixture retained its native
+client's accepted initial and final consensuses, spanning 13:20:00–13:29:00 UTC,
+with distinct current/previous shared-random values. Environment: Chromium
+`152.0.7977.64`, Node `24.19.0`, native Tor `0.4.9.12`.
+
+Artifacts are under
+`/workspaces/component-releases/cmsg/b63a1941ac286c9313e1bb9340e28af30bb40b54/tor-test-network-diagnostics-renewal/`.
+Downloaded source/test receipts, runtime evidence, test logs and signed fixture
+consensuses were verified against the manifests; the download is partial.
+
+- Source archive SHA-256: `b1a8ec7b9f6d22106fff67bc01f37274c783513f461dff001ffacb46f2760cc0`.
+- Root artifact manifest: `1d53dbb1d47045d306c5c73c8ab1b228a56a38aaea98788063334dfa2daf5eaa`.
+- Runtime artifact manifest: `ad8535a5017b3f60f81771bc231b56219e57d66c47cb8143e04614802079c498`.
+- Runtime evidence: `29e8f3d9682bf3ddc6e9978d57d701ab82739c743ce3652110175862509f689a`.
+
+This closes the identified skipped-period defect and demonstrates continuity
+across the tested renewal. Public-network exchange has [separate evidence](public-tor-validation.md).
+Public-network renewal over ordinary wall-clock intervals, mobile behavior,
+process-wide browser confinement and indefinite availability remain unverified.
