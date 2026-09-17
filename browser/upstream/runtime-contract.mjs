@@ -36,11 +36,28 @@ async function syntheticMember() {
 }
 
 export async function runTorRuntimeContract() {
-  const progress = { testNetworkOnly: true, stage: 'initialization', passed: [], failed: [] };
+  const progress = { network: 'unselected', testNetworkOnly: null, stage: 'initialization',
+    phaseDurationsMs: {}, passed: [], failed: [] };
+  let phaseStarted = performance.now();
+  function stage(value) {
+    progress.phaseDurationsMs[progress.stage] = Math.round(performance.now() - phaseStarted);
+    progress.stage = value;
+    phaseStarted = performance.now();
+  }
   globalThis.__cmsgTorRuntime = progress;
   await init({ module_or_path: new URL('../pkg/cmsg_bg.wasm', import.meta.url) });
   const fixture = await (await fetch('/fixture.json', { cache: 'no-store' })).json();
-  check(fixture.testOnly === true && fixture.arti.vanguards.mode === 'full', 'isolated full-vanguard configuration');
+  const publicNetwork = fixture.network === 'public';
+  check(fixture.testOnly === true, 'disposable test participants');
+  if (publicNetwork) {
+    check(!Object.hasOwn(fixture, 'arti') && fixture.testNetworkFeature === false
+      && fixture.vanguards === 'full', 'public service build without injected Tor configuration');
+  } else {
+    check(fixture.network === undefined && fixture.arti.vanguards.mode === 'full',
+      'isolated full-vanguard configuration');
+  }
+  progress.network = publicNetwork ? 'public' : 'private';
+  progress.testNetworkOnly = !publicNetwork;
   check(await TorClient.onionClientSupported() && await TorClient.onionStreamSupported()
     && await TorClient.onionServiceSupported(), 'actual Wasm capabilities');
   const clients = [];
@@ -49,7 +66,7 @@ export async function runTorRuntimeContract() {
   const passed = progress.passed;
   let member;
   try {
-    progress.stage = 'gateway-non-relay-rejection';
+    stage('gateway-non-relay-rejection');
     check(/^127\.0\.0\.1:\d+$/.test(fixture.nonRelayCanary), 'owned loopback canary');
     const gateway = new KpsGateway(fixture.gateway);
     let forbidden = false;
@@ -62,7 +79,9 @@ export async function runTorRuntimeContract() {
       progress.gatewayCanary = 'unexpected-tunnel';
     } catch (error) {
       const detail = String(error);
-      forbidden = detail === `Error: CONNECT ${fixture.nonRelayCanary}: 403 target is not an advertised Tor relay`;
+      const refusal = publicNetwork ? 'connections to local addresses are forbidden'
+        : 'target is not an advertised Tor relay';
+      forbidden = detail === `Error: CONNECT ${fixture.nonRelayCanary}: 403 ${refusal}`;
       progress.gatewayCanary = forbidden ? 'expected-403'
         : /timed out|deadline/i.test(detail) ? 'deadline'
         : /framing|body|response head/i.test(detail) ? 'response-framing'
@@ -70,19 +89,39 @@ export async function runTorRuntimeContract() {
     } finally { gateway.close(); }
     const canaryUntouched = (await (await fetch('/__canary', { cache: 'no-store' })).json()).connections === 0;
     if (forbidden && canaryUntouched) {
-      passed.push('actual browser WebRTC/KPS non-relay CONNECT rejected with 403 and zero owned canary connections');
+      passed.push(publicNetwork
+        ? 'actual browser WebRTC/KPS local-address CONNECT rejected with 403 and zero owned canary connections'
+        : 'actual browser WebRTC/KPS non-relay CONNECT rejected with 403 and zero owned canary connections');
     } else {
       // Retain failure and continue independent service diagnostics. The final
       // result still fails unless exact 403 AND zero connections were observed.
       progress.failed.push('real KPS non-relay 403 with zero canary connections was not verified');
     }
-    progress.stage = 'client-bootstrap';
+    if (publicNetwork) {
+      stage('gateway-public-non-relay-rejection');
+      check(fixture.publicNonRelay === '192.0.2.1:1', 'fixed documentation-range non-relay target');
+      const publicGateway = new KpsGateway(fixture.gateway);
+      let rejected = false;
+      try {
+        const socket = await bounded(publicGateway.connect(fixture.publicNonRelay, {
+          signal: AbortSignal.timeout(15_000),
+        }), 20_000);
+        socket.close();
+      } catch (error) {
+        rejected = String(error) === `Error: CONNECT ${fixture.publicNonRelay}: 403 target is not an advertised Tor relay`;
+      } finally { publicGateway.close(); }
+      check(rejected, 'public gateway requires advertised relay even for a nonlocal address');
+      passed.push('actual browser KPS nonlocal non-relay CONNECT rejected with exact 403');
+    }
+    stage('client-bootstrap');
     for (let i = 0; i < 2; i++) clients.push(new TorClient({ gateway: fixture.gateway,
-      testNetwork: JSON.stringify(fixture.arti), storage: new storage.MemoryStorage(),
+      ...(publicNetwork ? {} : { testNetwork: JSON.stringify(fixture.arti) }),
+      storage: new storage.MemoryStorage(),
       log: new Log({ rawLog: () => {} }), logLevel: 'error' }));
     await bounded(Promise.all(clients.map(c => c.ready())), 360_000);
-    passed.push('two browser Arti clients bootstrapped on isolated signed Tor network');
-    progress.stage = 'wasm-onion-route-validation';
+    passed.push(publicNetwork ? 'two browser Arti clients bootstrapped on public signed Tor network'
+      : 'two browser Arti clients bootstrapped on isolated signed Tor network');
+    stage('wasm-onion-route-validation');
     for (const host of [fixture.nonRelayCanary, '127.0.0.1', '[::1]', 'https://example.invalid/',
       'a'.repeat(56) + '.onion', 'example.invalid\r\nHost: 127.0.0.1']) {
       let rejected = false;
@@ -95,28 +134,40 @@ export async function runTorRuntimeContract() {
     check((await (await fetch('/__canary', { cache: 'no-store' })).json()).connections === 0,
       'invalid contact routes did not reach the canary');
     passed.push('actual Wasm rejects IP, URL, malformed onion and injected route inputs before connection');
-    for (let index = 0; index < clients.length; index++) {
-      progress.stage = `service-publication-${index}`;
-      services.push(await bounded(clients[index].hostOnion(80, 4, 60_000), 65_000));
+    stage('wasm-publication-deadline-validation');
+    for (const deadline of [0, -1, 0.5, NaN, Infinity, 600_001]) {
+      let rejected = false;
+      try {
+        const service = await bounded(clients[0].hostOnion(80, 4, deadline), 2_000);
+        service.close(); service.free();
+      } catch (error) { rejected = String(error) === 'tor-js:OnionService'; }
+      check(rejected, 'actual Wasm rejects invalid publication deadline before launch');
     }
-    check(services[0].host !== services[1].host, 'distinct ephemeral onion identities');
-    for (const service of services) new BrowserOnionEndpoint(service.host, service.port).free();
-    passed.push('two browser-owned onion services published with full vanguards');
-    progress.stage = 'browser-onion-stream';
-    const [dialled, accepted] = await bounded(Promise.all([
-      clients[0].connectOnion(services[1].host, 80, 60_000), services[1].accept(60_000),
-    ]), 65_000);
-    const left = new OnionFramedStream(dialled, 60_000);
-    const right = new OnionFramedStream(accepted, 60_000);
-    framed.push(left, right);
-    await left.send(new Uint8Array([0, 128, 255, 0, 9]));
-    check(same(await right.receive(), [0, 128, 255, 0, 9]), 'browser outgoing onion bytes');
-    await right.send(new Uint8Array([253, 129, 0, 1]));
-    check(same(await left.receive(), [253, 129, 0, 1]), 'browser return onion bytes');
-    left.close(); right.close();
-    passed.push('actual browser onion dial/accept and bidirectional cmsg framing');
-
-    progress.stage = 'native-peer-connection';
+    const publicationDeadlineMs = publicNetwork ? 420_000 : 60_000;
+    progress.publicationDeadlineMs = publicationDeadlineMs;
+    progress.serviceReadiness = [];
+    async function publish(index) {
+      stage(`service-publication-${index}`);
+      try {
+        const service = await bounded(clients[index].hostOnion(80, 4, publicationDeadlineMs), publicationDeadlineMs + 5_000);
+        services.push(service);
+        const readiness = service.readiness;
+        check(readiness === 'running' || readiness === 'degraded-reachable', 'actual Wasm reports its accepted readiness snapshot');
+        progress.serviceReadiness.push({ service: index, readiness });
+        new BrowserOnionEndpoint(service.host, service.port).free();
+      } catch (error) {
+        const label = String(error);
+        // Diagnostic builds return static categories only. Never retain an
+        // arbitrary upstream exception as service diagnostic metadata.
+        if (/^tor-js:OnionService:[a-z0-9=:/-]{1,512}$/.test(label)) {
+          progress.serviceDiagnostic = label;
+        }
+        throw error;
+      }
+    }
+    await publish(0);
+    passed.push('actual Wasm rejects invalid publication budgets and preserves the valid one-service launch');
+    stage('native-peer-connection');
     const incoming = services[0].accept(60_000);
     const native = fetch('/__native-peer', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ host: services[0].host, port: 80 }) }).then(async r => {
@@ -127,7 +178,7 @@ export async function runTorRuntimeContract() {
     native.catch(() => {});
     const peer = new OnionFramedStream(await bounded(incoming, 65_000), 60_000);
     framed.push(peer);
-    progress.stage = 'native-peer-mls';
+    stage('native-peer-mls');
     member = await syntheticMember();
     member.createGroup();
     const invitation = member.add(await peer.receive());
@@ -144,17 +195,42 @@ export async function runTorRuntimeContract() {
     const nativeEvidence = await bounded(native, 125_000);
     check(nativeEvidence.nativeFramedStream && nativeEvidence.rootAuthorizedMlsBinaryBothDirections, 'native process evidence');
     peer.close();
+    progress.nativePeer = nativeEvidence;
     passed.push('browser/native Tor FramedStream and root-authorized MLS binary both directions, replay rejected');
-    progress.stage = 'service-cancellation';
+    await publish(1);
+    check(services[0].host !== services[1].host, 'distinct ephemeral onion identities');
+    passed.push('two browser-owned onion services published with full vanguards');
+    stage('browser-onion-stream');
+    const [dialled, accepted] = await bounded(Promise.all([
+      clients[0].connectOnion(services[1].host, 80, 60_000), services[1].accept(60_000),
+    ]), 65_000);
+    const left = new OnionFramedStream(dialled, 60_000);
+    const right = new OnionFramedStream(accepted, 60_000);
+    framed.push(left, right);
+    await left.send(new Uint8Array([0, 128, 255, 0, 9]));
+    check(same(await right.receive(), [0, 128, 255, 0, 9]), 'browser outgoing onion bytes');
+    await right.send(new Uint8Array([253, 129, 0, 1]));
+    check(same(await left.receive(), [253, 129, 0, 1]), 'browser return onion bytes');
+    left.close(); right.close();
+    passed.push('actual browser onion dial/accept and bidirectional cmsg framing');
+
+    stage('service-cancellation');
     const pending = services[0].accept(60_000);
     services[0].close();
     const cancelled = await bounded(pending.then(() => false, () => true), 5_000);
     check(cancelled, 'service close cancels accept');
     passed.push('browser onion service close cancels pending accept');
     check(progress.failed.length === 0, 'gateway boundary assertions failed');
-    progress.stage = 'complete';
-    return { testNetworkOnly: true, nativePeer: nativeEvidence, passed };
+    stage('complete');
+    return { network: progress.network, testNetworkOnly: !publicNetwork,
+      phaseDurationsMs: progress.phaseDurationsMs,
+      serviceReadiness: progress.serviceReadiness,
+      topology: 'native C Tor client connects to browser-owned onion; MLS binary both directions',
+      nativePeer: nativeEvidence, passed };
   } finally {
+    if (progress.stage !== 'complete') {
+      progress.phaseDurationsMs[progress.stage] = Math.round(performance.now() - phaseStarted);
+    }
     member?.free();
     for (const stream of framed) stream.close();
     for (const service of services) { service.close(); service.free(); }

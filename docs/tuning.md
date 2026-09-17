@@ -17,12 +17,25 @@ Timestamps below are absolute UTC seconds, integers in `1..=2^53-1`.
 | `FrameCodec::new(max_frame_bytes)`, `BrowserFrameCodec` | `1..=1048576` bytes. | A new codec. Existing partial-frame state is not reconfigured. |
 | Native `FramedStream::new(stream, max_frame_bytes, frame_timeout)` | Frame limit above; timeout greater than zero and at most 60 seconds. | A new owned stream. Timeout/partial I/O failure closes that stream. |
 | `createTorJsOnionNode({bootstrapDeadlineMs,operationDeadlineMs,gateway,storage})` | Integer bootstrap deadline `1..=300000` ms; operation deadline `1..=60000` ms; nonempty gateway string/list. | A new browser Tor node. Existing streams capture that node's operation budget. Gateway routing is trusted deployment configuration, never supplied by a peer. |
-| Browser Tor node `.listen({port,maximumStreams,deadlineMs})` | Port `1..=65535`; service streams `1..=32`; startup deadline `1..=60000` ms. | The node's single service launch. Changing an active service requires an explicit new lifecycle, not mutation of its existing sessions. |
+| Browser Tor node `.listen({port,maximumStreams,deadlineMs})` | Port `1..=65535`; service streams `1..=32`; explicit startup deadline `1..=600000` ms. | The node's single service launch. Publication has a separate budget from stream operations. Changing an active service requires an explicit new lifecycle, not mutation of its existing sessions. |
 | Native `OnionTransport::new(proxy)` | Nonzero loopback SOCKS address; application owns and verifies the Tor listener. | A new transport. Its current connect timeout is fixed at 45 seconds. |
 
 Credential expiry is also explicit in root-device authorization and accounting
 delegation APIs. Renewal requires valid signatures and the same required root,
 member and device binding; it is not an operational bypass for eligibility.
+
+Treat onion publication time separately from message latency. The pinned Arti
+publisher allows up to 300 seconds for an individual directory-upload retry
+episode and reports the completed batch together. The public-network fixture
+explicitly supplies 420000 ms for publication, allowing bounded startup and
+retry time. That is a test setting, not an implicit application default. Tune
+the caller's publication budget from cold-start duration and timeout rates.
+Readiness uses Arti's documented `is_fully_reachable()` predicate: `Running`
+or `DegradedReachable`. The listener exposes a fixed `readiness` snapshot of
+`running` or `degraded-reachable`; the latter means reduced redundancy and
+must not be reported as full publication. This startup snapshot is not a
+continuing availability guarantee. Stream deadlines remain independent and
+at most 60000 ms.
 
 ## Fixed bounds and missing controls
 
@@ -42,7 +55,8 @@ current live adapter does not retry canceled application deliveries offline.
 
 ## Metrics for choosing future settings
 
-Measure locally first: bootstrap and handshake duration histograms, stream
+Measure locally first: bootstrap, onion-publication and handshake duration
+histograms, degraded-reachable startup counts, stream
 operation timeouts, active stream counts, checkpoint size/write latency, CAS
 conflict counts, canceled-unconfirmed counts and aggregate ACK delay. Keep
 transport acceptance distinct from authenticated delivery and accounting

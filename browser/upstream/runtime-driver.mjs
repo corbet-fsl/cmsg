@@ -16,6 +16,10 @@ const fixturePath = process.env.TOR_FIXTURE_JSON;
 const nativeBinary = process.env.TOR_NATIVE_PEER_BIN;
 const nativeSocks = process.env.TOR_NATIVE_SOCKS;
 if (!process.env.TORJS_DIST || !fixturePath || !nativeBinary || !nativeSocks) throw new Error('runtime fixture paths required');
+const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
+const network = fixture.network === 'public' ? 'public' : 'private';
+// Public service publication includes Arti's bounded descriptor-upload retries.
+const contractDeadlineMs = network === 'public' ? 1_900_000 : 900_000;
 let nativeStarted = false;
 let nativeChild;
 let nativeClosed;
@@ -64,7 +68,6 @@ const server = createServer(async (request, response) => {
     const pathname = new URL(request.url, 'http://localhost').pathname;
     if (pathname === '/fixture.json') {
       response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
       response.end(JSON.stringify({ ...fixture, nonRelayCanary: canaryTarget })); return;
     }
     if (pathname === '/__canary') {
@@ -179,13 +182,13 @@ try {
     awaitPromise: true, returnByValue: true,
   });
   const result = await Promise.race([running, new Promise((_, reject) => {
-    deadline = setTimeout(() => reject(new Error('Browser contract deadline exceeded')), 900_000);
+    deadline = setTimeout(() => reject(new Error('Browser contract deadline exceeded')), contractDeadlineMs);
   })]);
   if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
   if (!result.result || !('value' in result.result)) throw new Error('Browser contract returned no evidence');
   if (forbiddenRequests.length) throw new Error(`Unexpected external requests: ${JSON.stringify(forbiddenRequests)}`);
   if (canaryConnections !== 0) throw new Error('Non-relay canary received a TCP connection');
-  const evidence = { source: process.env.CI_COMMIT_SHA, browser: metadata.Browser,
+  const evidence = { source: process.env.CI_COMMIT_SHA, network, browser: metadata.Browser,
     runtime: process.version, contract: result.result.value, nonRelayCanaryConnections: canaryConnections,
     unexpectedExternalRequests: forbiddenRequests };
   await writeFile(artifact, JSON.stringify(evidence, null, 2) + '\n');
@@ -203,7 +206,7 @@ try {
     }
   } catch {} finally { clearTimeout(traceTimer); }
   await writeFile(artifact + '.failure.json', JSON.stringify({
-    source: process.env.CI_COMMIT_SHA, testNetworkOnly: true,
+    source: process.env.CI_COMMIT_SHA, network, testNetworkOnly: network === 'private',
     browser: browserMetadata?.Browser, runtime: process.version, progress,
     nonRelayCanaryConnections: canaryConnections,
     failure: String(error).slice(0, 8192), chromiumStderr: stderr.slice(-8000),

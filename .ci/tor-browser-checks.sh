@@ -4,8 +4,23 @@ rustc --version
 cargo --version
 python3 --version
 case "$TOR_STAGE" in client|streams|service|test-network) ;; *) exit 2 ;; esac
-artifact_dir="$ARTIFACT_ROOT/$CI_COMMIT_SHA/tor-$TOR_STAGE"
+export TOR_NETWORK="${TOR_NETWORK:-private}"
+case "$TOR_NETWORK" in public|private) ;; *) exit 2 ;; esac
+export TOR_DIAGNOSTICS="${TOR_DIAGNOSTICS:-0}"
+case "$TOR_DIAGNOSTICS" in 0|1) ;; *) exit 2 ;; esac
+artifact_suffix="$TOR_STAGE"
+if test "$TOR_NETWORK" = public; then
+  test "$TOR_STAGE" = service
+  artifact_suffix=public
+  python3 -c 'import ast,pathlib; ast.parse(pathlib.Path("browser/upstream/public-runtime-fixture.py").read_text())'
+  node --check browser/upstream/runtime-contract.mjs
+  node --check browser/upstream/runtime-driver.mjs
+fi
+if test "$TOR_DIAGNOSTICS" = 1; then artifact_suffix="$artifact_suffix-diagnostics"; fi
+artifact_dir="$ARTIFACT_ROOT/$CI_COMMIT_SHA/tor-$artifact_suffix"
 mkdir -p "$artifact_dir"
+timeout 30 python3 browser/upstream/runtime-process.test.py \
+  2>&1 | tee "$artifact_dir/process-cleanup-tests.log"
 scratch="$(mktemp -d)"
 trap 'rm -rf -- "$scratch"' EXIT
 ln -s "$TORJS_SOURCE_ARCHIVE" "$scratch/tor-js.tar"
@@ -29,24 +44,39 @@ if test -n "${SQLITE3_LIB_DIR:-}"; then
 fi
 torjs_manifest="$scratch/source/tor-js/Cargo.toml"
 arti_manifest="$scratch/source/arti/Cargo.toml"
-# Convert the pinned upstream graph to the explicit patched path dependencies.
-# Capture this resolution before validation; later promotion must retain it.
-cargo update --manifest-path "$torjs_manifest" --workspace
+# Public validation retains the already validated dependency graph. The source
+# stage changes, but dependency versions must not drift between network runs.
+if test "$TOR_NETWORK" = public; then
+  cp browser/upstream/locks/tor-js-Cargo.lock "$scratch/source/tor-js/Cargo.lock"
+  cp browser/upstream/locks/arti-Cargo.lock "$scratch/source/arti/Cargo.lock"
+else
+  cargo update --manifest-path "$torjs_manifest" --workspace
+fi
 cp "$scratch/source/tor-js/Cargo.lock" "$artifact_dir/tor-js-Cargo.lock"
-date -u +%FT%TZ > "$artifact_dir/dependency-resolution-time.txt"
+if test "$TOR_NETWORK" = public; then
+  cp browser/upstream/locks/README.md "$artifact_dir/dependency-provenance.md"
+else
+  date -u +%FT%TZ > "$artifact_dir/dependency-resolution-time.txt"
+fi
 result=0
 tor_features=()
 if test "$TOR_STAGE" = test-network; then tor_features=(--features browser-test-network); fi
 timeout 1800 cargo check --locked --manifest-path "$torjs_manifest" \
   -p tor-js --target wasm32-unknown-unknown "${tor_features[@]}" || result=$?
 if test "$TOR_STAGE" = service || test "$TOR_STAGE" = test-network; then
-  cargo update --manifest-path "$arti_manifest" --workspace
+  if test "$TOR_NETWORK" != public; then
+    cargo update --manifest-path "$arti_manifest" --workspace
+  fi
   cp "$scratch/source/arti/Cargo.lock" "$artifact_dir/arti-Cargo.lock"
   timeout 1800 cargo test --locked --manifest-path "$arti_manifest" \
     -p tor-persist --features state-dir state_dir_wasm_tests -- --test-threads=2 || result=$?
 fi
 if test "${RUN_RUNTIME:-0}" = 1 && test "$result" = 0; then
-  test "$TOR_STAGE" = test-network
+  if test "$TOR_NETWORK" = public; then
+    test "$TOR_STAGE" = service
+  else
+    test "$TOR_STAGE" = test-network
+  fi
   test -x "$WASM_LINKER"
   test -x "$BROWSER_BIN"
   export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER="$WASM_LINKER"
@@ -81,9 +111,14 @@ PY
   export TOR_NATIVE_PEER_BIN="$CARGO_TARGET_DIR/debug/examples/tor_browser_peer"
   export TORJS_DIST="$scratch/source/tor-js/dist"
   export TOR_RUNTIME_ARTIFACT="$artifact_dir/runtime"
-  # 360s bootstrap + 1520s signed-SRV warmup + 30s gateway + 1000s driver,
-  # plus 90s for startup and cleanup. Inner browser deadlines are unchanged.
-  timeout --kill-after=15 3000 "${fixture_tools[2]}" browser/upstream/runtime-fixture.py \
+  fixture=browser/upstream/runtime-fixture.py
+  fixture_seconds=3000
+  if test "$TOR_NETWORK" = public; then
+    fixture=browser/upstream/public-runtime-fixture.py
+    fixture_seconds=3300
+  fi
+  # Each fixture also enforces its own phase bounds and owns all child cleanup.
+  timeout --kill-after=40 "$fixture_seconds" "${fixture_tools[2]}" "$fixture" \
     2>&1 | tee "$artifact_dir/runtime/network.log" || result=$?
   (cd "$artifact_dir/runtime" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 fi

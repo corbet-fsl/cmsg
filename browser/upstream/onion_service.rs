@@ -45,6 +45,7 @@ impl ServiceState {
 pub struct BrowserOnionService {
     state: Rc<ServiceState>,
     host: String,
+    readiness: &'static str,
 }
 
 impl Drop for BrowserOnionService { fn drop(&mut self) { self.state.close(); } }
@@ -56,6 +57,10 @@ impl BrowserOnionService {
 
     #[wasm_bindgen(getter)]
     pub fn port(&self) -> u16 { self.state.port }
+
+    /// Snapshot at successful publication, not a promise of future availability.
+    #[wasm_bindgen(getter)]
+    pub fn readiness(&self) -> String { self.readiness.to_owned() }
 
     /// Wait for one accepted byte stream. An idle timeout retains the listener;
     /// explicit service/client close cancels the accept and all child streams.
@@ -109,14 +114,16 @@ impl TorClient {
     pub fn onion_service_supported() -> bool { true }
 
     /// Launch exactly one ephemeral onion service for this client lifetime.
-    /// Return only after Arti reports the service Running; reachability still
-    /// requires a separate client connection test.
+    /// Return only after Arti reports fully reachable (Running or
+    /// DegradedReachable). Actual reachability requires a client connection.
     #[wasm_bindgen(js_name = hostOnion)]
     pub fn host_onion(&self, port: f64, maximum_streams: f64, deadline_ms: f64) -> js_sys::Promise {
         let launch: Result<(BrowserOnionService, u32), JsValue> = (|| {
             let port = integer(port, 65535)? as u16;
             let maximum_streams = integer(maximum_streams, 32)? as usize;
-            let deadline = integer(deadline_ms, 60000)?;
+            // Publication can include Arti's five-minute HSDir retry episode.
+            // This independent bound does not change stream/accept deadlines.
+            let deadline = integer(deadline_ms, 600000)?;
             let client = self.inner.as_ref().ok_or_else(failure)?;
             if self.onion_service_started.replace(true) { return Err(failure()); }
             let config = OnionServiceConfig::builder()
@@ -139,16 +146,24 @@ impl TorClient {
                 streams: Rc::clone(&self.onion_streams), closed: Cell::new(false), port, maximum_streams,
             });
             *self.onion_service.borrow_mut() = Some(Rc::downgrade(&state));
-            Ok((BrowserOnionService { state, host }, deadline))
+            Ok((BrowserOnionService { state, host, readiness: "unavailable" }, deadline))
         })();
         wasm_bindgen_futures::future_to_promise(async move {
-            let (service, deadline) = launch?;
+            let (mut service, deadline) = launch?;
             let ready = async {
                 loop {
                     if service.state.closed.get() { return Err(failure()); }
                     let state = service.state.service.borrow().as_ref().ok_or_else(failure)?.status().state();
+                    if state.is_fully_reachable() {
+                        // Preserve the exact readiness decision in the returned
+                        // snapshot; future/unknown variants must not succeed.
+                        return match state {
+                            tor_hsservice::status::State::Running => Ok("running"),
+                            tor_hsservice::status::State::DegradedReachable => Ok("degraded-reachable"),
+                            _ => Err(failure()),
+                        };
+                    }
                     match state {
-                        tor_hsservice::status::State::Running => return Ok(()),
                         tor_hsservice::status::State::Broken => return Err(failure()),
                         _ => (),
                     }
@@ -159,7 +174,7 @@ impl TorClient {
                 Either::Left((result, _)) => result,
                 _ => Err(failure()),
             };
-            outcome?;
+            service.readiness = outcome?;
             Ok(service.into())
         })
     }

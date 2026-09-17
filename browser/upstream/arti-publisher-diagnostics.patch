@@ -6,7 +6,7 @@ diff --git a/crates/tor-hsservice/src/status.rs b/crates/tor-hsservice/src/statu
  
  use crate::internal_prelude::*;
 +
-+// Applied only to the isolated test-network build. These are runtime-wide last
++// Applied only to explicit diagnostic builds. These are runtime-wide last
 +// observations across concurrent uploads, not a per-service event history.
 +// Retain static categories only: no addresses, identities, paths or payloads.
 +static FIXTURE_PUBLISHER: std::sync::Mutex<[&'static str; 5]> =

@@ -1,0 +1,61 @@
+diff --git a/crates/tor-js-gateway/src/config.rs b/crates/tor-js-gateway/src/config.rs
+--- a/crates/tor-js-gateway/src/config.rs
++++ b/crates/tor-js-gateway/src/config.rs
+@@ -37,6 +37,10 @@
+     /// UDP port the KPS listener binds (serves both QUIC and WebRTC)
+     pub kps_port: u16,
+ 
++    /// Explicit listener IP; advertisements do not constrain the bind address.
++    #[serde(default = "default_bind_ip")]
++    pub kps_bind_ip: std::net::IpAddr,
++
+     /// Path to the persistent KPS identity key (PEM; created by `init`)
+     pub kps_key_file: PathBuf,
+ 
+@@ -63,11 +67,16 @@
+     pub tunnel_max_lifetime: u64,
+ }
+ 
++fn default_bind_ip() -> std::net::IpAddr {
++    std::net::Ipv4Addr::UNSPECIFIED.into()
++}
++
+ impl Default for Config {
+     fn default() -> Self {
+         Self {
+             data_dir: default_data_dir(),
+             kps_port: 12298,
++            kps_bind_ip: default_bind_ip(),
+             kps_key_file: default_key_file(),
+             keccak_dir: PathBuf::new(),
+             advertised_addresses: Vec::new(),
+@@ -209,6 +218,17 @@
+     }
+ 
+     #[test]
++    fn explicit_listener_ip_is_independent_of_advertised_addresses() {
++        let mut input = as_value(&Config::default());
++        input["kps_bind_ip"] = serde_json::json!("127.0.0.1");
++        let configured: Config = serde_json::from_value(input.clone()).unwrap();
++        assert!(configured.kps_bind_ip.is_loopback());
++        assert!(configured.advertised_addresses.is_empty());
++        input["kps_bind_ip"] = serde_json::json!("localhost");
++        assert!(serde_json::from_value::<Config>(input).is_err());
++    }
++
++    #[test]
+     fn an_unknown_field_is_rejected_rather_than_ignored() {
+         // A typo in a config key must not silently fall back to the default.
+         let text = Config::to_json5_with_comments()
+diff --git a/crates/tor-js-gateway/src/main.rs b/crates/tor-js-gateway/src/main.rs
+--- a/crates/tor-js-gateway/src/main.rs
++++ b/crates/tor-js-gateway/src/main.rs
+@@ -228,7 +228,7 @@
+ 
+     // Start the KPS listener: one UDP port serving both QUIC and WebRTC.
+     let listener = kps::listen(
+-        &format!(":{}", cfg.kps_port),
++        &std::net::SocketAddr::new(cfg.kps_bind_ip, cfg.kps_port).to_string(),
+         kps::ListenOptions {
+             identity: None,
+             key_file: Some(cfg.kps_key_file.clone()),

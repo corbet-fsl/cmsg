@@ -6,7 +6,7 @@ diff --git a/crates/tor-hsservice/src/ipt_establish.rs b/crates/tor-hsservice/sr
  use tor_proto::TargetHop;
  use tracing::instrument;
 +
-+// Isolated test-network diagnostic only: retain two static labels for the
++// Explicit diagnostic build only: retain two static labels for the
 +// latest IPT failure across this runtime, never error payloads or relay details.
 +static FIXTURE_LAST_IPT_ERROR: Mutex<Option<(&'static str, &'static str)>> = Mutex::new(None);
 +
@@ -70,7 +70,7 @@ diff --git a/crates/tor-hsservice/src/status.rs b/crates/tor-hsservice/src/statu
          }
 +    }
 +
-+    /// Static diagnostics for the isolated browser test network only.
++    /// Static diagnostics for explicit diagnostic source builds only.
 +    /// The final two labels summarize the latest IPT failure across this runtime.
 +    #[doc(hidden)]
 +    pub fn fixture_status_labels(&self) -> [&'static str; 6] {

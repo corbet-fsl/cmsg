@@ -5,6 +5,67 @@ The stock `tor-js@0.4.1` npm artifact configures `arti-client` with
 `default-features = false` and only `experimental-api`. That does not include
 `onion-service-client`; browser HTTP fetch support alone is insufficient.
 
+## Public-network runtime mode
+
+`TOR_NETWORK=public TOR_STAGE=service RUN_RUNTIME=1` selects
+`public-runtime-fixture.py` after the pinned service package build. It starts
+one disposable native C Tor client and a separate KPS gateway using the public
+authorities. The browser receives no `testNetwork` option or directory/path
+overrides. `tor-js-full-vanguards.patch` explicitly selects full vanguards:
+the pinned Arti default is Lite and does not automatically escalate for hosts.
+
+`tor-js-gateway-bind.patch` adds a validated IP listener setting; this fixture
+uses `127.0.0.1`, independently of its advertised address. The gateway starts
+with empty task-owned cache/state, normal signature-verified directory sync,
+and local targets forbidden. It waits for its actual bootstrap archive; the
+fixture retains both gateway and native-client accepted public consensuses and
+requires validity through the bounded browser run. No `--no-sync`, synthetic
+authorities, network parameter overrides, host services or persistent keys
+are used in public mode.
+
+The shared browser contract checks local-target rejection with zero canary
+connections, exact non-relay rejection for a documentation-range address,
+two browser-owned onion services, browser/browser framing and a native C Tor
+client connecting to a browser onion for root-authorized MLS binary data in
+both directions. It records phase durations, rejects replay/malformed routes,
+and checks service cancellation. This topology does not test a native-hosted
+onion service. Public success requires the actual runtime artifact; source
+preparation alone is not evidence. Private-network mode retains its existing
+separate test-network stage and signed fixture authorities.
+
+`TOR_DIAGNOSTICS=1` also permits the existing sanitized service/publisher
+instrumentation with the public `service` stage. This source option does not
+enable `browser-test-network`, injected authorities or network overrides; the
+source receipt records `serviceDiagnostics` separately from `testNetworkOnly`.
+It changes diagnostic labels only and preserves the selected service readiness
+bound. The current service's IPT/publisher states are reported alongside
+runtime-wide last-error/upload categories, which can describe another service.
+No identifiers, addresses, keys or raw underlying error strings are included.
+The shared contract performs native MLS exchange with the first service before
+publishing the second, retaining that evidence if later publication fails;
+overall success still requires both services and every transport assertion.
+
+Publication has a separate explicit deadline of 1..600,000 ms. The public
+contract selects 420,000 ms; the private contract retains 60,000 ms. The pinned
+Arti publisher permits 300 seconds of retry per onion directory, with at least
+30 seconds per attempt, and reports a period's results only after all its
+uploads finish (`publish/reactor.rs:130`, `:382`, `:1672`, `:2130`). A single
+recovering upload can therefore keep the service bootstrapping past 60 seconds
+while other uploads succeed. The public budget allows that retry episode plus
+60 seconds each for upload scheduling and startup. It guarantees no success:
+the wrapper requires Arti's `is_fully_reachable()` predicate (`Running` or
+`DegradedReachable`), full vanguards and subsequent peer reachability. The
+listener exposes the startup state so reduced redundancy remains visible;
+this snapshot does not guarantee continuing availability. Stream
+connect/accept/read/write limits remain 60,000 ms.
+
+Both supervisors terminate their owned process groups even when a leader
+already exited. They retain the leader unreaped until cleanup to prevent PID
+reuse from authorizing an unrelated group. `python3 browser/upstream/runtime-process.test.py` checks an
+orphaned descendant that ignores SIGTERM and requires bounded SIGKILL cleanup.
+Run this regression only on CI. Request interception remains tab HTTP evidence,
+not whole-process network confinement or a hostile-gateway resource audit.
+
 `tor-js-onion-client.patch` enables onion clients and vanguards, and exposes a
 capability marker through the actual Wasm module. cmsg checks that marker before
 creating a client. A marker proves which integration API was built; a real Tor

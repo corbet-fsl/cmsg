@@ -27,16 +27,7 @@ source = Path(os.environ["CHUTNEY_SOURCE"]).resolve()
 sys.path.insert(0, str(source / "lib"))
 from chutney import TorNet
 from chutney.TorNet import NodeConfig, NetworkConfig
-
-
-def stop_child(child):
-    if child is not None and child.poll() is None:
-        os.killpg(child.pid, signal.SIGTERM)
-        try:
-            child.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGKILL)
-            child.wait()
+from runtime_process import poll_child, stop_child, wait_child
 
 
 def stop_signal(signum, _frame):
@@ -358,7 +349,7 @@ with tempfile.TemporaryDirectory(prefix="cmsg-browser-tor-fixture-") as temporar
             stdout=log_handle, stderr=subprocess.STDOUT, start_new_session=True)
         gateway_address = None
         for _ in range(300):
-            if gateway.poll() is not None:
+            if poll_child(gateway) is not None:
                 raise RuntimeError("fixture gateway exited")
             match = re.search(r"127\.0\.0\.1:" + str(gateway_port) + r":[A-Za-z0-9_=-]+", gateway_log.read_text())
             if match:
@@ -380,7 +371,7 @@ with tempfile.TemporaryDirectory(prefix="cmsg-browser-tor-fixture-") as temporar
                        "BROWSER_EVIDENCE": str(artifact / "browser-tor-runtime.json")}
         driver = subprocess.Popen(["node", str(root / "browser/upstream/runtime-driver.mjs")],
             cwd=root, env=environment, start_new_session=True)
-        result = driver.wait(timeout=1000)
+        result = wait_child(driver, timeout=1000)
         if result != 0:
             raise RuntimeError("real browser Tor contract failed")
     finally:

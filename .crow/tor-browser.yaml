@@ -11,6 +11,8 @@ variables:
   ARTIFACT_ROOT: {default: ""}
   CARGO_TARGET_DIR: {default: ""}
   TOR_STAGE: {default: "service"}
+  TOR_NETWORK: {default: "private"}
+  TOR_DIAGNOSTICS: {default: "0"}
   WASM_LINKER: {default: ""}
   BROWSER_BIN: {default: ""}
   RUN_RUNTIME: {default: "0"}
