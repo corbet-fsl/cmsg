@@ -14,6 +14,7 @@ that this edited graph matches the patched source manifests.
 
 The upstream source revisions remain in `../manifest.json`. Paths refer to
 the isolated sibling TorJS/Arti source trees created by `apply.py`. Public
-network validation consumes these locks with `--locked`; it does not claim a
-fresh dependency resolution. The private fixture retains its existing resolver
-workflow. Dependency changes require a deliberate replacement and validation.
+network validation and the explicit private renewal check consume these locks
+with `--locked`; neither claims a fresh dependency resolution. Other private
+fixture runs retain their existing resolver workflow. Dependency changes
+require a deliberate replacement and validation.

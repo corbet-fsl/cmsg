@@ -198,6 +198,13 @@ def wait_for_shared_random(consensus, artifact, voting_interval, period_seconds)
 signal.signal(signal.SIGTERM, stop_signal)
 signal.signal(signal.SIGINT, stop_signal)
 root = Path(__file__).resolve().parents[2]
+renewal_flag = os.environ.get("TOR_RENEWAL", "0")
+if renewal_flag not in {"0", "1"}:
+    raise RuntimeError("invalid renewal fixture selection")
+renewal = renewal_flag == "1"
+if renewal and (os.environ.get("TOR_NETWORK") != "private"
+                or os.environ.get("TOR_STAGE") != "test-network"):
+    raise RuntimeError("renewal requires the private test-network source stage")
 artifact = Path(os.environ["TOR_RUNTIME_ARTIFACT"]).resolve()
 artifact.mkdir(parents=True, exist_ok=True)
 os.environ["CHUTNEY_TOR"] = os.environ["TOR_BIN"]
@@ -273,6 +280,7 @@ with tempfile.TemporaryDirectory(prefix="cmsg-browser-tor-fixture-") as temporar
         "synthetic": True, "ephemeral": ephemeral, "unprivilegedStart": unprivileged,
         "reservedBlocks": allocated_ports,
     }, indent=2) + "\n")
+    consensus = None
     gateway = None
     driver = None
     gateway_log = temporary / "gateway.log"
@@ -317,6 +325,7 @@ with tempfile.TemporaryDirectory(prefix="cmsg-browser-tor-fixture-") as temporar
         (artifact / "fixture-provenance.json").write_text(json.dumps({
             "chutneyRevision": CHUTNEY_REVISION, "authorities": 4, "guardRelays": 20,
             "exitRelays": 2, "nativeClients": 1, "vanguards": "full", "synthetic": True,
+            "renewal": renewal,
             "torVersion": subprocess.check_output([os.environ["TOR_BIN"], "--version"], text=True).strip(),
             "artiNetOverrides": net_overrides,
             "netOverrideSource": "pinned chutney.arti.config.tor_config(network)",
@@ -340,7 +349,7 @@ with tempfile.TemporaryDirectory(prefix="cmsg-browser-tor-fixture-") as temporar
         config = {"data_dir": str(gateway_data), "kps_port": gateway_port,
                   "kps_key_file": str(temporary / "synthetic-kps.key"), "keccak_dir": "",
                   "advertised_addresses": ["127.0.0.1"], "tunnel_max": 128,
-                  "tunnel_per_ip": 128, "tunnel_idle_timeout": 300, "tunnel_max_lifetime": 1200}
+                  "tunnel_per_ip": 128, "tunnel_idle_timeout": 300, "tunnel_max_lifetime": 2300 if renewal else 1200}
         config_path = temporary / "gateway.json"
         config_path.write_text(json.dumps(config))
         log_handle = gateway_log.open("w")
@@ -363,6 +372,8 @@ with tempfile.TemporaryDirectory(prefix="cmsg-browser-tor-fixture-") as temporar
                             "fallback_caches": fallbacks},
             "path_rules": {"ipv4_subnet_family_prefix": 33, "ipv6_subnet_family_prefix": 129},
             "override_net_params": net_overrides, "vanguards": {"mode": "full"}}}
+        if renewal:
+            fixture["renewal"] = {"waitMs": 900_000, "heartbeatMs": 15_000}
         fixture_path = temporary / "fixture.json"
         fixture_path.write_text(json.dumps(fixture))
         socks_ip, socks_port = next(iter(nodes[-1].socksport_endpoints()))
@@ -371,18 +382,51 @@ with tempfile.TemporaryDirectory(prefix="cmsg-browser-tor-fixture-") as temporar
                        "BROWSER_EVIDENCE": str(artifact / "browser-tor-runtime.json")}
         driver = subprocess.Popen(["node", str(root / "browser/upstream/runtime-driver.mjs")],
             cwd=root, env=environment, start_new_session=True)
-        result = wait_child(driver, timeout=1000)
+        result = wait_child(driver, timeout=2100 if renewal else 1000)
         if result != 0:
             raise RuntimeError("real browser Tor contract failed")
     finally:
-        stop_child(driver)
-        stop_child(gateway)
-        if log_handle is not None:
-            log_handle.close()
+        cleanup_failed = False
+        for child in [driver, gateway]:
+            try:
+                stop_child(child)
+            except (OSError, RuntimeError):
+                cleanup_failed = True
         try:
+            if log_handle is not None:
+                log_handle.close()
             save_tail(gateway_log, artifact / "gateway-synthetic.log", 65536)
             save_node_diagnostics(network, artifact, "final")
+            if renewal and consensus is not None and consensus.is_file():
+                # Retain only the native client's public, accepted signed directory.
+                # This corroborates elapsed directory periods; no keys/state are copied.
+                with consensus.open("rb") as stream:
+                    final_consensus = stream.read(2 * 1024 * 1024 + 1)
+                if len(final_consensus) > 2 * 1024 * 1024:
+                    raise RuntimeError("final synthetic consensus exceeds artifact bound")
+                final_lines = final_consensus.decode("ascii").splitlines()
+                (artifact / "consensus-microdesc-final.txt").write_bytes(final_consensus)
+                (artifact / "renewal-consensus-final.json").write_text(json.dumps({
+                    "synthetic": True, "source": "native client accepted consensus cache",
+                    "capturedAt": datetime.now(timezone.utc).isoformat(),
+                    "consensusSha256": hashlib.sha256(final_consensus).hexdigest(),
+                    "consensusTiming": [line for line in final_lines if line.startswith((
+                        "valid-after ", "fresh-until ", "valid-until ", "voting-delay ", "params "))],
+                    "sharedRandomCurrentPresent": any(line.startswith("shared-rand-current-value ") for line in final_lines),
+                    "sharedRandomPreviousPresent": any(line.startswith("shared-rand-previous-value ") for line in final_lines),
+                }, indent=2) + "\n")
         finally:
             for reserved in reservations:
-                reserved.close()
-            network.stop()
+                try:
+                    reserved.close()
+                except OSError:
+                    cleanup_failed = True
+            try:
+                network.stop()
+            except Exception:
+                cleanup_failed = True
+            (artifact / "private-cleanup.json").write_text(json.dumps({
+                "synthetic": True, "cleanupFailed": cleanup_failed,
+            }, indent=2) + "\n")
+            if cleanup_failed:
+                raise RuntimeError("private fixture process cleanup failed")

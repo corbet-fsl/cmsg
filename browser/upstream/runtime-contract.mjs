@@ -48,6 +48,9 @@ export async function runTorRuntimeContract() {
   await init({ module_or_path: new URL('../pkg/cmsg_bg.wasm', import.meta.url) });
   const fixture = await (await fetch('/fixture.json', { cache: 'no-store' })).json();
   const publicNetwork = fixture.network === 'public';
+  const renewal = fixture.renewal !== undefined;
+  check(!renewal || (!publicNetwork && fixture.renewal.waitMs === 900_000
+    && fixture.renewal.heartbeatMs === 15_000), 'bounded private-only renewal configuration');
   check(fixture.testOnly === true, 'disposable test participants');
   if (publicNetwork) {
     check(!Object.hasOwn(fixture, 'arti') && fixture.testNetworkFeature === false
@@ -64,7 +67,7 @@ export async function runTorRuntimeContract() {
   const services = [];
   const framed = [];
   const passed = progress.passed;
-  let member;
+  const members = [];
   try {
     stage('gateway-non-relay-rejection');
     check(/^127\.0\.0\.1:\d+$/.test(fixture.nonRelayCanary), 'owned loopback canary');
@@ -113,11 +116,16 @@ export async function runTorRuntimeContract() {
       check(rejected, 'public gateway requires advertised relay even for a nonlocal address');
       passed.push('actual browser KPS nonlocal non-relay CONNECT rejected with exact 403');
     }
+    function newClient() {
+      const client = new TorClient({ gateway: fixture.gateway,
+        ...(publicNetwork ? {} : { testNetwork: JSON.stringify(fixture.arti) }),
+        storage: new storage.MemoryStorage(),
+        log: new Log({ rawLog: () => {} }), logLevel: 'error' });
+      clients.push(client);
+      return client;
+    }
     stage('client-bootstrap');
-    for (let i = 0; i < 2; i++) clients.push(new TorClient({ gateway: fixture.gateway,
-      ...(publicNetwork ? {} : { testNetwork: JSON.stringify(fixture.arti) }),
-      storage: new storage.MemoryStorage(),
-      log: new Log({ rawLog: () => {} }), logLevel: 'error' }));
+    for (let i = 0; i < 2; i++) newClient();
     await bounded(Promise.all(clients.map(c => c.ready())), 360_000);
     passed.push(publicNetwork ? 'two browser Arti clients bootstrapped on public signed Tor network'
       : 'two browser Arti clients bootstrapped on isolated signed Tor network');
@@ -167,34 +175,40 @@ export async function runTorRuntimeContract() {
     }
     await publish(0);
     passed.push('actual Wasm rejects invalid publication budgets and preserves the valid one-service launch');
-    stage('native-peer-connection');
-    const incoming = services[0].accept(60_000);
-    const native = fetch('/__native-peer', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ host: services[0].host, port: 80 }) }).then(async r => {
-        if (!r.ok) throw new Error('native fixture failed');
-        return r.json();
-      });
-    // Attach immediately; the native task remains independently bounded by CI.
-    native.catch(() => {});
-    const peer = new OnionFramedStream(await bounded(incoming, 65_000), 60_000);
-    framed.push(peer);
-    stage('native-peer-mls');
-    member = await syntheticMember();
-    member.createGroup();
-    const invitation = member.add(await peer.receive());
-    await peer.send(invitation.welcome); invitation.free();
-    const ciphertext = await peer.receive();
-    const received = member.receive(ciphertext);
-    check(received.kind === 'bytes' && same(received.bytes, [0, 255, 128, 7, 0, 9]), 'native MLS ciphertext authenticated');
-    received.free();
-    let replay = false;
-    try { member.receive(ciphertext); } catch { replay = true; }
-    check(replay, 'native ciphertext replay rejected');
-    await peer.send(member.sendBytes(new Uint8Array([254, 0, 129, 4, 0, 3])));
-    check(same(await peer.receive(), encode('cmsg-native-verified')), 'native peer verified browser ciphertext');
-    const nativeEvidence = await bounded(native, 125_000);
-    check(nativeEvidence.nativeFramedStream && nativeEvidence.rootAuthorizedMlsBinaryBothDirections, 'native process evidence');
-    peer.close();
+    async function nativeExchange(label) {
+      stage(`${label}-connection`);
+      const incoming = services[0].accept(60_000);
+      const native = fetch('/__native-peer', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ host: services[0].host, port: 80 }) }).then(async r => {
+          if (!r.ok) throw new Error('native fixture failed');
+          return r.json();
+        });
+      // Attach immediately; the native task remains independently bounded by CI.
+      native.catch(() => {});
+      const peer = new OnionFramedStream(await bounded(incoming, 65_000), 60_000);
+      framed.push(peer);
+      stage(`${label}-mls`);
+      const member = await syntheticMember();
+      members.push(member);
+      member.createGroup();
+      const invitation = member.add(await peer.receive());
+      try { await peer.send(invitation.welcome); } finally { invitation.free(); }
+      const ciphertext = await peer.receive();
+      const received = member.receive(ciphertext);
+      try {
+        check(received.kind === 'bytes' && same(received.bytes, [0, 255, 128, 7, 0, 9]), 'native MLS ciphertext authenticated');
+      } finally { received.free(); }
+      let replay = false;
+      try { member.receive(ciphertext).free(); } catch { replay = true; }
+      check(replay, 'native ciphertext replay rejected');
+      await peer.send(member.sendBytes(new Uint8Array([254, 0, 129, 4, 0, 3])));
+      check(same(await peer.receive(), encode('cmsg-native-verified')), 'native peer verified browser ciphertext');
+      const evidence = await bounded(native, 125_000);
+      check(evidence.nativeFramedStream && evidence.rootAuthorizedMlsBinaryBothDirections, 'native process evidence');
+      peer.close();
+      return evidence;
+    }
+    const nativeEvidence = await nativeExchange('native-peer');
     progress.nativePeer = nativeEvidence;
     passed.push('browser/native Tor FramedStream and root-authorized MLS binary both directions, replay rejected');
     await publish(1);
@@ -211,8 +225,120 @@ export async function runTorRuntimeContract() {
     check(same(await right.receive(), [0, 128, 255, 0, 9]), 'browser outgoing onion bytes');
     await right.send(new Uint8Array([253, 129, 0, 1]));
     check(same(await left.receive(), [253, 129, 0, 1]), 'browser return onion bytes');
-    left.close(); right.close();
+    if (!renewal) { left.close(); right.close(); }
     passed.push('actual browser onion dial/accept and bidirectional cmsg framing');
+
+    if (renewal) {
+      function snapshot(service) {
+        check(typeof service.publicationSnapshot === 'function', 'per-service publication diagnostics are present');
+        const value = JSON.parse(service.publicationSnapshot());
+        check(value && Object.keys(value).sort().join(',') === 'currentPeriod,latestSuccessfulPeriod,successfulBatches'
+          && Number.isSafeInteger(value.successfulBatches) && value.successfulBatches > 0
+          && value.successfulBatches <= 0xffff_ffff
+          && Number.isSafeInteger(value.currentPeriod) && value.currentPeriod >= 0
+          && Number.isSafeInteger(value.latestSuccessfulPeriod) && value.latestSuccessfulPeriod >= 0,
+        'exact bounded per-service publication evidence');
+        return value;
+      }
+      async function authenticatedChannel(outgoing, incoming) {
+        const sender = await syntheticMember();
+        members.push(sender);
+        const receiver = await syntheticMember();
+        members.push(receiver);
+        sender.createGroup();
+        await incoming.send(receiver.keyPackage());
+        const invitation = sender.add(await outgoing.receive());
+        try { await outgoing.send(invitation.welcome); } finally { invitation.free(); }
+        receiver.join(await incoming.receive());
+        let sequence = 0;
+        return async function exchange() {
+          const current = ++sequence;
+          check(current < 65536, 'bounded authenticated heartbeat count');
+          const request = new Uint8Array([0, current >>> 8, current & 255, 255]);
+          await outgoing.send(sender.sendBytes(request));
+          const received = receiver.receive(await incoming.receive());
+          try { check(received.kind === 'bytes' && same(received.bytes, request), 'authenticated stream request'); }
+          finally { received.free(); }
+          const reply = new Uint8Array([254, current >>> 8, current & 255, 0]);
+          await incoming.send(receiver.sendBytes(reply));
+          const answer = sender.receive(await outgoing.receive());
+          try { check(answer.kind === 'bytes' && same(answer.bytes, reply), 'authenticated stream reply'); }
+          finally { answer.free(); }
+          return current;
+        };
+      }
+      stage('descriptor-period-transition');
+      const hosts = services.map(service => service.host);
+      const heartbeat = await bounded(authenticatedChannel(left, right), 65_000);
+      const initialHeartbeat = await bounded(heartbeat(), 60_000);
+      // Capture the baseline after authenticated traffic, so a boundary crossed
+      // during channel setup cannot stand in for continuity from before renewal.
+      const baseline = services.map(snapshot);
+      const renewalEvidence = { scope: 'accelerated signed private-network period transition',
+        waitLimitMs: fixture.renewal.waitMs, baseline, final: null, elapsedMs: 0,
+        authenticatedHeartbeats: initialHeartbeat, addressUnchanged: false };
+      progress.renewal = renewalEvidence;
+      const started = performance.now();
+      const expires = started + fixture.renewal.waitMs;
+      let nextHeartbeat = started + fixture.renewal.heartbeatMs;
+      let nextReport = started;
+      while (true) {
+        const now = performance.now();
+        check(now < expires, 'descriptor period transition deadline');
+        if (now >= nextHeartbeat) {
+          renewalEvidence.authenticatedHeartbeats = await bounded(heartbeat(), Math.min(60_000, expires - now));
+          nextHeartbeat = performance.now() + fixture.renewal.heartbeatMs;
+        }
+        const observed = services.map(snapshot);
+        const elapsed = Math.round(performance.now() - started);
+        renewalEvidence.final = observed;
+        renewalEvidence.elapsedMs = elapsed;
+        // A future-period upload alone, a late initial batch, or another
+        // service's success cannot satisfy all three per-service advances.
+        const advanced = renewalEvidence.authenticatedHeartbeats > initialHeartbeat
+          && observed.every((value, index) =>
+          value.successfulBatches > baseline[index].successfulBatches
+          && value.latestSuccessfulPeriod > baseline[index].latestSuccessfulPeriod
+          && value.currentPeriod > baseline[index].currentPeriod);
+        if (performance.now() >= nextReport || advanced) {
+          const response = await bounded(fetch('/__renewal-progress', { method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ elapsedMs: elapsed,
+              authenticatedHeartbeats: renewalEvidence.authenticatedHeartbeats,
+              services: observed }),
+          }), 2_000);
+          check(response.ok, 'renewal progress receipt');
+          nextReport = performance.now() + 60_000;
+        }
+        check(performance.now() < expires, 'renewal evidence arrived within its bound');
+        if (advanced) break;
+        await new Promise(resolve => setTimeout(resolve, Math.min(1_000, expires - performance.now())));
+      }
+      check(services.every((service, index) => service.host === hosts[index]), 'onion addresses stable after publication transition');
+      renewalEvidence.addressUnchanged = true;
+      passed.push('both services accepted later-period publication batches and observed a signed directory-period transition without changing onion address');
+      stage('established-stream-after-renewal');
+      renewalEvidence.authenticatedHeartbeats = await bounded(heartbeat(), 60_000);
+      left.close(); right.close();
+      passed.push('established browser onion stream carried authenticated MLS binary before, during and after renewal');
+
+      stage('fresh-browser-after-renewal');
+      // A fresh Arti client has no cached old descriptor or established circuit.
+      const freshClient = newClient();
+      await bounded(freshClient.ready(), 360_000);
+      const [newDialled, newAccepted] = await bounded(Promise.all([
+        freshClient.connectOnion(services[1].host, 80, 60_000), services[1].accept(60_000),
+      ]), 65_000);
+      const freshLeft = new OnionFramedStream(newDialled, 60_000);
+      const freshRight = new OnionFramedStream(newAccepted, 60_000);
+      framed.push(freshLeft, freshRight);
+      const freshExchange = await bounded(authenticatedChannel(freshLeft, freshRight), 65_000);
+      await bounded(freshExchange(), 60_000);
+      freshLeft.close(); freshRight.close();
+      passed.push('fresh browser Arti client fetched the renewed service and exchanged root-authorized MLS binary both directions');
+      renewalEvidence.nativePeer = await nativeExchange('native-peer-after-renewal');
+      passed.push('fresh native onion connection exchanged root-authorized MLS binary both directions after renewal, replay rejected');
+    }
 
     stage('service-cancellation');
     const pending = services[0].accept(60_000);
@@ -226,12 +352,12 @@ export async function runTorRuntimeContract() {
       phaseDurationsMs: progress.phaseDurationsMs,
       serviceReadiness: progress.serviceReadiness,
       topology: 'native C Tor client connects to browser-owned onion; MLS binary both directions',
-      nativePeer: nativeEvidence, passed };
+      nativePeer: nativeEvidence, ...(renewal ? { renewal: progress.renewal } : {}), passed };
   } finally {
     if (progress.stage !== 'complete') {
       progress.phaseDurationsMs[progress.stage] = Math.round(performance.now() - phaseStarted);
     }
-    member?.free();
+    for (const member of members) member.free();
     for (const stream of framed) stream.close();
     for (const service of services) { service.close(); service.free(); }
     for (const client of clients) { try { await bounded(client.close(), 2_000); } catch {} }

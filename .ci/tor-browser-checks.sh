@@ -8,6 +8,16 @@ export TOR_NETWORK="${TOR_NETWORK:-private}"
 case "$TOR_NETWORK" in public|private) ;; *) exit 2 ;; esac
 export TOR_DIAGNOSTICS="${TOR_DIAGNOSTICS:-0}"
 case "$TOR_DIAGNOSTICS" in 0|1) ;; *) exit 2 ;; esac
+export TOR_RENEWAL="${TOR_RENEWAL:-0}"
+case "$TOR_RENEWAL" in 0|1) ;; *) exit 2 ;; esac
+if test "$TOR_RENEWAL" = 1; then
+  test "$TOR_NETWORK" = private
+  test "$TOR_STAGE" = test-network
+  test "${RUN_RUNTIME:-0}" = 1
+  python3 -c 'import ast,pathlib; ast.parse(pathlib.Path("browser/upstream/runtime-fixture.py").read_text())'
+  node --check browser/upstream/runtime-contract.mjs
+  node --check browser/upstream/runtime-driver.mjs
+fi
 artifact_suffix="$TOR_STAGE"
 if test "$TOR_NETWORK" = public; then
   test "$TOR_STAGE" = service
@@ -17,6 +27,7 @@ if test "$TOR_NETWORK" = public; then
   node --check browser/upstream/runtime-driver.mjs
 fi
 if test "$TOR_DIAGNOSTICS" = 1; then artifact_suffix="$artifact_suffix-diagnostics"; fi
+if test "$TOR_RENEWAL" = 1; then artifact_suffix="$artifact_suffix-renewal"; fi
 artifact_dir="$ARTIFACT_ROOT/$CI_COMMIT_SHA/tor-$artifact_suffix"
 mkdir -p "$artifact_dir"
 timeout 30 python3 browser/upstream/runtime-process.test.py \
@@ -44,16 +55,18 @@ if test -n "${SQLITE3_LIB_DIR:-}"; then
 fi
 torjs_manifest="$scratch/source/tor-js/Cargo.toml"
 arti_manifest="$scratch/source/arti/Cargo.toml"
-# Public validation retains the already validated dependency graph. The source
-# stage changes, but dependency versions must not drift between network runs.
-if test "$TOR_NETWORK" = public; then
+# Public and renewal validation retain the already validated dependency graph.
+# The cmsg source advances without an unrelated upstream dependency upgrade.
+locked_upstream=0
+if test "$TOR_NETWORK" = public || test "$TOR_RENEWAL" = 1; then
+  locked_upstream=1
   cp browser/upstream/locks/tor-js-Cargo.lock "$scratch/source/tor-js/Cargo.lock"
   cp browser/upstream/locks/arti-Cargo.lock "$scratch/source/arti/Cargo.lock"
 else
   cargo update --manifest-path "$torjs_manifest" --workspace
 fi
 cp "$scratch/source/tor-js/Cargo.lock" "$artifact_dir/tor-js-Cargo.lock"
-if test "$TOR_NETWORK" = public; then
+if test "$locked_upstream" = 1; then
   cp browser/upstream/locks/README.md "$artifact_dir/dependency-provenance.md"
 else
   date -u +%FT%TZ > "$artifact_dir/dependency-resolution-time.txt"
@@ -64,12 +77,15 @@ if test "$TOR_STAGE" = test-network; then tor_features=(--features browser-test-
 timeout 1800 cargo check --locked --manifest-path "$torjs_manifest" \
   -p tor-js --target wasm32-unknown-unknown "${tor_features[@]}" || result=$?
 if test "$TOR_STAGE" = service || test "$TOR_STAGE" = test-network; then
-  if test "$TOR_NETWORK" != public; then
+  if test "$locked_upstream" = 0; then
     cargo update --manifest-path "$arti_manifest" --workspace
   fi
   cp "$scratch/source/arti/Cargo.lock" "$artifact_dir/arti-Cargo.lock"
   timeout 1800 cargo test --locked --manifest-path "$arti_manifest" \
     -p tor-persist --features state-dir state_dir_wasm_tests -- --test-threads=2 || result=$?
+  if test "$result" = 0; then
+    bash .ci/tor-publisher-checks.sh "$arti_manifest" "$artifact_dir" || result=$?
+  fi
 fi
 if test "${RUN_RUNTIME:-0}" = 1 && test "$result" = 0; then
   if test "$TOR_NETWORK" = public; then
@@ -113,15 +129,20 @@ PY
   export TOR_RUNTIME_ARTIFACT="$artifact_dir/runtime"
   fixture=browser/upstream/runtime-fixture.py
   fixture_seconds=3000
+  cleanup_seconds=40
   if test "$TOR_NETWORK" = public; then
     fixture=browser/upstream/public-runtime-fixture.py
     fixture_seconds=3300
+  elif test "$TOR_RENEWAL" = 1; then
+    fixture_seconds=4300
+    # Chutney may need three 15-second termination rounds after child cleanup.
+    cleanup_seconds=80
   fi
   # Each fixture also enforces its own phase bounds and owns all child cleanup.
-  timeout --kill-after=40 "$fixture_seconds" "${fixture_tools[2]}" "$fixture" \
+  timeout --kill-after="$cleanup_seconds" "$fixture_seconds" "${fixture_tools[2]}" "$fixture" \
     2>&1 | tee "$artifact_dir/runtime/network.log" || result=$?
   (cd "$artifact_dir/runtime" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 fi
-(cd "$artifact_dir" && sha256sum source-application.json *Cargo.lock > SHA256SUMS)
+(cd "$artifact_dir" && find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 printf 'Patched upstream validation status: %s\n' "$result"
 exit "$result"

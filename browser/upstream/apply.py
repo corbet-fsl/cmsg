@@ -76,6 +76,12 @@ def main():
     diagnostics = stage == "test-network" or diagnostic_option == "1"
     if diagnostics and stage not in {"service", "test-network"}:
         raise SystemExit("service diagnostics require the service or test-network stage")
+    renewal_option = os.environ.get("TOR_RENEWAL", "0")
+    if renewal_option not in {"0", "1"}:
+        raise SystemExit("TOR_RENEWAL must be 0 or 1")
+    renewal = renewal_option == "1"
+    if renewal and stage != "test-network":
+        raise SystemExit("renewal diagnostics require the private test-network stage")
     if archived:
         tor_js, arti = from_archives(sys.argv[2:4], sys.argv[4], manifest)
     else:
@@ -95,6 +101,7 @@ def main():
         overlays.append(("onion_stream.rs", tor_js / "crates/tor-js-wasm/src/onion_stream.rs"))
     if stage in {"service", "test-network"}:
         patches.extend([(arti, "arti-browser-service.patch"), (tor_js, "tor-js-onion-service.patch")])
+        patches.append((arti, "arti-publisher-renewal.patch"))
         patches.append((tor_js, "tor-js-full-vanguards.patch"))
         overlays.extend([
             ("state_dir_wasm.rs", arti / "crates/tor-persist/src/state_dir_wasm.rs"),
@@ -108,6 +115,9 @@ def main():
                         (arti, "arti-publisher-diagnostics.patch")])
         post_overlay_patches.append((tor_js, "tor-js-service-diagnostics.patch"))
         post_overlay_patches.append((tor_js, "tor-js-publisher-diagnostics.patch"))
+    if renewal:
+        patches.append((arti, "arti-renewal-diagnostics.patch"))
+        post_overlay_patches.append((tor_js, "tor-js-renewal-diagnostics.patch"))
     for checkout, patch in patches:
         git(checkout, "apply", "--check", str(source / patch))
         git(checkout, "apply", str(source / patch))
@@ -143,6 +153,7 @@ def main():
         "stage": stage,
         "testNetworkOnly": stage == "test-network",
         "serviceDiagnostics": diagnostics,
+        "renewalDiagnostics": renewal,
         "sourceMode": "verified git archives" if archived else "pinned git checkouts",
         "torJsRevision": manifest["torJs"]["revision"],
         "artiRevision": manifest["arti"]["revision"],

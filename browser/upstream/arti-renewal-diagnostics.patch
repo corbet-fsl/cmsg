@@ -1,0 +1,132 @@
+diff --git a/crates/tor-hsservice/src/status.rs b/crates/tor-hsservice/src/status.rs
+--- a/crates/tor-hsservice/src/status.rs
++++ b/crates/tor-hsservice/src/status.rs
+@@ -10,6 +10,12 @@
+ 
+     /// The current high-level state for the descriptor publisher.
+     publisher: ComponentStatus,
++
++    // Explicit diagnostic builds only: per-service public period/count evidence.
++    // No identities, descriptor contents, keys, or application data are retained.
++    fixture_successful_batches: u32,
++    fixture_latest_successful_period: Option<u64>,
++    fixture_current_period: Option<u64>,
+ 
+     /// The current high-level state for the PoW manager.
+     #[cfg(feature = "hs-pow-full")]
+@@ -208,6 +214,9 @@
+         Self {
+             ipt_mgr: ComponentStatus::new_shutdown(),
+             publisher: ComponentStatus::new_shutdown(),
++            fixture_successful_batches: 0,
++            fixture_latest_successful_period: None,
++            fixture_current_period: None,
+             #[cfg(feature = "hs-pow-full")]
+             pow_manager: ComponentStatus::new_shutdown(),
+         }
+@@ -267,6 +276,14 @@
+             (_, Some(e), _) | (Some(e), _, _) => Some(e),
+             (_, _, Some(e)) => Some(e),
+         }
++    }
++
++    /// Public period/count evidence belonging only to this service.
++    /// Applied only to the explicit renewal diagnostic source build.
++    #[doc(hidden)]
++    pub fn fixture_publication_snapshot(&self) -> (u32, Option<u64>, Option<u64>) {
++        (self.fixture_successful_batches, self.fixture_latest_successful_period,
++         self.fixture_current_period)
+     }
+ 
+     /// Return a time before which the user must re-provision this onion service
+@@ -375,6 +392,27 @@
+ #[cfg(feature = "hs-pow-full")]
+ impl_status_sender!(PowManagerStatusSender, pow_manager);
+ 
++impl PublisherStatusSender {
++    /// Record the current period from this reactor's authenticated directory.
++    pub(crate) fn fixture_note_current_period(&self, period: u64) {
++        let mut tx = self.0.0.lock().expect("Poisoned lock");
++        let mut status = tx.borrow().clone();
++        status.fixture_current_period = Some(period);
++        tx.maybe_send(|_| status);
++    }
++
++    /// Record an accepted completed batch with at least one successful upload.
++    /// A late older batch may increase the count, but never the latest period.
++    pub(crate) fn fixture_note_publication(&self, period: u64) {
++        let mut tx = self.0.0.lock().expect("Poisoned lock");
++        let mut status = tx.borrow().clone();
++        status.fixture_successful_batches = status.fixture_successful_batches.saturating_add(1);
++        status.fixture_latest_successful_period = Some(
++            status.fixture_latest_successful_period.map_or(period, |old| old.max(period)));
++        tx.maybe_send(|_| status);
++    }
++}
++
+ impl StatusSender {
+     /// Create a new StatusSender with a given initial status.
+     pub(crate) fn new(initial_status: OnionServiceStatus) -> Self {
+@@ -413,3 +451,31 @@
+         self.latest_error.as_ref()
+     }
+ }
++
++#[cfg(test)]
++mod fixture_renewal_tests {
++    use super::*;
++
++    #[test]
++    fn fixture_publication_is_per_service_and_late_batches_do_not_fake_transition() {
++        let first = StatusSender::new(OnionServiceStatus::new_shutdown());
++        let second = StatusSender::new(OnionServiceStatus::new_shutdown());
++        let publisher = PublisherStatusSender::from(first.clone());
++        publisher.fixture_note_current_period(10);
++        publisher.fixture_note_publication(11);
++        let baseline = first.get().fixture_publication_snapshot();
++        assert_eq!(baseline, (1, Some(11), Some(10)));
++        let transitioned = |snapshot: (u32, Option<u64>, Option<u64>)| {
++            snapshot.0 > baseline.0 && snapshot.1 > baseline.1 && snapshot.2 > baseline.2
++        };
++
++        publisher.fixture_note_publication(10); // delayed initial/older batch
++        assert_eq!(first.get().fixture_publication_snapshot(), (2, Some(11), Some(10)));
++        assert!(!transitioned(first.get().fixture_publication_snapshot()));
++        publisher.fixture_note_publication(12); // future publication alone is insufficient
++        assert!(!transitioned(first.get().fixture_publication_snapshot()));
++        publisher.fixture_note_current_period(11);
++        assert!(transitioned(first.get().fixture_publication_snapshot()));
++        assert_eq!(second.get().fixture_publication_snapshot(), (0, None, None));
++    }
++}
+diff --git a/crates/tor-hsservice/src/publish/reactor.rs b/crates/tor-hsservice/src/publish/reactor.rs
+--- a/crates/tor-hsservice/src/publish/reactor.rs
++++ b/crates/tor-hsservice/src/publish/reactor.rs
+@@ -661,6 +661,7 @@
+                 .wait_for_netdir(Timeliness::Timely)
+                 .await?;
+             let time_periods = self.compute_time_periods(&netdir, &[])?;
++            self.imm.status_tx.fixture_note_current_period(netdir.hs_time_period().interval_num());
+ 
+             let mut inner = self.inner.lock().expect("poisoned lock");
+ 
+@@ -932,7 +933,11 @@
+             upload_results.push(upload_res);
+         }
+ 
++        let fixture_success = upload_results.iter().any(|result| result.upload_res.is_ok());
+         period.set_upload_results(upload_results);
++        if fixture_success {
++            self.imm.status_tx.fixture_note_publication(time_period.interval_num());
++        }
+     }
+ 
+     /// Maybe update our list of HsDirs.
+@@ -969,6 +974,7 @@
+         // Update our list of relevant time periods.
+         let new_time_periods = self.compute_time_periods(&netdir, &inner.time_periods)?;
+         inner.time_periods = new_time_periods;
++        self.imm.status_tx.fixture_note_current_period(netdir.hs_time_period().interval_num());
+ 
+         Ok(())
+     }

@@ -1,0 +1,27 @@
+diff --git a/crates/tor-js-wasm/src/onion_service.rs b/crates/tor-js-wasm/src/onion_service.rs
+--- a/crates/tor-js-wasm/src/onion_service.rs
++++ b/crates/tor-js-wasm/src/onion_service.rs
+@@ -61,6 +61,23 @@
+     /// Snapshot at successful publication, not a promise of future availability.
+     #[wasm_bindgen(getter)]
+     pub fn readiness(&self) -> String { self.readiness.to_owned() }
++
++    /// Per-service public period/count evidence; explicit renewal diagnostics only.
++    #[wasm_bindgen(js_name = publicationSnapshot)]
++    pub fn publication_snapshot(&self) -> Result<String, JsValue> {
++        let running = self.state.service.borrow();
++        let running = running.as_ref().ok_or_else(failure)?;
++        let (batches, latest, current) = running.status().fixture_publication_snapshot();
++        // Preserve exact integers when this diagnostic string reaches JavaScript.
++        if latest.into_iter().chain(current).any(|period| period > 9_007_199_254_740_991) {
++            return Err(failure());
++        }
++        Ok(serde_json::json!({
++            "successfulBatches": batches,
++            "latestSuccessfulPeriod": latest,
++            "currentPeriod": current,
++        }).to_string())
++    }
+ 
+     /// Wait for one accepted byte stream. An idle timeout retains the listener;
+     /// explicit service/client close cancels the accept and all child streams.

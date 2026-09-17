@@ -8,18 +8,18 @@
     "rawStreamStage": {
       "patch": "tor-js-onion-stream.patch",
       "overlay": { "onion_stream.rs": "crates/tor-js-wasm/src/onion_stream.rs" },
-      "status": "source application and full service Wasm check verified Crow run45 at cmsg755d83b1a; generated bindings/browser/native Tor round-trip unverified"
+      "status": "generated service Wasm/bindings and public Tor browser/native round-trip verified Crow run84 at cmsg d39022b35ebe4a1bc2569acaa5f7ac2f206b29c3 with service diagnostics; see docs/public-tor-validation.md"
     },
     "serviceStage": {
       "patch": "tor-js-onion-service.patch",
       "overlay": { "onion_service.rs": "crates/tor-js-wasm/src/onion_service.rs" },
-      "status": "source application and full service Wasm check verified Crow run45 at cmsg755d83b1a; generated bindings/browser/native Tor round-trip unverified"
+      "status": "generated service Wasm/bindings and public Tor browser/native round-trip verified Crow run84 at cmsg d39022b35ebe4a1bc2569acaa5f7ac2f206b29c3 with service diagnostics; see docs/public-tor-validation.md"
     },
     "testNetworkStage": {
       "patch": "tor-js-test-network.patch",
       "overlay": { "test_network.rs": "crates/tor-js-wasm/src/test_network.rs" },
       "requiredFeature": "browser-test-network",
-      "status": "isolated CI only; not a production networking API; unverified"
+      "status": "isolated CI only; not a production networking API; signed private-network browser runtime passed Crow run68 at cmsg b23221271f7170a4f665e3834f4302a4a1a33ff0"
     }
   },
   "arti": {
@@ -32,7 +32,7 @@
   },
   "evidence": {
     "stockOnionClientFeature": false,
-    "patchedOnionClientBuild": "full service Wasm cargo check passed Crow run45 at cmsg755d83b1a; generated artifact pending",
-    "browserOnionServiceHosting": "unverified"
+    "patchedOnionClientBuild": "generated service artifact and actual public-network client/service operation passed Crow run84 at cmsg d39022b35ebe4a1bc2569acaa5f7ac2f206b29c3",
+    "browserOnionServiceHosting": "public Tor browser/browser framing and native/browser MLS with replay rejection passed Crow run84; diagnostic service build, both services running; not process-wide confinement or long-running reliability evidence"
   }
 }

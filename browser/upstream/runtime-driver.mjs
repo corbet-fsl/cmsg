@@ -18,40 +18,80 @@ const nativeSocks = process.env.TOR_NATIVE_SOCKS;
 if (!process.env.TORJS_DIST || !fixturePath || !nativeBinary || !nativeSocks) throw new Error('runtime fixture paths required');
 const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
 const network = fixture.network === 'public' ? 'public' : 'private';
-// Public service publication includes Arti's bounded descriptor-upload retries.
-const contractDeadlineMs = network === 'public' ? 1_900_000 : 900_000;
-let nativeStarted = false;
+const renewal = fixture.renewal !== undefined;
+if (renewal && (network !== 'private' || fixture.renewal.waitMs !== 900_000
+    || fixture.renewal.heartbeatMs !== 15_000 || process.env.TOR_RENEWAL !== '1'
+    || process.env.TOR_STAGE !== 'test-network')) {
+  throw new Error('renewal requires the bounded private diagnostic fixture');
+}
+if (process.env.TOR_RENEWAL === '1' && !renewal) throw new Error('renewal fixture configuration missing');
+// Publication and renewal have independent bounds; individual streams stay 60s.
+const contractDeadlineMs = renewal ? 2_000_000 : network === 'public' ? 1_900_000 : 900_000;
+let nativeInvocations = 0;
+let nativeBusy = false;
+let nativeHost;
 let nativeChild;
 let nativeClosed;
 async function startNative(request, response) {
-  if (nativeStarted) { response.writeHead(409).end(); return; }
-  nativeStarted = true;
+  if (nativeBusy || nativeInvocations >= (renewal ? 2 : 1)) { response.writeHead(409).end(); return; }
+  nativeBusy = true;
+  try {
+    let body = '';
+    for await (const chunk of request) {
+      body += chunk.toString();
+      if (body.length > 1024) { response.writeHead(413).end(); return; }
+    }
+    const input = JSON.parse(body);
+    if (!/^[a-z2-7]{56}\.onion$/.test(input.host) || input.port !== 80
+        || (nativeHost !== undefined && input.host !== nativeHost)) {
+      response.writeHead(400).end(); return;
+    }
+    nativeHost = input.host;
+    nativeInvocations += 1;
+    const child = spawn(nativeBinary, [nativeSocks, input.host, String(input.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
+    nativeChild = child;
+    nativeClosed = new Promise(resolve => child.once('close', resolve));
+    let output = '';
+    let nativeError = '';
+    child.stdout.on('data', bytes => { output = (output + bytes.toString()).slice(-4096); });
+    child.stderr.on('data', bytes => { nativeError = (nativeError + bytes.toString()).slice(-4096); });
+    const timer = setTimeout(() => child.kill('SIGKILL'), 120_000);
+    try {
+      const [code] = await once(child, 'close');
+      if (code !== 0) {
+        await writeFile(artifact + '.native-error.txt', nativeError);
+        response.writeHead(500).end('native fixture failed'); return;
+      }
+      const result = JSON.parse(output.trim());
+      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      response.end(JSON.stringify(result));
+    } finally { clearTimeout(timer); }
+  } finally { nativeBusy = false; }
+}
+let renewalReports = 0;
+async function reportRenewal(request, response) {
+  if (!renewal || renewalReports >= 20) { response.writeHead(409).end(); return; }
   let body = '';
   for await (const chunk of request) {
     body += chunk.toString();
     if (body.length > 1024) { response.writeHead(413).end(); return; }
   }
-  const input = JSON.parse(body);
-  if (!/^[a-z2-7]{56}\.onion$/.test(input.host) || input.port !== 80) {
+  const value = JSON.parse(body);
+  const integer = (number, maximum) => Number.isSafeInteger(number) && number >= 0 && number <= maximum;
+  if (Object.keys(value).sort().join(',') !== 'authenticatedHeartbeats,elapsedMs,services'
+      || !integer(value.elapsedMs, 900_000) || !integer(value.authenticatedHeartbeats, 1000)
+      || !Array.isArray(value.services) || value.services.length !== 2
+      || !value.services.every(service => service && Object.keys(service).sort().join(',')
+        === 'currentPeriod,latestSuccessfulPeriod,successfulBatches'
+        && integer(service.successfulBatches, 0xffff_ffff)
+        && integer(service.currentPeriod, Number.MAX_SAFE_INTEGER)
+        && integer(service.latestSuccessfulPeriod, Number.MAX_SAFE_INTEGER))) {
     response.writeHead(400).end(); return;
   }
-  nativeChild = spawn(nativeBinary, [nativeSocks, input.host, String(input.port)], { stdio: ['ignore', 'pipe', 'pipe'] });
-  nativeClosed = new Promise(resolve => nativeChild.once('close', resolve));
-  let output = '';
-  let nativeError = '';
-  nativeChild.stdout.on('data', bytes => { output = (output + bytes.toString()).slice(-4096); });
-  nativeChild.stderr.on('data', bytes => { nativeError = (nativeError + bytes.toString()).slice(-4096); });
-  const timer = setTimeout(() => nativeChild.kill('SIGKILL'), 120_000);
-  try {
-    const [code] = await once(nativeChild, 'close');
-    if (code !== 0) {
-      await writeFile(artifact + '.native-error.txt', nativeError);
-      response.writeHead(500).end('native fixture failed'); return;
-    }
-    const result = JSON.parse(output.trim());
-    response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    response.end(JSON.stringify(result));
-  } finally { clearTimeout(timer); }
+  renewalReports += 1;
+  // Only bounded numeric counters/periods; never onion, relay or peer identifiers.
+  process.stdout.write(`Tor renewal progress: ${JSON.stringify(value)}\n`);
+  response.writeHead(204).end();
 }
 if (!binary || !artifact) throw new Error('BROWSER_BIN and BROWSER_EVIDENCE are required');
 let canaryConnections = 0;
@@ -73,6 +113,9 @@ const server = createServer(async (request, response) => {
     if (pathname === '/__canary') {
       response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       response.end(JSON.stringify({ connections: canaryConnections })); return;
+    }
+    if (pathname === '/__renewal-progress' && request.method === 'POST') {
+      await reportRenewal(request, response); return;
     }
     if (pathname === '/__native-peer' && request.method === 'POST') {
       await startNative(request, response); return;
@@ -188,8 +231,9 @@ try {
   if (!result.result || !('value' in result.result)) throw new Error('Browser contract returned no evidence');
   if (forbiddenRequests.length) throw new Error(`Unexpected external requests: ${JSON.stringify(forbiddenRequests)}`);
   if (canaryConnections !== 0) throw new Error('Non-relay canary received a TCP connection');
+  if (nativeInvocations !== (renewal ? 2 : 1)) throw new Error('Expected native exchange count missing');
   const evidence = { source: process.env.CI_COMMIT_SHA, network, browser: metadata.Browser,
-    runtime: process.version, contract: result.result.value, nonRelayCanaryConnections: canaryConnections,
+    runtime: process.version, renewal, nativeInvocations, contract: result.result.value, nonRelayCanaryConnections: canaryConnections,
     unexpectedExternalRequests: forbiddenRequests };
   await writeFile(artifact, JSON.stringify(evidence, null, 2) + '\n');
   process.stdout.write(JSON.stringify(evidence) + '\n');
