@@ -162,9 +162,9 @@ redemption are required. Timing and small anonymity sets can still correlate
 actions. The relevant constructions are [RFC 9474](https://www.rfc-editor.org/rfc/rfc9474.html)
 and the unlinkability analysis in [RFC 9576](https://www.rfc-editor.org/rfc/rfc9576.html).
 
-The separate experimental [private account ledger](https://github.com/corbet-labs/cfrm/blob/main/docs/account-ledger.md)
+The separate experimental [private account ledger](https://github.com/cmtymeet/cfrm/blob/main/docs/account-ledger.md)
 now binds hidden state, the debited member, both roles, the exact introduction
-and authenticated resolution evidence. Its [v2 policy](https://github.com/corbet-labs/cfrm/blob/main/docs/reciprocity-policy.md)
+and authenticated resolution evidence. Its [v2 policy](https://github.com/cmtymeet/cfrm/blob/main/docs/reciprocity-policy.md)
 implements shared capacity, nonrefundable admission turns, Prepared cancellation,
 outgoing expiry and bounded refill. Answer refunds both reservations when each
 owner's required evidence is accepted; recipient Close refunds the recipient
@@ -175,7 +175,7 @@ Local booleans, generic membership proofs and bearer permits do not substitute
 for those proofs. The older allocation API's `resolve_private` remains closed;
 it is a separate path from this experimental ledger.
 
-The [private accounting review](https://github.com/corbet-labs/cfrm/blob/main/docs/private-accounting.md)
+The [private accounting review](https://github.com/cmtymeet/cfrm/blob/main/docs/private-accounting.md)
 retains the earlier backend comparison and links the current implementation.
 An account's latest hiding state commitment can be public without revealing
 its contact map. Public markers shared by two named accounts would reconnect

@@ -26,7 +26,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: corbet-labs/cfrm
+          repository: cmtymeet/cfrm
           ref: 2c4fa47c59dfd8eb2fdc058ee171836ebc097d99
           path: .ci-dependencies/cfrm-source
           persist-credentials: false

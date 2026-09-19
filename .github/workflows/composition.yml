@@ -20,13 +20,13 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          repository: corbet-labs/cvld
+          repository: cmtymeet/cvld
           ref: 9d8dfb642a0a9e53eed8069a757d400c82cd4b11
           path: cvld
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          repository: corbet-labs/cfrm
+          repository: cmtymeet/cfrm
           ref: 507b63c775c4869d08f255d0a0c11866a2bf9249
           path: cfrm
           persist-credentials: false
