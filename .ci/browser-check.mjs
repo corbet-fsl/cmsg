@@ -11,7 +11,9 @@ import { resolve, join, extname, sep } from 'node:path';
 const root = resolve(process.cwd());
 const artifact = process.env.BROWSER_EVIDENCE;
 const binary = process.env.BROWSER_BIN;
+const buildProfile = process.env.BROWSER_BUILD_PROFILE;
 if (!binary || !artifact) throw new Error('BROWSER_BIN and BROWSER_EVIDENCE are required');
+if (buildProfile && !['debug', 'release'].includes(buildProfile)) throw new Error('Invalid browser build profile');
 const profileModules = new Map();
 let profileSource;
 if (process.env.CFRM_SOURCE_ARCHIVE || process.env.CFRM_SOURCE_COMMIT || process.env.CFRM_SOURCE_SHA256) {
@@ -21,7 +23,9 @@ if (process.env.CFRM_SOURCE_ARCHIVE || process.env.CFRM_SOURCE_COMMIT || process
   }
   const archive = await readFile(archivePath);
   if (createHash('sha256').update(archive).digest('hex') !== expectedHash) throw new Error('cfrm archive checksum mismatch');
-  const identified = spawnSync('git', ['get-tar-commit-id'], { input: archive, encoding: 'utf8' });
+  // git reads only the first 1024 bytes; a whole-archive pipe can fail with
+  // EPIPE after it has already returned the correct commit.
+  const identified = spawnSync('git', ['get-tar-commit-id'], { input: archive.subarray(0, 1024), encoding: 'utf8' });
   if (identified.error || identified.status !== 0 || identified.stdout.trim() !== commit) throw new Error('cfrm archive commit mismatch');
   // Serve only these verified source modules. No repository directory, test
   // secrets, package installation, or external endpoint is exposed to the page.
@@ -110,6 +114,14 @@ try {
       }
     } else if (message.method === 'Page.lifecycleEvent' && message.params.name === 'load') {
       loaded.add(message.params.loaderId);
+    } else if (message.method === 'Runtime.bindingCalled' && message.params.name === 'cmsgReportProgress') {
+      try {
+        const value = JSON.parse(message.params.payload);
+        if (typeof value.phase === 'string' && value.phase.length <= 240
+            && Number.isSafeInteger(value.elapsedMs) && value.elapsedMs >= 0) {
+          process.stdout.write(JSON.stringify({ browserProgress: { phase: value.phase, elapsedMs: value.elapsedMs } }) + '\n');
+        }
+      } catch { /* unrelated or malformed diagnostic input is not evidence */ }
     } else if (message.method === 'Fetch.requestPaused') {
       const { requestId, request } = message.params;
       if (request.url.startsWith(origin + '/')) {
@@ -123,6 +135,7 @@ try {
   await command('Page.enable');
   await command('Page.setLifecycleEventsEnabled', { enabled: true });
   await command('Runtime.enable');
+  await command('Runtime.addBinding', { name: 'cmsgReportProgress' });
   await command('Fetch.enable', { patterns: [{ urlPattern: '*' }] });
   const navigation = await command('Page.navigate', { url: origin });
   if (navigation.errorText || !navigation.loaderId) throw new Error('Browser navigation failed');
@@ -132,7 +145,7 @@ try {
   if (!loaded.has(navigation.loaderId)) throw new Error('Browser navigation deadline exceeded');
   // Evaluation waits for the current page's document before importing fixtures.
   const running = command('Runtime.evaluate', {
-    expression: `(async () => { while (document.readyState === 'loading') await new Promise(r => setTimeout(r, 10)); return await (await import('/browser/contract.mjs')).runBrowserContract(${profileSource ? "{ profileApi: await import('/cfrm-profiles/index.js') }" : ''}); })()`,
+    expression: `(async () => { globalThis.cmsgContractProgress = { phase: 'browser contract: load fixture', elapsedMs: 0, passed: [] }; while (document.readyState === 'loading') await new Promise(r => setTimeout(r, 10)); return await (await import('/browser/contract.mjs')).runBrowserContract({ ${profileSource ? "profileApi: await import('/cfrm-profiles/index.js')," : ''} onProgress: progress => { globalThis.cmsgContractProgress = progress; globalThis.cmsgReportProgress(JSON.stringify({ phase: progress.phase, elapsedMs: progress.elapsedMs })); } }); })()`,
     awaitPromise: true, returnByValue: true,
   });
   const result = await Promise.race([running, new Promise((_, reject) => {
@@ -142,9 +155,35 @@ try {
   if (!result.result || !('value' in result.result)) throw new Error('Browser contract returned no evidence');
   if (forbiddenRequests.length) throw new Error(`Unexpected external requests: ${JSON.stringify(forbiddenRequests)}`);
   const evidence = { source: process.env.CI_COMMIT_SHA, browser: metadata.Browser,
-    runtime: process.version, profileSource, contract: result.result.value, unexpectedExternalRequests: forbiddenRequests };
+    runtime: process.version, buildProfile, profileSource, contract: result.result.value, unexpectedExternalRequests: forbiddenRequests };
   await writeFile(artifact, JSON.stringify(evidence, null, 2) + '\n');
   process.stdout.write(JSON.stringify(evidence) + '\n');
+} catch (error) {
+  // Capture only fixed fixture phase/completion labels before closing the page.
+  // A hung CDP connection must not hold cleanup or replace the original error.
+  let progress;
+  let snapshotDeadline;
+  try {
+    if (socket?.readyState === 1) {
+      const snapshot = await Promise.race([
+        command('Runtime.evaluate', { expression: 'globalThis.cmsgContractProgress', returnByValue: true }),
+        new Promise((_, reject) => { snapshotDeadline = setTimeout(() => reject(new Error('Progress unavailable')), 5000); }),
+      ]);
+      const value = snapshot.result?.value;
+      if (value && typeof value.phase === 'string' && value.phase.length <= 240
+          && Number.isSafeInteger(value.elapsedMs) && value.elapsedMs >= 0
+          && Array.isArray(value.passed) && value.passed.length <= 64
+          && value.passed.every(label => typeof label === 'string' && label.length <= 240)) {
+        progress = { phase: value.phase, elapsedMs: value.elapsedMs, passed: value.passed };
+      }
+    }
+  } catch { /* preserve the contract failure */ }
+  finally { clearTimeout(snapshotDeadline); }
+  const failure = { source: process.env.CI_COMMIT_SHA, runtime: process.version, buildProfile, profileSource,
+    status: 'failed', progress: progress ?? { phase: 'unavailable', passed: [] } };
+  await writeFile(artifact + '.failure.json', JSON.stringify(failure, null, 2) + '\n').catch(() => {});
+  process.stderr.write(JSON.stringify(failure) + '\n');
+  throw error;
 } finally {
   clearTimeout(deadline);
   socket?.close();

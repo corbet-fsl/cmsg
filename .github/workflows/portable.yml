@@ -6,6 +6,13 @@ on:
   pull_request:
     paths: ["Cargo.*", "src/**", "tests/**", "examples/**", "browser/**", ".ci/**", ".github/workflows/portable.yml"]
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Contract suite to run
+        type: choice
+        required: true
+        default: all
+        options: [all, core, browser]
 permissions:
   contents: read
 concurrency:
@@ -19,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [core, browser]
+        suite: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.suite == 'browser' && '["browser"]' || github.event_name == 'workflow_dispatch' && inputs.suite == 'core' && '["core"]' || '["core","browser"]') }}
     env:
       CARGO_BUILD_JOBS: '2'
       RUST_TEST_THREADS: '2'

@@ -119,15 +119,19 @@ async function liveHandshake(a,b,key,context,saveA,saveB) {
   assert(a.liveSessions().length>0 && b.liveSessions().length>0,'mutual fresh live session');
 }
 
-export async function runBrowserContract({ profileApi } = {}) {
-  await init({ module_or_path: new URL('./pkg/cmsg_bg.wasm', import.meta.url) });
+export async function runBrowserContract({ profileApi, onProgress = () => {} } = {}) {
   const passed = [];
+  const started = performance.now();
+  const report = phase => onProgress({ phase, elapsedMs: Math.round(performance.now() - started), passed: [...passed] });
+  const completed = (...labels) => { passed.push(...labels); report(labels.at(-1)); };
+  report('browser contract: initialize generated Wasm');
+  await init({ module_or_path: new URL('./pkg/cmsg_bg.wasm', import.meta.url) });
   let profileComposition;
   const issuer = await authority();
   const alice = await member(issuer);
   const bob = await member(issuer);
   await runProfileSigningContract(alice.member, { admission: alice.grant, authorization: JSON.parse(alice.certificate) });
-  passed.push('generated JS API: scoped profile signing uses the root-authorized device key');
+  completed('generated JS API: scoped profile signing uses the root-authorized device key');
   await runAccountingMemberContract(alice.member, alice.identity.memberId(), issuer.trust);
   alice.member.createGroup();
   const invitation = alice.member.add(bob.member.keyPackage());
@@ -144,7 +148,7 @@ export async function runBrowserContract({ profileApi } = {}) {
   const text = alice.member.receive(bob.member.sendText('literal <tag> 🦀'));
   assert(text.kind === 'text' && text.text === 'literal <tag> 🦀', 'text ABI roundtrip');
   text.free();
-  passed.push('generated JS API: root-authorized MLS binary/text roundtrip and replay rejection');
+  completed('generated JS API: root-authorized MLS binary/text roundtrip and replay rejection');
 
   const valid = alice.member.sendBytes(new Uint8Array([254, 0, 1]));
   const corrupt = valid.slice();
@@ -153,7 +157,7 @@ export async function runBrowserContract({ profileApi } = {}) {
   const recovered = bob.member.receive(valid);
   assert(sameBytes(recovered.bytes, [254, 0, 1]), 'rejected tamper preserves receive state');
   recovered.free();
-  passed.push('generated JS API: tampering rejection preserves valid receive state');
+  completed('generated JS API: tampering rejection preserves valid receive state');
 
   const key = crypto.getRandomValues(new Uint8Array(32));
   const context = encode('browser-fixture');
@@ -171,7 +175,7 @@ export async function runBrowserContract({ profileApi } = {}) {
   afterRestore.free();
   resumed.free();
   key.fill(0);
-  passed.push('generated JS API: identity and conversation encrypted recovery with context/member pins');
+  completed('generated JS API: identity and conversation encrypted recovery with context/member pins');
 
   const forged = new BrowserMember();
   const substitutedGrant = await issuer.grant(alice.identity.memberId(), forged.chatPublicKey());
@@ -179,7 +183,7 @@ export async function runBrowserContract({ profileApi } = {}) {
     JSON.stringify(substitutedGrant), JSON.stringify(issuer.trust), alice.certificate,
   ), 'issuer alone cannot replace a device');
   forged.free();
-  passed.push('generated JS API: issuer-only device substitution rejected');
+  completed('generated JS API: issuer-only device substitution rejected');
 
   const sender = await member(issuer);
   const recipient = await member(issuer);
@@ -191,9 +195,10 @@ export async function runBrowserContract({ profileApi } = {}) {
   const recipientAuthority = { admission: recipient.grant, authorization: JSON.parse(recipient.certificate) };
   await runProfileSigningContract(senderInbox, senderAuthority);
   if (profileApi) {
+    report('profile composition: start');
     profileComposition = await runProfileComposition(profileApi, senderInbox, senderAuthority, recipientInbox, recipientAuthority,
-      { communityId: issuer.trust.community_id, policyDigest: issuer.trust.policy_digest, issuerPublicKey: b64(new Uint8Array(issuer.trust.issuer_public_key)) });
-    passed.push('pinned cfrm composition: all eight profile/discovery signing domains, publication, owner/holder key release and private decryption');
+      { communityId: issuer.trust.community_id, policyDigest: issuer.trust.policy_digest, issuerPublicKey: b64(new Uint8Array(issuer.trust.issuer_public_key)) }, report);
+    completed('pinned cfrm composition: all eight profile/discovery signing domains, publication, owner/holder key release and private decryption');
   }
   const store = await checkpointStore();
   const sessionKey = crypto.getRandomValues(new Uint8Array(32));
@@ -252,7 +257,7 @@ export async function runBrowserContract({ profileApi } = {}) {
       answerReceived.free();
       await liveControls(senderInbox,recipientInbox,sessionKey,sessionContext,saveSender,saveRecipient);
     } });
-  passed.push('generated Wasm + WebCrypto: actual Inbox Ed25519/P256 receipt, original sender acknowledgment, external delegated key and sealed recovery');
+  completed('generated Wasm + WebCrypto: actual Inbox Ed25519/P256 receipt, original sender acknowledgment, external delegated key and sealed recovery');
   const queuedBeforeClose = await senderInbox.sendBytes(binary, sessionKey, sessionContext, saveSender);
   await rejects(() => recipientInbox.blockMemberUntil(senderId, undefined, sessionKey, sessionContext,
     async () => false), 'closure requires acknowledgement');
@@ -436,14 +441,14 @@ export async function runBrowserContract({ profileApi } = {}) {
   restoredLive.free();
   await liveHandshake(senderInbox,recipientInbox,sessionKey,sessionContext,saveSender,saveRecipient);
   await rejects(()=>recipientInbox.receive(pendingLive,sessionKey,sessionContext,saveRecipient),'old session frame rejected after fresh handshake');
-  passed.push('generated Wasm + IndexedDB: fresh live sessions, atomic cancellation, lost ACK recovery and no restored application replay');
-  await runLiveStreamContract(senderInbox,recipientInbox,sessionKey,sessionContext,saveSender,saveRecipient);
-  passed.push('actual Wasm with scripted framed I/O: live adapter acceptance, close during pending write, cancellation and member independence');
+  completed('generated Wasm + IndexedDB: fresh live sessions, atomic cancellation, lost ACK recovery and no restored application replay');
+  await runLiveStreamContract(senderInbox,recipientInbox,sessionKey,sessionContext,saveSender,saveRecipient,report);
+  completed('actual Wasm with scripted framed I/O: live adapter acceptance, pending-write cancellation, failed-ACK payload cleanup and member independence');
   senderReplacement.member.free(); recipientReplacement.member.free();
-  passed.push('generated JS API + IndexedDB: fresh-admission replacement group, durable handle transfer, exact restored pending retry and one-introduction gate');
+  completed('generated JS API + IndexedDB: fresh-admission replacement group, durable handle transfer, exact restored pending retry and one-introduction gate');
   senderInbox.free(); recipientInbox.free(); sender.identity.free(); recipient.identity.free();
   sessionKey.fill(0); store.close();
-  passed.push('generated JS API + IndexedDB: bounded intro/reply, owner-only fresh restart, private archived receipts, stale traffic rejection and durable checkpoint/outbox');
+  completed('generated JS API + IndexedDB: bounded intro/reply, owner-only fresh restart, private archived receipts, stale traffic rejection and durable checkpoint/outbox');
 
   for (const port of [0, -1, 65536, 65537, 1.5, NaN, Infinity]) {
     throws(() => new BrowserOnionEndpoint(ONION, port), 'port bounds before JS integer coercion');
@@ -454,7 +459,7 @@ export async function runBrowserContract({ profileApi } = {}) {
   const endpoint = new BrowserOnionEndpoint(ONION, 80);
   assert(endpoint.host === ONION && endpoint.port === 80, 'onion getters');
   endpoint.free();
-  passed.push('generated JS API: onion checksum and numeric bounds');
+  completed('generated JS API: onion checksum and numeric bounds');
 
   const requests = [];
   let closes = 0;
@@ -476,7 +481,7 @@ export async function runBrowserContract({ profileApi } = {}) {
   assert(requests.length === 1, 'invalid routes never reach adapter');
   transport.close();
   assert(closes === 1, 'transport closes exactly once');
-  passed.push('scripted adapter boundary: onion-only framing, fixed path, no invalid-route I/O');
+  completed('scripted adapter boundary: onion-only framing, fixed path, no invalid-route I/O');
 
   const invalidResponses = [
     () => new Response(null, { status: 302, headers: { location: 'https://tracking.invalid/' } }),
@@ -497,7 +502,7 @@ export async function runBrowserContract({ profileApi } = {}) {
     await rejects(() => failing.exchange(ONION, 80, new Uint8Array([1])), 'failed transport cannot retry');
     assert(calls === 1 && closed, 'response failure closes without a retry/redirect');
   }
-  passed.push('scripted adapter boundary: redirects, oversize, truncation, multiple frames and chunking rejected');
+  completed('scripted adapter boundary: redirects, oversize, truncation, multiple frames and chunking rejected');
 
   let timedOut = false;
   const stalled = new OnionHttpTransport({
@@ -507,7 +512,7 @@ export async function runBrowserContract({ profileApi } = {}) {
   }, 20);
   await rejects(() => stalled.exchange(ONION, 80, new Uint8Array([1])), 'whole exchange timeout');
   assert(timedOut, 'timeout closes Tor client');
-  passed.push('scripted adapter boundary: readiness is inside whole-exchange deadline');
+  completed('scripted adapter boundary: readiness is inside whole-exchange deadline');
 
   const throwingClose = new OnionHttpTransport({
     ready: async () => {}, fetch: async () => { throw new Error('secret destination'); },
@@ -517,7 +522,7 @@ export async function runBrowserContract({ profileApi } = {}) {
   try { await throwingClose.exchange(ONION, 80, new Uint8Array([1])); } catch (error) { sanitized = error.message; }
   assert(sanitized === 'cmsg:Transport', 'upstream close errors scrubbed');
   throwingClose.close();
-  passed.push('scripted adapter boundary: transport and shutdown errors cannot disclose upstream details');
+  completed('scripted adapter boundary: transport and shutdown errors cannot disclose upstream details');
 
   const incomingFrames = new Uint8Array([...frame(new Uint8Array([1, 255])), ...frame(new Uint8Array([2]))]);
   const chunks = [incomingFrames.slice(0, 3), incomingFrames.slice(3)];
@@ -543,8 +548,8 @@ export async function runBrowserContract({ profileApi } = {}) {
   }, 1000);
   await rejects(() => invalidRaw.receive(), 'invalid raw frame');
   assert(invalidRaw.closed, 'invalid raw frame poisons stream');
-  passed.push('scripted raw-stream boundary: native framing, fragmentation, coalescing, EOF and invalid-frame closure');
-  passed.push(...await runTorNodeContract());
+  completed('scripted raw-stream boundary: native framing, fragmentation, coalescing, EOF and invalid-frame closure');
+  completed(...await runTorNodeContract());
 
   bob.member.free();
   alice.identity.free();

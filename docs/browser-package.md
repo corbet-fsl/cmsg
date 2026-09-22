@@ -2,10 +2,15 @@
 
 [Browser package entrypoint](../browser/README.md).
 
-Build the Rust library for `wasm32-unknown-unknown`, then generate the Web
+Build the Rust library with `--release` for `wasm32-unknown-unknown`, then generate the Web
 bindings with a `wasm-bindgen` CLI matching the resolved crate version, output
 name `cmsg`, into `browser/pkg/`. Copy the repository license into the package
 before packing. The checked-in package excludes generated artifacts.
+
+The portable browser suite validates and packs the same optimized Wasm binary.
+It records `buildProfile: "release"` in both browser-contract and npm-package
+evidence. Its three-minute contract deadline and cryptographic restore checks
+also apply to this build.
 
 After generating those bindings, `node .ci/browser-package.mjs <artifact-directory>`
 creates and checks an installable npm archive with the license, runtime entrypoints,

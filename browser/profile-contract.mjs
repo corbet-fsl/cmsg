@@ -26,7 +26,7 @@ export async function runProfileSigningContract(signer, authority) {
   refuses(() => signer.signProfileStatement(json(expired)), 'actual browser clock rejects expired statement');
 }
 
-export async function runProfileComposition(api, ownerSigner, ownerAuthority, holderSigner, holderAuthority, trust) {
+export async function runProfileComposition(api, ownerSigner, ownerAuthority, holderSigner, holderAuthority, trust, report = () => {}) {
   const domains = new Set(), clock = () => Math.floor(Date.now() / 1000), now = clock();
   const identity = (signer, authority) => ({ authority, sign(bytes) {
     domains.add(JSON.parse(decodeText.decode(bytes))[0]);
@@ -39,6 +39,7 @@ export async function runProfileComposition(api, ownerSigner, ownerAuthority, ho
       maxConcurrentProofs: 4, maxRequestsPerWindow: 100, requestWindowSeconds: 60 } };
   let cached, sequence = 0, keyService, seededHolder;
   const cache = { publish: async value => { cached = structuredClone(value); }, fetch: async () => structuredClone(cached) };
+  report('profile composition: create publisher');
   const publisher = await api.createProfilePublisher({ ...config, identity: owner, cache,
     reserveSequence: async () => ++sequence, saveCheckpoint: async () => {} });
   // Explicit fixture gates only. This contract establishes device signatures
@@ -62,6 +63,7 @@ export async function runProfileComposition(api, ownerSigner, ownerAuthority, ho
     check(received.text === 'Private profile 🦀', 'actual cfrm publisher/reader decrypts authenticated profile');
   }
   try {
+    report('profile composition: publish encrypted profile');
     const publication = await publisher.publish({ text: 'Private profile 🦀', discriminators: { region: 2 }, expiresAt: now + 120 });
     const discovery = api.createDiscoveryClient({ ...config, identity: owner, sessionId: b64(random(32)),
       requestSeconds: 30, maxResponseBytes: 16384, savePending: async () => {},
@@ -71,13 +73,17 @@ export async function runProfileComposition(api, ownerSigner, ownerAuthority, ho
         check(await crypto.subtle.verify('Ed25519', key, unb64(request.signature), api.discoveryRequestBytes(request)), 'real nested discovery transcript');
         return { kind: 'updated' };
       } });
+    report('profile composition: publish discovery request');
     await discovery.publish(publication); await discovery.confirmPublication(publication);
     keyService = publisher.createKeyService(access);
+    report('profile composition: owner key release and decryption');
     await read(keyService, ownerAuthority.admission.memberId);
+    report('profile composition: holder offer and seed');
     const wrappingKeys = await api.wrappingKeyPair();
     const holderOffer = await api.createHolderKeyOffer({ identity: holder, wrappingKeys, expiresAt: now + 50 }, config);
     const seed = await publisher.seedHolder({ holderOffer, expiresAt: now + 45 });
     seededHolder = await api.createSeededProfileHolder({ ...config, ...access, identity: holder, seed, wrappingKeys });
+    report('profile composition: holder key release and decryption');
     await read(seededHolder, holderAuthority.admission.memberId);
     // The real signing helper constructs its transcript. The blinded request
     // below is synthetic; no RSA permit issuance or redemption is claimed.
@@ -86,6 +92,7 @@ export async function runProfileComposition(api, ownerSigner, ownerAuthority, ho
     const contextId = await hash(json(['cfrm.permit.epoch.v1', epoch.communityId, epoch.epochId, epoch.validFrom,
       epoch.issueUntil, epoch.expiresAt, epoch.publicKeyDer, epoch.redemptionPublicKey]));
     const blindedRequest = random(416); blindedRequest.set(contextId);
+    report('profile composition: ticket issue signature');
     await api.signProfileTicketIssue({ ...config, identity: owner, epoch, blindedRequest,
       requestId: b64(random(32)), expiresAt: now + 30 });
     const expected = ['cfrm.cached-profile.v1', 'cfrm.discovery-request.v1', 'cfrm.key-access.issue.v1',

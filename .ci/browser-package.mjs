@@ -15,7 +15,7 @@ const repository = fileURLToPath(new URL('../', import.meta.url));
 const source = join(repository, 'browser'), artifacts = resolve(process.argv[2]);
 await mkdir(artifacts, { recursive: true });
 const scratch = await mkdtemp(join(tmpdir(), 'cmsg-browser-package-'));
-const evidence = { source: process.env.CI_COMMIT_SHA, runtime: process.version, ok: false,
+const evidence = { source: process.env.CI_COMMIT_SHA, runtime: process.version, buildProfile: process.env.BROWSER_BUILD_PROFILE, ok: false,
   scope: 'Packed browser bindings and declared import closure; Tor peer remains external' };
 const execute = promisify(execFile);
 const sha256 = value => createHash('sha256').update(value).digest('hex');

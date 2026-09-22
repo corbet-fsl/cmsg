@@ -163,7 +163,7 @@ board statements. There is no generic device-signing or private-key export API.
 `signProfileStatement` on both `BrowserMember` and `BrowserInbox` accepts cfrm's
 eight supported canonical profile/discovery signing transcripts, using this
 same root-authorized device key. It can be supplied directly as cfrm's
-`identity.sign` callback; see the [schema and authority boundary](../docs/profile-signing.md).
+`identity.sign` callback; see the [schema and authority boundary](https://github.com/cmtymeet/cmsg/blob/main/docs/profile-signing.md).
 
 ## Transport and packaging references
 
@@ -172,7 +172,7 @@ HTTP client bridge. The embedding supplies the configured gateway, deadlines,
 and live peer endpoints. Permanent identity and encrypted contact state remain
 separate from ephemeral onion-service keys.
 
-- [Tor adapter setup, lifecycle and peer HTTP wire contract](../docs/browser-transport.md)
-- [Building bindings, packing the npm archive and browser validation](../docs/browser-package.md)
-- [Pinned upstream TorJS source and patches](upstream/README.md)
-- [Public-network validation](../docs/public-tor-validation.md) and [onion renewal evidence](../docs/onion-renewal.md)
+- [Tor adapter setup, lifecycle and peer HTTP wire contract](https://github.com/cmtymeet/cmsg/blob/main/docs/browser-transport.md)
+- [Building bindings, packing the npm archive and browser validation](https://github.com/cmtymeet/cmsg/blob/main/docs/browser-package.md)
+- [Pinned upstream TorJS source and patches](https://github.com/cmtymeet/cmsg/blob/main/browser/upstream/README.md)
+- [Public-network validation](https://github.com/cmtymeet/cmsg/blob/main/docs/public-tor-validation.md) and [onion renewal evidence](https://github.com/cmtymeet/cmsg/blob/main/docs/onion-renewal.md)

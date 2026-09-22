@@ -42,9 +42,10 @@ if test "${CHECK_SUITE:-core}" = browser; then
     cargo update --manifest-path .ci/browser-bindgen/Cargo.toml --workspace
   fi
   cp .ci/browser-bindgen/Cargo.lock "$artifact_dir/browser-helper-Cargo.lock"
-  timeout 1200 cargo build --locked --target wasm32-unknown-unknown --lib
+  export BROWSER_BUILD_PROFILE=release
+  timeout 1200 cargo build --locked --release --target wasm32-unknown-unknown --lib
   timeout 1200 cargo run --locked --manifest-path .ci/browser-bindgen/Cargo.toml -- \
-    "$CARGO_TARGET_DIR/wasm32-unknown-unknown/debug/cmsg.wasm" browser/pkg cmsg
+    "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/cmsg.wasm" browser/pkg cmsg
   export BROWSER_BIN BROWSER_EVIDENCE="$artifact_dir/browser-evidence.json"
   timeout 300 node .ci/browser-check.mjs || result=$?
   cargo fmt --all -- --check || result=$?
