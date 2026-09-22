@@ -6,6 +6,12 @@ archive_variable = "CFRM_SOURCE_ARCHIVE"
 digest_variable = "CFRM_SOURCE_SHA256"
 workflows = ["composition"]
 
+[archives.cfrm_profiles]
+revision = "9637a9fe16f2b255f3dd57c1e8b6130d5ef6e89e"
+archive_variable = "CFRM_PROFILES_SOURCE_ARCHIVE"
+digest_variable = "CFRM_PROFILES_SOURCE_SHA256"
+workflows = ["portable-core"]
+
 [archives.torjs]
 revision = "65bb21d536a405ba706689ca384fad2ee25e60a7"
 archive_variable = "TORJS_SOURCE_ARCHIVE"

@@ -8,6 +8,7 @@ import { OnionFramedStream } from './internal/streams.mjs';
 import { runTorNodeContract } from './tor-node-contract.mjs';
 import { runLiveStreamContract } from './live-contract.mjs';
 import { runAccountingContract, runAccountingMemberContract } from './accounting-contract.mjs';
+import { runProfileSigningContract, runProfileComposition } from './profile-contract.mjs';
 
 function assert(condition, label) {
   if (!condition) throw new Error(`browser contract: ${label}`);
@@ -118,12 +119,15 @@ async function liveHandshake(a,b,key,context,saveA,saveB) {
   assert(a.liveSessions().length>0 && b.liveSessions().length>0,'mutual fresh live session');
 }
 
-export async function runBrowserContract() {
+export async function runBrowserContract({ profileApi } = {}) {
   await init({ module_or_path: new URL('./pkg/cmsg_bg.wasm', import.meta.url) });
   const passed = [];
+  let profileComposition;
   const issuer = await authority();
   const alice = await member(issuer);
   const bob = await member(issuer);
+  await runProfileSigningContract(alice.member, { admission: alice.grant, authorization: JSON.parse(alice.certificate) });
+  passed.push('generated JS API: scoped profile signing uses the root-authorized device key');
   await runAccountingMemberContract(alice.member, alice.identity.memberId(), issuer.trust);
   alice.member.createGroup();
   const invitation = alice.member.add(bob.member.keyPackage());
@@ -183,6 +187,14 @@ export async function runBrowserContract() {
   const recipientId = recipient.identity.memberId();
   let senderInbox = new BrowserInbox(sender.member);
   const recipientInbox = new BrowserInbox(recipient.member);
+  const senderAuthority = { admission: sender.grant, authorization: JSON.parse(sender.certificate) };
+  const recipientAuthority = { admission: recipient.grant, authorization: JSON.parse(recipient.certificate) };
+  await runProfileSigningContract(senderInbox, senderAuthority);
+  if (profileApi) {
+    profileComposition = await runProfileComposition(profileApi, senderInbox, senderAuthority, recipientInbox, recipientAuthority,
+      { communityId: issuer.trust.community_id, policyDigest: issuer.trust.policy_digest, issuerPublicKey: b64(new Uint8Array(issuer.trust.issuer_public_key)) });
+    passed.push('pinned cfrm composition: all eight profile/discovery signing domains, publication, owner/holder key release and private decryption');
+  }
   const store = await checkpointStore();
   const sessionKey = crypto.getRandomValues(new Uint8Array(32));
   const sessionContext = encode('guarded-browser-session');
@@ -537,5 +549,5 @@ export async function runBrowserContract() {
   bob.member.free();
   alice.identity.free();
   bob.identity.free();
-  return { evidence: 'browser crypto and scripted adapter boundaries; no live Tor claim', passed };
+  return { evidence: 'browser crypto and scripted adapter boundaries; no live Tor claim', profileComposition, passed };
 }

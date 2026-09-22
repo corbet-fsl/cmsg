@@ -25,7 +25,6 @@ jobs:
       RUST_TEST_THREADS: '2'
       CI_COMMIT_SHA: ${{ github.sha }}
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      ARTIFACT_ROOT: ${{ runner.temp }}/contract-evidence
       CHECK_SUITE: ${{ matrix.suite }}
       RESOLVE_DEPENDENCIES: '0'
     steps:
@@ -35,6 +34,40 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+      - name: Read pinned cfrm profile revision
+        if: matrix.suite == 'browser'
+        id: cfrm-profile-pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmsg_profile_revision="$(awk '
+            $0 == "[archives.cfrm_profiles]" { selected=1; next }
+            /^\[/ { selected=0 }
+            selected && $1 == "revision" { gsub(/"/, "", $3); print $3 }
+          ' .ci/archives.toml)"
+          [[ "$cmsg_profile_revision" =~ ^[0-9a-f]{40}$ ]]
+          printf 'revision=%s\n' "$cmsg_profile_revision" >> "$GITHUB_OUTPUT"
+      - name: Checkout pinned public profile source
+        if: matrix.suite == 'browser'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: cmtymeet/cfrm
+          ref: ${{ steps.cfrm-profile-pin.outputs.revision }}
+          path: .ci-dependencies/cfrm-profiles
+          persist-credentials: false
+      - name: Archive exact profile composition source
+        if: matrix.suite == 'browser'
+        shell: bash
+        env:
+          CFRM_PROFILE_REVISION: ${{ steps.cfrm-profile-pin.outputs.revision }}
+        run: |
+          set -euo pipefail
+          test "$(git -C .ci-dependencies/cfrm-profiles rev-parse HEAD)" = "$CFRM_PROFILE_REVISION"
+          cmsg_profile_archive="$RUNNER_TEMP/cfrm-profiles.tar"
+          git -C .ci-dependencies/cfrm-profiles archive --format=tar --output="$cmsg_profile_archive" "$CFRM_PROFILE_REVISION"
+          cmsg_profile_digest="$(sha256sum "$cmsg_profile_archive" | cut -d ' ' -f 1)"
+          printf 'CFRM_PROFILES_SOURCE_ARCHIVE=%s\n' "$cmsg_profile_archive" >> "$GITHUB_ENV"
+          printf 'CFRM_PROFILES_SOURCE_SHA256=%s\n' "$cmsg_profile_digest" >> "$GITHUB_ENV"
       - name: Prepare isolated runner dependencies
         shell: bash
         run: |
@@ -53,6 +86,8 @@ jobs:
         if: matrix.suite == 'core'
         run: cargo fmt --all -- --check
       - name: Run the shared contract
+        env:
+          ARTIFACT_ROOT: ${{ runner.temp }}/contract-evidence
         run: bash .ci/portable-checks.sh
       - name: Retain exact dependency and runtime evidence
         if: always()

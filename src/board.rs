@@ -129,7 +129,7 @@ impl Member {
         Ok(request)
     }
 
-    fn current_board_authorization(
+    pub(crate) fn current_board_authorization(
         &self,
         expires_at: u64,
     ) -> Result<(AdmissionGrant, DeviceAuthorization, u64), Error> {

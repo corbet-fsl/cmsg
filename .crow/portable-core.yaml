@@ -12,6 +12,8 @@ variables:
   WASM_LINKER: {default: ""}
   OPENSSL_INCLUDE_DIR: {default: ""}
   OPENSSL_LIB_DIR: {default: ""}
+  CFRM_PROFILES_SOURCE_ARCHIVE: {default: ""}
+  CFRM_PROFILES_SOURCE_SHA256: {default: ""}
 steps:
   - name: verified-source
     image: bash

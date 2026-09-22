@@ -64,10 +64,16 @@ export class LiveInboxStream {
       for (;;) {
         const wire = await this.#stream.receive();
         const result = await mutate(this.#inbox, () => this.#inbox.receive(wire, this.#key, this.#context, this.#persist));
-        if (this.#closed) { result.free(); throw failure(); }
-        await this.#flushControls();
-        if (result.kind === 'liveControl') { result.free(); continue; }
-        return result;
+        let returned = false;
+        try {
+          if (this.#closed) throw failure();
+          await this.#flushControls();
+          if (result.kind === 'liveControl') continue;
+          returned = true;
+          return result;
+        } finally {
+          if (!returned) result.free();
+        }
       }
     } catch { await this.close(); throw failure(); }
   }

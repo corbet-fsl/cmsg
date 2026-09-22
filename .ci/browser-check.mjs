@@ -2,7 +2,8 @@
 // No npm packages, browser downloads, persistent browser profiles or services.
 import { createServer } from 'node:http';
 import { readFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { resolve, join, extname, sep } from 'node:path';
@@ -11,6 +12,27 @@ const root = resolve(process.cwd());
 const artifact = process.env.BROWSER_EVIDENCE;
 const binary = process.env.BROWSER_BIN;
 if (!binary || !artifact) throw new Error('BROWSER_BIN and BROWSER_EVIDENCE are required');
+const profileModules = new Map();
+let profileSource;
+if (process.env.CFRM_SOURCE_ARCHIVE || process.env.CFRM_SOURCE_COMMIT || process.env.CFRM_SOURCE_SHA256) {
+  const { CFRM_SOURCE_ARCHIVE: archivePath, CFRM_SOURCE_COMMIT: commit, CFRM_SOURCE_SHA256: expectedHash } = process.env;
+  if (!archivePath || !/^[0-9a-f]{40}$/.test(commit ?? '') || !/^[0-9a-f]{64}$/.test(expectedHash ?? '')) {
+    throw new Error('Profile composition requires an explicit cfrm archive, commit and checksum');
+  }
+  const archive = await readFile(archivePath);
+  if (createHash('sha256').update(archive).digest('hex') !== expectedHash) throw new Error('cfrm archive checksum mismatch');
+  const identified = spawnSync('git', ['get-tar-commit-id'], { input: archive, encoding: 'utf8' });
+  if (identified.error || identified.status !== 0 || identified.stdout.trim() !== commit) throw new Error('cfrm archive commit mismatch');
+  // Serve only these verified source modules. No repository directory, test
+  // secrets, package installation, or external endpoint is exposed to the page.
+  for (const name of ['index.js', 'publisher.js', 'access.js', 'envelope.js', 'keys.js', 'eligibility.js', 'crypto.js', 'discovery.js', 'tickets.js']) {
+    const extracted = spawnSync('tar', ['--extract', '--to-stdout', '--file', '-', `browser/profiles/${name}`],
+      { input: archive, maxBuffer: 2 * 1024 * 1024 });
+    if (extracted.error || extracted.status !== 0 || !extracted.stdout.length) throw new Error('Missing pinned cfrm profile module');
+    profileModules.set(`/cfrm-profiles/${name}`, extracted.stdout);
+  }
+  profileSource = { commit, archiveSha256: expectedHash };
+}
 const mime = { '.mjs': 'text/javascript', '.js': 'text/javascript', '.wasm': 'application/wasm' };
 const server = createServer(async (request, response) => {
   try {
@@ -19,6 +41,10 @@ const server = createServer(async (request, response) => {
       response.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
       response.end('<!doctype html><meta charset="utf-8"><title>cmsg browser contract</title><script type="importmap">{"imports":{"tor-js/wasm-file":"/browser/fixtures/tor-js.mjs"}}</script>');
       return;
+    }
+    if (profileModules.has(pathname)) {
+      response.writeHead(200, { 'Content-Type': 'text/javascript', 'Cache-Control': 'no-store' });
+      response.end(profileModules.get(pathname)); return;
     }
     const file = resolve(root, '.' + decodeURIComponent(pathname));
     if (!file.startsWith(join(root, 'browser') + sep) || !mime[extname(file)]) {
@@ -106,7 +132,7 @@ try {
   if (!loaded.has(navigation.loaderId)) throw new Error('Browser navigation deadline exceeded');
   // Evaluation waits for the current page's document before importing fixtures.
   const running = command('Runtime.evaluate', {
-    expression: "(async () => { while (document.readyState === 'loading') await new Promise(r => setTimeout(r, 10)); return await (await import('/browser/contract.mjs')).runBrowserContract(); })()",
+    expression: `(async () => { while (document.readyState === 'loading') await new Promise(r => setTimeout(r, 10)); return await (await import('/browser/contract.mjs')).runBrowserContract(${profileSource ? "{ profileApi: await import('/cfrm-profiles/index.js') }" : ''}); })()`,
     awaitPromise: true, returnByValue: true,
   });
   const result = await Promise.race([running, new Promise((_, reject) => {
@@ -116,7 +142,7 @@ try {
   if (!result.result || !('value' in result.result)) throw new Error('Browser contract returned no evidence');
   if (forbiddenRequests.length) throw new Error(`Unexpected external requests: ${JSON.stringify(forbiddenRequests)}`);
   const evidence = { source: process.env.CI_COMMIT_SHA, browser: metadata.Browser,
-    runtime: process.version, contract: result.result.value, unexpectedExternalRequests: forbiddenRequests };
+    runtime: process.version, profileSource, contract: result.result.value, unexpectedExternalRequests: forbiddenRequests };
   await writeFile(artifact, JSON.stringify(evidence, null, 2) + '\n');
   process.stdout.write(JSON.stringify(evidence) + '\n');
 } finally {

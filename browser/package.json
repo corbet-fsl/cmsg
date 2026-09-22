@@ -24,7 +24,7 @@
     "tor-streams.d.ts",
     "internal/http.mjs",
     "internal/streams.mjs",
-    "upstream/**",
+    "upstream/manifest.json",
     "pkg/cmsg.js",
     "pkg/cmsg.d.ts",
     "pkg/cmsg_bg.wasm",

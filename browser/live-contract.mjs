@@ -5,8 +5,9 @@ function assert(value,label) {if(!value)throw new Error(`live contract: ${label}
 function pair() {
  const sides=[{queue:[],wait:[],closed:false},{queue:[],wait:[],closed:false}];
  const endpoints=sides.map((self,index)=>({
-  pauseNext:false,release:undefined,captured:undefined,
+  pauseNext:false,failNext:false,release:undefined,captured:undefined,
   async send(bytes) {
+   if(this.failNext){this.failNext=false;throw new Error('scripted write failure');}
    this.captured=bytes.slice();
    if(this.pauseNext){this.pauseNext=false;await new Promise(resolve=>{this.release=resolve;});}
    if(self.closed)throw new Error('scripted closed write');
@@ -36,4 +37,36 @@ export async function runLiveStreamContract(a,b,key,context,saveA,saveB) {
   assert(!a.canTransmitLiveWire(late) && JSON.parse(a.liveDeliveries()).some(d=>d.outgoing&&d.status==='canceledUnconfirmed'),'late application stays canceled');
   assert(!a.isClosed(b.memberId()),'I/O close never blocks member');
  } finally {await Promise.allSettled([la.close(),lb.close()]);}
+ // An accepted plaintext result remains owned by the adapter until ACK flushing
+ // succeeds. A failed write must free it while preserving durable peer history.
+ const [sc,sd]=pair();
+ const [lc,ld]=await Promise.all([
+  LiveInboxStream.open(sc,a,{peerDevice:b.chatPublicKey(),until,key,context,persist:saveA}),
+  LiveInboxStream.open(sd,b,{peerDevice:a.chatPublicKey(),until,key,context,persist:saveB}),
+ ]);
+ const originalReceive=b.receive;
+ let receivedPayloads=0,freedPayloads=0;
+ b.receive=async function(...args) {
+  const result=await originalReceive.apply(this,args);
+  if(result.kind==='bytes') {
+   receivedPayloads+=1;
+   const originalFree=result.free;
+   result.free=function(){freedPayloads+=1;return originalFree.call(this);};
+  }
+  return result;
+ };
+ try {
+  const historySize=()=>{const entries=b.acceptedLiveHistory();for(const entry of entries)entry.free();return entries.length;};
+  const historyBefore=historySize();
+  await lc.send(new Uint8Array([21,0,255]));
+  sd.failNext=true;
+  let rejected=false;
+  try {const result=await ld.receive();result.free();} catch {rejected=true;}
+  assert(rejected&&ld.closed,'ACK write failure closes receive');
+  assert(receivedPayloads===1&&freedPayloads===1,'failed ACK frees accepted Wasm payload exactly once');
+  assert(historySize()===historyBefore+1,'failed ACK retains accepted history');
+ } finally {
+  b.receive=originalReceive;
+  await Promise.allSettled([lc.close(),ld.close()]);
+ }
 }

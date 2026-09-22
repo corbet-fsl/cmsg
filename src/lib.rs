@@ -21,6 +21,7 @@ mod lifecycle;
 mod live;
 mod member;
 mod profile;
+mod profile_statements;
 mod release;
 mod rendezvous;
 mod reservation;

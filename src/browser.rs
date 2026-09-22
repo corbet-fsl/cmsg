@@ -161,6 +161,11 @@ impl BrowserMember {
         self.member.chat_public_key()
     }
 
+    #[wasm_bindgen(js_name = signProfileStatement)]
+    pub fn sign_profile_statement(&self, bytes: &[u8]) -> Result<String, JsValue> {
+        self.member.sign_profile_statement(bytes).map_err(js_error)
+    }
+
     /// Trust is application configuration. Do not take issuer trust from peers.
     #[wasm_bindgen(js_name = bindDeviceAdmission)]
     pub fn bind_device_admission(
@@ -560,6 +565,11 @@ impl BrowserInbox {
     #[wasm_bindgen(js_name = invitationSender)]
     pub fn invitation_sender(&self, welcome: &[u8]) -> Result<String, JsValue> {
         self.member.invitation_sender(welcome).map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = signProfileStatement)]
+    pub fn sign_profile_statement(&self, bytes: &[u8]) -> Result<String, JsValue> {
+        self.member.sign_profile_statement(bytes).map_err(js_error)
     }
 
     #[wasm_bindgen(js_name = signPresence)]

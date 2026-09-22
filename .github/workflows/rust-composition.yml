@@ -17,7 +17,6 @@ jobs:
       RUST_TEST_THREADS: '2'
       CI_COMMIT_SHA: ${{ github.sha }}
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      ARTIFACT_ROOT: ${{ runner.temp }}/contract-evidence
       CHECK_SUITE: composition
       RESOLVE_DEPENDENCIES: '0'
     steps:
@@ -44,6 +43,8 @@ jobs:
           printf 'OPENSSL_INCLUDE_DIR=%s\n' "$(pkg-config --variable=includedir openssl)" >> "$GITHUB_ENV"
           printf 'OPENSSL_LIB_DIR=%s\n' "$(pkg-config --variable=libdir openssl)" >> "$GITHUB_ENV"
       - name: Exercise signed identities and blind introduction admission
+        env:
+          ARTIFACT_ROOT: ${{ runner.temp }}/contract-evidence
         run: bash .ci/portable-checks.sh
       - name: Retain component evidence
         if: always()
