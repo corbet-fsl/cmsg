@@ -1,0 +1,54 @@
+name: Public Tor transport package
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CI_COMMIT_SHA: ${{ github.sha }}
+      CARGO_BUILD_JOBS: '2'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.ci-target/tor-public
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Prepare stable Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+      - name: Build current pinned public-network assets
+        env:
+          ARTIFACT_ROOT: ${{ runner.temp }}/cmsg-tor-package
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACT_ROOT"
+          capture() {
+            result=$?
+            trap - EXIT
+            printf '%s\n' "$result" > "$ARTIFACT_ROOT/validation-status.txt"
+            (cd "$ARTIFACT_ROOT"; find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+            exit "$result"
+          }
+          trap capture EXIT
+          timeout --kill-after=30 5100 bash .ci/tor-public-package.sh 2>&1 | tee "$ARTIFACT_ROOT/package-build.log"
+      - name: Retain package, gateway and source evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cmsg-tor-public-package-${{ github.sha }}
+          path: ${{ runner.temp }}/cmsg-tor-package
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

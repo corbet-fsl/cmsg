@@ -39,8 +39,9 @@ pub mod browser;
 pub use accounting::{
     verify_accounting_acknowledgment, verify_accounting_acknowledgment_historical,
     verify_accounting_delegation, verify_accounting_receipt, verify_accounting_receipt_historical,
-    AccountRequestAuthorization, AccountingAcknowledgment, AccountingContactContext,
-    AccountingDelegation, AccountingIntroduction, AccountingKey, AccountingReceipt,
+    AccountRequestAuthorization, AccountStatusAuthorization, AccountingAcknowledgment,
+    AccountingContactContext, AccountingDelegation, AccountingIntroduction, AccountingKey,
+    AccountingReceipt,
 };
 pub use admission::{verify_admission, AdmissionGrant, AdmissionTrust};
 pub use board::{AllocationRequest, PresenceEndpoint, PresenceUpdate};

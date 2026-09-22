@@ -15,6 +15,9 @@ if test "${RESOLVE_DEPENDENCIES:-0}" = 1; then
 fi
 cp Cargo.lock "$artifact_dir/Cargo.lock"
 result=0
+if test "${CHECK_SUITE:-core}" = core; then
+  timeout 120 node .ci/peer-channel-check.mjs || result=$?
+fi
 if test "${CHECK_SUITE:-core}" = browser; then
   test -n "${CFRM_PROFILES_SOURCE_ARCHIVE:-}"
   test -n "${CFRM_PROFILES_SOURCE_SHA256:-}"
@@ -54,7 +57,8 @@ if test "${CHECK_SUITE:-core}" = browser; then
   fi
   tar --create --file "$artifact_dir/formatted-browser-source.tar" src/browser_accounting.rs
   tar --create --file "$artifact_dir/browser-package.tar" browser/pkg browser/index.mjs browser/index.d.ts browser/package.json \
-    browser/live-stream.mjs browser/live-stream.d.ts browser/indexeddb-store.mjs browser/indexeddb-store.d.ts
+    browser/live-stream.mjs browser/live-stream.d.ts browser/indexeddb-store.mjs browser/indexeddb-store.d.ts \
+    browser/peer-channel.mjs browser/peer-channel.d.ts
   (
     cd "$artifact_dir"
     find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS

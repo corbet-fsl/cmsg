@@ -316,6 +316,50 @@ fn key_context(
 }
 
 impl Member {
+    /// Sign the fixed cfrm status transcript for this admitted member/device.
+    /// Community and owner are derived here, never selected by the caller.
+    pub fn authorize_account_status(
+        &self,
+        request_id: Option<[u8; 32]>,
+        challenge: &[u8; 32],
+        issued_at: u64,
+        expires_at: u64,
+    ) -> Result<AccountStatusAuthorization, Error> {
+        let owner = member_bytes(&self.member_id()?)?;
+        let admission = self.admission_grant()?;
+        let authorization = self.device_authorization()?.ok_or(Error::Admission)?;
+        let now = self.authorization_time()?;
+        time(issued_at)?;
+        time(expires_at)?;
+        if request_id == Some([0; 32])
+            || *challenge == [0; 32]
+            || issued_at > now
+            || now >= expires_at
+            || issued_at >= expires_at
+            || issued_at < admission.issued_at
+            || issued_at < authorization.issued_at
+            || expires_at > admission.expires_at
+            || expires_at > authorization.expires_at
+        {
+            return Err(Error::Admission);
+        }
+        let mut result = AccountStatusAuthorization {
+            community: hash(admission.community_id.as_bytes()),
+            owner,
+            request_id,
+            challenge: *challenge,
+            chat_public_key: B64.encode(&self.chat_public_key()),
+            issued_at,
+            expires_at,
+            signature: String::new(),
+        };
+        result.signature = B64.encode(
+            &MlsSigner::sign(&self.signer, &result.signing_bytes()?)
+                .map_err(|_| Error::Admission)?,
+        );
+        Ok(result)
+    }
+
     /// Authorize one named cfrm proof request without exposing this device key or
     /// signing arbitrary bytes. cfrm independently recomputes statement/proof hashes.
     #[allow(clippy::too_many_arguments)]
@@ -414,6 +458,47 @@ impl Member {
             self.authorization_time()?,
         )?;
         Ok(d)
+    }
+}
+
+/// Exact cfrm AccountStatusRequest wire shape, with no arbitrary signing input.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccountStatusAuthorization {
+    pub community: [u8; 32],
+    pub owner: [u8; 32],
+    pub request_id: Option<[u8; 32]>,
+    pub challenge: [u8; 32],
+    pub chat_public_key: String,
+    pub issued_at: u64,
+    pub expires_at: u64,
+    pub signature: String,
+}
+impl std::fmt::Debug for AccountStatusAuthorization {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AccountStatusAuthorization([redacted])")
+    }
+}
+impl AccountStatusAuthorization {
+    pub fn signing_bytes(&self) -> Result<Vec<u8>, Error> {
+        time(self.issued_at)?;
+        time(self.expires_at)?;
+        if self.issued_at >= self.expires_at
+            || self.request_id == Some([0; 32])
+            || self.challenge == [0; 32]
+        {
+            return Err(Error::Admission);
+        }
+        let mut bytes = b"cfrm.account.status.v1\0".to_vec();
+        bytes.extend_from_slice(&self.community);
+        bytes.extend_from_slice(&self.owner);
+        bytes.push(u8::from(self.request_id.is_some()));
+        bytes.extend_from_slice(&self.request_id.unwrap_or([0; 32]));
+        bytes.extend_from_slice(&self.challenge);
+        bytes.extend_from_slice(&member_bytes(&self.chat_public_key)?);
+        bytes.extend_from_slice(&self.issued_at.to_be_bytes());
+        bytes.extend_from_slice(&self.expires_at.to_be_bytes());
+        Ok(bytes)
     }
 }
 

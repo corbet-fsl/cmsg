@@ -1,4 +1,6 @@
 //! Protected first-payload release; accounting proofs stay on the peer channel.
+#[path = "inbox_reservation/accounted.rs"]
+mod accounted;
 use super::*;
 use crate::{
     ReservationContext, ReservationContexts, ReservationExpectation, ReservationPolicy,
@@ -13,10 +15,21 @@ struct Gate {
     outgoing: Option<VerifiedReservation>,
     incoming: Option<VerifiedReservation>,
 }
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AccountedAdmission {
+    welcome_hash: [u8; 32],
+    peer: String,
+    nonce: [u8; 32],
+    completed: bool,
+    cancelled: bool,
+}
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Journal {
     gates: BTreeMap<String, Gate>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    admissions: BTreeMap<String, AccountedAdmission>,
 }
 fn key(peer: &str, nonce: &[u8; 32]) -> String {
     format!("{}:{}", peer, crate::live::id(nonce))
@@ -30,6 +43,23 @@ fn member_bytes(id: &str) -> Result<[u8; 32], Error> {
 }
 impl Journal {
     pub(super) fn merge(&mut self, other: &Self) -> Result<(), Error> {
+        for (id, incoming) in &other.admissions {
+            if let Some(local) = self.admissions.get_mut(id) {
+                if local.welcome_hash != incoming.welcome_hash
+                    || local.peer != incoming.peer
+                    || local.nonce != incoming.nonce
+                {
+                    return Err(Error::InvalidStore);
+                }
+                local.completed |= incoming.completed;
+                local.cancelled |= incoming.cancelled;
+                if local.completed && local.cancelled {
+                    return Err(Error::InvalidStore);
+                }
+            } else {
+                self.admissions.insert(id.clone(), incoming.clone());
+            }
+        }
         for (id, incoming) in &other.gates {
             if let Some(local) = self.gates.get_mut(id) {
                 if local.policy != incoming.policy || local.contexts != incoming.contexts {
@@ -52,6 +82,21 @@ impl Journal {
     pub(super) fn validate(&self, owner: &str, community: &str) -> Result<(), Error> {
         let own = member_bytes(owner)?;
         let scope: [u8; 32] = Sha256::digest(community.as_bytes()).into();
+        for (id, admission) in &self.admissions {
+            let gate = self.gates.get(id).ok_or(Error::InvalidStore)?;
+            if *id != key(&admission.peer, &admission.nonce)
+                || admission.welcome_hash == [0; 32]
+                || admission.nonce == [0; 32]
+                || admission.completed && admission.cancelled
+                || gate.contexts.incoming.expected.owner != own
+                || gate.contexts.outgoing.expected.owner != member_bytes(&admission.peer)?
+                || gate.contexts.outgoing.expected.nonce != admission.nonce
+                || admission.completed
+                    && (!gate.consented || gate.outgoing.is_none() || gate.incoming.is_none())
+            {
+                return Err(Error::InvalidStore);
+            }
+        }
         for (id, gate) in &self.gates {
             let a = &gate.contexts.outgoing.expected;
             let b = &gate.contexts.incoming.expected;
@@ -130,6 +175,7 @@ impl Inbox {
     pub fn reservation_delivery_enabled(&self) -> bool {
         self.state.reservations.is_some()
     }
+
     pub fn require_active_reservations(
         &mut self,
         member: &Member,
@@ -312,6 +358,19 @@ impl Inbox {
         gate: &Gate,
     ) -> Result<(), Error> {
         self.check_exclusions(member)?;
+        if self
+            .state
+            .reservations
+            .as_ref()
+            .and_then(|journal| {
+                journal
+                    .admissions
+                    .get(&key(peer, &gate.contexts.outgoing.expected.nonce))
+            })
+            .is_some_and(|admission| admission.cancelled)
+        {
+            return Err(Error::Admission);
+        }
         let now = member.authorization_time()?;
         let own = member_bytes(&self.state.recipient_id)?;
         let designated = if gate.contexts.outgoing.expected.owner == own {
@@ -509,6 +568,13 @@ impl Inbox {
             .introductions
             .get(&peer)
             .ok_or(Error::Admission)?;
+        if journal
+            .admissions
+            .get(&key(&peer, &intro.id))
+            .is_some_and(|admission| !admission.completed || admission.cancelled)
+        {
+            return Err(Error::Admission);
+        }
         // Established traffic needs the contact/session gate, not another debit.
         if intro.decision == Some(ContactResolutionKind::Answered) {
             return Ok(());

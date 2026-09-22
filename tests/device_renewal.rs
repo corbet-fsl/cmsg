@@ -30,6 +30,64 @@ fn device(root: &MemberIdentity, time: &Arc<Time>, device_expiry: u64) -> Member
 }
 
 #[test]
+fn ungrouped_device_refreshes_expired_root_authorization_without_changing_key() {
+    let time = Arc::new(Time(AtomicU64::new(100)));
+    let root = MemberIdentity::new("synthetic-community").unwrap();
+    let mut member = device(&root, &time, 200);
+    let key = member.chat_public_key();
+    time.0.store(300, Ordering::Relaxed);
+    assert!(member.member_id().is_err());
+
+    let mut grant = common::grant(&key, 1);
+    grant.member_id = root.member_id().to_owned();
+    common::sign(&mut grant);
+    let authorization = root.authorize_device(&key, 300, 900).unwrap();
+    member
+        .refresh_device_admission(grant.clone(), authorization.clone(), 300)
+        .unwrap();
+    assert_eq!(member.member_id().unwrap(), root.member_id());
+    assert_eq!(member.chat_public_key(), key);
+
+    let wrong_root = MemberIdentity::new("synthetic-community").unwrap();
+    let wrong_authorization = wrong_root.authorize_device(&key, 300, 900).unwrap();
+    assert!(member
+        .refresh_device_admission(grant.clone(), wrong_authorization, 300)
+        .is_err());
+
+    member.create_group().unwrap();
+    let later = root.authorize_device(&key, 400, 1000).unwrap();
+    assert!(member.refresh_device_admission(grant, later, 400).is_err());
+}
+
+#[test]
+fn ungrouped_device_accepts_identical_still_valid_refresh_retry_only() {
+    let time = Arc::new(Time(AtomicU64::new(100)));
+    let root = MemberIdentity::new("synthetic-community").unwrap();
+    let mut member = device(&root, &time, 200);
+    let key = member.chat_public_key();
+    let mut grant = common::grant(&key, 1);
+    grant.member_id = root.member_id().to_owned();
+    common::sign(&mut grant);
+    let authorization = root.authorize_device(&key, 1, 200).unwrap();
+
+    member
+        .refresh_device_admission(grant.clone(), authorization.clone(), 100)
+        .unwrap();
+    assert_eq!(member.member_id().unwrap(), root.member_id());
+
+    let wrong_root = MemberIdentity::new("synthetic-community").unwrap();
+    let wrong_authorization = wrong_root.authorize_device(&key, 1, 200).unwrap();
+    assert!(member
+        .refresh_device_admission(grant.clone(), wrong_authorization, 100)
+        .is_err());
+
+    time.0.store(200, Ordering::Relaxed);
+    assert!(member
+        .refresh_device_admission(grant, authorization, 200)
+        .is_err());
+}
+
+#[test]
 fn expired_device_authorization_renews_with_same_root_and_key_without_rotating_identity() {
     let time = Arc::new(Time(AtomicU64::new(100)));
     let alice_root = MemberIdentity::new("synthetic-community").unwrap();
@@ -83,6 +141,89 @@ fn expired_device_authorization_renews_with_same_root_and_key_without_rotating_i
         matches!(bob.receive(&alice.send(b"root renewed").unwrap()).unwrap(), Received::Text(message)
         if message.member_id == alice_root.member_id() && message.text == "root renewed")
     );
+}
+
+#[test]
+fn control_boundary_accepts_only_same_roster_admission_renewals() {
+    let time = Arc::new(Time(AtomicU64::new(100)));
+    let alice_root = MemberIdentity::new("synthetic-community").unwrap();
+    let bob_root = MemberIdentity::new("synthetic-community").unwrap();
+    let charlie_root = MemberIdentity::new("synthetic-community").unwrap();
+    let mut alice = device(&alice_root, &time, 1000);
+    let mut bob = device(&bob_root, &time, 1000);
+    let charlie = device(&charlie_root, &time, 1000);
+    alice.create_group().unwrap();
+    bob.join(&alice.add(&bob.key_package().unwrap()).unwrap().welcome)
+        .unwrap();
+
+    let add = alice.add(&charlie.key_package().unwrap()).unwrap();
+    assert!(bob.receive_admission_renewal(&add.commit).is_err());
+    assert!(matches!(
+        bob.receive(&add.commit),
+        Ok(Received::MembershipChanged)
+    ));
+}
+
+#[test]
+fn inbox_renewal_while_expired_is_durable_and_accepts_multiple_devices_per_member() {
+    use cmsg::{Error, Inbox};
+    let time = Arc::new(Time(AtomicU64::new(100)));
+    let alice_root = MemberIdentity::new("synthetic-community").unwrap();
+    let bob_root = MemberIdentity::new("synthetic-community").unwrap();
+    let mut alice = device(&alice_root, &time, 1000);
+    let mut bob = device(&bob_root, &time, 200);
+    let other_bob = device(&bob_root, &time, 1000);
+    alice.create_group().unwrap();
+    bob.join(&alice.add(&bob.key_package().unwrap()).unwrap().welcome)
+        .unwrap();
+    let addition = alice.add(&other_bob.key_package().unwrap()).unwrap();
+    bob.receive(&addition.commit).unwrap();
+    let mut inbox = Inbox::new(&bob).unwrap();
+    let key = [31; 32];
+    let context = b"durable-admission-renewal";
+    inbox
+        .set_blocked(
+            alice_root.member_id(),
+            true,
+            &bob,
+            &key,
+            context,
+            |_| Ok(()),
+        )
+        .unwrap();
+    let payload = alice.send(b"not a credential update").unwrap();
+    time.0.store(300, Ordering::Relaxed);
+    assert!(inbox
+        .receive_admission_renewal(&mut bob, &payload, &key, context, |_| Ok(()))
+        .is_err());
+
+    let device_key = alice.chat_public_key();
+    let mut grant = common::grant(&device_key, 1);
+    grant.member_id = alice_root.member_id().to_owned();
+    common::sign(&mut grant);
+    let authorization = alice_root.authorize_device(&device_key, 300, 2000).unwrap();
+    let renewal = alice
+        .renew_device_admission(grant, authorization, |_, _| Ok(()))
+        .unwrap();
+    assert!(inbox
+        .receive_admission_renewal(&mut bob, &renewal, &key, context, |_| Err(
+            Error::InvalidStore
+        ))
+        .is_err());
+    let mut durable = None;
+    inbox
+        .receive_admission_renewal(&mut bob, &renewal, &key, context, |bytes| {
+            durable = Some(bytes.to_vec());
+            Ok(())
+        })
+        .unwrap();
+    assert!(durable.is_some());
+    assert!(
+        bob.member_id().is_err(),
+        "peer renewal cannot renew our expired certificate"
+    );
+    assert_eq!(bob.participants().unwrap().len(), 3);
+    assert!(inbox.is_blocked(alice_root.member_id()));
 }
 
 #[test]

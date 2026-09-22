@@ -1630,6 +1630,30 @@ impl Inbox {
         self.check_exclusions(member)
     }
 
+    /// Apply an authenticated same-device admission renewal before reopening
+    /// live delivery. This control path remains available while the local
+    /// certificate is expired and never accepts application payloads or roster
+    /// changes. The candidate checkpoint must be durable before the member is updated.
+    pub fn receive_admission_renewal(
+        &mut self,
+        member: &mut Member,
+        wire: &[u8],
+        key: &[u8; 32],
+        context: &[u8],
+        mut persist: impl FnMut(&[u8]) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        if wire.is_empty() || wire.len() > MAX_WIRE_BYTES {
+            return Err(Error::InvalidMessage);
+        }
+        self.check_binding(member)?;
+        let mut candidate = member.staged_copy(key, context)?;
+        candidate.receive_admission_renewal(wire)?;
+        self.check_reservation_roster(&candidate)?;
+        persist(&self.seal(&candidate, key, context)?)?;
+        *member = candidate;
+        Ok(())
+    }
+
     /// Reject excluded authenticated senders before publishing plaintext,
     /// changing receive ratchets, or appending history. A control message cannot
     /// silently reintroduce a closed identity under a different device key.

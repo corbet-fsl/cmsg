@@ -11,6 +11,13 @@ export interface LiveInboxStorage {
   key: Uint8Array;
   context: Uint8Array;
   persist(checkpoint: Uint8Array, outbound: Uint8Array[], metadata: InboxPublication): Promise<true>;
+  /**
+   * Serialize the complete cmsg operation, including synchronous Wasm
+   * getters used by that operation, with the embedding application's state.
+   * The callback must not wait for peer input; transport reads belong outside
+   * this callback. `control` covers opening, control flushes, and close.
+   */
+  schedule?: <T>(category: 'send' | 'receive' | 'control', operation: () => Promise<T>) => Promise<T>;
 }
 export class LiveInboxStream {
   private constructor();

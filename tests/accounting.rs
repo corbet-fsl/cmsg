@@ -335,3 +335,61 @@ fn named_account_request_signature_binds_exact_proof_statement_and_device_lifeti
         .authorize_account_request(&[1; 32], &[2; 32], &[3; 32], &[4; 32], &[5; 32], 100, 10_001)
         .is_err());
 }
+
+#[test]
+fn account_status_signer_binds_owner_challenge_lookup_and_authority_lifetime() {
+    use data_encoding::BASE64URL_NOPAD as B64;
+    use sha2::{Digest, Sha256};
+    let p = Pair::pending();
+    let status =
+        p.a.authorize_account_status(Some([7; 32]), &[8; 32], 100, 200)
+            .unwrap();
+    assert_eq!(B64.encode(&status.owner), p.a.member_id().unwrap());
+    let community: [u8; 32] = Sha256::digest(common::trust().community_id.as_bytes()).into();
+    assert_eq!(status.community, community);
+    let public: [u8; 32] = p.a.chat_public_key().try_into().unwrap();
+    let verifier = ed25519_dalek::VerifyingKey::from_bytes(&public).unwrap();
+    let signature =
+        ed25519_dalek::Signature::from_slice(&B64.decode(status.signature.as_bytes()).unwrap())
+            .unwrap();
+    verifier
+        .verify_strict(&status.signing_bytes().unwrap(), &signature)
+        .unwrap();
+    for field in ["community", "owner", "challenge", "requestId", "expiresAt"] {
+        let mut changed: cmsg::AccountStatusAuthorization = copy(&status);
+        match field {
+            "community" => changed.community[0] ^= 1,
+            "owner" => changed.owner[0] ^= 1,
+            "challenge" => changed.challenge[0] ^= 1,
+            "requestId" => changed.request_id = None,
+            "expiresAt" => changed.expires_at += 1,
+            _ => unreachable!(),
+        }
+        assert!(verifier
+            .verify_strict(&changed.signing_bytes().unwrap(), &signature)
+            .is_err());
+    }
+    let latest =
+        p.a.authorize_account_status(None, &[9; 32], 100, 200)
+            .unwrap();
+    assert!(latest.request_id.is_none());
+    for (request, challenge, issued, expires) in [
+        (Some([0; 32]), [8; 32], 100, 200),
+        (None, [0; 32], 100, 200),
+        (None, [8; 32], 101, 200),
+        (None, [8; 32], 100, 100),
+        (None, [8; 32], 100, 10_001),
+        (None, [8; 32], 0, 200),
+    ] {
+        assert!(p
+            .a
+            .authorize_account_status(request, &challenge, issued, expires)
+            .is_err());
+    }
+    let request =
+        p.a.authorize_account_request(&[7; 32], &[8; 32], &[9; 32], &[10; 32], &[11; 32], 100, 200)
+            .unwrap();
+    assert!(verifier
+        .verify_strict(&request.signing_bytes().unwrap(), &signature)
+        .is_err());
+}

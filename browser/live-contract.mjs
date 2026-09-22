@@ -2,32 +2,56 @@
 // These cases are transport ownership evidence, not additional Tor evidence.
 import { LiveInboxStream } from './live-stream.mjs';
 function assert(value,label) {if(!value)throw new Error(`live contract: ${label}`);}
-function pair() {
+function callerQueue() {
+ const categories=[];let tail=Promise.resolve(),active=false;
+ const schedule=(category,operation)=>{
+  assert(['send','receive','control'].includes(category),'scheduler category');
+  categories.push(category);
+  const next=tail.catch(()=>{}).then(async()=>{active=true;try{return await operation();}finally{active=false;}});
+  tail=next.catch(()=>{});return next;
+ };
+ return {categories,schedule,get active(){return active;}};
+}
+function pair(guards=[]) {
  const sides=[{queue:[],wait:[],closed:false},{queue:[],wait:[],closed:false}];
  const endpoints=sides.map((self,index)=>({
-  pauseNext:false,failNext:false,release:undefined,captured:undefined,
+  pauseNext:false,failNext:false,release:undefined,writeReject:undefined,captured:undefined,
   async send(bytes) {
    if(this.failNext){this.failNext=false;throw new Error('scripted write failure');}
    this.captured=bytes.slice();
-   if(this.pauseNext){this.pauseNext=false;await new Promise(resolve=>{this.release=resolve;});}
+   if(this.pauseNext){
+    this.pauseNext=false;
+    try {
+     await new Promise((resolve,reject)=>{this.release=resolve;this.writeReject=reject;});
+    } finally {this.writeReject=undefined;}
+   }
    if(self.closed)throw new Error('scripted closed write');
    const other=sides[1-index];if(other.closed)throw new Error('scripted peer loss');
    const value=bytes.slice();const waiter=other.wait.shift();if(waiter)waiter.resolve(value);else other.queue.push(value);
   },
-  receive() {if(self.queue.length)return Promise.resolve(self.queue.shift());if(self.closed)return Promise.reject(new Error('scripted EOF'));return new Promise((resolve,reject)=>self.wait.push({resolve,reject}));},
-  close() {self.closed=true;for(const waiter of self.wait.splice(0))waiter.reject(new Error('scripted EOF'));},
+  receive() {if(guards[index]?.active)return Promise.reject(new Error('peer read held caller scheduler'));if(self.queue.length)return Promise.resolve(self.queue.shift());if(self.closed)return Promise.reject(new Error('scripted EOF'));return new Promise((resolve,reject)=>self.wait.push({resolve,reject}));},
+  close() {
+   self.closed=true;
+   const rejectWrite=this.writeReject;this.writeReject=undefined;
+   rejectWrite?.(new Error('scripted closed write'));
+   for(const waiter of self.wait.splice(0))waiter.reject(new Error('scripted EOF'));
+  },
  }));return endpoints;
 }
 export async function runLiveStreamContract(a,b,key,context,saveA,saveB,report=()=>{}) {
- const [sa,sb]=pair();const until=Math.floor(Date.now()/1000)+120;
+ const ownerA=callerQueue(),ownerB=callerQueue();
+ const [sa,sb]=pair([ownerA,ownerB]);const until=Math.floor(Date.now()/1000)+120;
  report('live adapter: initial paired open');
  const [la,lb]=await Promise.all([
-  LiveInboxStream.open(sa,a,{peerDevice:b.chatPublicKey(),until,key,context,persist:saveA}),
-  LiveInboxStream.open(sb,b,{peerDevice:a.chatPublicKey(),until,key,context,persist:saveB}),
+  LiveInboxStream.open(sa,a,{peerDevice:b.chatPublicKey(),until,key,context,persist:saveA,schedule:ownerA.schedule}),
+  LiveInboxStream.open(sb,b,{peerDevice:a.chatPublicKey(),until,key,context,persist:saveB,schedule:ownerB.schedule}),
  ]);
  try {
   report('live adapter: initial authenticated payload');
-  await la.send(new Uint8Array([7,0,255]));
+  await Promise.all([
+   la.send(new Uint8Array([7,0,255])),
+   ownerA.schedule('control',()=>a.applyDeadlines(key,context,saveA)),
+  ]);
   const received=await lb.receive();assert(received.bytes[2]===255,'actual authenticated payload');received.free();
   report('live adapter: reply and ACK recovery');
   await lb.send(new Uint8Array([8]));const reply=await la.receive();assert(reply.bytes[0]===8,'ACK recovery and next live data');reply.free();
@@ -43,7 +67,7 @@ export async function runLiveStreamContract(a,b,key,context,saveA,saveB,report=(
  } finally {report('live adapter: close initial pair');await Promise.allSettled([la.close(),lb.close()]);}
  // An accepted plaintext result remains owned by the adapter until ACK flushing
  // succeeds. A failed write must free it while preserving durable peer history.
- const [sc,sd]=pair();
+ const [sc,sd]=pair([ownerA,ownerB]);
  report('live adapter: reopen pair for failed ACK');
  // Fixed endpoint/operation labels distinguish a blocked opening from time
  // spent in actual Wasm publication. Never report arguments or results.
@@ -63,8 +87,8 @@ export async function runLiveStreamContract(a,b,key,context,saveA,saveB,report=(
  let opened;
  try {
   opened=await Promise.all([
-   LiveInboxStream.open(sc,a,{peerDevice:b.chatPublicKey(),until,key,context,persist:saveA}),
-   LiveInboxStream.open(sd,b,{peerDevice:a.chatPublicKey(),until,key,context,persist:saveB}),
+   LiveInboxStream.open(sc,a,{peerDevice:b.chatPublicKey(),until,key,context,persist:saveA,schedule:ownerA.schedule}),
+   LiveInboxStream.open(sd,b,{peerDevice:a.chatPublicKey(),until,key,context,persist:saveB,schedule:ownerB.schedule}),
   ]);
  } finally {restoreA();restoreB();}
  const [lc,ld]=opened;
@@ -96,4 +120,6 @@ export async function runLiveStreamContract(a,b,key,context,saveA,saveB,report=(
   b.receive=originalReceive;
   await Promise.allSettled([lc.close(),ld.close()]);
  }
+ assert(ownerA.categories.includes('control')&&ownerA.categories.includes('receive')&&ownerA.categories.includes('send'),'sender scheduler categories');
+ assert(ownerB.categories.includes('control')&&ownerB.categories.includes('receive')&&ownerB.categories.includes('send'),'recipient scheduler categories');
 }

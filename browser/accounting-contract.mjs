@@ -28,7 +28,32 @@ async function sign(key, transcript) {
   if (s > order / 2n) bytes.set(unhex((order - s).toString(16).padStart(64, '0')), 32);
   return [...bytes];
 }
+async function statusContract(signer, memberId, communityId) {
+  const now = Math.floor(Date.now() / 1000), expires = now + 120;
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const requestId = crypto.getRandomValues(new Uint8Array(32));
+  const integer = value => { const bytes = new Uint8Array(8); new DataView(bytes.buffer).setBigUint64(0, BigInt(value)); return bytes; };
+  const decode = value => Uint8Array.from(atob(value.replaceAll('-', '+').replaceAll('_', '/')), char => char.charCodeAt(0));
+  const community = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(communityId)));
+  const device = await crypto.subtle.importKey('raw', signer.chatPublicKey(), 'Ed25519', false, ['verify']);
+  for (const id of [undefined, requestId]) {
+    const status = JSON.parse(signer.authorizeAccountStatus(id, challenge, now, expires));
+    const transcript = new Uint8Array([
+      ...new TextEncoder().encode('cfrm.account.status.v1\0'), ...community, ...decode(memberId),
+      id === undefined ? 0 : 1, ...(id ?? new Uint8Array(32)), ...challenge,
+      ...signer.chatPublicKey(), ...integer(now), ...integer(expires),
+    ]);
+    check(hex(status.community) === hex(community) && hex(status.owner) === hex(decode(memberId)), 'status derives admitted community and permanent owner');
+    check(await crypto.subtle.verify('Ed25519', device, decode(status.signature), transcript), 'scoped status transcript verifies independently in WebCrypto');
+    transcript[0] ^= 1;
+    check(!await crypto.subtle.verify('Ed25519', device, decode(status.signature), transcript), 'status signature rejects another domain');
+  }
+  fails(() => signer.authorizeAccountStatus(new Uint8Array(31), challenge, now, expires), 'status request ID width');
+  fails(() => signer.authorizeAccountStatus(undefined, new Uint8Array(32), now, expires), 'status requires fresh nonzero challenge');
+  fails(() => signer.authorizeAccountStatus(undefined, challenge, now + 60, expires), 'status rejects future issuance');
+}
 export async function runAccountingMemberContract(member, memberId, trust) {
+  await statusContract(member, memberId, trust.community_id);
   const key = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
   const publicBytes = new Uint8Array(await crypto.subtle.exportKey('raw', key.publicKey)).subarray(1);
   const now = Math.floor(Date.now() / 1000), expires = now + 120;
@@ -48,6 +73,7 @@ export async function runAccountingMemberContract(member, memberId, trust) {
   fails(() => member.authorizeAccountRequest(new Uint8Array(31), ...fields.slice(1), now, expires), 'Member request bounds');
 }
 export async function runAccountingContract({ sender, recipient, senderId, recipientId, trust, receiveAnswer }) {
+  await statusContract(sender, senderId, trust.community_id);
   const now = Math.floor(Date.now() / 1000), trustJson = JSON.stringify(trust);
   const at = () => Math.floor(Date.now() / 1000);
   const senderKey = new BrowserAccountingKey(sender), recipientKey = new BrowserAccountingKey(recipient);

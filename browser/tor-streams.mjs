@@ -129,9 +129,16 @@ export async function createTorJsOnionNode({ gateway, storage, bootstrapDeadline
         async accept() {
           if (closed || !listening) throw failed();
           try {
-            const raw = await beforeDeadline(() => service.accept(operationDeadlineMs), operationDeadlineMs, close, dispose);
-            if (!listening) { dispose(raw); throw failed(); }
-            return own(raw);
+            while (!closed && listening) {
+              // Upstream returns null on an ordinary idle poll. Keep the
+              // listener alive, while the outer watchdog still closes a stuck
+              // accept and disposes any late stream.
+              const pollMs = Math.max(1, Math.floor(operationDeadlineMs / 2));
+              const raw = await beforeDeadline(() => service.accept(pollMs), operationDeadlineMs, close, value => { if (value) dispose(value); });
+              if (!listening || closed) { if (raw) dispose(raw); throw failed(); }
+              if (raw !== null) return own(raw);
+            }
+            throw failed();
           } catch { throw failed(); }
         },
         close() {

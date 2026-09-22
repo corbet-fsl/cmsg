@@ -92,14 +92,15 @@ impl BrowserOnionService {
                     Err(failure())
                 }, registration).boxed_local();
                 match select(operation, TimeoutFuture::new(deadline).boxed_local()).await {
-                    Either::Left((Ok(result), _)) => result,
+                    Either::Left((Ok(result), _)) => result.map(Some),
+                    Either::Right(_) => Ok(None),
                     _ => Err(failure()),
                 }
             };
             state.accept_abort.borrow_mut().take();
             if state.closed.get() { return Err(failure()); }
             *state.requests.borrow_mut() = Some(requests);
-            let stream = result?;
+            let Some(stream) = result? else { return Ok(JsValue::NULL); };
             state.children.borrow_mut().push(Rc::downgrade(&stream.state));
             Ok(stream.into())
         })

@@ -112,10 +112,19 @@ export async function runTorNodeContract() {
     check(JSON.stringify(fixture.calls) === JSON.stringify([['listen', 80, 4, publicationDeadline]]),
       'explicit publication budget reaches TorJS without a stream-deadline clamp');
     const accepted = await listener.accept();
-    check(acceptDeadline === options.operationDeadlineMs, 'long publication budget never extends stream acceptance');
+    check(acceptDeadline === Math.floor(options.operationDeadlineMs / 2), 'idle poll stays within the outer stream watchdog');
     accepted.close(); listener.close(); node.close();
   }
   passed.push('scripted Tor factory: publication supports its separate bounded retry budget while stream limits remain short');
+
+  let idlePolls = 0;
+  const idleService = service({ accept: async () => { await tick(); return ++idlePolls <= 2 ? null : raw(); } });
+  fixture = configure({ listen: () => idleService }); node = await createTorJsOnionNode(options);
+  const idleListener = await node.listen({ port: 80, maximumStreams: 4, deadlineMs: 30 });
+  const afterIdle = await idleListener.accept();
+  check(idlePolls === 3 && fixture.closed === 0 && idleService.closed === 0, 'ordinary idle polls retain the live service');
+  afterIdle.close(); idleListener.close(); node.close();
+  passed.push('scripted Tor factory: idle service can accept a later conversation');
 
   for (const readiness of ['running', 'degraded-reachable']) {
     const published = service({ readiness });

@@ -5,10 +5,16 @@ test "$#" = 2
 torjs="$(realpath "$1")"
 artifact="$(realpath -m "$2")"
 : "${TOR_BINDGEN_BINARY:?matching wasm-bindgen 0.2.122 helper required}"
-: "${CMSG_BINDGEN_BINARY:?matching cmsg wasm-bindgen helper required}"
 : "${CARGO_TARGET_DIR:?explicit CI target cache required}"
 test -x "$TOR_BINDGEN_BINARY"
-test -x "$CMSG_BINDGEN_BINARY"
+package_only="${TOR_PACKAGE_ONLY:-0}"
+case "$package_only" in 0|1) ;; *) exit 2 ;; esac
+if test "$package_only" = 0; then
+  : "${CMSG_BINDGEN_BINARY:?matching cmsg wasm-bindgen helper required}"
+  test -x "$CMSG_BINDGEN_BINARY"
+else
+  test "${TOR_NETWORK:-}" = public
+fi
 mkdir -p "$artifact"
 tor_features=()
 case "${TOR_NETWORK:-private}" in
@@ -27,15 +33,19 @@ timeout 1800 cargo test --locked --manifest-path "$torjs/Cargo.toml" \
 timeout 1800 cargo test --locked --manifest-path "$torjs/Cargo.toml" \
   -p tor-js-gateway config::tests:: -- --nocapture \
   2>&1 | tee "$artifact/gateway-config-tests.log"
-timeout 1800 cargo build --locked --target wasm32-unknown-unknown --lib
-"$CMSG_BINDGEN_BINARY" "$CARGO_TARGET_DIR/wasm32-unknown-unknown/debug/cmsg.wasm" browser/pkg cmsg
-if test "${TOR_NETWORK:-private}" = public; then
+if test "$package_only" = 0; then
+  timeout 1800 cargo build --locked --target wasm32-unknown-unknown --lib
+  "$CMSG_BINDGEN_BINARY" "$CARGO_TARGET_DIR/wasm32-unknown-unknown/debug/cmsg.wasm" browser/pkg cmsg
+fi
+if test "${TOR_NETWORK:-private}" = public && test "$package_only" = 0; then
   # Reuse the generated cmsg module for its browser/factory regressions before
   # starting the expensive public network fixture; no duplicate Wasm build.
   BROWSER_EVIDENCE="$artifact/cmsg-browser-evidence.json" \
     timeout 300 node .ci/browser-check.mjs
 fi
-timeout 1800 cargo build --locked --example tor_browser_peer
+if test "$package_only" = 0; then
+  timeout 1800 cargo build --locked --example tor_browser_peer
+fi
 (
   cd "$torjs"
   timeout 600 npm ci --ignore-scripts --no-audit --no-fund
@@ -64,7 +74,9 @@ cp "$torjs/Cargo.lock" "$artifact/tor-js-runtime-Cargo.lock"
 cp "$torjs/package-lock.json" "$artifact/tor-js-package-lock.json"
 cp "$torjs/build.cmsg-experiment.mjs" "$artifact/build.cmsg-experiment.mjs"
 cp "$torjs/package.json" "$artifact/tor-js-package.json"
-sha256sum "$torjs/dist/tor_js_bg.wasm" browser/pkg/cmsg_bg.wasm \
-  "$CARGO_TARGET_DIR/debug/tor-js-gateway" "$CARGO_TARGET_DIR/debug/examples/tor_browser_peer" \
-  > "$artifact/runtime-input-SHA256SUMS"
+runtime_inputs=("$torjs/dist/tor_js_bg.wasm" "$CARGO_TARGET_DIR/debug/tor-js-gateway")
+if test "$package_only" = 0; then
+  runtime_inputs+=(browser/pkg/cmsg_bg.wasm "$CARGO_TARGET_DIR/debug/examples/tor_browser_peer")
+fi
+sha256sum "${runtime_inputs[@]}" > "$artifact/runtime-input-SHA256SUMS"
 printf 'Runtime package built; network contract still required.\n'

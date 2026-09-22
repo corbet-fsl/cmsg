@@ -17,8 +17,35 @@ fn fixed(bytes: &[u8]) -> Result<&[u8; 32], JsValue> {
     bytes.try_into().map_err(|_| js_error(Error::Admission))
 }
 
+fn optional_fixed(bytes: Option<Vec<u8>>) -> Result<Option<[u8; 32]>, JsValue> {
+    bytes
+        .map(|value| value.try_into().map_err(|_| js_error(Error::Admission)))
+        .transpose()
+}
+
 #[wasm_bindgen]
 impl BrowserMember {
+    #[wasm_bindgen(js_name = authorizeAccountStatus)]
+    pub fn authorize_account_status(
+        &self,
+        request_id: Option<Vec<u8>>,
+        challenge: &[u8],
+        issued_at: f64,
+        expires_at: f64,
+    ) -> Result<String, JsValue> {
+        encode(
+            &self
+                .member
+                .authorize_account_status(
+                    optional_fixed(request_id)?,
+                    fixed(challenge)?,
+                    timestamp(issued_at)?,
+                    timestamp(expires_at)?,
+                )
+                .map_err(js_error)?,
+        )
+    }
+
     #[wasm_bindgen(js_name = authorizeAccountRequest)]
     pub fn authorize_account_request(
         &self,
@@ -123,6 +150,27 @@ impl BrowserAccountingKey {
 
 #[wasm_bindgen]
 impl BrowserInbox {
+    #[wasm_bindgen(js_name = authorizeAccountStatus)]
+    pub fn authorize_account_status(
+        &self,
+        request_id: Option<Vec<u8>>,
+        challenge: &[u8],
+        issued_at: f64,
+        expires_at: f64,
+    ) -> Result<String, JsValue> {
+        encode(
+            &self
+                .member
+                .authorize_account_status(
+                    optional_fixed(request_id)?,
+                    fixed(challenge)?,
+                    timestamp(issued_at)?,
+                    timestamp(expires_at)?,
+                )
+                .map_err(js_error)?,
+        )
+    }
+
     #[wasm_bindgen(js_name = authorizeAccountRequest)]
     pub fn authorize_account_request(
         &self,

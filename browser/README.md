@@ -86,6 +86,17 @@ Persisted application ciphertext is eligible only for its still-live session.
 Restoring or losing that session cancels pending delivery; it must not be blindly
 retransmitted from the outbox. Control and accepted-history recovery are separate.
 
+`LiveInboxStream.open` also accepts an optional `schedule(category, operation)`
+storage callback. It lets an embedding serialize cmsg's asynchronous mutation
+and its synchronous Wasm getters with the application's own Inbox queue. The
+category is `send`, `receive`, or `control`; the operation includes any control
+wires generated while processing the current frame. The callback must not wait
+for peer input. Read the transport before scheduling `receive`; bounded writes
+of the generated live/control wire may complete inside the callback so the
+release check remains adjacent to the write. Pass the raw `BrowserInbox` to the
+stream when using this hook so a second proxy queue is not nested around cmsg's
+own queue.
+
 `accept(welcome, recipientRedemption, key, context, persist, redeem)` returns
 `joined`, `rejected`, `pending`, `needsPermit`, `busy` or `blocked`. The recipient's
 trusted policy adapter prepares `recipientRedemption` using

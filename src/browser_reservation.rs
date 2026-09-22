@@ -90,6 +90,61 @@ impl BrowserInbox {
             member: member.member,
         })
     }
+    #[wasm_bindgen(js_name=stageAccountedInvitation)]
+    pub async fn stage_accounted_invitation(
+        &mut self,
+        welcome: &[u8],
+        introduction_id: &[u8],
+        contact_policy_json: &str,
+        reservation_policy_json: &str,
+        key: &[u8],
+        context: &[u8],
+        persist: Function,
+    ) -> Result<String, JsValue> {
+        if contact_policy_json.len() > 4096 || reservation_policy_json.len() > 4096 {
+            return Err(js_error(Error::Admission));
+        }
+        let contact_policy =
+            serde_json::from_str(contact_policy_json).map_err(|_| js_error(Error::Admission))?;
+        let reservation_policy = serde_json::from_str(reservation_policy_json)
+            .map_err(|_| js_error(Error::Admission))?;
+        let introduction_id = introduction_id
+            .try_into()
+            .map_err(|_| js_error(Error::Admission))?;
+        let wrapping = wrapping_key(key)?;
+        self.update(key, context, &persist, |inbox, member| {
+            let expected = inbox.stage_accounted_invitation(
+                member,
+                welcome,
+                introduction_id,
+                contact_policy,
+                reservation_policy,
+                &wrapping,
+                context,
+                |_| Ok(()),
+            )?;
+            Ok((
+                serde_json::to_string(&expected).map_err(|_| Error::Admission)?,
+                vec![],
+            ))
+        })
+        .await
+    }
+
+    #[wasm_bindgen(js_name=cancelAccountedInvitation)]
+    pub async fn cancel_accounted_invitation(
+        &mut self,
+        key: &[u8],
+        context: &[u8],
+        persist: Function,
+    ) -> Result<(), JsValue> {
+        let wrapping = wrapping_key(key)?;
+        self.update(key, context, &persist, |inbox, member| {
+            inbox.cancel_accounted_invitation(member, &wrapping, context, |_| Ok(()))?;
+            Ok(((), vec![]))
+        })
+        .await
+    }
     #[wasm_bindgen(js_name=requireActiveReservations)]
     pub async fn require_active_reservations(
         &mut self,
@@ -220,6 +275,53 @@ impl BrowserInbox {
                 |_| Ok(()),
             )?;
             Ok(((), vec![]))
+        })
+        .await
+    }
+    #[wasm_bindgen(js_name=completeAccountedInvitation)]
+    pub async fn complete_accounted_invitation(
+        &mut self,
+        outgoing: &[u8],
+        incoming: &[u8],
+        verifier: Function,
+        key: &[u8],
+        context: &[u8],
+        persist: Function,
+    ) -> Result<String, JsValue> {
+        let expected = self
+            .inbox
+            .reservation_contexts(&self.member)
+            .map_err(js_error)?;
+        let own = data_encoding::BASE64URL_NOPAD
+            .decode(self.member.member_id().map_err(js_error)?.as_bytes())
+            .map_err(|_| js_error(Error::Admission))?;
+        let local_outgoing = own == expected.outgoing.expected.owner;
+        let remote = if local_outgoing {
+            verify_host(&verifier, incoming, &expected.incoming, false).await?
+        } else {
+            verify_host(&verifier, outgoing, &expected.outgoing, false).await?
+        };
+        let refreshed = self
+            .inbox
+            .reservation_contexts(&self.member)
+            .map_err(js_error)?;
+        let local = if local_outgoing {
+            verify_host(&verifier, outgoing, &refreshed.outgoing, true).await?
+        } else {
+            verify_host(&verifier, incoming, &refreshed.incoming, true).await?
+        };
+        let wrapping = wrapping_key(key)?;
+        self.update(key, context, &persist, |inbox, member| {
+            inbox.complete_accounted_invitation(
+                member,
+                outgoing,
+                incoming,
+                &mut Checked(vec![remote, local]),
+                &wrapping,
+                context,
+                |_| Ok(()),
+            )?;
+            Ok(("joined".to_owned(), vec![]))
         })
         .await
     }

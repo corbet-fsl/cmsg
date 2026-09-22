@@ -8,6 +8,7 @@
     ".": { "types": "./index.d.ts", "import": "./index.mjs" },
     "./tor-js": { "types": "./tor-js.d.ts", "import": "./tor-js.mjs" },
     "./tor-streams": { "types": "./tor-streams.d.ts", "import": "./tor-streams.mjs" },
+    "./peer-channel": { "types": "./peer-channel.d.ts", "import": "./peer-channel.mjs" },
     "./wasm": "./pkg/cmsg.js",
     "./wasm-binary": "./pkg/cmsg_bg.wasm"
   },
@@ -16,6 +17,8 @@
     "index.d.ts",
     "live-stream.mjs",
     "live-stream.d.ts",
+    "peer-channel.mjs",
+    "peer-channel.d.ts",
     "indexeddb-store.mjs",
     "indexeddb-store.d.ts",
     "tor-js.mjs",
@@ -33,7 +36,7 @@
     "LICENSE.md"
   ],
   "peerDependencies": {
-    "tor-js": "0.4.1"
+    "tor-js": "0.4.1 || >=0.4.1-cmsg-experiment.0 <0.4.1"
   },
   "peerDependenciesMeta": {
     "tor-js": {
