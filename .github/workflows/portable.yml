@@ -58,7 +58,7 @@ jobs:
         if: matrix.suite == 'browser'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: cmtymeet/cfrm
+          repository: corbet-libs/cfrm
           ref: ${{ steps.cfrm-profile-pin.outputs.revision }}
           path: .ci-dependencies/cfrm-profiles
           persist-credentials: false

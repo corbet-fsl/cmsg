@@ -28,7 +28,7 @@ The primary client runs in an ordinary browser using Rust/Wasm. Native Android a
 
 Operational telemetry should consist of aggregate success/failure counts and coarse latency buckets, with a privacy budget and release threshold to be defined. Do not attach account, recipient, group or conversation IDs to events. Even apparently anonymous timing can correlate activity.
 
-cfrm validates permitted resource use without receiving the private contact graph through separate experimental anonymous-capability and private-state-transition paths. The [private account ledger](https://github.com/cmtymeet/cfrm/blob/main/docs/account-ledger.md) retains accepted state commitments and owner-specific replay markers; peer proofs remain private. Neither conventional E2EE nor a messaging library supplies these checks automatically. Production activation, audit and retention guarantees require separate validation.
+cfrm validates permitted resource use without receiving the private contact graph through separate experimental anonymous-capability and private-state-transition paths. The [private account ledger](https://github.com/corbet-libs/cfrm/blob/main/docs/account-ledger.md) retains accepted state commitments and owner-specific replay markers; peer proofs remain private. Neither conventional E2EE nor a messaging library supplies these checks automatically. Production activation, audit and retention guarantees require separate validation.
 
 Rules control participation in this protocol. They cannot prevent consenting people from communicating through a modified client or unrelated channel outside it.
 

@@ -16,7 +16,7 @@ After generating those bindings, `node .ci/browser-package.mjs <artifact-directo
 creates and checks an installable npm archive with the license, runtime entrypoints,
 declarations and Wasm binary. The archive includes the exact Tor dependency
 manifest; patch/build tooling and validation fixtures remain in the
-[source repository](https://github.com/cmtymeet/cmsg/tree/main/browser/upstream).
+[source repository](https://github.com/corbet-libs/cmsg/tree/main/browser/upstream).
 The optional Tor entrypoints require the separately built, patched TorJS artifact
 described there; packaging cmsg does not install the stock TorJS package.
 
