@@ -12,7 +12,10 @@ fn config(community: &str) -> Configuration {
     Configuration::new(
         community.into(),
         BTreeMap::from([
-            (Role::Member, BTreeSet::from([ORIGIN.into()])),
+            (
+                Role::Member,
+                BTreeSet::from([ORIGIN.into(), "https://vault.example".into()]),
+            ),
             (
                 Role::Admin,
                 BTreeSet::from(["https://admin.example".into()]),
@@ -59,6 +62,20 @@ fn unavailable_owners_never_release_preload() {
     assert_eq!(response["status"], "ok");
     assert_eq!(response["result"]["community"], "community-a");
     assert_eq!(response["result"]["preload"], "unavailable");
+    assert_eq!(
+        call(&mut door, &token, "board.status", 11),
+        error(ErrorCode::Unavailable)
+    );
+    let board = catalog()
+        .into_iter()
+        .find(|a| a.action == "board.status")
+        .unwrap();
+    assert_eq!(board.family, Family::Board);
+    assert_eq!(
+        board.result["required"],
+        json!(["connection", "groups", "rooms"])
+    );
+    assert!(surface::bundle()["types"]["GroupView"].is_object());
     assert_eq!(response["result"]["owners"].as_object().unwrap().len(), 5);
     for status in response["result"]["owners"].as_object().unwrap().values() {
         assert_eq!(status, "unavailable");
@@ -867,4 +884,46 @@ async fn lost_mutation_response_requires_reconciliation_and_is_never_retried() {
     assert_eq!(count.load(Ordering::SeqCst), 2);
     server.abort();
     let _ = server.await;
+}
+
+// Link maintained profiling support only into the instrumented test binary.
+#[cfg(all(target_arch = "wasm32", owned_browser_coverage))]
+#[wasm_bindgen_test::wasm_bindgen_test]
+fn profiling_runtime_is_linked() {
+    let _ = browser_coverage_runtime::__owned_test_module_signature();
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn trusted_vault_origin_is_explicit_and_keeps_its_own_capability() {
+    let (mut door, member_token) = paired();
+    let vault = "https://vault.example";
+    let token = door
+        .pair_client(vault, Role::Member, actions(), 10, 100)
+        .unwrap();
+    let input = br#"{"action":"runtime.status","version":1,"body":{}}"#;
+    assert_eq!(
+        value(door.dispatch(vault, token.expose_for_transport(), input, 11))["status"],
+        "ok"
+    );
+    assert_eq!(
+        value(door.dispatch(vault, member_token.expose_for_transport(), input, 11)),
+        error(ErrorCode::Unauthorized)
+    );
+    assert_eq!(
+        value(door.dispatch(ORIGIN, token.expose_for_transport(), input, 11)),
+        error(ErrorCode::Unauthorized)
+    );
+    assert!(door
+        .pair_client(vault, Role::Admin, actions(), 11, 20)
+        .is_err());
+    assert_eq!(
+        value(door.dispatch(
+            "https://unlisted-vault.example",
+            token.expose_for_transport(),
+            input,
+            11
+        )),
+        error(ErrorCode::Unauthorized)
+    );
 }

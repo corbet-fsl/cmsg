@@ -39,3 +39,10 @@ fn duplicate_capability_cannot_replace_a_live_grant_and_outputs_are_bounded() {
         Err(ErrorCode::Capacity)
     );
 }
+
+// Link maintained profiling support only into the instrumented test binary.
+#[cfg(all(target_arch = "wasm32", owned_browser_coverage))]
+#[wasm_bindgen_test::wasm_bindgen_test]
+fn profiling_runtime_is_linked() {
+    let _ = browser_coverage_runtime::__owned_test_module_signature();
+}

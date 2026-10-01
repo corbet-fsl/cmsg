@@ -6,3 +6,4 @@
 /tools/node_modules/
 /generated/
 /registry.json
+__pycache__/

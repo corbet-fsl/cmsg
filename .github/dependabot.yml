@@ -24,3 +24,7 @@ updates:
     groups:
       compatible:
         patterns: ["*"]
+  - package-ecosystem: pip
+    directory: /.ci
+    schedule:
+      interval: weekly

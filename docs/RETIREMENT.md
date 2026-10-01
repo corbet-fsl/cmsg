@@ -25,7 +25,7 @@ not a claim that each successor has completed or passed the associated tests.
 | `src/live.rs`, `src/inbox_live.rs`, `tests/live_delivery.rs` | Delivery `cdlv` | Sender/receiver state, authenticated ACK, timeout/cancel, unknown-after-write and durable outbox retries |
 | `src/inbox.rs`, `src/inbox_replacement.rs`, `src/inbox_reservation*`, `tests/inbox.rs`, `tests/reservation_gate.rs` | Inbox `cnbx` composing dedicated owners | One combined candidate/checkpoint before output, replacement restoration and refusal on missing current authority |
 | `src/accounting.rs`, `src/reservation.rs`, `src/inbox_accounting.rs`, `tests/accounting.rs`, `tests/accounted_admission.rs`, `experiments/community-composition`, `experiments/first-contact-release` | Wallet `cwlt`, Balance `cblc`, corresponding facades | Actual current proofs and private settlement; old verifier callbacks never establish G2/G5 |
-| `src/identity.rs`, `src/enrollment.rs`, `src/admission.rs`, `tests/identity.rs`, `tests/devices.rs`, `tests/device_attacks.rs`, `tests/device_renewal.rs`, `tests/enrollment_signing.rs`, `tests/admission.rs` | Keys `ckmg`, device Passkeys `cpky`, server Keyhole `ckyh`, membership owners | PRF-derived identity, WebAuthn separation, current device authority, revocation and same-passkey restore |
+| `src/identity.rs`, `src/enrollment.rs`, `src/admission.rs`, `tests/identity.rs`, `tests/devices.rs`, `tests/device_attacks.rs`, `tests/device_renewal.rs`, `tests/enrollment_signing.rs`, `tests/admission.rs` | Keys `ckmg`, device Passkeys `cpky`, server Keyhole `ckyh`, membership owners | Equal PRF-wrapped copies of the random common identity root, WebAuthn separation, current device authority, revocation and enrolled-passkey restore |
 | `src/profile.rs`, `src/profile_statements.rs`, `src/board.rs`, `tests/profile.rs`, `tests/profile_statements.rs`, `tests/release_signing.rs` | Profile `cpfl`, Envelope `cnvl`, Search `csrh`, Exchange `cxch`, Board `cbrd` | Current signed public/full Guard validation, scoped read-key custody, authenticated give-first exchange |
 | `src/vault.rs`, `src/browser*.rs`, `browser/indexeddb-store*`, `tests/browser.rs` | Waist `cwst`, Vault `cvlt`, dedicated facade adapters | Real encrypted IndexedDB/CAS, cross-tab conflict, shared checkpoint, durable unknown and reopen |
 | `src/framing.rs`, `src/transport.rs`, `src/rendezvous.rs`, `tests/frame_codec.rs`, `tests/framing.rs`, `tests/transport.rs`, `tests/rendezvous.rs`, `tests/renewal.rs`, Tor examples and experiments, `browser/upstream`, `browser/tor-*`, `browser/live-stream*` | Mesh `cmsh`, Tor `ctrn`, Ferry `cfry`, backend owners | Bounded messages/partial reads/backpressure, actual browser/native networking, renewal, deadlines and process isolation |
@@ -48,3 +48,9 @@ Current door CI measures only current door code. Retiring these tests does not
 satisfy or waive their successor regressions, real network integration, active
 member restoration, anonymous settlement, group scenarios or product acceptance.
 Unavailable domain operations remain failures and preload remains unavailable.
+
+Historical deterministic-identity vectors must be adapted by their current owner:
+all enrolled passkeys have equal wrapped copies of the common random root in
+member-owned records. No first passkey has privileged recordless recovery. If
+long absence plus loss of every device copy leaves no recoverable records,
+identity and data are lost equally; unavailable replicas do not prove that loss.

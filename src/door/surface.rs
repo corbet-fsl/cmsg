@@ -73,7 +73,7 @@ pub fn cli_commands() -> Value {
 
 /// Build-time artifact, used by the maintained JSON Schema-to-TypeScript tool.
 pub fn bundle() -> Value {
-    json!({"version": 1, "actions": catalog(), "invocation": registry::schema::<Invocation>(),
+    json!({"version": 1, "actions": catalog(), "types": registry::owner_types(), "invocation": registry::schema::<Invocation>(),
         "output": registry::schema::<Output>(), "openapi": openapi(), "mcp": mcp_tools(),
         "cli": cli_commands()})
 }

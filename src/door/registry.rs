@@ -71,6 +71,16 @@ fn describe(_: &mut Door, _: &[u8; 32], _: Empty) -> Result<(Vec<ActionDescripti
     Ok((catalog(), vec![]))
 }
 
+fn board_status(_: &mut Door, _: &[u8; 32], _: Empty) -> Result<(cbrd::Status, Vec<Event>)> {
+    // The actual Board runtime adapter is not installed. Its owner result type
+    // still defines every projection; no caller-supplied state becomes success.
+    Err(ErrorCode::Unavailable)
+}
+
+pub(super) fn owner_types() -> Value {
+    serde_json::json!({"GroupView": schema::<cbrd::GroupView>()})
+}
+
 fn revoke(door: &mut Door, key: &[u8; 32], _: Empty) -> Result<(Revoked, Vec<Event>)> {
     door.grants.remove(key);
     Ok((Revoked { revoked: true }, vec![Event::ClientRevoked]))
@@ -79,9 +89,9 @@ fn revoke(door: &mut Door, key: &[u8; 32], _: Empty) -> Result<(Revoked, Vec<Eve
 // Each row is the sole definition of the action's typed body/result, authority,
 // scope family, effect and dispatch. Projection code reads these same entries.
 macro_rules! actions {
-    ($($name:literal => $handler:ident ($body:ty) -> $result:ty, $effect:ident;)+) => {
+    ($($name:literal => $handler:ident ($body:ty) -> $result:ty, $effect:ident, $family:ident;)+) => {
         pub(super) static ACTIONS: &[Action] = &[$(Action {
-            name: $name, version: 1, family: Family::Local,
+            name: $name, version: 1, family: Family::$family,
             authority: Authority::LocalClient, effect: Effect::$effect,
             body: schema::<$body>, result: schema::<$result>,
             handler: |door, key, body| {
@@ -94,9 +104,10 @@ macro_rules! actions {
 }
 
 actions! {
-    "runtime.status" => status(Empty) -> RuntimeStatus, Read;
-    "runtime.describe" => describe(Empty) -> Vec<ActionDescription>, Read;
-    "client.revoke" => revoke(Empty) -> Revoked, LocalRevocation;
+    "runtime.status" => status(Empty) -> RuntimeStatus, Read, Local;
+    "runtime.describe" => describe(Empty) -> Vec<ActionDescription>, Read, Local;
+    "client.revoke" => revoke(Empty) -> Revoked, LocalRevocation, Local;
+    "board.status" => board_status(Empty) -> cbrd::Status, Read, Board;
 }
 
 pub(super) fn action(name: &str) -> Option<&'static Action> {
