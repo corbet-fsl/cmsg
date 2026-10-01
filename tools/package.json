@@ -6,8 +6,8 @@
     "generate": "node generate.mjs"
   },
   "devDependencies": {
-    "json-schema-to-typescript": "^15.0.4",
-    "typescript": "^5.9.3",
+    "json-schema-to-typescript": "^16.0.0",
+    "typescript": "^7.0.2",
     "ajv": "^8.17.1"
   }
 }
