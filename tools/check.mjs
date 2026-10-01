@@ -4,6 +4,7 @@ import Ajv2020 from 'ajv/dist/2020.js';
 
 const registry = JSON.parse(await readFile(process.argv[2], 'utf8'));
 const ajv = new Ajv2020({ strict: false });
+for (const schema of Object.values(registry.types ?? {})) ajv.compile(schema);
 for (const action of registry.actions) {
   for (const name of ['body', 'result', 'event', 'error']) ajv.compile(action[name]);
   const route = `/v${action.version}/${action.action}`;

@@ -8,6 +8,8 @@ set, expiry, revocation and fixed runtime scope. Requests cannot select a role
 or community. Root/admin origins and sessions remain separate from members.
 
 Current local actions are runtime.status, runtime.describe and client.revoke.
+board.status uses the actual Board result type and explicitly refuses until its
+runtime adapter exists. GroupView is generated from the actual Groups owner.
 All domain owners remain unavailable, so preload remains blocked. No network
 reachability flag, compile test, transport ACK or fixture can create readiness.
 Native paired clients use the owned original-byte Client and loopback HTTP;

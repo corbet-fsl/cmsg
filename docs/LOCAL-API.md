@@ -5,7 +5,10 @@ effect and bounded errors. HTTP, MCP tools, CLI command descriptions and
 TypeScript are projections of this registry, not separate definitions.
 
 The current implemented actions are `runtime.status`, `runtime.describe`, and
-`client.revoke`. Domain owner ports are still being integrated. Runtime status
+`client.revoke`. `board.status` projects the real `cbrd::Status` result schema
+and returns `Unavailable` until the Board runtime is bound. The generated
+`GroupView` type is the owner cgrp type reexported by cbrd, not a copied DTO.
+Domain owner ports are still being integrated. Runtime status
 reports every missing facade as unavailable and blocks preload. No membership,
 balance, transport, profile or group success is fabricated.
 
@@ -41,7 +44,13 @@ uses maintained `json-schema-to-typescript` to emit `client.ts`:
 ```typescript
 const client = createCmsgClient(pairedLocalTransport);
 const status = await client.call('runtime.status', {});
+// Preserve the complete owner envelope and events for effectful operations.
+const outcome = await client.invoke('client.revoke', {});
 ```
+
+`invoke` preserves the typed result, events and owner refusal envelope. `call`
+is a result-only convenience for reads; consumers needing effect events use
+`invoke`. Neither operation adds retries or domain logic.
 
 The transport sends the invocation to the embedded local door; it does not
 implement domain behavior. Generated artifacts include the exact Rust registry
@@ -84,3 +93,10 @@ Output or mismatched status returns `Reconcile`: the action may already have
 committed. Valid owner Output is preserved exactly. Local pre-send request size
 refusal remains `Capacity`. A caller must reconcile through owner state, never
 blindly retry a mutation. This uses the maintained [reqwest never-retry policy](https://docs.rs/reqwest/latest/reqwest/retry/fn.never.html).
+
+The generated TypeScript client also runs against an actual native Door in CI.
+A test-only host transfers its local capability over an inherited private pipe;
+the client checks status/discovery, unavailable Board, strict duplicate decoding,
+origin refusal, revocation events and subsequent denial over real loopback HTTP.
+This establishes local generated-client parity, not production bootstrap or remote
+member workflows. The host requires the non-default `conformance` feature.

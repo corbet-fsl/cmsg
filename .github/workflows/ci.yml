@@ -25,6 +25,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - run: |
+          python3 .ci/check-first-party.py
           cargo update
           rustc -Vv > resolution.txt
           date -u +%FT%TZ >> resolution.txt
@@ -84,7 +85,11 @@ jobs:
           npm ci --prefix tools --ignore-scripts --no-audit --no-fund
           node tools/generate.mjs registry.json generated
           node tools/check.mjs registry.json
-          tools/node_modules/.bin/tsc --noEmit --strict --target es2022 --module nodenext --moduleResolution nodenext generated/client.ts
+          tools/node_modules/.bin/tsc --outDir generated/runtime --strict --target es2022 --module nodenext --moduleResolution nodenext generated/client.ts
+      - name: Execute generated TypeScript against the actual local Door
+        run: |
+          cargo build --locked --features conformance --example client-conformance
+          node tools/client-conformance.mjs target/debug/examples/client-conformance
       - uses: actions/upload-artifact@v4
         with:
           name: generated-local-api
@@ -98,7 +103,7 @@ jobs:
           name: formatting
           path: formatting.patch
   coverage:
-    needs: check
+    needs: dependency-policy
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -111,6 +116,7 @@ jobs:
           name: resolved-lock
       - uses: dtolnay/rust-toolchain@nightly
         with:
+          targets: wasm32-unknown-unknown
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
@@ -120,7 +126,9 @@ jobs:
           tool: cargo-llvm-cov
       - run: cargo llvm-cov --locked --branch --all-targets --json --output-path coverage.json --ignore-filename-regex '/tests/'
       - run: cargo llvm-cov report --lcov --output-path coverage.lcov --ignore-filename-regex '/tests/'
-      - run: python3 .ci/check-source-coverage.py coverage.lcov
+      - run: cargo llvm-cov report --text --output-path coverage.txt --ignore-filename-regex '/tests/'
+      - run: python3 .ci/test-source-coverage.py
+      - run: python3 .ci/check-source-coverage.py coverage.lcov coverage.json coverage.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -128,3 +136,37 @@ jobs:
           path: |
             coverage.json
             coverage.lcov
+            coverage.txt
+      - id: binding-version
+        run: |
+          python3 - <<'PYCODE'
+          import os, tomllib
+          packages = tomllib.load(open('Cargo.lock', 'rb'))['package']
+          version = next(p['version'] for p in packages if p['name'] == 'wasm-bindgen')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('version=' + version + '\n')
+          PYCODE
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@${{ steps.binding-version.outputs.version }}
+      - run: python3 -m pip install -r .ci/requirements.txt
+      - name: Measure actual browser Rust coverage
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: python3 .ci/browser-coverage-runner.py
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS: -Zno-profiler-runtime -Clink-args=--no-gc-sections --cfg=owned_browser_coverage
+          WASM_BINDGEN_TEST_ONLY_WEB: "1"
+          WASM_BINDGEN_SPLIT_LINKED_MODULES: "1"
+          CHROMEDRIVER: /usr/bin/chromedriver
+          CC_wasm32_unknown_unknown: clang
+        run: cargo llvm-cov test --locked --branch --coverage-target-only --target wasm32-unknown-unknown --lib --test door --json --output-path wasm-coverage.json --ignore-filename-regex '/tests/'
+      - run: cargo llvm-cov report --target wasm32-unknown-unknown --lcov --output-path wasm-coverage.lcov --ignore-filename-regex '/tests/'
+      - run: cargo llvm-cov report --target wasm32-unknown-unknown --text --output-path wasm-coverage.txt --ignore-filename-regex '/tests/'
+      - run: python3 .ci/check-source-coverage.py wasm-coverage.lcov wasm-coverage.json wasm-coverage.txt wasm
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wasm-coverage
+          path: |
+            wasm-coverage.json
+            wasm-coverage.lcov
+            wasm-coverage.txt
