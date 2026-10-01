@@ -12,4 +12,4 @@ path = "../browser-bindgen/src/main.rs"
 
 [dependencies]
 anyhow = "1"
-wasm-bindgen-cli-support = "=0.2.122"
+wasm-bindgen-cli-support = "0.2.122"

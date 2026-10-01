@@ -6,4 +6,4 @@ publish = false
 
 [dependencies]
 anyhow = "1"
-wasm-bindgen-cli-support = "=0.2.128"
+wasm-bindgen-cli-support = "0.2.128"

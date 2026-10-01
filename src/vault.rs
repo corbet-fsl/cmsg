@@ -31,7 +31,7 @@ pub(crate) fn seal(
         .encrypt(
             XNonce::from_slice(&data_nonce),
             Payload {
-                msg: &plaintext,
+                msg: plaintext,
                 aad: &aad,
             },
         )

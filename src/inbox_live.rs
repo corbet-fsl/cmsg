@@ -205,6 +205,7 @@ impl Inbox {
     pub fn live_delivery_enabled(&self) -> bool {
         self.state.live.is_some()
     }
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn require_live_delivery(&mut self) {
         self.state.live.get_or_insert_with(Default::default);
     }
@@ -375,6 +376,7 @@ impl Inbox {
     }
     /// Copy transient connection permissions only while staging this same running
     /// client. Deserializing a checkpoint never calls this method.
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn copy_live_runtime(&mut self, original: &Inbox) {
         self.runtime = original.runtime.clone();
         self.state.live = original.state.live.clone();
@@ -665,6 +667,8 @@ impl Inbox {
                 .is_some_and(|s| matches!(&s.local.body,Body::Hello {nonce:n,..} if n==nonce))
         })
     }
+    // Keep the existing checkpoint callback API stable during owner extraction.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn send_live_data(
         &mut self,
         member: &mut Member,

@@ -1,0 +1,54 @@
+# Member local API
+
+`cmsg::door` owns the action/version, typed body/result, event, authority,
+effect and bounded errors. HTTP, MCP tools, CLI command descriptions and
+TypeScript are projections of this registry, not separate definitions.
+
+The current implemented actions are `runtime.status`, `runtime.describe`, and
+`client.revoke`. Domain owner ports are still being integrated. Runtime status
+reports every missing facade as unavailable and blocks preload. No membership,
+balance, transport, profile or group success is fabricated.
+
+Create one `Door` per community with exact permitted origins for each role.
+`pair_client` is an embedding control, called only after trusted local pairing;
+it is absent from the public action registry. Capabilities are random, bounded,
+expiring and revocable. They authorize an explicit local action set, not remote
+service authority. Admin, root and member origins are separate. Remote role
+sessions will be supplied by Foyer; no copied cvld metadata or frontend bypass.
+
+The shared invocation is `{action, version, body}`. `Door::dispatch` takes its
+bytes, the transport's origin/capability, and trusted current time. Requests
+cannot select another role or community. Responses are `{status:"ok", result,
+events}` or `{status:"error", error}`. Errors contain no member values or
+dependency details. Key and PRF values have no API path.
+
+CLI adapters use the owner's `ErrorCode::exit_code()`: 64 for malformed or
+unsupported requests, 77 for denied authority, 69 for unavailable integration,
+and 75 for capacity, clock or reconciliation refusals. Success is zero.
+Keep incoming request bytes intact until `Door::dispatch`; parsing them into a
+generic JSON value first would erase duplicate fields before the typed decoder.
+
+Native `door::native::router` projects POST `/v1/<action>` with a typed JSON
+body. Require an exact Host, Origin, application/json and bearer local client
+capability. Bind the router to a local listener; do not install request/body
+logging middleware. Every handled response is no-store. The native and Wasm
+dispatchers use the same implementation and test vectors.
+
+`door::surface::{bundle,openapi,mcp_tools,cli_commands}` exports the generated
+views. The `registry` example exports the bundle in CI. `tools/generate.mjs`
+uses maintained `json-schema-to-typescript` to emit `client.ts`:
+
+```typescript
+const client = createCmsgClient(pairedLocalTransport);
+const status = await client.call('runtime.status', {});
+```
+
+The transport sends the invocation to the embedded local door; it does not
+implement domain behavior. Generated artifacts include the exact Rust registry
+snapshot. Schemars derives schemas from Serde types; Axum supplies native HTTP,
+getrandom creates local capabilities, and SHA-256 indexes their digests. None
+of those primitives is implemented here.
+
+Remaining integration includes real owner schemas/operations, Foyer projections,
+Mesh readiness, bounded event delivery, and combined encrypted checkpoint/output
+publication. The local API foundation is not end-to-end product acceptance.

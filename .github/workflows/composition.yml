@@ -1,14 +1,11 @@
 name: Component composition
 on:
-  push:
-    branches: [main]
-    paths:
-      - experiments/composition/**
-      - examples/composition.rs
-      - .github/workflows/composition.yml
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: implementation
+  cancel-in-progress: false
 jobs:
   test:
     runs-on: ubuntu-24.04

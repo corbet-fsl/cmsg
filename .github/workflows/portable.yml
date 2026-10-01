@@ -1,23 +1,12 @@
 name: Portable Rust and browser contracts
 on:
-  push:
-    branches: [main]
-    paths: ["Cargo.*", "src/**", "tests/**", "examples/**", "browser/**", ".ci/**", ".github/workflows/portable.yml"]
-  pull_request:
-    paths: ["Cargo.*", "src/**", "tests/**", "examples/**", "browser/**", ".ci/**", ".github/workflows/portable.yml"]
   workflow_dispatch:
-    inputs:
-      suite:
-        description: Contract suite to run
-        type: choice
-        required: true
-        default: all
-        options: [all, core, browser]
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: implementation
+  cancel-in-progress: false
+
 jobs:
   contract:
     # GHA is primary; .crow/portable-core.yaml invokes the same script as fallback.

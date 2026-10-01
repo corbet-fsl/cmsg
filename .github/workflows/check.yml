@@ -1,15 +1,11 @@
 name: Native cross-target checks
 on:
-  push:
-    paths: ["Cargo.*", "src/**", "tests/**", "examples/**", ".github/workflows/check.yml"]
-  pull_request:
-    paths: ["Cargo.*", "src/**", "tests/**", "examples/**", ".github/workflows/check.yml"]
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: implementation
+  cancel-in-progress: false
 
 jobs:
   mobile:

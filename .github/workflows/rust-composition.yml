@@ -1,13 +1,11 @@
 name: Rust community composition
 on:
-  push:
-    branches: [main]
-    paths: ["Cargo.*", "src/**", "experiments/community-composition/**", ".ci/portable-checks.sh", ".github/workflows/rust-composition.yml"]
-  pull_request:
-    paths: ["Cargo.*", "src/**", "experiments/community-composition/**", ".ci/portable-checks.sh", ".github/workflows/rust-composition.yml"]
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: implementation
+  cancel-in-progress: false
 jobs:
   composition:
     runs-on: ubuntu-24.04

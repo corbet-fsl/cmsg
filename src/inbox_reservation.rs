@@ -445,6 +445,8 @@ impl Inbox {
         *self = changed;
         Ok(())
     }
+    // The two reservation proofs and atomic persistence are independent inputs.
+    #[allow(clippy::too_many_arguments)]
     pub fn bind_active_reservations(
         &mut self,
         member: &Member,

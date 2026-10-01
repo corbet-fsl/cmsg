@@ -676,15 +676,15 @@ impl Inbox {
             .state
             .introductions
             .iter()
-            .filter_map(|(peer, intro)| {
-                (intro.decision.is_none()
+            .filter(|(peer, intro)| {
+                intro.decision.is_none()
                     && !self.is_closed(peer)
                     && intro
                         .strict
                         .as_ref()
-                        .is_some_and(|s| s.policy.response_deadline <= now))
-                .then(|| peer.clone())
+                        .is_some_and(|s| s.policy.response_deadline <= now)
             })
+            .map(|(peer, _)| peer.clone())
             .collect();
         let mut changed = self.duplicate();
         let ended = changed.expire_live_sessions(now);
@@ -1451,10 +1451,7 @@ impl Inbox {
                             .state
                             .introductions
                             .get(peer)
-                            .is_some_and(|i| i.id == nonce) =>
-                    {
-                        ()
-                    }
+                            .is_some_and(|i| i.id == nonce) => {}
                     _ => {
                         changed.mark_contact_conflict(peer);
                     }
@@ -1875,6 +1872,7 @@ impl Inbox {
     pub fn publication_version(&self) -> u64 {
         self.state.publication_version
     }
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn advance_publication(&mut self, expected: u64) -> Result<u64, Error> {
         if self.state.publication_version != expected || expected >= 9_007_199_254_740_991 {
             return Err(Error::InvalidStore);

@@ -10,6 +10,8 @@
 //! onion networking. Raw MLS objects must not be routed through an operator's
 //! logging relay. This alpha does not provide mobile bindings, storage rollback
 //! protection, guaranteed delivery or an audited anonymity system.
+pub mod door;
+
 mod accounting;
 mod admission;
 mod board;

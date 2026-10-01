@@ -1,0 +1,120 @@
+name: ci
+on:
+  push:
+    branches: [main]
+    paths: ["Cargo.*", "src/**", "tests/**", "examples/**", "browser/**", "tools/**", ".ci/**", ".github/**"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: implementation
+  cancel-in-progress: false
+env:
+  CARGO_BUILD_JOBS: '2'
+  RUST_TEST_THREADS: '2'
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - run: |
+          cargo update
+          rustc -Vv > resolution.txt
+          date -u +%FT%TZ >> resolution.txt
+          sha256sum Cargo.lock >> resolution.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resolved-lock
+          path: |
+            Cargo.lock
+            resolution.txt
+  dependency-policy:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: resolved-lock
+      - run: python3 .ci/check-first-party.py
+  check:
+    needs: dependency-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: resolved-lock
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - name: Format and preserve corrections
+        run: |
+          cargo fmt --all
+          git diff -- src tests examples > formatting.patch
+          test ! -s formatting.patch
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Generate every consumer surface from Rust
+        run: |
+          cargo run --locked --example registry > registry.json
+          npm ci --prefix tools --ignore-scripts --no-audit --no-fund
+          node tools/generate.mjs registry.json generated
+          tools/node_modules/.bin/tsc --noEmit --strict --target es2022 --module nodenext --moduleResolution nodenext generated/client.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-local-api
+          path: generated
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked --all-targets
+      - run: wasm-pack test --headless --chrome -- --locked
+      - run: node .ci/peer-channel-check.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: formatting
+          path: formatting.patch
+  coverage:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: resolved-lock
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - run: cargo llvm-cov --locked --branch --all-targets --json --output-path coverage.json
+      - run: python3 .ci/check-coverage.py coverage.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage.json

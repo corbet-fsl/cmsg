@@ -2,3 +2,7 @@
 /.ci-dependencies/
 /browser/pkg/
 /arti-corpora/
+
+/tools/node_modules/
+/generated/
+/registry.json

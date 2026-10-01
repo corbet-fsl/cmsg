@@ -122,10 +122,7 @@ impl Envelope {
             Body::Hello { nonce, until }
                 if *nonce != [0; 32]
                     && *until > self.issued_at
-                    && *until <= 9_007_199_254_740_991 =>
-            {
-                ()
-            }
+                    && *until <= 9_007_199_254_740_991 => {}
             Body::Ready { nonce, peer_nonce } if *nonce != [0; 32] && *peer_nonce != [0; 32] => (),
             Body::Data {
                 session,
