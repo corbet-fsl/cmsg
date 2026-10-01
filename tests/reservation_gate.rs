@@ -201,7 +201,7 @@ fn restore_close_and_reopening_keep_old_proofs_from_reauthorizing_another_contac
 fn pending_accounted_contact_is_bound_to_one_recipient_device_and_roster() {
     let mut p = Pair::configured(10_000);
     configure(&mut p);
-    let mut sibling = common::accounting::device(&p.br, &p.time, 10_000);
+    let sibling = common::accounting::device(&p.br, &p.time, 10_000);
     let incoming = p.bi.export_contact_sync(&p.b).unwrap();
     let mut sibling_inbox = cmsg::Inbox::new_accounted(&sibling).unwrap();
     sibling_inbox

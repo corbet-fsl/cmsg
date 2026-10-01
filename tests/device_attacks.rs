@@ -32,7 +32,7 @@ fn malicious_root_authorized_peer_cannot_downgrade_its_leaf_through_a_valid_mls_
         .wire_format_policy(PURE_CIPHERTEXT_WIRE_FORMAT_POLICY)
         .build();
     let mut group = MlsGroup::new(&provider, &signer, &config, credential).unwrap();
-    let package = KeyPackageIn::tls_deserialize_exact(&receiver.key_package().unwrap())
+    let package = KeyPackageIn::tls_deserialize_exact(receiver.key_package().unwrap())
         .unwrap()
         .validate(provider.crypto(), ProtocolVersion::Mls10)
         .unwrap();

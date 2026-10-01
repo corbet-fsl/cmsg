@@ -18,6 +18,17 @@ pub fn output_schema(action: &ActionDescription) -> Value {
 
 pub fn openapi() -> Value {
     let mut paths = serde_json::Map::new();
+    paths.insert("/invoke".into(), json!({"post": {
+        "operationId": "invoke",
+        "description": "Bounded original-byte envelope for the same action dispatcher",
+        "security": [{"localClient": []}],
+        "requestBody": {"required": true, "content": {"application/json": {
+            "schema": registry::schema::<Invocation>()
+        }}},
+        "responses": {"default": {"description": "Registry action result or bounded refusal", "content": {
+            "application/json": {"schema": registry::schema::<Output>()}
+        }}}
+    }}));
     for action in catalog() {
         paths.insert(format!("/v{}/{}", action.version, action.action), json!({
             "post": {

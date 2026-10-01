@@ -109,6 +109,25 @@ fn validate_origin(value: &str) -> Result<()> {
 pub struct ClientToken(Zeroizing<String>);
 
 impl ClientToken {
+    /// Receive an existing capability over a private inherited pipe/socket from
+    /// the trusted pairing host. Import is encoding validation, not pairing or
+    /// authorization: unknown tokens are still rejected by the Door. Never use
+    /// command-line arguments, environment variables, logs or raw token files.
+    pub fn from_protected_transport(bytes: Zeroizing<Vec<u8>>) -> Result<Self> {
+        if bytes.len() != 43 {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let _decoded = Zeroizing::new(
+            BASE64URL_NOPAD
+                .decode(&bytes)
+                .map_err(|_| ErrorCode::Unauthorized)?,
+        );
+        // Strict 43-byte base64url is exactly 32 decoded bytes and guarantees
+        // ASCII, so UTF-8 is infallible.
+        let text = std::str::from_utf8(&bytes).expect("base64url is ASCII");
+        Ok(Self(Zeroizing::new(text.to_owned())))
+    }
+
     /// Hand to the paired client's protected transport; never log or persist raw.
     pub fn expose_for_transport(&self) -> &str {
         &self.0
@@ -132,7 +151,7 @@ pub struct Invocation {
 }
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "status", rename_all = "snake_case")]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Output {
     Ok { result: Value, events: Vec<Event> },
     Error { error: ErrorCode },
@@ -255,13 +274,7 @@ impl Door {
         }
     }
 
-    fn invoke(
-        &mut self,
-        origin: &str,
-        token: &str,
-        bytes: &[u8],
-        now: u64,
-    ) -> Result<(Value, Vec<Event>)> {
+    fn authenticate(&mut self, origin: &str, token: &str, now: u64) -> Result<[u8; 32]> {
         self.observe(now)?;
         if token.len() != 43 || origin.len() > 2048 {
             return Err(ErrorCode::Unauthorized);
@@ -271,6 +284,21 @@ impl Door {
         if grant.origin != origin {
             return Err(ErrorCode::Unauthorized);
         }
+        Ok(key)
+    }
+
+    fn invoke(
+        &mut self,
+        origin: &str,
+        token: &str,
+        bytes: &[u8],
+        now: u64,
+    ) -> Result<(Value, Vec<Event>)> {
+        let key = self.authenticate(origin, token, now)?;
+        let grant = self
+            .grants
+            .get(&key)
+            .expect("authentication established this unchanged grant");
         if bytes.len() > MAX_BODY_BYTES {
             return Err(ErrorCode::Capacity);
         }

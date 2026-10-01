@@ -210,7 +210,7 @@ impl RawOwner {
             .wire_format_policy(PURE_CIPHERTEXT_WIRE_FORMAT_POLICY)
             .build();
         let mut group = MlsGroup::new(&provider, &signer, &config, credential).unwrap();
-        let key_package = KeyPackageIn::tls_deserialize_exact(&receiver.key_package().unwrap())
+        let key_package = KeyPackageIn::tls_deserialize_exact(receiver.key_package().unwrap())
             .unwrap()
             .validate(provider.crypto(), ProtocolVersion::Mls10)
             .unwrap();

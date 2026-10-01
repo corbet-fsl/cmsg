@@ -1,5 +1,7 @@
 mod common;
-use cmsg::{validate_text, Error, Member, OnionEndpoint, OnionTransport, Received, MAX_TEXT_BYTES};
+#[cfg(not(target_arch = "wasm32"))]
+use cmsg::OnionTransport;
+use cmsg::{validate_text, Error, Member, OnionEndpoint, Received, MAX_TEXT_BYTES};
 
 fn pair() -> (Member, Member) {
     let mut a = common::member();
@@ -148,9 +150,13 @@ fn arbitrary_peers_cannot_choose_clearnet_routes() {
     ] {
         assert!(OnionEndpoint::parse(host, 80).is_err(), "accepted {host}");
     }
-    assert!(OnionTransport::new("1.2.3.4:9050".parse().unwrap()).is_err());
-    assert!(OnionTransport::new("127.0.0.1:9050".parse().unwrap()).is_ok());
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        assert!(OnionTransport::new("1.2.3.4:9050".parse().unwrap()).is_err());
+        assert!(OnionTransport::new("127.0.0.1:9050".parse().unwrap()).is_ok());
+    }
 }
+#[cfg(not(target_arch = "wasm32"))]
 #[tokio::test]
 async fn missing_proxy_fails_closed() {
     // A valid v3 address synthesized from public key material; no Tor connection.

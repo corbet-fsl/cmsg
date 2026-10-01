@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 mod common;
 use cmsg::{OnionEndpoint, OnionTransport, Received};
 use sha3::{Digest, Sha3_256};

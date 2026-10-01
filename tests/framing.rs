@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 //! Real stream framing tests. Loopback/duplex streams do not prove anonymity.
 use cmsg::{Error, FramedStream, MAX_WIRE_BYTES};
 use std::time::Duration;

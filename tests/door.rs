@@ -484,3 +484,133 @@ async fn http_rejects_ambiguous_headers_and_bounds_every_route() {
     }
     assert!(native::router(Door::new(config("a")), BTreeSet::new(), Arc::new(Clock)).is_err());
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test]
+async fn native_client_executes_real_loopback_door_and_preserves_raw_input() {
+    use std::sync::Arc;
+    struct Clock;
+    impl native::Clock for Clock {
+        fn now(&self) -> u64 {
+            11
+        }
+    }
+    let (mut door, token) = paired();
+    let other_token = door
+        .pair_client("https://admin.example", Role::Admin, actions(), 10, 100)
+        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let base = format!("http://{address}");
+    let app = native::router(door, BTreeSet::from([address.to_string()]), Arc::new(Clock)).unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let client = native::Client::new(&base, ORIGIN, token).unwrap();
+    let status = client
+        .invoke_bytes(br#"{"action":"runtime.status","version":1,"body":{}}"#)
+        .await
+        .unwrap();
+    assert_eq!(value(status)["result"]["preload"], "unavailable");
+    let description = client
+        .invoke_bytes(br#"{"action":"runtime.describe","version":1,"body":{}}"#)
+        .await
+        .unwrap();
+    assert_eq!(value(description)["result"], surface::bundle()["actions"]);
+    assert_eq!(value(client.invoke_bytes(br#"{"action":"runtime.status","action":"client.revoke","version":1,"body":{}}"#).await.unwrap()),error(ErrorCode::InvalidRequest));
+    assert_eq!(
+        value(
+            client
+                .invoke_bytes(br#"{"action":"runtime.status","version":2,"body":{}}"#)
+                .await
+                .unwrap()
+        ),
+        error(ErrorCode::UnsupportedVersion)
+    );
+    assert!(matches!(
+        client.invoke_bytes(&vec![0; MAX_BODY_BYTES + 1]).await,
+        Err(ErrorCode::Capacity)
+    ));
+    let foreign = native::Client::new(&base, ORIGIN, other_token).unwrap();
+    assert_eq!(
+        value(
+            foreign
+                .invoke_bytes(br#"{"action":"runtime.status","version":1,"body":{}}"#)
+                .await
+                .unwrap()
+        ),
+        error(ErrorCode::Unauthorized)
+    );
+    assert_eq!(
+        value(
+            client
+                .invoke_bytes(br#"{"action":"client.revoke","version":1,"body":{}}"#)
+                .await
+                .unwrap()
+        )["result"]["revoked"],
+        true
+    );
+    assert_eq!(
+        value(
+            client
+                .invoke_bytes(br#"{"action":"runtime.status","version":1,"body":{}}"#)
+                .await
+                .unwrap()
+        ),
+        error(ErrorCode::Unauthorized)
+    );
+    server.abort();
+    let _ = server.await;
+    assert!(matches!(
+        client.invoke_bytes(b"{}").await,
+        Err(ErrorCode::Unavailable)
+    ));
+    for base in [
+        "not a url",
+        "http://example.test",
+        "https://127.0.0.1",
+        "http://localhost",
+        "http://user@127.0.0.1",
+        "http://u:p@127.0.0.1",
+        "http://127.0.0.1/path",
+        "http://127.0.0.1?query",
+        "http://127.0.0.1#fragment",
+    ] {
+        let (_, token) = paired();
+        assert!(matches!(
+            native::Client::new(base, ORIGIN, token),
+            Err(ErrorCode::InvalidRequest)
+        ));
+    }
+    let (_, token) = paired();
+    assert!(native::Client::new("http://[::1]:3000", ORIGIN, token).is_ok());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn imported_capability_is_only_an_encoding_until_the_door_authorizes_it() {
+    let (mut door, token) = paired();
+    let received = ClientToken::from_protected_transport(zeroize::Zeroizing::new(
+        token.expose_for_transport().as_bytes().to_vec(),
+    ))
+    .unwrap();
+    assert_eq!(
+        call(&mut door, &received, "runtime.status", 11)["status"],
+        "ok"
+    );
+    door.revoke(&token);
+    assert_eq!(
+        call(&mut door, &received, "runtime.status", 11),
+        error(ErrorCode::Unauthorized)
+    );
+    for bytes in [vec![], vec![b'!'; 43], vec![b'A'; 44], vec![255; 43]] {
+        assert!(matches!(
+            ClientToken::from_protected_transport(zeroize::Zeroizing::new(bytes)),
+            Err(ErrorCode::Unauthorized)
+        ));
+    }
+    let unknown =
+        ClientToken::from_protected_transport(zeroize::Zeroizing::new(vec![b'A'; 43])).unwrap();
+    assert_eq!(
+        call(&mut door, &unknown, "runtime.status", 11),
+        error(ErrorCode::Unauthorized)
+    );
+}

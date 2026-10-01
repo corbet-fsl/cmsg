@@ -52,3 +52,28 @@ of those primitives is implemented here.
 Remaining integration includes real owner schemas/operations, Foyer projections,
 Mesh readiness, bounded event delivery, and combined encrypted checkpoint/output
 publication. The local API foundation is not end-to-end product acceptance.
+
+Native applications use the owner's `door::native::Client::new(base, origin,
+ClientToken) -> Result<Client, ErrorCode>` and
+`Client::invoke_bytes(&[u8]) -> Result<Output, ErrorCode>` (async). The constructor
+consumes a capability delivered by trusted host pairing; there is no frontend
+mint endpoint or token command-line/file convention. The client uses literal
+loopback HTTP only, no proxy/cookies/redirects, a total timeout, sensitive auth
+headers and a bounded streaming decoder. Transport errors use Result; action
+refusals preserve Output and its existing process exit taxonomy.
+
+POST `/invoke` accepts the original `{action, version, body}` bytes through the
+same authorization and dispatcher as per-action routes. CLI/MCP/TUI transport
+adapters must preserve these bytes so duplicate fields remain detectable.
+The integration test starts a real Axum loopback Door, pairs actual owner
+capabilities in trusted test setup, and invokes status/description/revocation
+and refusal paths through reqwest. This proves local transport, not production
+pairing bootstrap, member authority or the full network demonstration.
+
+A separate native process can receive the opaque capability through an inherited
+private pipe/socket, then call
+`ClientToken::from_protected_transport(Zeroizing<Vec<u8>>)`. Import checks only
+fixed canonical encoding; the Door still authorizes the digest, origin, expiry
+and explicit action set. Imported random bytes grant nothing. The frontend
+adapter owns bounded pipe reads; tokens must not enter argv, environment values,
+logs or raw files. This is transport plumbing, not a production pairing bootstrap.

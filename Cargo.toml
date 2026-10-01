@@ -45,8 +45,9 @@ p256 = { version = "0.13.2", features = ["ecdsa"] }
 data-encoding = "2.9"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.13", default-features = false }
 axum = "0.8"
-tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
 tokio-socks = "0.5.3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

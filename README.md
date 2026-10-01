@@ -1,6 +1,22 @@
 # cmsg
 
-Browser-first Rust/Wasm messaging with end-to-end encryption, bounded opaque bytes, text convenience APIs and encrypted local state.
+The device-local Member door for cmtymeet. `cmsg::door` owns one action registry
+and dispatcher, with generated HTTP/OpenAPI/MCP/CLI/TypeScript projections.
+Current local actions provide unavailable-runtime status, schema discovery and
+client revocation, guarded by bounded origin-bound capabilities. The native
+client forwards original bytes to the same dispatcher.
+
+[Local API and native client](docs/LOCAL-API.md) · [Door contract](docs/CONTRACT.md)
+
+Domain facades, production pairing, current admission and combined checkpoint
+integration remain incomplete. No local status or historical fixture establishes
+member readiness or full network acceptance.
+
+## Retained messaging implementation
+
+The original browser/native MLS implementation and evidence below remain during
+extraction into their dedicated leaf owners. They are not the current Member-door
+integration contract or evidence of its current admission/accounting behavior.
 
 The published [`cmsg 0.1.0-alpha.1`](https://crates.io/crates/cmsg/0.1.0-alpha.1) requires Rust 1.97.1 and predates the browser-first implementation described here. See the [release artifact and installation](studies/crate-alpha-release.md).
 
