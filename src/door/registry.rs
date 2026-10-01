@@ -59,8 +59,14 @@ pub(super) struct Action {
     pub handler: Handler,
 }
 
-fn schema<T: JsonSchema>() -> Value {
-    schemars::schema_for!(T).to_value()
+pub(super) fn schema<T: JsonSchema>() -> Value {
+    // These schemas are embedded in multiple documents. Inline references so
+    // their meaning does not change when nested under an OpenAPI operation.
+    schemars::generate::SchemaSettings::draft2020_12()
+        .with(|settings| settings.inline_subschemas = true)
+        .into_generator()
+        .into_root_schema_for::<T>()
+        .to_value()
 }
 
 fn status(door: &mut Door, _: &[u8; 32], _: Empty) -> Result<(RuntimeStatus, Vec<Event>)> {

@@ -2,9 +2,12 @@
   "name": "cmsg-registry-tools",
   "private": true,
   "type": "module",
-  "scripts": { "generate": "node generate.mjs" },
+  "scripts": {
+    "generate": "node generate.mjs"
+  },
   "devDependencies": {
     "json-schema-to-typescript": "^15.0.4",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "ajv": "^8.17.1"
   }
 }

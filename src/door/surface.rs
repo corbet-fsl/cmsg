@@ -2,6 +2,20 @@
 use super::*;
 use serde_json::json;
 
+/// Preserve the single wire envelope while specializing its success payload
+/// with the action owner's exact result type.
+pub fn output_schema(action: &ActionDescription) -> Value {
+    let mut schema = registry::schema::<Output>();
+    if let Some(variants) = schema.get_mut("oneOf").and_then(Value::as_array_mut) {
+        for variant in variants {
+            if let Some(result) = variant["properties"].get_mut("result") {
+                *result = action.result.clone();
+            }
+        }
+    }
+    schema
+}
+
 pub fn openapi() -> Value {
     let mut paths = serde_json::Map::new();
     for action in catalog() {
@@ -12,7 +26,9 @@ pub fn openapi() -> Value {
                 "security": [{"localClient": []}],
                 "requestBody": {"required": true, "content": {"application/json": {"schema": action.body}}},
                 "responses": {"200": {"description": "Bounded local result", "content": {
-                    "application/json": {"schema": schemars::schema_for!(Output)}
+                    "application/json": {"schema": output_schema(&action)}
+                }}, "default": {"description": "Bounded refusal", "content": {
+                    "application/json": {"schema": registry::schema::<Output>()}
                 }}},
                 "x-result-schema": action.result,
                 "x-event-schema": action.event,
@@ -31,7 +47,7 @@ pub fn mcp_tools() -> Value {
         "name": action.action,
         "description": format!("Version {} device-local action", action.version),
         "inputSchema": action.body,
-        "outputSchema": schemars::schema_for!(Output),
+        "outputSchema": output_schema(&action),
         "annotations": {"readOnlyHint": action.effect == Effect::Read},
         "_meta": {"cmsg": action}
     })).collect::<Vec<_>>()})
@@ -44,8 +60,8 @@ pub fn cli_commands() -> Value {
 
 /// Build-time artifact, used by the maintained JSON Schema-to-TypeScript tool.
 pub fn bundle() -> Value {
-    json!({"version": 1, "actions": catalog(), "invocation": schemars::schema_for!(Invocation),
-        "output": schemars::schema_for!(Output), "openapi": openapi(), "mcp": mcp_tools(),
+    json!({"version": 1, "actions": catalog(), "invocation": registry::schema::<Invocation>(),
+        "output": registry::schema::<Output>(), "openapi": openapi(), "mcp": mcp_tools(),
         "cli": cli_commands()})
 }
 
