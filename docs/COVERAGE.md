@@ -22,3 +22,10 @@ These Rust composition libraries export no standalone C or JavaScript ABI. They
 build as rlibs on native and Wasm; an embedding application owns its eventual
 exported module. A standalone instrumented cdylib would link before the test-only
 profiling runtime and is not used for the actual browser vector harness.
+
+The resolver refreshes both Cargo and the Node tooling lock before testing.
+The maintained [npm update](https://docs.npmjs.com/cli/v11/commands/npm-update)
+lock-only operation respects declared ranges and disables package scripts; the
+single resolved artifact carries both locks and their hashes to every job.
+Generation, schema validation and actual TypeScript HTTP conformance install
+that exact tooling graph with npm ci.
