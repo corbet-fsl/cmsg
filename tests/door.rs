@@ -386,3 +386,101 @@ async fn native_http_uses_identical_capability_checks_and_no_store_errors() {
         );
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test]
+async fn http_rejects_ambiguous_headers_and_bounds_every_route() {
+    use axum::{
+        body::Body,
+        http::{HeaderName, HeaderValue, Request},
+    };
+    use http_body_util::BodyExt;
+    use std::sync::Arc;
+    use tower::ServiceExt;
+    struct Clock;
+    impl native::Clock for Clock {
+        fn now(&self) -> u64 {
+            11
+        }
+    }
+    let (door, token) = paired();
+    let app = native::router(
+        door,
+        BTreeSet::from(["localhost:3000".into()]),
+        Arc::new(Clock),
+    )
+    .unwrap();
+    let request = || {
+        Request::post("/v1/runtime.status")
+            .header("Host", "localhost:3000")
+            .header("Origin", ORIGIN)
+            .header(
+                "Authorization",
+                format!("Bearer {}", token.expose_for_transport()),
+            )
+            .header("Content-Type", "application/json")
+            .body(Body::from("{}"))
+            .unwrap()
+    };
+    for name in ["host", "origin", "authorization", "content-type"] {
+        for duplicate in [false, true] {
+            let mut req = request();
+            if duplicate {
+                req.headers_mut().append(
+                    HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                    HeaderValue::from_static("different"),
+                );
+            } else {
+                req.headers_mut().remove(name);
+            }
+            let response = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(response.status(), 403);
+            assert_eq!(response.headers()["cache-control"], "no-store");
+        }
+    }
+    for (body, code) in [
+        (vec![0xff], ErrorCode::InvalidRequest),
+        (vec![b' '; MAX_BODY_BYTES + 1], ErrorCode::Capacity),
+        (b"{\"bad\":1,\"bad\":2}".to_vec(), ErrorCode::InvalidRequest),
+    ] {
+        let mut req = request();
+        *req.body_mut() = Body::from(body);
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+            error(code)
+        );
+    }
+    for (method, path) in [
+        ("GET", "/v1/runtime.status"),
+        ("OPTIONS", "/v1/runtime.status"),
+        ("POST", "/unknown"),
+        ("POST", "/v1/%FF"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(!response.status().is_success());
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert_eq!(response.headers()["pragma"], "no-cache");
+    }
+    for host in ["", "bad/host", "bad@host"] {
+        assert!(native::router(
+            Door::new(config("a")),
+            BTreeSet::from([host.into()]),
+            Arc::new(Clock)
+        )
+        .is_err());
+    }
+    assert!(native::router(Door::new(config("a")), BTreeSet::new(), Arc::new(Clock)).is_err());
+}

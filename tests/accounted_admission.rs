@@ -76,7 +76,7 @@ impl Pair {
         let ar = MemberIdentity::new("synthetic-community").unwrap();
         let br = MemberIdentity::new("synthetic-community").unwrap();
         let mut a = device(&ar, &time, 10_000);
-        let mut b = device(&br, &time, 10_000);
+        let b = device(&br, &time, 10_000);
         a.create_group().unwrap();
         let welcome = a.add(&b.key_package().unwrap()).unwrap().welcome;
         let ai = Inbox::new_accounted(&a).unwrap();

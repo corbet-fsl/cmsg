@@ -4,7 +4,8 @@ use super::*;
 use axum::{
     body::to_bytes,
     extract::{Path, Request, State},
-    http::{header, HeaderValue, StatusCode},
+    http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
+    middleware,
     response::{IntoResponse, Response},
     routing::post,
     Json, Router,
@@ -43,7 +44,24 @@ pub fn router(door: Door, hosts: BTreeSet<String>, clock: Arc<dyn Clock>) -> Res
             response(Output::Error {
                 error: ErrorCode::UnsupportedAction,
             })
-        }))
+        })
+        .method_not_allowed_fallback(|| async {
+            response(Output::Error {
+                error: ErrorCode::InvalidRequest,
+            })
+        })
+        .layer(middleware::map_response(no_store)))
+}
+
+// Never let different HTTP consumers choose different values for an authority
+// header. Exact configured origins and hosts do not accept comma lists either.
+fn unique_header(headers: &HeaderMap, name: HeaderName) -> Option<&str> {
+    let mut values = headers.get_all(name).iter();
+    let value = values.next()?.to_str().ok()?;
+    if values.next().is_some() {
+        return None;
+    }
+    Some(value)
 }
 
 async fn call(
@@ -52,22 +70,17 @@ async fn call(
     request: Request,
 ) -> Response {
     let headers = request.headers();
-    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok());
-    let origin = headers.get(header::ORIGIN).and_then(|h| h.to_str().ok());
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "));
+    let host = unique_header(headers, header::HOST);
+    let origin = unique_header(headers, header::ORIGIN);
+    let token =
+        unique_header(headers, header::AUTHORIZATION).and_then(|h| h.strip_prefix("Bearer "));
     let (Some(host), Some(origin), Some(token)) = (host, origin, token) else {
         return response(Output::Error {
             error: ErrorCode::Unauthorized,
         });
     };
     if !state.hosts.contains(host)
-        || headers
-            .get(header::CONTENT_TYPE)
-            .and_then(|h| h.to_str().ok())
-            != Some("application/json")
+        || unique_header(headers, header::CONTENT_TYPE) != Some("application/json")
     {
         return response(Output::Error {
             error: ErrorCode::Unauthorized,
@@ -119,7 +132,11 @@ fn response(output: Output) -> Response {
         } => StatusCode::SERVICE_UNAVAILABLE,
         Output::Error { .. } => StatusCode::BAD_REQUEST,
     };
-    let mut response = (code, Json(output)).into_response();
+    (code, Json(output)).into_response()
+}
+
+// Includes routing and extraction refusals as well as domain responses.
+async fn no_store(mut response: Response) -> Response {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));

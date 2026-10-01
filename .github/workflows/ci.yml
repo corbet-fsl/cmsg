@@ -61,6 +61,8 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack
@@ -82,7 +84,7 @@ jobs:
         with:
           name: generated-local-api
           path: generated
-      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo clippy --locked --all-targets --keep-going -- -D warnings
       - run: cargo test --locked --all-targets
       - run: wasm-pack test --headless --chrome -- --locked
       - run: node .ci/peer-channel-check.mjs

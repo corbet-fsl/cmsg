@@ -21,7 +21,7 @@ impl Bridge {
             "CMSG_PEER_VERIFIER_ENROLLMENT",
             "CMSG_PEER_VERIFIER_LEDGER",
         ];
-        let paths: Vec<_> = names.iter().map(|name| std::env::var_os(name)).collect();
+        let paths: Vec<_> = names.iter().map(std::env::var_os).collect();
         if paths.iter().all(Option::is_none) {
             return Ok(None);
         }
