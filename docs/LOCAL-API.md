@@ -77,3 +77,10 @@ fixed canonical encoding; the Door still authorizes the digest, origin, expiry
 and explicit action set. Imported random bytes grant nothing. The frontend
 adapter owns bounded pipe reads; tokens must not enter argv, environment values,
 logs or raw files. This is transport plumbing, not a production pairing bootstrap.
+
+Native invocation never retries or follows redirects. Once sending begins, a
+transport timeout, missing/invalid headers, truncated/oversized body, invalid
+Output or mismatched status returns `Reconcile`: the action may already have
+committed. Valid owner Output is preserved exactly. Local pre-send request size
+refusal remains `Capacity`. A caller must reconcile through owner state, never
+blindly retry a mutation. This uses the maintained [reqwest never-retry policy](https://docs.rs/reqwest/latest/reqwest/retry/fn.never.html).

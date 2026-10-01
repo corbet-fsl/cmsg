@@ -216,6 +216,7 @@ impl Client {
         let http = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
             .timeout(std::time::Duration::from_secs(10))
             .build()
             .map_err(|_| ErrorCode::Unavailable)?;
@@ -229,7 +230,9 @@ impl Client {
 
     /// Forward the original invocation bytes. There is no Value parse/reencode
     /// that could erase duplicate fields before the Door's typed decoder.
-    /// Transport failures and door refusals remain distinct Result/Output layers.
+    /// Once send begins, any transport/response failure is Reconcile: the action
+    /// may already have committed. Valid owner refusals stay unchanged in Output.
+    /// No automatic retry or redirect can repeat a mutation.
     pub async fn invoke_bytes(&self, request: &[u8]) -> Result<Output> {
         if request.len() > MAX_BODY_BYTES {
             return Err(ErrorCode::Capacity);
@@ -248,24 +251,28 @@ impl Client {
             .body(request.to_vec())
             .send()
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|_| ErrorCode::Reconcile)?;
         let status = response.status();
         if unique_header(response.headers(), header::CONTENT_TYPE) != Some("application/json")
             || unique_header(response.headers(), header::CACHE_CONTROL) != Some("no-store")
         {
-            return Err(ErrorCode::Unavailable);
+            return Err(ErrorCode::Reconcile);
         }
         let mut bytes = Zeroizing::new(Vec::new());
-        while let Some(chunk) = response.chunk().await.map_err(|_| ErrorCode::Unavailable)? {
+        while let Some(chunk) = response.chunk().await.map_err(|_| ErrorCode::Reconcile)? {
             if chunk.len() > MAX_RESULT_BYTES - bytes.len() {
-                return Err(ErrorCode::Capacity);
+                return Err(ErrorCode::Reconcile);
             }
             bytes.extend_from_slice(&chunk);
         }
-        let output: Output = serde_json::from_slice(&bytes).map_err(|_| ErrorCode::Unavailable)?;
+        let output: Output = serde_json::from_slice(&bytes).map_err(|_| ErrorCode::Reconcile)?;
         if status.is_success() != matches!(output, Output::Ok { .. }) {
-            return Err(ErrorCode::Unavailable);
+            return Err(ErrorCode::Reconcile);
         }
         Ok(output)
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/support/native.rs"]
+mod tests;

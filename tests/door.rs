@@ -245,6 +245,7 @@ fn configuration_refuses_cross_role_origins_and_non_origins() {
         "http://member.example",
         "https://user@member.example",
         "file:///tmp",
+        "ftp://member.example",
     ] {
         assert!(Configuration::new(
             "a".into(),
@@ -474,15 +475,26 @@ async fn http_rejects_ambiguous_headers_and_bounds_every_route() {
         assert_eq!(response.headers()["cache-control"], "no-store");
         assert_eq!(response.headers()["pragma"], "no-cache");
     }
-    for host in ["", "bad/host", "bad@host"] {
+    for host in [
+        "".to_owned(),
+        "bad/host".into(),
+        "bad@host".into(),
+        "x".repeat(254),
+    ] {
         assert!(native::router(
             Door::new(config("a")),
-            BTreeSet::from([host.into()]),
+            BTreeSet::from([host]),
             Arc::new(Clock)
         )
         .is_err());
     }
     assert!(native::router(Door::new(config("a")), BTreeSet::new(), Arc::new(Clock)).is_err());
+    assert!(native::router(
+        Door::new(config("a")),
+        (0..9).map(|n| format!("localhost:{n}")).collect(),
+        Arc::new(Clock)
+    )
+    .is_err());
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -561,7 +573,7 @@ async fn native_client_executes_real_loopback_door_and_preserves_raw_input() {
     let _ = server.await;
     assert!(matches!(
         client.invoke_bytes(b"{}").await,
-        Err(ErrorCode::Unavailable)
+        Err(ErrorCode::Reconcile)
     ));
     for base in [
         "not a url",
@@ -613,4 +625,246 @@ fn imported_capability_is_only_an_encoding_until_the_door_authorizes_it() {
         call(&mut door, &unknown, "runtime.status", 11),
         error(ErrorCode::Unauthorized)
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn configuration_and_capability_limits_are_exact() {
+    for (community, origins) in [
+        ("x".repeat(254), BTreeMap::new()),
+        ("a".into(), BTreeMap::new()),
+        (
+            "a".into(),
+            BTreeMap::from([(
+                Role::Member,
+                (0..9).map(|n| format!("https://x{n}.example")).collect(),
+            )]),
+        ),
+        (
+            "a".into(),
+            BTreeMap::from([(
+                Role::Member,
+                BTreeSet::from([format!("https://member.example/{}", "x".repeat(2048))]),
+            )]),
+        ),
+    ] {
+        assert!(Configuration::new(community, origins).is_err());
+    }
+    for origin in ["http://localhost:3000", "http://[::1]:3000"] {
+        assert!(Configuration::new(
+            "a".into(),
+            BTreeMap::from([(Role::Member, BTreeSet::from([origin.into()]))])
+        )
+        .is_ok());
+    }
+    let (mut door, token) = paired();
+    assert!(matches!(
+        door.pair_client(ORIGIN, Role::Root, actions(), 11, 20),
+        Err(ErrorCode::Unauthorized)
+    ));
+    let mut too_many = actions();
+    too_many.insert("unknown".into());
+    assert!(matches!(
+        door.pair_client(ORIGIN, Role::Member, too_many, 11, 20),
+        Err(ErrorCode::Unauthorized)
+    ));
+    assert!(matches!(
+        door.pair_client(ORIGIN, Role::Member, actions(), 10, 20),
+        Err(ErrorCode::Clock)
+    ));
+    assert_eq!(
+        value(door.dispatch(&"x".repeat(2049), token.expose_for_transport(), b"{}", 11)),
+        error(ErrorCode::Unauthorized)
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test]
+async fn native_client_rejects_untrusted_http_outputs() {
+    use axum::{
+        body::Body,
+        http::{Response, StatusCode},
+        routing::post,
+        Router,
+    };
+    // Real loopback HTTP peers exercise the client protocol boundary. These
+    // deliberately malformed outputs are never domain-success fixtures.
+    let cases = [
+        ("text/plain", "no-store", 200, b"{}".to_vec()),
+        ("application/json", "public", 200, b"{}".to_vec()),
+        ("application/json", "no-store", 200, b"not json".to_vec()),
+        (
+            "application/json",
+            "no-store",
+            200,
+            br#"{"status":"error","error":"unauthorized"}"#.to_vec(),
+        ),
+        (
+            "application/json",
+            "no-store",
+            403,
+            br#"{"status":"ok","result":null,"events":[]}"#.to_vec(),
+        ),
+        (
+            "application/json",
+            "no-store",
+            200,
+            vec![b' '; MAX_RESULT_BYTES + 1],
+        ),
+        (
+            "application/json",
+            "no-store",
+            200,
+            br#"{"status":"error","error":"unauthorized","extra":1}"#.to_vec(),
+        ),
+    ];
+    for (media, cache, status, body) in cases {
+        let app = Router::new().route(
+            "/invoke",
+            post(move || {
+                let body = body.clone();
+                async move {
+                    Response::builder()
+                        .status(StatusCode::from_u16(status).unwrap())
+                        .header("content-type", media)
+                        .header("cache-control", cache)
+                        .body(Body::from(body))
+                        .unwrap()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (_, token) = paired();
+        let client = native::Client::new(&base, ORIGIN, token).unwrap();
+        assert!(matches!(
+            client.invoke_bytes(b"{}").await,
+            Err(ErrorCode::Reconcile)
+        ));
+        server.abort();
+        let _ = server.await;
+    }
+    let (_, token) = paired();
+    assert!(matches!(
+        native::Client::new("http://127.0.0.1", "null", token),
+        Err(ErrorCode::InvalidRequest)
+    ));
+    let (_, token) = paired();
+    assert!(matches!(
+        native::Client::new("http://:pass@127.0.0.1", ORIGIN, token),
+        Err(ErrorCode::InvalidRequest)
+    ));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test]
+async fn native_client_refuses_truncated_http_response() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let peer = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        // Read the small known test request before returning a truncated body.
+        let mut bytes = Vec::new();
+        while !bytes.ends_with(b"\r\n\r\n") {
+            bytes.push(stream.read_u8().await.unwrap());
+        }
+        let mut body = [0; 2];
+        stream.read_exact(&mut body).await.unwrap();
+        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: 100\r\n\r\n{").await.unwrap();
+        stream.flush().await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        stream.shutdown().await.unwrap();
+    });
+    let (_, token) = paired();
+    let client = native::Client::new(&base, ORIGIN, token).unwrap();
+    assert!(matches!(
+        client.invoke_bytes(b"{}").await,
+        Err(ErrorCode::Reconcile)
+    ));
+    peer.await.unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[tokio::test]
+async fn lost_mutation_response_requires_reconciliation_and_is_never_retried() {
+    use axum::{
+        body::{Body, Bytes},
+        extract::Request,
+        routing::post,
+        Router,
+    };
+    use futures_util::stream;
+    use http_body_util::BodyExt;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use tower::ServiceExt;
+    struct Clock;
+    impl native::Clock for Clock {
+        fn now(&self) -> u64 {
+            11
+        }
+    }
+    let (door, token) = paired();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let actual =
+        native::router(door, BTreeSet::from([address.to_string()]), Arc::new(Clock)).unwrap();
+    let count = Arc::new(AtomicUsize::new(0));
+    let proxy_count = count.clone();
+    // This proxy executes the actual Door and only damages its first response.
+    // The durable/local effect is never supplied by a test success callback.
+    let proxy = Router::new().route(
+        "/invoke",
+        post(move |request: Request| {
+            let actual = actual.clone();
+            let count = proxy_count.clone();
+            async move {
+                let response = actual.oneshot(request).await.unwrap();
+                if count.fetch_add(1, Ordering::SeqCst) == 0 {
+                    assert!(response.status().is_success());
+                    let (mut parts, body) = response.into_parts();
+                    let bytes = body.collect().await.unwrap().to_bytes();
+                    parts
+                        .headers
+                        .insert("content-length", bytes.len().to_string().parse().unwrap());
+                    let original: Value = serde_json::from_slice(&bytes).unwrap();
+                    assert_eq!(original["result"]["revoked"], true);
+                    let short = Bytes::copy_from_slice(&bytes[..bytes.len() - 1]);
+                    let body =
+                        Body::from_stream(stream::once(
+                            async move { Ok::<_, std::io::Error>(short) },
+                        ));
+                    // Original content length exceeds the truncated body.
+                    axum::http::Response::from_parts(parts, body)
+                } else {
+                    response
+                }
+            }
+        }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, proxy).await.unwrap() });
+    let client = native::Client::new(&format!("http://{address}"), ORIGIN, token).unwrap();
+    assert!(matches!(
+        client
+            .invoke_bytes(br#"{"action":"client.revoke","version":1,"body":{}}"#)
+            .await,
+        Err(ErrorCode::Reconcile)
+    ));
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        value(
+            client
+                .invoke_bytes(br#"{"action":"runtime.status","version":1,"body":{}}"#)
+                .await
+                .unwrap()
+        ),
+        error(ErrorCode::Unauthorized)
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 2);
+    server.abort();
+    let _ = server.await;
 }

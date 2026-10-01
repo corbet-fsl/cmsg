@@ -1,0 +1,858 @@
+{
+  "source_commit": "0958c30fc030edb7c60c8de41a389afad6c4ee89",
+  "extraction_commit": "c809cca308f48aaff373c66853f626412534bd58",
+  "files": [
+    {
+      "path": ".ci/archives.toml",
+      "sha256": "093c9675cd5e4134b4e21a11ada31af53700131abc93c280a3ba7bfd9940e5c6"
+    },
+    {
+      "path": ".ci/browser-bindgen/Cargo.lock",
+      "sha256": "b701ad7ceaf19a250293198647ceb25daad0c51cd0cf7639f68bfd97599c4e5b"
+    },
+    {
+      "path": ".ci/browser-bindgen/Cargo.toml",
+      "sha256": "b639bbd501d1e7868ba69b1bc9aacde0687f58cb385dc8410df7f695e429af34"
+    },
+    {
+      "path": ".ci/browser-bindgen/src/main.rs",
+      "sha256": "d83bacab9ae527e848ad840bee1db51080ac74bd858f62c49b83a84b53754458"
+    },
+    {
+      "path": ".ci/browser-check.mjs",
+      "sha256": "bacd8ae86d91ed903a202c84d0078d61fc23567906aaa7ab4015142d4e8c45c3"
+    },
+    {
+      "path": ".ci/browser-isolation-checks.sh",
+      "sha256": "cb89efceb09534431518a59f862aa40bc228dd3dd3bcdc2f661c2909514db54e"
+    },
+    {
+      "path": ".ci/browser-package.mjs",
+      "sha256": "603fc0cf09bdd69904744c3ac54e027a2b3dfc2c4761da11130fa7702eecf791"
+    },
+    {
+      "path": ".ci/ccid.toml",
+      "sha256": "3755e6d4039e75ca9a1e194e42b0db46e8794ad32b2237ff1372c734bd8836db"
+    },
+    {
+      "path": ".ci/peer-channel-check.mjs",
+      "sha256": "231569b323234acff3bad18cf01b2b94dcc62c891f5befddfaba4c54b5c49449"
+    },
+    {
+      "path": ".ci/portable-checks.sh",
+      "sha256": "b260778534b0e53e86acc9cab20149102b664697abda274436dc9e67aceec0d1"
+    },
+    {
+      "path": ".ci/tor-bindgen/Cargo.lock",
+      "sha256": "d84c8c8fc41825b03c61e54e84349bb962e580e5bb8a9ba0b945874f9edcd06e"
+    },
+    {
+      "path": ".ci/tor-bindgen/Cargo.toml",
+      "sha256": "2dc03b2551841ba010a987570dca23c4d52f094f9ed6b586a63c81874b2231e7"
+    },
+    {
+      "path": ".ci/tor-browser-checks.sh",
+      "sha256": "6b64961fee8d6a37e8efc8e771efe9b6e759312f79ad7138e12d704d7d8b374e"
+    },
+    {
+      "path": ".ci/tor-public-package.sh",
+      "sha256": "f80efb212a91cd51173b341e7f818923ba37367ba450aae16883347d3d61a656"
+    },
+    {
+      "path": ".ci/tor-publisher-checks.sh",
+      "sha256": "dd73013e03bc2eba7ddf35d1e951d5b3910e428fc20157bc1e459e856f6e9af7"
+    },
+    {
+      "path": ".ci/tor-runtime-build.sh",
+      "sha256": "bd173d3f53937494f445595be13767d0e46b5b368632dbb45735779140de1721"
+    },
+    {
+      "path": ".ci/tor-tools.sh",
+      "sha256": "49ea7fe98b26ceb4e110ac7081aa25b7171ff1c6319ab67efe2cd559da6976d0"
+    },
+    {
+      "path": ".crow/browser-isolation.yaml",
+      "sha256": "4adef1cc3ed72abe6f3eaf3292fd8d4b24c033dce4a2a4e8413629410f002170"
+    },
+    {
+      "path": ".crow/ccid.yaml",
+      "sha256": "e5a221bc21827db826afb95bdd038891855623e15f3c886eee1493d34dd9c6e2"
+    },
+    {
+      "path": ".crow/composition.yaml",
+      "sha256": "bb9586d80bfcf8e947f0079d988971c4c41966dc071c52e62d2750ad7be445d2"
+    },
+    {
+      "path": ".crow/embedded-onion-network.yaml",
+      "sha256": "ba31b9d95da5e49decc9f9f6221809be3c9b3808a5e690edba4e3353aa29930b"
+    },
+    {
+      "path": ".crow/embedded-onion-resolve.yaml",
+      "sha256": "5c2b410d54198c5badac606227ec82f0b419e816dc61e9978e004db3959997e2"
+    },
+    {
+      "path": ".crow/embedded-onion.yaml",
+      "sha256": "978b3238b77f5a411b5f713d7a4ebc224d776b00c4489bec74be3d70d789cbd7"
+    },
+    {
+      "path": ".crow/experiments.yaml",
+      "sha256": "a526e93806cf4286e12cc9e35761188af27331f73b7d5869799ed3d6622b2a2d"
+    },
+    {
+      "path": ".crow/first-contact-release.yaml",
+      "sha256": "61f2c269414e01574b6079c4d3f4bc5b36112d45e07b9e84307659fc607a5f23"
+    },
+    {
+      "path": ".crow/framing.yaml",
+      "sha256": "a7058d97334f3594a4f4b8579c8ce370223783d1d6024328fa8d11296c25ac00"
+    },
+    {
+      "path": ".crow/package.yaml",
+      "sha256": "4c8519a1c030eabaabf07841d8f7904b933cbf4b8342a0951229997f58e5b87d"
+    },
+    {
+      "path": ".crow/portable-core.yaml",
+      "sha256": "a27a563553c1c0b6c9a4e77b21a46a95e9dabf880307e9621b1e3c5439ad5928"
+    },
+    {
+      "path": ".crow/tor-browser.yaml",
+      "sha256": "8601a42f0ab8f9f094ac3e4f2b62b0f388e30c882150df3da363a891d9878fc4"
+    },
+    {
+      "path": ".crow/tor-tools.yaml",
+      "sha256": "1d74371fe31f52609eee45f37fd355d431d0eb5d3819d658ce4ccaea8c3c739b"
+    },
+    {
+      "path": ".crow/transport-capabilities.yaml",
+      "sha256": "50c734c849aca8123762b769540876101bd4185d6ffc18a48e8cfdd7d1dc78ee"
+    },
+    {
+      "path": ".github/workflows/audit.yml",
+      "sha256": "78721cf07ed0a1e92aafd4d5d71de3371f3c7bd72d768384683057eb33688c59"
+    },
+    {
+      "path": ".github/workflows/check.yml",
+      "sha256": "6abb230846bafdf364eef1e7d15379e73649a532ee84d834077d633181263034"
+    },
+    {
+      "path": ".github/workflows/composition.yml",
+      "sha256": "1f737f2695267f40e0adde715eb05fef21034a2f9d2895c099c82123412cad45"
+    },
+    {
+      "path": ".github/workflows/portable.yml",
+      "sha256": "7540dff93a2154f62f6e3f1d5443319b4dadc54fe2b2de84cb02f113cc76fd84"
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "sha256": "153e2d04ce6e0b1631971115141839a9b6269f81f6b86608d187c8bcfc853d1d"
+    },
+    {
+      "path": ".github/workflows/rust-composition.yml",
+      "sha256": "72ec5748cc300f409f964e61b1baccc55be81711018ae85aa5b8120640562784"
+    },
+    {
+      "path": ".github/workflows/tor-isolated.yml",
+      "sha256": "9670f9fa4f350366698bf4af9be9a587d5881ba4a93e03950c030432acf8364a"
+    },
+    {
+      "path": ".github/workflows/tor-package.yml",
+      "sha256": "d2d190b58597776ab68972901c7bd1a4e010d44d38daadff8c672dde00ea646f"
+    },
+    {
+      "path": ".github/workflows/tor.yml",
+      "sha256": "409ff7ac28885dec291b7ac5f85d30bacd6aa77299ec9e425225941b98adf497"
+    },
+    {
+      "path": "browser/README.md",
+      "sha256": "18727b9fc4605581d3b9a8fb2cd6435f19cd4d77002a93bd2695367e9151797e"
+    },
+    {
+      "path": "browser/accounting-contract.mjs",
+      "sha256": "28f6e736614dd9811468d8d48545183e4474e73514edab30044ec67119a7ea22"
+    },
+    {
+      "path": "browser/contract.mjs",
+      "sha256": "18970f6157e66fc94dae0a36d2938f65b28f1cd980b32a0906cf86c5b342e456"
+    },
+    {
+      "path": "browser/fixtures/tor-js.mjs",
+      "sha256": "5749bff47f1e9c8e27267e00cef66d8800a16dc7fc409714125e5caee152c392"
+    },
+    {
+      "path": "browser/index.d.ts",
+      "sha256": "8f1e3fdb07086f06573c9cc7b2f8ba61e15c8638737a7d30e23e7deb1632b6ed"
+    },
+    {
+      "path": "browser/index.mjs",
+      "sha256": "3178df4992ef5d9f76120c54cf499c3b0bc8ac4864e50eca867093d8bcf6aa14"
+    },
+    {
+      "path": "browser/indexeddb-store.d.ts",
+      "sha256": "6b0916be31d2eae6508136ea26a334289dfc3ddad5658a7973873046ae4be32d"
+    },
+    {
+      "path": "browser/indexeddb-store.mjs",
+      "sha256": "563843029832ac7c8b7a9883dab9468bf8d2734601258c2edceab5694f986a9e"
+    },
+    {
+      "path": "browser/internal/http.mjs",
+      "sha256": "2ff9fbdd7a1f536dc51740cadb3b920a45caac6e266d3f161f4e524dc4dc0084"
+    },
+    {
+      "path": "browser/internal/streams.mjs",
+      "sha256": "dcac3e72178b1d24f314ef42d4ca440393cae96fc9c757aed78ca9918134c269"
+    },
+    {
+      "path": "browser/live-contract.mjs",
+      "sha256": "79840130fb85613099adbcdce69d73c143f29992a65c9c8107458c9a7bbd3bfa"
+    },
+    {
+      "path": "browser/live-stream.d.ts",
+      "sha256": "29c903915fd9a71753efcf67c1f74ef690379638d0de7fcafbdf49de21732bbe"
+    },
+    {
+      "path": "browser/live-stream.mjs",
+      "sha256": "7ba352fc1b29e9a60dd268961421746c9f76e7b40bb559e9423eb53455036d52"
+    },
+    {
+      "path": "browser/package-lock.json",
+      "sha256": "04b2bd243ce6bc9c32f92c6be0ddc1a14d2d2e7090177139ef1755b9c8f68ee7"
+    },
+    {
+      "path": "browser/package.json",
+      "sha256": "e3935306520f3d9b4c3aaab3696f57e6ac1841216a7868edc9edab4a1f140051"
+    },
+    {
+      "path": "browser/peer-channel.d.ts",
+      "sha256": "2e3742c64eaff0e0b01a870da5efc892e90a8823261c0785d810a440f6423fd5"
+    },
+    {
+      "path": "browser/peer-channel.mjs",
+      "sha256": "c632b8e69a6d413efc519144207ae4da25701c9e4c8a6f409f2665de6dbd8598"
+    },
+    {
+      "path": "browser/profile-contract.mjs",
+      "sha256": "d31665a442f8abe1eaa02daf42bc5eb4a228422faf86eb8553c1455d379d211a"
+    },
+    {
+      "path": "browser/tor-js.d.ts",
+      "sha256": "38e31b9226cc903bf44cc57711921938b7d300b0d1c6dcc03c2a99d4dd31ea91"
+    },
+    {
+      "path": "browser/tor-js.mjs",
+      "sha256": "c31950dd4452af6efcf07d20546279f5e5412ebeb238c4c89d4e7ef44ff59ee4"
+    },
+    {
+      "path": "browser/tor-node-contract.mjs",
+      "sha256": "215269b0389c435712e4bf41d42639c51e57c56bcc4d3f92a615943d4563f14b"
+    },
+    {
+      "path": "browser/tor-streams.d.ts",
+      "sha256": "c09c87b5def23cc4a3c5cd7ed777edda96c347d59f529edfc121b5b1d05f2839"
+    },
+    {
+      "path": "browser/tor-streams.mjs",
+      "sha256": "a5c362a9930c503e9859c663cb578c8ff286b6ff87823f3b41bc29433a113dba"
+    },
+    {
+      "path": "browser/upstream/README.md",
+      "sha256": "d39081de4a2badbedadc3edeb899958dcddd049f603dcb9cc0f49f778978c2d7"
+    },
+    {
+      "path": "browser/upstream/apply.py",
+      "sha256": "16b9016361fe47920bdd7bb90f0cd961e16c3d859e82bd77d6871503b6131b40"
+    },
+    {
+      "path": "browser/upstream/arti-browser-service.patch",
+      "sha256": "61c4fe5c2069f0afe57383fc4169fc145db3c76c2a9c1fecf9e79d813ada96a8"
+    },
+    {
+      "path": "browser/upstream/arti-publisher-diagnostics.patch",
+      "sha256": "1f570a946f35baabe25a51b02de482efb89120f6d812536317cacdea4e236475"
+    },
+    {
+      "path": "browser/upstream/arti-publisher-renewal.patch",
+      "sha256": "77c4813a7fb2966db555bdbe5ac8ad313049596cbc35b65691e1d713144967e0"
+    },
+    {
+      "path": "browser/upstream/arti-renewal-diagnostics.patch",
+      "sha256": "c99ffc29005d3066f00332cdc3f4f3235119b0cf7e02959307d9d7710ffa21f5"
+    },
+    {
+      "path": "browser/upstream/arti-service-diagnostics.patch",
+      "sha256": "cc07c5e2ab1be95ddbc62574eb6d7301f0a2e18e795d367faca5b0b6ffbd20e2"
+    },
+    {
+      "path": "browser/upstream/locks/README.md",
+      "sha256": "5e5b3968942e7105c215fab35b65b2fb9f8d5a8572e1579ce11c5c8e7e9627fb"
+    },
+    {
+      "path": "browser/upstream/locks/arti-Cargo.lock",
+      "sha256": "66dbb07f67e9a6d483b9915b8680b50f5c5a9303006b7d9959ea40c9c7ee983c"
+    },
+    {
+      "path": "browser/upstream/locks/tor-js-Cargo.lock",
+      "sha256": "b93cef8f17427a1faab5b75fb29eed61079d122795ddb55e152a64693b12d29a"
+    },
+    {
+      "path": "browser/upstream/manifest.json",
+      "sha256": "9507eeba31135401c30c5fda95a02ee3162cc32523f002a4a1ef728ccb7f8b3c"
+    },
+    {
+      "path": "browser/upstream/onion_service.rs",
+      "sha256": "e6881ebee97fac3691b5684311967fbbcb8d7d88f1f6bdecf3e7dca3e0151828"
+    },
+    {
+      "path": "browser/upstream/onion_stream.rs",
+      "sha256": "d6fdf2f1a7129c059e63509f974aef3251e77f8e2d72810bfd8f2a0b89dd97d8"
+    },
+    {
+      "path": "browser/upstream/private-network.md",
+      "sha256": "3e0335335462e0db5dea82da40d2b55aa543108232aea810118ae7f1ee9e9456"
+    },
+    {
+      "path": "browser/upstream/public-runtime-fixture.py",
+      "sha256": "c4f882245c65b0686add19f10be54cc227031670836192254688631341c15aaa"
+    },
+    {
+      "path": "browser/upstream/runtime-contract.mjs",
+      "sha256": "03bac18585f193e1b7578ed838e0694d34d2cf6cc8ac684f1434a649794bccab"
+    },
+    {
+      "path": "browser/upstream/runtime-driver.mjs",
+      "sha256": "0abb4c61354e7beffe4750d0cc6f3d4c1ce45b713668ca07fe7bb3234ebee40f"
+    },
+    {
+      "path": "browser/upstream/runtime-fixture.py",
+      "sha256": "10ccad9300bed472dd9b585e60a30bbcd97bb6180a095252cb6ab09afbae7f39"
+    },
+    {
+      "path": "browser/upstream/runtime-process.test.py",
+      "sha256": "b7c043f40fe1829edd27a8ea6d0ce1c426ad68c593f2cf88913081fd21013b86"
+    },
+    {
+      "path": "browser/upstream/runtime_process.py",
+      "sha256": "7f9eb57581ca26e2dbdfd4eb1f1f01f0eb25e5253570fa470cf3ada199cc7475"
+    },
+    {
+      "path": "browser/upstream/state_dir_wasm.rs",
+      "sha256": "5186730cd41f5d858e54565b942e0be425af7a145006ffd6cfd75f71b8e35c68"
+    },
+    {
+      "path": "browser/upstream/test_network.rs",
+      "sha256": "8f2ca04e0639e603e9003a2099b91006094b923c35615b36744757127a1b6ea4"
+    },
+    {
+      "path": "browser/upstream/tor-js-full-vanguards.patch",
+      "sha256": "e757a910f90044ba4bfabb5ee84873c73799f92d5a135291c68f077bb9241039"
+    },
+    {
+      "path": "browser/upstream/tor-js-gateway-bind.patch",
+      "sha256": "73ad849181f596c7c36a6f84e3c92f77609a10d9f438700e98b2cff7fd5c2e36"
+    },
+    {
+      "path": "browser/upstream/tor-js-gateway-response.patch",
+      "sha256": "5be2a657337f9da35deab891767cc302d3c94596a3fcbbfba38c8b4a65f57cc3"
+    },
+    {
+      "path": "browser/upstream/tor-js-onion-client.patch",
+      "sha256": "881f943537a0239d49aaad078b3084d2a0d05d199a241973199cdcc579175dbe"
+    },
+    {
+      "path": "browser/upstream/tor-js-onion-service.patch",
+      "sha256": "515d983029fbe9fa692d6313749e43bad8255af0125aee175ddaa29f4eb3ab75"
+    },
+    {
+      "path": "browser/upstream/tor-js-onion-stream.patch",
+      "sha256": "1bfc48c78b57ec31a97b8ff8438d68c2bd3f45da00439189609a0b51278ac0b0"
+    },
+    {
+      "path": "browser/upstream/tor-js-publisher-diagnostics.patch",
+      "sha256": "3835aed0030623dd2eeba74a8fe83b3eb8f81dee20669ab48a6d18a0529707c3"
+    },
+    {
+      "path": "browser/upstream/tor-js-renewal-diagnostics.patch",
+      "sha256": "ebc9859a507b5ee7eff571e65171d93cd73071d93ff07e7ed2c1f1aaaf26416b"
+    },
+    {
+      "path": "browser/upstream/tor-js-service-diagnostics.patch",
+      "sha256": "1b30c575cd65833d960d6d0c2e1d25db9a9b2783c31e034dd95289b81d560cdc"
+    },
+    {
+      "path": "browser/upstream/tor-js-test-network.patch",
+      "sha256": "4fc171612fb348bcf3991eb9b319ee2971600eb53fc766d65e9977b90562c7cd"
+    },
+    {
+      "path": "docs/accounting-extension.md",
+      "sha256": "86560ba37cad300c47ccf11f99c0ec477c8262dd90d49770680c9b9bc27d8ae5"
+    },
+    {
+      "path": "docs/browser-evidence.md",
+      "sha256": "fe435ada432a16623313ba90ec34cb26984c577b0e722af54b378b62f83e8227"
+    },
+    {
+      "path": "docs/browser-first.md",
+      "sha256": "0c8c82d12bd5dbae3fadccd16b76d459c9ec1d08fdcab0d45e70839654291143"
+    },
+    {
+      "path": "docs/browser-package.md",
+      "sha256": "21f09d03b952594b60ef3106867c92ad027f03ee99e3cc043831a8984c8ada8e"
+    },
+    {
+      "path": "docs/browser-transport.md",
+      "sha256": "68e4156e6aa690dcb42be0ce876ce1c204804da6afd227b1bfd4b59ddb78aeb2"
+    },
+    {
+      "path": "docs/components.md",
+      "sha256": "8a2ae47d69c98490b1ce145df892334b0b0182d600b448b5db1b84df356709af"
+    },
+    {
+      "path": "docs/contract.md",
+      "sha256": "bd9d279348e70fd0b4a0a36c597151758418c62eac25bd89fa9d8737e082d918"
+    },
+    {
+      "path": "docs/live-delivery.md",
+      "sha256": "d66148cd19848b839846eabf728d2731e4c37c710b96f7a7ca153613ecb45845"
+    },
+    {
+      "path": "docs/onion-renewal.md",
+      "sha256": "3e042fab4eb67471d2bce54ee868e35b2f56b7c9d4d66f0f04df311d959d6069"
+    },
+    {
+      "path": "docs/profile-signing.md",
+      "sha256": "e8daef9f3c3bda683dc2ff282c37a84b7d62c335ab8738b0182e371a0047a7ca"
+    },
+    {
+      "path": "docs/public-tor-validation.md",
+      "sha256": "578cde7de2105e90fa8ad89f9e82f0a9defc6acb6f9a2ee1d293ae7e7e6f0e14"
+    },
+    {
+      "path": "docs/reservation-release.md",
+      "sha256": "c82ad170c521da5cd8bd2a4ab13d314501cf6de197e5e81a620e208777842094"
+    },
+    {
+      "path": "docs/tuning.md",
+      "sha256": "47440b1723276b1e7815dfe3efb8234ebaf347a2a206fadeeb6084015e0a2459"
+    },
+    {
+      "path": "examples/accounting_fixture.rs",
+      "sha256": "56e259901053db93abd0b7ef1170538c054880396720097efff9657d4b5d9c13"
+    },
+    {
+      "path": "examples/accounting_fixture/reservation.rs",
+      "sha256": "1d3c9ddffe32861e6449ef5fcf5d8142084388d370338aecd8281210f1eb1a5c"
+    },
+    {
+      "path": "examples/composition.rs",
+      "sha256": "ef93b8fc47aff1ff143e37539bfa9208f6e2ea398cac82778749418a22d8c47e"
+    },
+    {
+      "path": "examples/profile_signing.rs",
+      "sha256": "2a1d71988d322bac0c3a0cf93106326915d2db01c047f26f946e009f7e3d6278"
+    },
+    {
+      "path": "examples/tor_browser_peer.rs",
+      "sha256": "abf911e6b7302ac4064c376ae329ec19c18281b0fd658a995f700cc2ca645f55"
+    },
+    {
+      "path": "examples/tor_roundtrip.rs",
+      "sha256": "de8f2b563d6e466ffdf7af2c0d1a19a07b0fbf6bd25ac1e330dfb679c2fc1e64"
+    },
+    {
+      "path": "experiments/README.md",
+      "sha256": "df3064f2b47e4d62c62559892c99a1b6193870a04f4197a10fba5624f6f2ab70"
+    },
+    {
+      "path": "experiments/community-composition/Cargo.lock",
+      "sha256": "3d65c16de4046bc3b431a15907dd38dda8bf23e5d1adad98ae59a6eba8ee333d"
+    },
+    {
+      "path": "experiments/community-composition/Cargo.toml",
+      "sha256": "965401595e56576a187575002a28a6938deb51cc364bbcfa03b1a629be9f8a91"
+    },
+    {
+      "path": "experiments/community-composition/README.md",
+      "sha256": "e1ad5dd213a564cd8a492ea8fffd974ca4807e01924383770672c6e3fa405e6c"
+    },
+    {
+      "path": "experiments/community-composition/src/lib.rs",
+      "sha256": "438c9d9ef4cb00aaa6ad9d42be1c93813a8de79a95ff679e6bb72f42d85ddabd"
+    },
+    {
+      "path": "experiments/community-composition/tests/composition.rs",
+      "sha256": "b85c54d469df9b6ed862294bbd3f352e77b96fb698b3cca5b59ddc7deecc2efc"
+    },
+    {
+      "path": "experiments/composition/README.md",
+      "sha256": "d59e807c0f28923523c13256f360575247cad0523d25e1f81c71b8ad7e97c762"
+    },
+    {
+      "path": "experiments/composition/composition.test.mjs",
+      "sha256": "a817e411f16a62c406ca8bdf050ec2f2f7e4ce2fd0b91db11120f7daf1f8e0fc"
+    },
+    {
+      "path": "experiments/composition/run.mjs",
+      "sha256": "6e9c7ddf83bd933a4d1c6c05d59e79357b156926ea60e646a9d4bbbbe375e97a"
+    },
+    {
+      "path": "experiments/embedded-onion/.gitignore",
+      "sha256": "306fd52e74fca6746e12acc750f232de15e71da917756a1270d74c91f5eb7368"
+    },
+    {
+      "path": "experiments/embedded-onion/Cargo.lock",
+      "sha256": "a9cb575e9612d6094bd75345218070e414148c2a5846eadca704e1fc7ecca357"
+    },
+    {
+      "path": "experiments/embedded-onion/Cargo.toml",
+      "sha256": "49bb964072072e523be694196df871a1600d270acd8f2b74dfcb754c136d7033"
+    },
+    {
+      "path": "experiments/embedded-onion/README.md",
+      "sha256": "a590ff45bfd4cd457a701e9e81d3fb3163a331916ae9727b8c9b26b34dde5489"
+    },
+    {
+      "path": "experiments/embedded-onion/run-network.py",
+      "sha256": "fd5729520135e957b86dc578d7474c6dd02e5469785eecaea89c9b39133e17f1"
+    },
+    {
+      "path": "experiments/embedded-onion/src/lib.rs",
+      "sha256": "ec8dc5c03921f14e5131afbb75266d70651d485e04a124299d580c52f7f92347"
+    },
+    {
+      "path": "experiments/embedded-onion/src/main.rs",
+      "sha256": "a952e67e43ae7841b4ebeb47ac87fed8c5670e8da6eb8cfbcf307aa6eedb5349"
+    },
+    {
+      "path": "experiments/embedded-onion/tests/contracts.rs",
+      "sha256": "fecd54622dd947a4d757926f92128fadee2bccf2173ab9cf1a31c14198453bef"
+    },
+    {
+      "path": "experiments/first-contact-release/Cargo.lock",
+      "sha256": "e7f37bb91946be8914b105024c8986b4a00a5f66a27029cc3e0109fbefdedf33"
+    },
+    {
+      "path": "experiments/first-contact-release/Cargo.toml",
+      "sha256": "68799679b805610dfe8657c344657166e1968f34386512a3b1b91b84c1ad86bc"
+    },
+    {
+      "path": "experiments/first-contact-release/README.md",
+      "sha256": "4b3962ccc41760900cdf924f6fba702db7de25c5a5a924fba61c8400ba5138e8"
+    },
+    {
+      "path": "experiments/first-contact-release/src/bin/counter_bridge.rs",
+      "sha256": "e02bbe5f122c6f7307fd380de818dc3f4461446b107855de819043bc6575a76c"
+    },
+    {
+      "path": "experiments/first-contact-release/src/lib.rs",
+      "sha256": "1f72cb8ffbcc45455e875d15b30182b4c77e37b83b62cf7ef69e8e997f32354b"
+    },
+    {
+      "path": "experiments/first-contact-release/tests/contracts.rs",
+      "sha256": "b19f7ce42000865635edeca61ecd200737aa3e22de56d10c1c10cdd8ab4eac5d"
+    },
+    {
+      "path": "experiments/package-consumer/Cargo.toml",
+      "sha256": "b1d3b6474ea1d46508a2113c2722d49d644f41b44ab8966969954d33e0ce0e6f"
+    },
+    {
+      "path": "experiments/package-consumer/README.md",
+      "sha256": "2ecd005f24a8bec9ab53b616553f76d450723f544a14b8e182476f2da9bc7de1"
+    },
+    {
+      "path": "experiments/package-consumer/check.py",
+      "sha256": "aa96c43b08f68722eef18b62a840de31e36761405c26dd339873505edef08835"
+    },
+    {
+      "path": "experiments/package-consumer/src/main.rs",
+      "sha256": "652da989a5271a52ca888217871f4c45486bfc3634f989a1b019ae03f9242187"
+    },
+    {
+      "path": "experiments/tor_isolated.py",
+      "sha256": "9ef02ea3ca49d7d344e2e306d1ce98ed9bd43b1395a8618954a7cc9d873c61d4"
+    },
+    {
+      "path": "experiments/tor_roundtrip.py",
+      "sha256": "18e4a03fda772073eefc7f1692cedc28bf3e5ac4da1aea7d482c5a3673e1cec9"
+    },
+    {
+      "path": "src/accounting.rs",
+      "sha256": "b34f6daa388e85d48a1b6f00e564bef1a69b3e9c139863aa05196c34d066ec90"
+    },
+    {
+      "path": "src/admission.rs",
+      "sha256": "61073f099ecdcd754d883e3e6e0aeb01105bfde7cd3b71274d117df773227013"
+    },
+    {
+      "path": "src/board.rs",
+      "sha256": "6a9f83766213931d9e40074b648c90063fdc0c1098bc5af6cdae4ff5479376d5"
+    },
+    {
+      "path": "src/browser.rs",
+      "sha256": "5466a355991b45161bfd0cb258e963d912166893717a65ceedabd7682fc0ee76"
+    },
+    {
+      "path": "src/browser_accounting.rs",
+      "sha256": "396354867ff330a0458537b4d22687c4fcfc066a03e41eb3e9e37d3b81e0067a"
+    },
+    {
+      "path": "src/browser_live.rs",
+      "sha256": "b178ab416406068bd56fc0ab943728e31f9f830116101be0fa60b01a739fe928"
+    },
+    {
+      "path": "src/browser_reservation.rs",
+      "sha256": "2862898ca3401508c9f56698a30c0b2be18df47fafea8f0eded42945ecd77b52"
+    },
+    {
+      "path": "src/enrollment.rs",
+      "sha256": "0ffc08de3dddd87b67082cca10d011051394ab29cf81f4de14568a11f0ddbc56"
+    },
+    {
+      "path": "src/framing.rs",
+      "sha256": "6d38a7cb21770ca5808a7983fefd46ff17b3c08cada2788126684be8963fb8a3"
+    },
+    {
+      "path": "src/identity.rs",
+      "sha256": "efdec27057c8c3bcfc8504b92c9209e1ae6d1408264c5c2167d635bc4ddb3bb7"
+    },
+    {
+      "path": "src/inbox.rs",
+      "sha256": "debb8cef65341e73276c0217d11169eeeaddba390580fe2f0c0dddc5b90c9eab"
+    },
+    {
+      "path": "src/inbox_accounting.rs",
+      "sha256": "61c1f53270f05195a2dbd027a476ccab1c7c4872e5b05f50737ff099c1b20ef5"
+    },
+    {
+      "path": "src/inbox_live.rs",
+      "sha256": "4f545afe061efde4a3ec75ce217d7bee8550c1708db5d8f666be7975a822252a"
+    },
+    {
+      "path": "src/inbox_policy.rs",
+      "sha256": "b9a8c5479662d4fac4ce2780ec26eb99d8460803c81d820138b476a6d6761f5e"
+    },
+    {
+      "path": "src/inbox_replacement.rs",
+      "sha256": "1e987003e0f93afbfbc14a8badb269c0a5fc10f8db06ac6aaa0eb62096ae6254"
+    },
+    {
+      "path": "src/inbox_reservation.rs",
+      "sha256": "a1ce9896c023db7907414523acd93206ead9ea4744ee42bb5cfb705b236c1843"
+    },
+    {
+      "path": "src/inbox_reservation/accounted.rs",
+      "sha256": "3cbfc1db10e83677b969c3242805e1276644791c7c31bda9781bc99fc079efaf"
+    },
+    {
+      "path": "src/lifecycle.rs",
+      "sha256": "a76506d1c779a0896b3154136f9f99ab393032b454d27957ceadf0b404608296"
+    },
+    {
+      "path": "src/live.rs",
+      "sha256": "c875d8897cd8393bbdbcac553a5e94bee98849feda53ff824e6192f268d097d5"
+    },
+    {
+      "path": "src/member.rs",
+      "sha256": "f247641af4dcb203ffa1098e10df5a1fa127dca0e90decd97a74bf25978b3595"
+    },
+    {
+      "path": "src/profile.rs",
+      "sha256": "95eec02d6561b03bb7f1c673ce1c9649dc22a72d177020ec69ba89e85eb78012"
+    },
+    {
+      "path": "src/profile_statements.rs",
+      "sha256": "72c8e56885f7d03cd656fcf59d6f3f08b8612f0a57ffe894f29436f2fdeda8f2"
+    },
+    {
+      "path": "src/release.rs",
+      "sha256": "7fd1e52c48c58d5708b0fbc9d477f86da0e54a779fd29720ac45593ead8e781c"
+    },
+    {
+      "path": "src/rendezvous.rs",
+      "sha256": "eef39e2445f78cefa4445333fa2239fb2ccb9255992c1ab6d9a03a4ef45b2a25"
+    },
+    {
+      "path": "src/reservation.rs",
+      "sha256": "8d71c0cccfd6cbd8fe5b83dc04a5b3c4e3a52419e04c2761a64563e157858289"
+    },
+    {
+      "path": "src/roster.rs",
+      "sha256": "1466dc54f55e79f9a6fbfbca81db479322918caf0cb0e21c984f21041e82e701"
+    },
+    {
+      "path": "src/transport.rs",
+      "sha256": "2ae0bb787f6d4e4cd6e3ebd03989b9d9bd80337fbead559c95d0e321fedaaaa2"
+    },
+    {
+      "path": "src/vault.rs",
+      "sha256": "fed576cd3e0388ed2a32bc77f8662d93a1035cb51286c1b5b16d929402985b90"
+    },
+    {
+      "path": "studies/README.md",
+      "sha256": "079fe1f32161f694adbcb7bb3d70166336d066f8a003296bb041dfa49ab54324"
+    },
+    {
+      "path": "studies/client-owned-onion-adapters.md",
+      "sha256": "f59e0a971adc2036b2ea119600fcc9fbb16bcec46652ac7dff3548cb0aeb2cb6"
+    },
+    {
+      "path": "studies/crate-alpha-release-review.md",
+      "sha256": "0a95c90c61acd81ec5d575204483c6ca7ae5bdc613ce8ced263c98fdb08b42eb"
+    },
+    {
+      "path": "studies/crate-alpha-release.md",
+      "sha256": "0b8158475e98172f63839abb1c5fb8daeebe3ea78ac2d90b8f62f9012dffa5f4"
+    },
+    {
+      "path": "studies/credential-renewal-design.md",
+      "sha256": "f37c33c479d2dbcd7f716e4c78327b6b1b516b149c124b60c9df12d47ede07f3"
+    },
+    {
+      "path": "studies/embedded-onion-feasibility.md",
+      "sha256": "38a89fde91ed7aaa6cc99412ecbc051e215db4ec3bc8984c4c15d9e6f772fe09"
+    },
+    {
+      "path": "studies/first-contact-release-gate.md",
+      "sha256": "31707277bc2906ed774cbe68a09fa5c9b43d41aa9e81c48f49c46b511e417638"
+    },
+    {
+      "path": "studies/implementation-experiments.md",
+      "sha256": "17730e811ff2e1c9f06b360e0a703d86cf343821d46336043122ffce1b8f471d"
+    },
+    {
+      "path": "studies/messaging-components.md",
+      "sha256": "ccac2328386a0fa5b6005eae5bd15740159431e1fb6e5eed23677136d46972a6"
+    },
+    {
+      "path": "studies/semaphore-enrollment-signing.md",
+      "sha256": "5a14e307f0d3778808bdf9ec978ccf9c4eade9ecd1aa07bc5d0d56583ac94124"
+    },
+    {
+      "path": "tests/accounted_admission.rs",
+      "sha256": "5648d3eed467c46d4aa1ca91798524a4bb2428757c1d7a6bf7e8cf34c8ba7c4b"
+    },
+    {
+      "path": "tests/accounting.rs",
+      "sha256": "0dbe40eb0cda3101d629e3eb4fddbb360c68f5aeb39affa709043dc10aad0b7e"
+    },
+    {
+      "path": "tests/admission.rs",
+      "sha256": "51b789fb8c71130d3acc3525cc6d42d75ed0258e4282b4923989538665a2b5dd"
+    },
+    {
+      "path": "tests/browser.rs",
+      "sha256": "84988baf7b0fa71ee554b2f9ba1c13aa6babee10949291dbca4fe7ab2fbf97c2"
+    },
+    {
+      "path": "tests/closure.rs",
+      "sha256": "b506966f3a9cab70703dc66be94215033230d10bb805c3156e9f2d264fc0610d"
+    },
+    {
+      "path": "tests/common/accounting.rs",
+      "sha256": "ec04593929be2cebb2fb7ca96e4d33caf0e7dce91a7290d9bf55cb7f649be72e"
+    },
+    {
+      "path": "tests/common/mod.rs",
+      "sha256": "1ead76f292eee39636dfb406c5580559bd019c9e7b63a09794685de4a8ddff6d"
+    },
+    {
+      "path": "tests/contact_directives.rs",
+      "sha256": "015ac6ece7368e71700311712e5f1e71ef7dd560cb4afe40efb3fa5a8ec516fe"
+    },
+    {
+      "path": "tests/device_attacks.rs",
+      "sha256": "f7f28dcb7169366512865c573eba13ce8b4a2be68e197bcfa6e01727cf579b0a"
+    },
+    {
+      "path": "tests/device_renewal.rs",
+      "sha256": "e6570efdf3234b478b7bde88abc2b16af79ca6e5756e49bec0ce122fb821c9c0"
+    },
+    {
+      "path": "tests/devices.rs",
+      "sha256": "58675637e8db497f0c61e303540a121c9aff71459937872f815f70ec7f09aaa1"
+    },
+    {
+      "path": "tests/directional_contact.rs",
+      "sha256": "b0d68ef2f712b2790459545f3cebe5d3834052dc0e79c242c8a10caa788d9259"
+    },
+    {
+      "path": "tests/enrollment_signing.rs",
+      "sha256": "2cf1bb48dfe26aadc28097bc30d5d9e935e86a88ba5be76469d9c41bd1c1fa25"
+    },
+    {
+      "path": "tests/first_contact.rs",
+      "sha256": "7020b7870d36a2a19db215fdeb3fb77637b83b1f2c6b6617d544f9426720ada4"
+    },
+    {
+      "path": "tests/fixtures/admission-v1.json",
+      "sha256": "52d3413abbfe192e3de88206fe645267abdc08040a6be56735e1b9e9546a317e"
+    },
+    {
+      "path": "tests/frame_codec.rs",
+      "sha256": "675b1c9648669c95a63d26d4e72f0406d04c3a733c3fe9b711311f3f8a8d3b9d"
+    },
+    {
+      "path": "tests/framing.rs",
+      "sha256": "6e2be481a974db8f30b559abc0695f97b3b5093d97c11b3ca36a1d79d4dfc362"
+    },
+    {
+      "path": "tests/identity.rs",
+      "sha256": "db4ebb10f861a461e3d5d6aaf2b54240d75f478f7d80d196f189e33248b62dca"
+    },
+    {
+      "path": "tests/inbox.rs",
+      "sha256": "ae0d372aa7b61e8396947e86c80cfed868d088e0d3c414e8327244d853d8ab44"
+    },
+    {
+      "path": "tests/live_delivery.rs",
+      "sha256": "10273931418d949fbcc5786cee1c410325a61d8040e59b8243e99354fe8a925f"
+    },
+    {
+      "path": "tests/payloads.rs",
+      "sha256": "095a3b6dd3570588c860f255d498cc460b0b9feef92272eedef969cfe740e02f"
+    },
+    {
+      "path": "tests/profile.rs",
+      "sha256": "fe30ad497bd74bb4117d1c2f0463fb17c4f3c89aca4c84699057f3f05c3f6326"
+    },
+    {
+      "path": "tests/profile_statements.rs",
+      "sha256": "437388027cffb453df26d9bf4e4c9cac54a3b0bc4a0d5db89d81fd1e186664d7"
+    },
+    {
+      "path": "tests/release_signing.rs",
+      "sha256": "4465445bb3cd64f6ce6f477b5c338817bff93aee300c612a7a281047e45c7ae8"
+    },
+    {
+      "path": "tests/rendezvous.rs",
+      "sha256": "3c308b95a65a944e32af0f0479f20c051446ed918b61fe1d407cbbab3f9b449e"
+    },
+    {
+      "path": "tests/renewal.rs",
+      "sha256": "44c260eeaa84270870ba48860a45f46a9d77c773a377b5f93a62032434c43792"
+    },
+    {
+      "path": "tests/reservation_gate.rs",
+      "sha256": "04f02eb8ef270f5ad5d5057747325bd7f6ba1fe830b233f95dbfaf7a0da682ed"
+    },
+    {
+      "path": "tests/resolution.rs",
+      "sha256": "4c81a6081dae92fdeb0395b35029a2b213488aca048ef7cb98eaed9f86bbe697"
+    },
+    {
+      "path": "tests/roster.rs",
+      "sha256": "e4851b23a6e1d2f2c2488c2951953fa9674044946e00d91a19b17e310ee5ee02"
+    },
+    {
+      "path": "tests/scale.rs",
+      "sha256": "5fb321398f88d7d79880c1447a2f949a51327a727c350a22d0e8be8da5634f84"
+    },
+    {
+      "path": "tests/security.rs",
+      "sha256": "d7417d1381a31f5ac8fe531631af9d6fa22cd386fa5a8461f35d3dd050b3428b"
+    },
+    {
+      "path": "tests/transport.rs",
+      "sha256": "8bd5aa7f0b08262cc409c652ba81edf9513a2d802b97b54676f59a8c761a4892"
+    }
+  ]
+}

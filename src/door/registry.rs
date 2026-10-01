@@ -19,12 +19,6 @@ pub enum Authority {
     LocalClient,
 }
 
-impl Authority {
-    pub(super) fn permits(self, _role: Role) -> bool {
-        true
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Effect {

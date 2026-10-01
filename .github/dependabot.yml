@@ -1,71 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: cargo
-    directory: "/.ci/browser-bindgen"
-    schedule:
-      interval: daily
-    open-pull-requests-limit: 1
-    groups:
-      compatible:
-        patterns: ["*"]
-  - package-ecosystem: cargo
-    directory: "/.ci/tor-bindgen"
-    schedule:
-      interval: daily
-    open-pull-requests-limit: 1
-    groups:
-      compatible:
-        patterns: ["*"]
-  - package-ecosystem: cargo
-    directory: "/"
-    schedule:
-      interval: daily
-    open-pull-requests-limit: 1
-    groups:
-      compatible:
-        patterns: ["*"]
-  - package-ecosystem: cargo
-    directory: "/experiments/community-composition"
-    schedule:
-      interval: daily
-    open-pull-requests-limit: 1
-    groups:
-      compatible:
-        patterns: ["*"]
-  - package-ecosystem: cargo
-    directory: "/experiments/embedded-onion"
-    schedule:
-      interval: daily
-    open-pull-requests-limit: 1
-    groups:
-      compatible:
-        patterns: ["*"]
-  - package-ecosystem: cargo
-    directory: "/experiments/first-contact-release"
-    schedule:
-      interval: daily
-    open-pull-requests-limit: 1
-    groups:
-      compatible:
-        patterns: ["*"]
-  - package-ecosystem: cargo
-    directory: "/experiments/package-consumer"
-    schedule:
-      interval: daily
-    open-pull-requests-limit: 1
-    groups:
-      compatible:
-        patterns: ["*"]
-  - package-ecosystem: github-actions
-    directory: "/"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 1
-    groups:
-      compatible:
-        patterns: ["*"]
-  - package-ecosystem: npm
-    directory: "/browser"
+    directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 1
@@ -74,6 +10,14 @@ updates:
         patterns: ["*"]
   - package-ecosystem: npm
     directory: /tools
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
+    groups:
+      compatible:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 1

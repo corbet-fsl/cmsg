@@ -26,8 +26,8 @@ oversized requests fail. Every HTTP response, including routing errors, is
 noncacheable. The implementation uses maintained Schemars/Axum/reqwest and
 upstream cryptographic primitives rather than custom protocols or primitives.
 
-Historical monolithic messaging sources are retained while dedicated owners
-extract them. Their old callback/fixture authorities do not satisfy current
+Historical monolithic messaging sources remain in immutable Git history, indexed
+by the retirement map for their dedicated owners. Their old callback/fixture authorities do not satisfy current
 admission, accounting, key custody, room, transport or restore acceptance.
 Native and actual Wasm parity, full reachable line/branch coverage, real local
 HTTP invocation, shared-checkpoint failure/replay tests, live owner integration

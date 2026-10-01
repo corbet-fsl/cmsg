@@ -1,0 +1,9 @@
+[
+  {
+    "file": "src/door/native.rs",
+    "line": 222,
+    "source": ".map_err(|_| ErrorCode::Unavailable)?;",
+    "reason": "Defensive conversion of upstream ClientBuilder initialization failure. This fixed constructor disables TLS features and uses the default infallible GAI resolver with no user-supplied builder settings; inducing the callback requires changing upstream internals or unrelated process configuration. No request, authorization, response or retry path is excluded.",
+    "evidence": "Cargo.toml reqwest default-features=false; https://docs.rs/reqwest/0.13.5/reqwest/struct.ClientBuilder.html#method.build and https://docs.rs/reqwest/0.13.5/src/reqwest/async_impl/client.rs.html . Retained raw LCOV from CI36901672032 shows only this line unexecuted; every116 branch is exercised."
+  }
+]

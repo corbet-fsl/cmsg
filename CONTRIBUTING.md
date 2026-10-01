@@ -1,6 +1,6 @@
 # Contributing to cmsg
 
-cmsg is the FSL-licensed private messaging core. Please keep commercial
+cmsg is the FSL-licensed device-local Member door. Please keep commercial
 copy and deployment config out of this repository; those belong in the
 frontend layer.
 

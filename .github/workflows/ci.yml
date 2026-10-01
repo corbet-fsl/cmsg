@@ -2,7 +2,7 @@ name: ci
 on:
   push:
     branches: [main]
-    paths: ["Cargo.*", "src/**", "tests/**", "examples/**", "browser/**", "tools/**", ".ci/**", ".github/**"]
+    paths: ["Cargo.*", "src/**", "tests/**", "examples/**", "tools/**", ".ci/**", ".github/**"]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -10,6 +10,7 @@ permissions:
 concurrency:
   group: implementation
   cancel-in-progress: false
+  queue: max
 env:
   CARGO_BUILD_JOBS: '2'
   RUST_TEST_THREADS: '2'
@@ -91,7 +92,6 @@ jobs:
       - run: cargo clippy --locked --all-targets --keep-going -- -D warnings
       - run: cargo test --locked --all-targets
       - run: wasm-pack test --headless --chrome -- --locked
-      - run: node .ci/peer-channel-check.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -118,10 +118,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
-      - run: cargo llvm-cov --locked --branch --all-targets --json --output-path coverage.json
-      - run: python3 .ci/check-coverage.py coverage.json
+      - run: cargo llvm-cov --locked --branch --all-targets --json --output-path coverage.json --ignore-filename-regex '/tests/'
+      - run: cargo llvm-cov report --lcov --output-path coverage.lcov --ignore-filename-regex '/tests/'
+      - run: python3 .ci/check-source-coverage.py coverage.lcov
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage
-          path: coverage.json
+          path: |
+            coverage.json
+            coverage.lcov

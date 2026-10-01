@@ -136,7 +136,6 @@ impl ClientToken {
 
 struct Grant {
     origin: String,
-    role: Role,
     actions: BTreeSet<String>,
     expires: u64,
 }
@@ -244,6 +243,18 @@ impl Door {
         let mut bytes = Zeroizing::new([0u8; 32]);
         getrandom::fill(bytes.as_mut()).map_err(|_| ErrorCode::Unavailable)?;
         let token = ClientToken(Zeroizing::new(BASE64URL_NOPAD.encode(bytes.as_ref())));
+        self.insert_client(token, origin, actions, expires)
+    }
+
+    // Separate the actual insertion boundary so duplicate entropy cannot replace
+    // a live client grant. Pairing always obtains fresh OS/browser entropy first.
+    fn insert_client(
+        &mut self,
+        token: ClientToken,
+        origin: &str,
+        actions: BTreeSet<String>,
+        expires: u64,
+    ) -> Result<ClientToken> {
         let key = token_hash(token.expose_for_transport());
         if self.grants.contains_key(&key) {
             return Err(ErrorCode::Unavailable);
@@ -252,7 +263,6 @@ impl Door {
             key,
             Grant {
                 origin: origin.into(),
-                role,
                 actions,
                 expires,
             },
@@ -312,7 +322,9 @@ impl Door {
         let request: WireInvocation =
             serde_json::from_slice(bytes).map_err(|_| ErrorCode::InvalidRequest)?;
         let action = registry::action(&request.action).ok_or(ErrorCode::UnsupportedAction)?;
-        if !grant.actions.contains(&request.action) || !action.authority.permits(grant.role) {
+        // All current actions require LocalClient authority. Role-specific domain
+        // operations must introduce their actual authority check when registered.
+        if !grant.actions.contains(&request.action) {
             return Err(ErrorCode::Unauthorized);
         }
         if request.version != action.version {
@@ -320,13 +332,7 @@ impl Door {
         }
         // All projections converge here after the same scope/origin/capability check.
         let result = (action.handler)(self, &key, request.body.get())?;
-        if serde_json::to_vec(&result.0)
-            .map_err(|_| ErrorCode::Unavailable)?
-            .len()
-            > MAX_RESULT_BYTES
-        {
-            return Err(ErrorCode::Capacity);
-        }
+        check_result_size(&result.0)?;
         Ok(result)
     }
 
@@ -351,3 +357,19 @@ impl Door {
 fn token_hash(token: &str) -> [u8; 32] {
     Sha256::digest(token.as_bytes()).into()
 }
+
+fn check_result_size(result: &Value) -> Result<()> {
+    // Value already contains JSON types; serialization cannot reject its data.
+    if serde_json::to_vec(result)
+        .expect("Value is JSON-compatible")
+        .len()
+        > MAX_RESULT_BYTES
+    {
+        return Err(ErrorCode::Capacity);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "../../tests/support/door.rs"]
+mod tests;

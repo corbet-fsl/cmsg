@@ -6,11 +6,13 @@ use serde_json::json;
 /// with the action owner's exact result type.
 pub fn output_schema(action: &ActionDescription) -> Value {
     let mut schema = registry::schema::<Output>();
-    if let Some(variants) = schema.get_mut("oneOf").and_then(Value::as_array_mut) {
-        for variant in variants {
-            if let Some(result) = variant["properties"].get_mut("result") {
-                *result = action.result.clone();
-            }
+    let variants = schema
+        .get_mut("oneOf")
+        .and_then(Value::as_array_mut)
+        .expect("the owned Output schema is a tagged union");
+    for variant in variants {
+        if let Some(result) = variant["properties"].get_mut("result") {
+            *result = action.result.clone();
         }
     }
     schema
@@ -87,14 +89,12 @@ pub fn invoke(
     body: Value,
     now: u64,
 ) -> Output {
-    match serde_json::to_vec(&Invocation {
+    // Invocation contains only JSON-compatible primitives and an existing Value.
+    let bytes = serde_json::to_vec(&Invocation {
         action: action.into(),
         version,
         body,
-    }) {
-        Ok(bytes) => door.dispatch(origin, token, &bytes, now),
-        Err(_) => Output::Error {
-            error: ErrorCode::InvalidRequest,
-        },
-    }
+    })
+    .expect("Invocation contains only total JSON types");
+    door.dispatch(origin, token, &bytes, now)
 }
