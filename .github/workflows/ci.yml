@@ -30,17 +30,19 @@ jobs:
       - run: |
           python3 .ci/check-first-party.py
           cargo update
+          cargo update --manifest-path tests/fixture/Cargo.toml
           npm update --prefix tools --package-lock-only --ignore-scripts --no-audit --no-fund
           rustc -Vv > resolution.txt
           node --version >> resolution.txt
           npm --version >> resolution.txt
           date -u +%FT%TZ >> resolution.txt
-          sha256sum Cargo.lock tools/package-lock.json >> resolution.txt
+          sha256sum Cargo.lock tests/fixture/Cargo.lock tools/package-lock.json >> resolution.txt
       - uses: actions/upload-artifact@v4
         with:
           name: resolved-lock
           path: |
             Cargo.lock
+            tests/fixture/Cargo.lock
             tools/package-lock.json
             resolution.txt
   dependency-policy:
@@ -102,8 +104,45 @@ jobs:
           name: generated-local-api
           path: generated
       - run: cargo clippy --locked --all-targets --keep-going -- -D warnings
-      - run: cargo test --locked --all-targets
-      - run: wasm-pack test --headless --chrome -- --locked
+      - run: bash .ci/prepare-foyer-fixture.sh
+      - run: python3 .ci/with-foyer-fixture.py tests/fixture/target/debug/cmsg-foyer-fixture cargo test --locked --all-targets
+      - id: browser-binding-version
+        run: |
+          python3 - <<'PYCODE'
+          import os, tomllib
+          packages = tomllib.load(open('Cargo.lock', 'rb'))['package']
+          version = next(p['version'] for p in packages if p['name'] == 'wasm-bindgen')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('version=' + version + '\n')
+          PYCODE
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@${{ steps.browser-binding-version.outputs.version }}
+      - name: Build the generated browser module
+        run: |
+          cargo build --locked --target wasm32-unknown-unknown --lib
+          wasm-bindgen --target web --out-dir generated/wasm target/wasm32-unknown-unknown/debug/cmsg.wasm
+          tools/node_modules/.bin/tsc --outDir generated/runtime --strict --target es2022 --module nodenext --moduleResolution nodenext generated/client.ts generated/browser.ts
+          cp -R generated/wasm generated/runtime/wasm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-browser-api
+          path: generated
+      - name: Prepare ephemeral hosted browser tools
+        run: |
+          python3 -m pip install -r .ci/requirements.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y caddy libcap2-bin
+          sudo systemctl stop caddy
+          sudo setcap cap_net_bind_service=+ep "$(command -v caddy)"
+      - name: Execute generated module in the actual HTTPS browser
+        run: python3 .ci/with-foyer-fixture.py tests/fixture/target/debug/cmsg-foyer-fixture python3 .ci/test-browser-package.py
+      - name: Execute real browser regression and portal matrix
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: python3 .ci/browser-coverage-runner.py
+          WASM_BINDGEN_TEST_ONLY_WEB: "1"
+          WASM_BINDGEN_SPLIT_LINKED_MODULES: "1"
+        run: python3 .ci/with-foyer-fixture.py tests/fixture/target/debug/cmsg-foyer-fixture cargo test --locked --target wasm32-unknown-unknown --lib --test door --test facades --test browser_bridge --test foyer_browser
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -131,7 +170,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
-      - run: cargo llvm-cov --locked --branch --all-targets --json --output-path coverage.json --ignore-filename-regex '/tests/'
+      - run: bash .ci/prepare-foyer-fixture.sh
+      - run: python3 .ci/with-foyer-fixture.py tests/fixture/target/debug/cmsg-foyer-fixture cargo llvm-cov --locked --branch --all-targets --json --output-path coverage.json --ignore-filename-regex '/tests/'
       - run: cargo llvm-cov report --lcov --output-path coverage.lcov --ignore-filename-regex '/tests/'
       - run: cargo llvm-cov report --text --output-path coverage.txt --ignore-filename-regex '/tests/'
       - run: python3 .ci/test-source-coverage.py
@@ -156,16 +196,23 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-bindgen-cli@${{ steps.binding-version.outputs.version }}
-      - run: python3 -m pip install -r .ci/requirements.txt
+      - name: Prepare ephemeral hosted browser tools
+        run: |
+          python3 -m pip install -r .ci/requirements.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y caddy libcap2-bin
+          sudo systemctl stop caddy
+          sudo setcap cap_net_bind_service=+ep "$(command -v caddy)"
       - name: Measure actual browser Rust coverage
         env:
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: python3 .ci/browser-coverage-runner.py
+          CMSG_COLLECT_COVERAGE: "1"
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS: -Zno-profiler-runtime -Clink-args=--no-gc-sections --cfg=owned_browser_coverage
           WASM_BINDGEN_TEST_ONLY_WEB: "1"
           WASM_BINDGEN_SPLIT_LINKED_MODULES: "1"
           CHROMEDRIVER: /usr/bin/chromedriver
           CC_wasm32_unknown_unknown: clang
-        run: cargo llvm-cov test --locked --branch --coverage-target-only --target wasm32-unknown-unknown --lib --test door --json --output-path wasm-coverage.json --ignore-filename-regex '/tests/'
+        run: python3 .ci/with-foyer-fixture.py tests/fixture/target/debug/cmsg-foyer-fixture cargo llvm-cov test --locked --branch --coverage-target-only --target wasm32-unknown-unknown --lib --test door --test facades --test browser_bridge --test foyer_browser --json --output-path wasm-coverage.json --ignore-filename-regex '/tests/'
       - run: cargo llvm-cov report --target wasm32-unknown-unknown --lcov --output-path wasm-coverage.lcov --ignore-filename-regex '/tests/'
       - run: cargo llvm-cov report --target wasm32-unknown-unknown --text --output-path wasm-coverage.txt --ignore-filename-regex '/tests/'
       - run: python3 .ci/check-source-coverage.py wasm-coverage.lcov wasm-coverage.json wasm-coverage.txt wasm

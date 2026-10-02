@@ -16,7 +16,10 @@ for (const action of registry.actions) {
   const validate = ajv.compile(response);
   assert.equal(validate({ status: 'error', error: 'unauthorized' }), true);
   assert.equal(validate({ status: 'error', error: 'made_up_error' }), false);
-  assert.equal(validate({ status: 'ok', result: null, events: [] }), false);
+  // Optional owner results (for example an absent delivery status) may be null.
+  // The enclosing Output must preserve exactly the original result schema.
+  const acceptsNull = ajv.compile(action.result)(null);
+  assert.equal(validate({ status: 'ok', result: null, events: [] }), acceptsNull);
   assert.equal(validate({ status: 'ok', result: null }), false);
 }
 const output = ajv.compile(registry.output);

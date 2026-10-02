@@ -4,23 +4,43 @@
 effect and bounded errors. HTTP, MCP tools, CLI command descriptions and
 TypeScript are projections of this registry, not separate definitions.
 
-The current implemented actions are `runtime.status`, `runtime.describe`, and
-`client.revoke`. `board.status` projects the real `cbrd::Status` result schema
-and returns `Unavailable` until the Board runtime is bound. The generated
-`GroupView` type is the owner cgrp type reexported by cbrd, not a copied DTO.
-Domain owner ports are still being integrated. Runtime status
-reports every missing facade as unavailable and blocks preload. No membership,
-balance, transport, profile or group success is fabricated.
+The local actions are `runtime.status`, `runtime.describe`, and
+`client.revoke`. `login.start`, `login.poll` and `login.cancel` share owner Rust
+lifecycle types and currently refuse until the actual passkey/Vault bootstrap
+is bound. Launch URLs, callback capabilities, assertions and PRF secrets are
+never login response fields.
+
+Trusted embedding binds actual Board, Vault and Mesh values through
+`bind_board`, `bind_vault` and `bind_mesh`. Each is fixed to a configured member
+origin. Vault binding derives Inbox's member binding only after the actual
+Keys owner accepts `lineage`; subsequent Inbox reads recheck it and load from
+that Vault's authenticated Store. `inbox.history`, `inbox.relation` and
+`inbox.delivery_status` return the original Threads, Contacts and Delivery DTOs.
+No separate snapshot/store or caller-supplied pseudonym authorizes a read.
+
+`board.status` and `board.disconnect` return the actual Board Status.
+`vault.lock` consumes and locks the actual Vault before emitting VaultLocked.
+`mesh.disconnect` closes the retained actual Mesh listener before emitting
+MeshDisconnected. The embedding still owns backend node shutdown. These actions
+do not fabricate attendance, delivery acceptance or network health. Missing
+facades refuse; runtime preload remains unavailable while live end-to-end
+bindings are incomplete. Groups types come from cbrd, without a copied DTO.
 
 Create one `Door` per community with exact permitted origins for each role.
 `pair_client` is an embedding control, called only after trusted local pairing;
 it is absent from the public action registry. Capabilities are random, bounded,
 expiring and revocable. They authorize an explicit local action set, not remote
 service authority. Admin, root and member origins are separate. Remote role
-sessions will be supplied by Foyer; no copied cvld metadata or frontend bypass.
+sessions are supplied through `bind_foyer(origin, role, Sessions)` by trusted
+embedding code. This control is absent from every callable projection. The role
+selects the local portal surface; cvld checks actual membership rights. An admin
+or root signs into the member portal as an ordinary member. The Vault ceremony
+origin is `vault.<community>.<base>` under the pinned community RP; the global
+passport uses `wallet.<base>` separately.
 
 The shared invocation is `{action, version, body}`. `Door::dispatch` takes its
-bytes, the transport's origin/capability, and trusted current time. Requests
+bytes, the transport's origin/capability, and trusted current time, and must be
+awaited. `surface::invoke` is asynchronous as well. Requests
 cannot select another role or community. Responses are `{status:"ok", result,
 events}` or `{status:"error", error}`. Errors contain no member values or
 dependency details. Key and PRF values have no API path.
@@ -37,6 +57,42 @@ capability. Bind the router to a local listener; do not install request/body
 logging middleware. Every handled response is no-store. The native and Wasm
 dispatchers use the same implementation and test vectors.
 
+The native adapter constructs the Door and child facades on a dedicated thread
+with a current-thread Tokio runtime. `router(factory, hosts, clock).await` accepts
+an initialization factory whose future and resulting Door need not be Send;
+only that factory crosses threads. `router_with(factory, hosts, clock).await`
+can also return one protected, in-process startup value, such as a paired local
+token for a trusted test host. It never serializes that value. HTTP holds a
+bounded sender. Admission permits
+bound authentication, body wait and invocation together. Authentication runs
+before body consumption and again after the channel wait with fresh trusted time.
+Once queued, the owner retains each invocation and its permit through completion,
+even when the HTTP waiter disconnects. A panic during execution returns Reconcile
+and permanently fences the runtime. An authentication panic returns Unavailable
+and fences it. No arbitrary partially-mutated state is reused.
+
+`native::Embedded::start(factory, Pairing, clock).await` binds a literal loopback
+listener, pairs its Client inside the owner and exposes only `client()`. Pairing
+contains the configured origin, portal role, allowed actions and bounded lifetime;
+it does not supply remote authority. `shutdown().await` first closes HTTP and
+then closes and drains the owner queue and joins its thread. HTTP drain alone
+would miss work belonging to disappeared HTTP waiters. Dropping an Embedded
+signals graceful listener shutdown; callers that need confirmation await shutdown.
+
+Foyer operations are projected directly from `cfyr::contract()` under `foyer.`.
+Only positive `x-client-access=forward` metadata is exposed. The original owner
+role, scope, effect and request/result schemas remain attached; missing/unknown
+metadata refuses projection. Configured independent service sessions select the
+owner scope; JSON cannot choose a transport or authority. Raw duplicate object
+keys are rejected recursively before Value conversion. Check effects are not
+labelled read-only: some owner checks mutate ephemeral state. Token-bearing
+trusted authentication remains inside Foyer.
+
+After a dispatched Foyer operation, a damaged, oversized or uncertain result
+returns Reconcile and fences further forwarding through that binding. Dropping
+an in-flight borrowed browser future leaves that same uncertainty latch. Local
+status remains usable. There is no automatic retry or synthetic effect cache.
+
 `door::surface::{bundle,openapi,mcp_tools,cli_commands}` exports the generated
 views. The `registry` example exports the bundle in CI. `tools/generate.mjs`
 uses maintained `json-schema-to-typescript` to emit `client.ts`:
@@ -49,8 +105,10 @@ const outcome = await client.invoke('client.revoke', {});
 ```
 
 `invoke` preserves the typed result, events and owner refusal envelope. `call`
-is a result-only convenience for reads; consumers needing effect events use
-`invoke`. Neither operation adds retries or domain logic.
+returns the result or throws CmsgError. Both deliver successful completion events
+to `subscribe(listener)`; it returns an unsubscribe function. Observer exceptions
+cannot convert a committed action into an action failure. Neither operation adds
+retries or domain logic.
 
 The transport sends the invocation to the embedded local door; it does not
 implement domain behavior. Generated artifacts include the exact Rust registry
@@ -58,8 +116,8 @@ snapshot. Schemars derives schemas from Serde types; Axum supplies native HTTP,
 getrandom creates local capabilities, and SHA-256 indexes their digests. None
 of those primitives is implemented here.
 
-Remaining integration includes real owner schemas/operations, Foyer projections,
-Mesh readiness, bounded event delivery, and combined encrypted checkpoint/output
+Remaining integration includes actual login/Vault custody, additional owner
+operations, Mesh readiness, bounded event delivery, and combined encrypted checkpoint/output
 publication. The local API foundation is not end-to-end product acceptance.
 
 Native applications use the owner's `door::native::Client::new(base, origin,
@@ -100,3 +158,54 @@ the client checks status/discovery, unavailable Board, strict duplicate decoding
 origin refusal, revocation events and subsequent denial over real loopback HTTP.
 This establishes local generated-client parity, not production bootstrap or remote
 member workflows. The host requires the non-default `conformance` feature.
+
+The same generation emits `browser.ts`, exporting
+`createBrowserClient(configuration: BrowserConfiguration)`. Its Wasm module is
+built from the same Rust source/lock snapshot. The configuration is public pinned
+deployment data: community, exact page origin, portal role, primary Foyer scope,
+and one or two original service addresses. It contains no local capability,
+remote bearer, PRF or secret. Rust verifies the actual window origin and creates
+the local capability internally. No global injection is used.
+
+The returned client has the same registry-typed `call`, `invoke` and `subscribe`
+methods plus `dispose(): Promise<void>`. Browser disposal stops admission, waits
+for admitted operations even when their JavaScript promises were abandoned, then
+closes bound Mesh listeners. The member-page runtime rejects any Door holding
+Vault custody; the separate per-community vault-origin iframe/worker bridge must
+own decrypted keys and profile state. Native custom transports may supply
+their corresponding drain in createCmsgClient's optional lifecycle parameter;
+without that parameter disposal closes only the generated client wrapper.
+
+The default browser constructor binds actual unauthenticated Foyer transports
+and optionally the real configured Forum transport/Link/Board. Board initially
+reports Disconnected; login, custody and Mesh remain unavailable until their
+real initializers are composed. This is an explicit partial runtime, with no
+ready event or preload transition. Trusted Rust can attach an already-composed
+Door through BrowserRuntime::attach without exposing its sessions or capability.
+The actual browser regression and generated-module smoke test retain these
+refusals. Native, browser and strict coverage execution are required before
+acceptance.
+
+Native hosts may use `Embedded::configured(native::DeviceConfiguration,
+lifetime_seconds, clock).await` for the same public deployment configuration.
+Foyer/Board constructors run inside the owner thread, and the returned Client
+remains privately paired to literal loopback. The optional `forum` configuration
+supplies original Forum origin and explicit response/timeout/search-cache bounds.
+Construction creates no attendance, passkey authority or readiness.
+
+`board.heartbeat` and `board.depart` accept an empty body. The Door constructs
+the original owner request, asks Board for its immutable Prepared transcript,
+and signs only that transcript through actual Vault Keys. Sessions, nonces,
+signatures and arbitrary signing bytes are absent from local request/output
+schemas. The actual authority's intent-admission half must be supplied through
+trusted `bind_vault_with_intent`; the guard remains owned through remote
+completion. Original request/session/nonce/signature remain private after an
+uncertain response; further mutation is fenced and never retried automatically.
+A signed departure emits BoardDisconnected only after the child completes.
+
+This source still needs the concrete actual G3 authority constructor, lower
+exact signing-intent support, and Foyer-owned current Charter projection for
+signed minimum-version enforcement. It is not a qualified Board startup or
+complete discovery implementation. DiscoveryPage already comes from the Board
+owner; its runtime path also needs the original committed Profile loader and
+current Profile/Charter/contact verification, with no accepting substitute.

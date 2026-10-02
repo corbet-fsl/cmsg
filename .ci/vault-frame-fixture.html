@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Vault frame fixture</title>
+<body>
+<script type="module">
+import {startVaultHost} from '/browser.js';
+try {
+  const fixture = await (await fetch('/__fixture')).json();
+  const host = await startVaultHost({
+    member_origin: 'https://alpha.example.test',
+    runtime: {
+      community: 'alpha', origin: location.origin, role: 'member', primary: 'community',
+      services: [{scope: 'community', base: fixture.vault.base, host: fixture.vault.host}],
+    },
+  });
+  // Public test startup fact, never readiness or successful custody.
+  document.body.dataset.owner = 'constructed';
+  addEventListener('pagehide', () => { void host.dispose(); }, {once: true});
+} catch {
+  document.body.dataset.owner = 'refused';
+}
+</script>

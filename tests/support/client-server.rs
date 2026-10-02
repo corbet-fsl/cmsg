@@ -14,24 +14,32 @@ async fn main() {
         }
     }
     let origin = "https://client.example";
-    let config = Configuration::new(
-        "conformance".into(),
-        BTreeMap::from([(Role::Member, BTreeSet::from([origin.into()]))]),
-    )
-    .unwrap();
-    let mut door = Door::new(config);
-    let token = door
-        .pair_client(
-            origin,
-            Role::Member,
-            catalog().into_iter().map(|a| a.action).collect(),
-            10,
-            100,
-        )
-        .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let app = native::router(door, BTreeSet::from([address.to_string()]), Arc::new(Clock)).unwrap();
+    let (app, token) = native::router_with(
+        move || async move {
+            let config = Configuration::new(
+                "conformance".into(),
+                BTreeMap::from([(Role::Member, BTreeSet::from([origin.into()]))]),
+            )
+            .unwrap();
+            let mut door = Door::new(config);
+            let token = door
+                .pair_client(
+                    origin,
+                    Role::Member,
+                    catalog().into_iter().map(|a| a.action).collect(),
+                    10,
+                    100,
+                )
+                .unwrap();
+            Ok((door, token))
+        },
+        BTreeSet::from([address.to_string()]),
+        Arc::new(Clock),
+    )
+    .await
+    .unwrap();
     // The parent consumes this private pipe; it never forwards the token to logs.
     println!(
         "{}",

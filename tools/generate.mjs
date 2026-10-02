@@ -34,12 +34,33 @@ export class CmsgError extends Error {
     this.name = 'CmsgError';
   }
 }
-export function createCmsgClient(transport: Transport) {
+export type ClientEvent = Extract<Output, { status: 'ok' }>['events'][number];
+export function createCmsgClient(transport: Transport, lifecycle?: { dispose(): Promise<void> }) {
+  const listeners = new Set<(event: ClientEvent) => void>();
+  let closed = false;
+  let disposal: Promise<void> | undefined;
   async function invoke<K extends keyof Actions>(action: K, body: Actions[K]['body']): Promise<ActionOutput<K>> {
-    return await transport({ action, version: actionVersions[action], body }) as ActionOutput<K>;
+    if (closed) return { status: 'error', error: 'unavailable' } as ActionOutput<K>;
+    const response = await transport({ action, version: actionVersions[action], body }) as ActionOutput<K>;
+    if (response.status === 'ok') {
+      for (const event of response.events) for (const listener of [...listeners]) {
+        // Observers cannot turn an accepted child effect into an action failure.
+        try { listener(event); } catch { /* The observer owns its own failure. */ }
+      }
+    }
+    return response;
   }
   return {
     invoke,
+    subscribe(listener: (event: ClientEvent) => void): () => void {
+      if (!closed) listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    dispose(): Promise<void> {
+      closed = true;
+      disposal ??= Promise.resolve().then(() => lifecycle?.dispose()).finally(() => listeners.clear());
+      return disposal;
+    },
     async call<K extends keyof Actions>(action: K, body: Actions[K]['body']): Promise<Actions[K]['result']> {
       const response = await invoke(action, body);
       if (response.status === 'error') throw new CmsgError(response.error);
@@ -49,6 +70,9 @@ export function createCmsgClient(transport: Transport) {
 }
 `;
 await writeFile(`${output}/client.ts`, source);
+await writeFile(`${output}/package.json`, `${JSON.stringify({ type: 'module' })}\n`);
+const browserTemplate = await readFile(new URL('./browser.ts', import.meta.url), 'utf8');
+await writeFile(`${output}/browser.ts`, browserTemplate.replace('__BRIDGE_PROTOCOL__', JSON.stringify(registry.bridge)));
 for (const key of ['openapi', 'mcp', 'cli']) {
   await writeFile(`${output}/${key}.json`, `${JSON.stringify(registry[key], null, 2)}\n`);
 }

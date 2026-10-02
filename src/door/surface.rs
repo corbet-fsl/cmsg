@@ -73,14 +73,14 @@ pub fn cli_commands() -> Value {
 
 /// Build-time artifact, used by the maintained JSON Schema-to-TypeScript tool.
 pub fn bundle() -> Value {
-    json!({"version": 1, "actions": catalog(), "types": registry::owner_types(), "invocation": registry::schema::<Invocation>(),
+    json!({"version": 1, "actions": catalog(), "types": registry::owner_types(), "bridge": browser::bridge_contract(), "invocation": registry::schema::<Invocation>(),
         "output": registry::schema::<Output>(), "openapi": openapi(), "mcp": mcp_tools(),
         "cli": cli_commands()})
 }
 
 /// MCP and native/browser CLI use exactly the same invocation path. The host
 /// authenticates the local transport and supplies its bound origin/capability.
-pub fn invoke(
+pub async fn invoke(
     door: &mut Door,
     origin: &str,
     token: &str,
@@ -96,5 +96,5 @@ pub fn invoke(
         body,
     })
     .expect("Invocation contains only total JSON types");
-    door.dispatch(origin, token, &bytes, now)
+    door.dispatch(origin, token, &bytes, now).await
 }

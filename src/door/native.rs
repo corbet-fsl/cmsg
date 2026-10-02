@@ -10,7 +10,9 @@ use axum::{
     routing::post,
     Json, Router,
 };
-use std::sync::{Arc, Mutex};
+use futures_util::FutureExt;
+use std::{future::Future, panic::AssertUnwindSafe, sync::Arc};
+use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit};
 
 /// Injected trusted clock. Member-controlled request data never supplies time.
 pub trait Clock: Send + Sync {
@@ -19,13 +21,192 @@ pub trait Clock: Send + Sync {
 
 #[derive(Clone)]
 struct HttpState {
-    door: Arc<Mutex<Door>>,
+    runtime: Owner,
     hosts: BTreeSet<String>,
-    clock: Arc<dyn Clock>,
     requests: Arc<tokio::sync::Semaphore>,
 }
 
-pub fn router(door: Door, hosts: BTreeSet<String>, clock: Arc<dyn Clock>) -> Result<Router> {
+/// Only bounded messages cross threads. Door and all its child facades stay on
+/// their owning thread, including browser-compatible Rc custody adapters.
+#[derive(Clone)]
+struct Owner(mpsc::Sender<Command>);
+enum Command {
+    Authenticate {
+        origin: String,
+        token: Zeroizing<String>,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    Invoke {
+        origin: String,
+        token: Zeroizing<String>,
+        envelope: Vec<u8>,
+        reply: oneshot::Sender<Output>,
+        permit: OwnedSemaphorePermit,
+    },
+    Stop,
+}
+
+impl Owner {
+    async fn start<F, Fut, T>(
+        initialize: F,
+        clock: Arc<dyn Clock>,
+    ) -> Result<(Self, T, std::thread::JoinHandle<Result<()>>)>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(Door, T)>> + 'static,
+        T: Send + 'static,
+    {
+        let (sender, mut receiver) = mpsc::channel(MAX_CLIENTS);
+        let (ready, initialized) = oneshot::channel();
+        let thread = std::thread::Builder::new()
+            .name("cmsg-owner".into())
+            .spawn(move || {
+                let initialized = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                }));
+                let Ok(Ok(runtime)) = initialized else {
+                    let _ = ready.send(Err(ErrorCode::Unavailable));
+                    return Err(ErrorCode::Unavailable);
+                };
+                runtime.block_on(tokio::task::LocalSet::new().run_until(async move {
+                    let initialized = AssertUnwindSafe(async { initialize().await })
+                        .catch_unwind()
+                        .await;
+                    let (mut door, value) = match initialized {
+                        Ok(Ok(value)) => value,
+                        Ok(Err(error)) => {
+                            let _ = ready.send(Err(error));
+                            return Err(error);
+                        }
+                        Err(_) => {
+                            let _ = ready.send(Err(ErrorCode::Unavailable));
+                            return Err(ErrorCode::Unavailable);
+                        }
+                    };
+                    if ready.send(Ok(value)).is_err() {
+                        door.close_owned().await;
+                        return Err(ErrorCode::Unavailable);
+                    }
+                    let mut failed = false;
+                    while let Some(command) = receiver.recv().await {
+                        match command {
+                            Command::Stop => receiver.close(),
+                            Command::Authenticate {
+                                origin,
+                                token,
+                                reply,
+                            } => {
+                                let checked = if failed {
+                                    Err(ErrorCode::Unavailable)
+                                } else {
+                                    match std::panic::catch_unwind(AssertUnwindSafe(|| {
+                                        door.authenticate(&origin, &token, clock.now()).map(|_| ())
+                                    })) {
+                                        Ok(result) => result,
+                                        Err(_) => {
+                                            failed = true;
+                                            Err(ErrorCode::Unavailable)
+                                        }
+                                    }
+                                };
+                                let _ = reply.send(checked);
+                            }
+                            Command::Invoke {
+                                origin,
+                                token,
+                                envelope,
+                                reply,
+                                permit,
+                            } => {
+                                let _permit = permit;
+                                let output = if failed {
+                                    Output::Error {
+                                        error: ErrorCode::Unavailable,
+                                    }
+                                } else {
+                                    // Even a lost HTTP waiter cannot cancel this future.
+                                    // A panic may follow a durable child effect: reconcile,
+                                    // then refuse every later request on this runtime.
+                                    match AssertUnwindSafe(async {
+                                        door.dispatch(&origin, &token, &envelope, clock.now()).await
+                                    })
+                                    .catch_unwind()
+                                    .await
+                                    {
+                                        Ok(output) => output,
+                                        Err(_) => {
+                                            failed = true;
+                                            Output::Error {
+                                                error: ErrorCode::Reconcile,
+                                            }
+                                        }
+                                    }
+                                };
+                                let _ = reply.send(output);
+                            }
+                        }
+                    }
+                    if failed {
+                        // Never call domain methods on a panic-fenced owner.
+                        // Dropping its state cannot grant another request access.
+                        return Err(ErrorCode::Reconcile);
+                    }
+                    door.close_owned().await;
+                    Ok(())
+                }))
+            })
+            .map_err(|_| ErrorCode::Unavailable)?;
+        let value = initialized.await.map_err(|_| ErrorCode::Unavailable)??;
+        Ok((Self(sender), value, thread))
+    }
+
+    async fn authenticate(&self, origin: &str, token: &str) -> Result<()> {
+        let (reply, receive) = oneshot::channel();
+        self.0
+            .send(Command::Authenticate {
+                origin: origin.into(),
+                token: Zeroizing::new(token.into()),
+                reply,
+            })
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?;
+        receive.await.map_err(|_| ErrorCode::Unavailable)?
+    }
+
+    async fn invoke(
+        &self,
+        origin: String,
+        token: Zeroizing<String>,
+        envelope: Vec<u8>,
+        permit: OwnedSemaphorePermit,
+    ) -> Output {
+        let (reply, receive) = oneshot::channel();
+        if self
+            .0
+            .send(Command::Invoke {
+                origin,
+                token,
+                envelope,
+                reply,
+                permit,
+            })
+            .await
+            .is_err()
+        {
+            return Output::Error {
+                error: ErrorCode::Unavailable,
+            };
+        }
+        // A vanished owner after admission may have committed. Never suggest retry.
+        receive.await.unwrap_or(Output::Error {
+            error: ErrorCode::Reconcile,
+        })
+    }
+}
+
+fn validate_hosts(hosts: &BTreeSet<String>) -> Result<()> {
     if hosts.is_empty()
         || hosts.len() > 8
         || hosts.iter().any(|host| {
@@ -34,15 +215,60 @@ pub fn router(door: Door, hosts: BTreeSet<String>, clock: Arc<dyn Clock>) -> Res
     {
         return Err(ErrorCode::InvalidRequest);
     }
-    Ok(Router::new()
+    Ok(())
+}
+
+/// Construct all facades inside a dedicated current-thread runtime. The factory
+/// may produce a non-Send future and Door; only the factory crosses threads.
+/// Dropping every router closes admission and drains admitted owner work.
+pub async fn router<F, Fut>(
+    initialize: F,
+    hosts: BTreeSet<String>,
+    clock: Arc<dyn Clock>,
+) -> Result<Router>
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = Result<Door>> + 'static,
+{
+    router_with(
+        move || async { Ok((initialize().await?, ())) },
+        hosts,
+        clock,
+    )
+    .await
+    .map(|(router, ())| router)
+}
+
+/// Trusted initialization with one protected in-process startup result. This is
+/// useful for host pairing; it is never exposed through an HTTP/JSON action.
+/// Construct non-Send facades inside initialize, not before moving the factory.
+pub async fn router_with<F, Fut, T>(
+    initialize: F,
+    hosts: BTreeSet<String>,
+    clock: Arc<dyn Clock>,
+) -> Result<(Router, T)>
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = Result<(Door, T)>> + 'static,
+    T: Send + 'static,
+{
+    validate_hosts(&hosts)?;
+    let (runtime, value, _thread) = Owner::start(initialize, clock).await?;
+    Ok((
+        routes(HttpState {
+            runtime,
+            hosts,
+            requests: Arc::new(tokio::sync::Semaphore::new(MAX_CLIENTS)),
+        }),
+        value,
+    ))
+}
+
+fn routes(state: HttpState) -> Router {
+    Router::new()
         .route("/invoke", post(invoke))
         .route("/v1/{action}", post(call))
-        .with_state(HttpState {
-            door: Arc::new(Mutex::new(door)),
-            hosts,
-            clock,
-            requests: Arc::new(tokio::sync::Semaphore::new(MAX_CLIENTS)),
-        })
+        .with_state(state)
         .fallback(|| async {
             response(Output::Error {
                 error: ErrorCode::UnsupportedAction,
@@ -53,7 +279,158 @@ pub fn router(door: Door, hosts: BTreeSet<String>, clock: Arc<dyn Clock>) -> Res
                 error: ErrorCode::InvalidRequest,
             })
         })
-        .layer(middleware::map_response(no_store)))
+        .layer(middleware::map_response(no_store))
+}
+
+/// Trusted native pairing configuration. This is not an API request and grants
+/// only local access; configured Foyer sessions supply remote authority.
+pub struct Pairing {
+    pub origin: String,
+    pub role: Role,
+    pub actions: BTreeSet<String>,
+    pub lifetime_seconds: u64,
+}
+
+/// Owns the listener, protected local client and facade thread. No capability is
+/// exposed as JSON, environment data or a URL. Explicit shutdown drains admitted
+/// owner work, including work whose HTTP request has already disappeared.
+pub struct Embedded {
+    client: Client,
+    runtime: RuntimeHandle,
+}
+
+/// Owns the embedded listener and facade thread independently of its single
+/// protected client. Explicit shutdown drains admitted owner work even after
+/// the client or an HTTP waiter has disappeared. No endpoint or capability is
+/// exposed by this handle.
+#[must_use = "retain the runtime handle and await shutdown after its client finishes"]
+pub struct RuntimeHandle {
+    owner: Owner,
+    stop: Option<oneshot::Sender<()>>,
+    server: tokio::task::JoinHandle<std::io::Result<()>>,
+    thread: std::thread::JoinHandle<Result<()>>,
+}
+/// Public deployment data. Native construction uses the same schema as the
+/// browser; capabilities, authenticators and storage secrets are not fields.
+pub use super::browser::Configuration as DeviceConfiguration;
+
+impl Embedded {
+    /// Construct configured actual Foyer/Board owners inside the dedicated
+    /// thread. This partial startup keeps custody/login/Mesh unavailable until
+    /// their real initializer is integrated; it never claims messaging readiness.
+    pub async fn configured(
+        configuration: DeviceConfiguration,
+        lifetime_seconds: u64,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self> {
+        let pairing = Pairing {
+            origin: configuration.origin.clone(),
+            role: configuration.role,
+            actions: catalog().into_iter().map(|action| action.action).collect(),
+            lifetime_seconds,
+        };
+        Self::start(
+            move || async move { configuration.construct() },
+            pairing,
+            clock,
+        )
+        .await
+    }
+
+    pub async fn start<F, Fut>(
+        initialize: F,
+        pairing: Pairing,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<Door>> + 'static,
+    {
+        validate_origin(&pairing.origin)?;
+        if pairing.lifetime_seconds == 0 || pairing.lifetime_seconds > MAX_GRANT_SECONDS {
+            return Err(ErrorCode::InvalidRequest);
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?;
+        let address = listener.local_addr().map_err(|_| ErrorCode::Unavailable)?;
+        let origin = pairing.origin.clone();
+        let pairing_clock = clock.clone();
+        let (owner, token, thread) = Owner::start(
+            move || async move {
+                let mut door = initialize().await?;
+                let now = pairing_clock.now();
+                let expires = now
+                    .checked_add(pairing.lifetime_seconds)
+                    .ok_or(ErrorCode::Clock)?;
+                let token =
+                    door.pair_client(&pairing.origin, pairing.role, pairing.actions, now, expires)?;
+                Ok((door, token))
+            },
+            clock,
+        )
+        .await?;
+        let client = Client::new(&format!("http://{address}"), &origin, token)?;
+        let app = routes(HttpState {
+            runtime: owner.clone(),
+            hosts: BTreeSet::from([address.to_string()]),
+            requests: Arc::new(tokio::sync::Semaphore::new(MAX_CLIENTS)),
+        });
+        let (stop, receive) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = receive.await;
+                })
+                .await
+        });
+        Ok(Self {
+            client,
+            runtime: RuntimeHandle {
+                owner,
+                stop: Some(stop),
+                server,
+                thread,
+            },
+        })
+    }
+
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
+    /// Move the one protected client into an owned CLI/MCP consumer while the
+    /// caller retains responsibility for draining the runtime. Neither value
+    /// clones or exports its local capability.
+    pub fn into_parts(self) -> (Client, RuntimeHandle) {
+        (self.client, self.runtime)
+    }
+
+    pub async fn shutdown(self) -> Result<()> {
+        let (client, runtime) = self.into_parts();
+        drop(client);
+        runtime.shutdown().await
+    }
+}
+
+impl RuntimeHandle {
+    pub async fn shutdown(mut self) -> Result<()> {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        let server = self.server.await;
+        // Stop closes the queue and drains it; HTTP graceful shutdown alone is
+        // insufficient because cancelled waiters may already be gone.
+        let _ = self.owner.0.send(Command::Stop).await;
+        let joined = tokio::task::spawn_blocking(move || self.thread.join()).await;
+        joined
+            .map_err(|_| ErrorCode::Reconcile)?
+            .map_err(|_| ErrorCode::Reconcile)??;
+        if !matches!(server, Ok(Ok(()))) {
+            return Err(ErrorCode::Unavailable);
+        }
+        Ok(())
+    }
 }
 
 // Never let different HTTP consumers choose different values for an authority
@@ -99,20 +476,17 @@ async fn dispatch(state: HttpState, action: Option<String>, request: Request) ->
     }
     let origin = origin.to_owned();
     let token = Zeroizing::new(token.to_owned());
-    let authorized = match state.door.lock() {
-        Ok(mut door) => door
-            .authenticate(&origin, &token, state.clock.now())
-            .map(|_| ()),
-        Err(_) => Err(ErrorCode::Unavailable),
-    };
-    if let Err(error) = authorized {
-        return response(Output::Error { error });
-    }
-    let Ok(_permit) = state.requests.try_acquire() else {
+    let Ok(permit) = state.requests.clone().try_acquire_owned() else {
         return response(Output::Error {
             error: ErrorCode::Capacity,
         });
     };
+    // Bound queued work before authentication; repeat authority after body and
+    // channel waiting with fresh time inside the owner thread.
+    let authorized = state.runtime.authenticate(&origin, &token).await;
+    if let Err(error) = authorized {
+        return response(Output::Error { error });
+    }
     let bytes = match tokio::time::timeout(
         std::time::Duration::from_secs(5),
         to_bytes(request.into_body(), MAX_BODY_BYTES),
@@ -144,12 +518,7 @@ async fn dispatch(state: HttpState, action: Option<String>, request: Request) ->
     } else {
         bytes.to_vec()
     };
-    let output = match state.door.lock() {
-        Ok(mut door) => door.dispatch(&origin, &token, &envelope, state.clock.now()),
-        Err(_) => Output::Error {
-            error: ErrorCode::Unavailable,
-        },
-    };
+    let output = state.runtime.invoke(origin, token, envelope, permit).await;
     response(output)
 }
 

@@ -3,6 +3,12 @@
 //! Client grants are local capabilities, never remote member/admin/root authority.
 //! Pairing belongs to the trusted embedding runtime; it is not an API action.
 //! Unavailable domain owners cannot be replaced by caller-provided success values.
+pub mod board;
+pub mod browser;
+pub mod facades;
+pub mod foyer;
+mod json;
+pub mod login;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
 mod registry;
@@ -34,6 +40,7 @@ pub enum ErrorCode {
     Capacity,
     Clock,
     Reconcile,
+    Refused,
 }
 
 impl ErrorCode {
@@ -43,7 +50,7 @@ impl ErrorCode {
     pub const fn exit_code(self) -> u8 {
         match self {
             Self::InvalidRequest | Self::UnsupportedAction | Self::UnsupportedVersion => 64,
-            Self::Unauthorized => 77,
+            Self::Unauthorized | Self::Refused => 77,
             Self::Unavailable => 69,
             Self::Capacity | Self::Clock | Self::Reconcile => 75,
         }
@@ -160,6 +167,9 @@ pub enum Output {
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
     ClientRevoked,
+    VaultLocked,
+    MeshDisconnected,
+    BoardDisconnected,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -192,6 +202,10 @@ pub struct Door {
     config: Configuration,
     grants: BTreeMap<[u8; 32], Grant>,
     clock_floor: u64,
+    foyers: BTreeMap<String, foyer::Binding>,
+    boards: BTreeMap<String, Box<dyn facades::BoundBoard>>,
+    meshes: BTreeMap<String, facades::BoundMesh>,
+    vaults: BTreeMap<String, Box<dyn facades::BoundVault>>,
 }
 
 impl Door {
@@ -200,7 +214,40 @@ impl Door {
             config,
             grants: BTreeMap::new(),
             clock_floor: 0,
+            foyers: BTreeMap::new(),
+            boards: BTreeMap::new(),
+            meshes: BTreeMap::new(),
+            vaults: BTreeMap::new(),
         }
+    }
+
+    /// Install actual Foyer sessions for an already configured local portal.
+    /// This trusted embedding control is absent from every callable projection.
+    /// The scope/session set cannot be supplied or changed by a local client.
+    pub fn bind_foyer(
+        &mut self,
+        origin: &str,
+        role: Role,
+        sessions: foyer::Sessions,
+    ) -> Result<()> {
+        if !self
+            .config
+            .origins
+            .get(&role)
+            .is_some_and(|set| set.contains(origin))
+            || self.foyers.contains_key(origin)
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        self.foyers.insert(
+            origin.into(),
+            foyer::Binding {
+                role,
+                sessions,
+                uncertain: false,
+            },
+        );
+        Ok(())
     }
 
     fn observe(&mut self, now: u64) -> Result<()> {
@@ -230,8 +277,8 @@ impl Door {
             .get(&role)
             .is_some_and(|set| set.contains(origin))
             || actions.is_empty()
-            || actions.len() > registry::ACTIONS.len()
-            || actions.iter().any(|name| registry::action(name).is_none())
+            || actions.len() > catalog().len()
+            || actions.iter().any(|name| !registry::known(name))
             || expires <= now
             || expires - now > MAX_GRANT_SECONDS
         {
@@ -276,8 +323,8 @@ impl Door {
             .remove(&token_hash(token.expose_for_transport()));
     }
 
-    pub fn dispatch(&mut self, origin: &str, token: &str, bytes: &[u8], now: u64) -> Output {
-        let result = self.invoke(origin, token, bytes, now);
+    pub async fn dispatch(&mut self, origin: &str, token: &str, bytes: &[u8], now: u64) -> Output {
+        let result = self.invoke(origin, token, bytes, now).await;
         match result {
             Ok((result, events)) => Output::Ok { result, events },
             Err(error) => Output::Error { error },
@@ -297,7 +344,7 @@ impl Door {
         Ok(key)
     }
 
-    fn invoke(
+    async fn invoke(
         &mut self,
         origin: &str,
         token: &str,
@@ -321,19 +368,30 @@ impl Door {
         }
         let request: WireInvocation =
             serde_json::from_slice(bytes).map_err(|_| ErrorCode::InvalidRequest)?;
-        let action = registry::action(&request.action).ok_or(ErrorCode::UnsupportedAction)?;
-        // All current actions require LocalClient authority. Role-specific domain
-        // operations must introduce their actual authority check when registered.
+        let local = registry::action(&request.action);
+        let remote = foyer::action(&request.action);
+        let version = local
+            .map(|action| action.version)
+            .or_else(|| remote.map(|action| action.description.version))
+            .ok_or(ErrorCode::UnsupportedAction)?;
         if !grant.actions.contains(&request.action) {
             return Err(ErrorCode::Unauthorized);
         }
-        if request.version != action.version {
+        if request.version != version {
             return Err(ErrorCode::UnsupportedVersion);
         }
         // All projections converge here after the same scope/origin/capability check.
-        let result = (action.handler)(self, &key, request.body.get())?;
-        check_result_size(&result.0)?;
-        Ok(result)
+        if let Some(action) = local {
+            let result = (action.handler)(self, &key, request.body.get()).await?;
+            check_result_size(&result.0)?;
+            Ok(result)
+        } else {
+            let action = remote.expect("a registered operation was resolved");
+            let body = json::unique_value(request.body.get())?;
+            let foyer = self.foyers.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
+            let result = foyer.call(action, body).await?;
+            Ok((result, vec![]))
+        }
     }
 
     fn status(&self) -> RuntimeStatus {

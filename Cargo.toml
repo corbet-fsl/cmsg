@@ -20,10 +20,15 @@ include = [
 ]
 
 [lib]
-crate-type = ["rlib"]
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-cbrd = { git = "https://github.com/corbet-libs/cbrd", branch = "main" }
+cmmr = { git = "https://github.com/corbet-foss/cmmr", branch = "main" }
+cmsh = { git = "https://github.com/corbet-libs/cmsh", branch = "main" }
+cvlt = { git = "https://github.com/corbet-libs/cvlt", branch = "main" }
+cnbx = { git = "https://github.com/corbet-libs/cnbx", branch = "main" }
+ckmg = { git = "https://github.com/corbet-foss/ckmg", branch = "main" }
+cwst = { git = "https://github.com/corbet-foss/cwst", branch = "main" }
 schemars = "1"
 url = "2"
 getrandom = "0.3"
@@ -34,19 +39,34 @@ sha2 = "0.10"
 data-encoding = "2.9"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cbrd = { git = "https://github.com/corbet-libs/cbrd", branch = "main", default-features = false, features = ["http"] }
+futures-util = "0.3"
+cfyr = { git = "https://github.com/corbet-libs/cfyr", branch = "main", default-features = false, features = ["http"] }
 reqwest = { version = "0.13", default-features = false }
 axum = "0.8"
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+cbrd = { git = "https://github.com/corbet-libs/cbrd", branch = "main", default-features = false, features = ["browser"] }
+futures-channel = "0.3"
+gloo-timers = "0.3"
+futures-util = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Location", "Event", "EventTarget", "MessageEvent", "MessageChannel", "MessagePort"] }
+cfyr = { git = "https://github.com/corbet-libs/cfyr", branch = "main", default-features = false, features = ["browser"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+futures-util = "0.3"
+gloo-net = "0.6"
+gloo-timers = { version = "0.3", features = ["futures"] }
+web-sys = { version = "0.3", features = ["Window", "Location"] }
 browser-coverage-runtime = { path = ".ci/coverage-runtime" }
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-futures-util = "0.3"
 tokio = { version = "1", features = ["test-util"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
