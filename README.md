@@ -22,29 +22,43 @@ License: [FSL-1.1-ALv2](LICENSE.md).
 
 ## Scope
 
-The member backend on the device exposes one versioned local action registry and
-dispatcher through generated HTTP/OpenAPI, MCP, CLI and TypeScript views. Every
-frontend uses the same capability, origin, role and community checks. Local client
-capabilities are bounded and revocable; they are separate from passkeys and service
-sessions. Vault, Mesh, Foyer, Board and Inbox retain their domain authority.
+### Purpose
 
-The door owns runtime lifecycle and cross-facade orchestration. An accepted effect
-must be included in one combined encrypted owner checkpoint before any result,
-event or output escapes. Groups decides membership and Threads executes it; the
-door coordinates their checkpoint. Admin and root operations use Foyer's generated
-`cvld` projections and separate sessions/origins. The trusted origin policy
-includes the configured vault origin; WebAuthn RP policy belongs to its owners.
-Preload remains blocked until Mesh actually reports ready, and an unsupported
-published minimum version must refuse runtime use.
+cmsg is the member's backend on their own device, offering one versioned local API with generated HTTP/OpenAPI, MCP, CLI, and TypeScript views, composed from Vault, Mesh, Foyer, Board, and Inbox.
 
-The door never exports member keys or PRF material, records member traces, lets a
-caller choose another community or role, or gives official clients extra privilege.
-It has no policy engine, roster, wallet, retry machine or alternate remote door.
-Runtime states derive from the children: starting, locked/ready, and stopping.
+### Owns
 
-Validation must cover every projection's authorization and typed parity, bounded
-strict decoding, revocation and origin isolation, crash/cancellation at every
-checkpoint boundary, reconciliation of uncertain sends, restore/offline delivery,
-GroupView and consent, real Mesh readiness, minimum versions, and third-party use
-of the unchanged door. Missing owner operations return typed failures. The current
-implementation boundary is documented in [the contract](docs/CONTRACT.md).
+| Area | Responsibility |
+|---|---|
+| Local API | One action registry and dispatcher; all projections share identical authorization and semantics |
+| Clients | Bounded, revocable, origin-bound local capabilities, separate from passkeys and service sessions; third parties embed cmsg unchanged |
+| Orchestration | Routes cross-facade operations and includes every accepted effect in one combined encrypted checkpoint before any result, event, or output escapes; coordinates the Groups and Threads checkpoint |
+| Administration | Forwards admin and root actions through Foyer with separate sessions and origins |
+| Runtime | Lifecycle management, readiness reporting with use blocked until Mesh reports ready, refusal to run below the published minimum version, and the member MCP server on the member's machine |
+
+### Never
+
+| cmsg does not |
+|---|
+| Keep domain workflows; those stay in the specialist libraries and facades |
+| Export member keys or PRF material through APIs, errors, logs, or remote access |
+| Grant extra privilege to any frontend, or let a caller switch community or role |
+| Let a frontend bypass it to reach backend services directly |
+| Keep legacy or parallel code paths, protocol libraries, policy engines, rosters, wallets, or retry machines |
+| Record member traces |
+
+### States
+
+Starting, then Locked or Ready, then Stopping. Action progress is derived from the committed checkpoints of the child facades, and the door is not usable before Mesh readiness is reported.
+
+### Test obligations
+
+| Area | Requirement |
+|---|---|
+| Parity | Every action behaves identically across HTTP, MCP, CLI, and TypeScript views, including administration and group views |
+| Authorization | Wrong origins, expired or revoked capabilities, wrong action sets, cross-community calls, and wrong roles are refused |
+| Decoding | Oversized, duplicate-field, and unknown-field requests are refused before typed decoding, within bounded resource limits |
+| Atomicity | Crashes or cancellations at every checkpoint boundary leave no output before the combined checkpoint; restarts replay to exactly one effect, and uncertain sends reconcile without blind retry |
+| Flows | Group consent, offline delivery, restore, readiness gating, minimum-version refusal, and unchanged third-party embedding work end to end |
+| Hygiene | No secrets, PRF material, plaintext, identifiers, or cross-community keys appear in traces, errors, or debug output |
+| Common | Native and Wasm builds share identical test vectors; state machines declare states, inputs, outputs, and failures with injected clock, randomness, storage, and network; coverage is full line and branch with real round trips and injected delay, duplication, loss, cancellation, clock regression, corruption, and storage conflicts; each community keeps independent keys, identities, locators, sessions, and stores; maintained third-party code is reused and no own cryptography is shipped |
