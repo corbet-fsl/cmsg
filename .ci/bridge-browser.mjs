@@ -58,8 +58,29 @@ export async function member() {
   const disposed = client.dispose();
   check((await revoke).revoked && events.join(',') === 'client_revoked', 'lost admitted effect');
   await disposed; await client.dispose();
+  check(!document.querySelector('[data-cmsg-vault]'), 'acknowledged drained frame retained');
   check((await client.invoke('runtime.status', {})).error === 'unavailable', 'closed client reused');
   check(!performance.getEntriesByType('resource').some(entry => entry.name.endsWith('.wasm')), 'UI instantiated custody Wasm');
+}
+async function invalid_close_retains_custody(page, withPending) {
+  const client = await createVaultClient({member_origin: MEMBER, vault_origin: VAULT,
+    vault_url: VAULT + page, timeout_millis: 10000});
+  const frame = document.querySelector('[data-cmsg-vault]');
+  check(frame?.isConnected, 'missing live custody frame');
+  // The actual owner receives an invocation followed by close. Its response is
+  // altered only at the wire boundary, never replaced by domain fixture logic.
+  const pending = withPending ? client.invoke('runtime.status', {}) : null;
+  const disposed = client.dispose().then(() => false, error => error.code === 'reconcile');
+  if (pending) check((await pending).error === 'reconcile', 'pending effect lost its uncertainty');
+  check(await disposed, 'unproven close was accepted');
+  check(frame.isConnected, 'unproven close destroyed custody');
+  check((await client.invoke('runtime.status', {})).error === 'unavailable', 'uncertain client reused');
+}
+export async function close_mismatch() {
+  await invalid_close_retains_custody('/__vault-close-mismatch.html', false);
+}
+export async function close_pending() {
+  await invalid_close_retains_custody('/__vault-close-pending.html', true);
 }
 export async function raw() {
   const port = await boundPort();

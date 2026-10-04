@@ -1,0 +1,875 @@
+{
+  "archive_helper_sha256": "f968ccd3cbeaac60ad439783478fbd95c429adab903278ddc8075169204ea007",
+  "baseline_closure_sha256": "9188937a34b5f8c47a6d5fdd27b493709cff6282d5c616754aff6114a5d03697",
+  "candidate_contract_sha256": "980821f961dc355f13a0754e298e0a0cae11729beb046dacaaa4e1599a17526d",
+  "consumer_sha256": "293450018834cd60ff58e0c62d78de8cfcf21c060fb4de5d905200afd0bd84da",
+  "consumers": [
+    {
+      "commit": "b33538a8b45ad6e9a26ba37cf52acff7e0d9021f",
+      "metadata_sha256": {
+        ".ci/coverage-runtime/Cargo.toml": "f3ab32cbc4c82b935697aec9d5fb9d94e79f0cece0a29546e158d1e22f708355",
+        "Cargo.lock": "5ca46d9c92f1e0ee5941663f5e7a12a710bc92d8fe11ec6a39df20ac384474d7",
+        "Cargo.toml": "4ae913d9a4314a622158896cef8ce3120ffd2bc05e0464b17b62efa7a27dccb2"
+      },
+      "source_sha256": "69a7e643f3f4faca6f94aab1c139f7dcda06f9c8da09a5c5f1e8b734fb6fc0a9",
+      "tree": "edcd86fcfa39b7758fdf254d632990eb64bdc796",
+      "url": "https://github.com/corbet-libs/cbrd"
+    },
+    {
+      "commit": "af81d8dccd82522f0b765ff140324da67ca4e57b",
+      "metadata_sha256": {
+        ".github/coverage-runtime/Cargo.toml": "f3ab32cbc4c82b935697aec9d5fb9d94e79f0cece0a29546e158d1e22f708355",
+        "Cargo.lock": "2c195582118cea7696cf23b50d9ca41ae7824d86142734b56bb1759c30ef27ac",
+        "Cargo.toml": "94feb34e19e2995be58e7481d1051a1da4d28c357c86b906f161b1c31f9ecc28"
+      },
+      "source_sha256": "ff3608127eb3f1990fcbc2a44084cc72af879640681cba15dbccb2550999d0ce",
+      "tree": "ed65bac06e88b026b4ab3200847234338a9884a7",
+      "url": "https://github.com/corbet-foss/ckmg"
+    },
+    {
+      "commit": "28ec3882db4f445fa11f994a67966ea01a6b07ad",
+      "metadata_sha256": {
+        "Cargo.lock": "38e05ba73025640bf3c2108e50978b880071518a9951364f7a2cc1915d9a59a7",
+        "Cargo.toml": "80e769898e92a865534edff2f62fa12a44ffa4926f8c477e4371dff87d5d5509"
+      },
+      "source_sha256": "15f815c5b213607549705c8f73b4222dd983c5f327124b7fe98926be50dbc6d7",
+      "tree": "1a72220c0aa1365ab1ba93919e89d47d70df623d",
+      "url": "https://github.com/corbet-libs/cnbx"
+    },
+    {
+      "commit": "c6dc1a633340c92586c44c304d304149c647e1b9",
+      "metadata_sha256": {
+        ".github/coverage-runtime/Cargo.toml": "f3ab32cbc4c82b935697aec9d5fb9d94e79f0cece0a29546e158d1e22f708355",
+        "Cargo.lock": "3e76efc5bcff318601a2004ca875a4c10614240532165a76ef1153498179d02a",
+        "Cargo.toml": "b1ca77d5e9f6dac6c48171c8d36a11b41e45ccc4033fa2237974762ed3c13898"
+      },
+      "source_sha256": "37acfb92f1d1cf40f481a82d9b7e2bdc808c30ee56f43258d5221b4b2df8a8b3",
+      "tree": "c694f79b5d7fb45f5abdf59ab2bd0b72ccee6c24",
+      "url": "https://github.com/corbet-libs/cvlt"
+    },
+    {
+      "commit": "de04691c4c654ddbc5f0cd985e342606059b98ba",
+      "metadata_sha256": {
+        ".github/coverage-runtime/Cargo.toml": "f3ab32cbc4c82b935697aec9d5fb9d94e79f0cece0a29546e158d1e22f708355",
+        "Cargo.lock": "ef58c386dea4006231f47abc411402952f8e4bb775acecbb325df7f16db22c7d",
+        "Cargo.toml": "138130b1223b19136a4aabbee0b6e40993507993d1258716b7776dc378c6afb9",
+        "package-lock.json": "52acae1a1435fe5a58eea370734a9a635747af0f64169f9ef6f01e1799ae0cd8",
+        "package.json": "6f319c7204a4e488d49d834e8d87698fd2a76821a43b7a52ae9fafdcb1525ab0"
+      },
+      "source_sha256": "3c482c56cdc81049a1fec055d6e02dca7419233c7e998b97a6da3b8ecd4702c0",
+      "tree": "4700fe09adcb5c410801265eaf7146de9614e95c",
+      "url": "https://github.com/corbet-foss/cwst"
+    },
+    {
+      "commit": "dad831e54b3172ec678e3442e0fd576a000c9777",
+      "metadata_sha256": {
+        ".ci/coverage-runtime/Cargo.toml": "f3ab32cbc4c82b935697aec9d5fb9d94e79f0cece0a29546e158d1e22f708355",
+        "Cargo.lock": "7820915d887ef16ac3e88f97a3313aae88bb29c894493d1f0e7a5ff7832b8136",
+        "Cargo.toml": "7f91fd9f97364a1302a008c6b69d3f00aca2cd32ef61eba9fb5565dd04a3005d"
+      },
+      "source_sha256": "50d65b1be16073ef1949f4d18c12ac1b139cb91cb477497cbfe128e3717d5c8c",
+      "tree": "096290a7c7f68bb739e6d474ee890cd60187ec6e",
+      "url": "https://github.com/corbet-foss/clnk"
+    },
+    {
+      "commit": "47c77e9659f638a9cd42ad9cb148f7f4ffc67e53",
+      "metadata_sha256": {
+        "Cargo.lock": "2ea0d24b6db28d3ae15ffe3ca122422723d2862cdcd5e614882ad66cb933e96b",
+        "Cargo.toml": "eba184e20d8266ed27647273d3ee55ebce4b1e1a57cf8343a9a1c80177ede992",
+        "experiments/anonymous-permits/package-lock.json": "0007c66453fe1e02e45173b2df892ec998bd21eefebc9aa41ac0ec6a22475e8f",
+        "experiments/anonymous-permits/package.json": "2d42597febb89661ff45740acdcb68386889e1f4d6ca9bbaac04484e75c45042",
+        "experiments/directional-receipts/package-lock.json": "049c928c6754c7b734b0bf8f3a3ce1bbe04b342e11af2f6dfeb031c09906cbc8",
+        "experiments/directional-receipts/package.json": "8c1c6063e27be5fcdd1136e3b6a5404f6e6d30169b2958ddf999a9431087c1f8",
+        "experiments/member-profiles/package.json": "cc40a60166d97d958c3f86adeff7edea8b713ee7fddcd8bdbb360962927ea91b",
+        "experiments/private-accounting/package-lock.json": "9f469372058055b2fe513900e07b2a4c61c2b5ac1a6fb3122aa3749e677cdc8b",
+        "experiments/private-accounting/package.json": "891f7f790eb78fe64f4f2c371c3db40e97629ced087e19cf58c962e356078324",
+        "experiments/private-reciprocity/package-lock.json": "a6e282e5aa69922a65c8ef965d1e045e0374bdd1ae6926cbac13e0065a9c2aec",
+        "experiments/private-reciprocity/package.json": "32139167f8a70f69dd7d48d909f14c5722aefbb3925d0872226e1846554577b3",
+        "package-lock.json": "9249ccb6c44c807e32b0cdc35770965ea725af98f905b00c32b19de4ca657442",
+        "package.json": "6d084d0b6a5ee381cad61b574133133796c1627507afd8b68e77ca46da7e5391"
+      },
+      "source_sha256": "d6ae57f0e1da354bc7fc94740d2b7889bd6c603d081d701124348bc5fae92302",
+      "tree": "bde4e5a4054528063ff13b7dd46c1000ccb87f37",
+      "url": "https://github.com/corbet-libs/cfrm"
+    },
+    {
+      "commit": "d2897b13480fc1853bf57635e5724dc04e34b51c",
+      "metadata_sha256": {
+        ".github/coverage-runtime/Cargo.toml": "f3ab32cbc4c82b935697aec9d5fb9d94e79f0cece0a29546e158d1e22f708355",
+        "Cargo.lock": "27a10029a7358483b794b4aa8c1ba541053534a1eb614f195a67c55d9d077e52",
+        "Cargo.toml": "a1c23ef632df69307ac3cae856742ce7074f57cc657422d8d70c64a1af4ff6ee",
+        "clients/ts/package-lock.json": "0a4c29902d3337090744ef37add378a22e10c84932a930b3efa75daa1b270199",
+        "clients/ts/package.json": "723a0a95e756ccb78611b379723448cd296a895f07ff1a9a51aba0d20f417a5c",
+        "tests/browser/Cargo.lock": "4fac41e20177aa17d4731c982cce0e9f5b287c1ffee47950ef6cf754263b7821",
+        "tests/browser/Cargo.toml": "de4e6d987edd06316e3f50dba2b89f650138e8f280fccb1ee1a30db14a1a45e4"
+      },
+      "source_sha256": "fd22d634928b05251af9abba5e5d035da6942e1561f4012b9275a0f9c9421caa",
+      "tree": "ff3f9cd322751fc4423cf768085ecb241321ef4e",
+      "url": "https://github.com/corbet-libs/cvld"
+    },
+    {
+      "commit": "ae67e589b787cba9f2ed4277bb10a7dba5222600",
+      "metadata_sha256": {
+        "Cargo.lock": "79586e950304f937bd6c8325e066cce1de438ce8b62626860b8a5b79fcc2cdb9",
+        "Cargo.toml": "b889d0d5b7ce2dc661414eed9e9beb126899dd9fd2abe66b39f6f78fba34a026"
+      },
+      "source_sha256": "85f782d2b0cc542c64d77a63bb7c66ac4d642a024b90ac1c46c33cb0da34ddfd",
+      "tree": "638d2b79b44e0febaef78536e67b5d0d1cdad579",
+      "url": "https://github.com/corbet-foss/cnvy"
+    },
+    {
+      "commit": "3df50afbcad33138849e50e23bf4d54d8be15935",
+      "metadata_sha256": {
+        "Cargo.lock": "31c5b2089ebb4c58ecb306921110f56c90bcdce7f01d6078891164e4191c310b",
+        "Cargo.toml": "6da399ba7a3e8d208ba02c7e9224f77c85a55395284c704a34a879ed51116160"
+      },
+      "source_sha256": "060b1e2784af5d3ab59acf4287ec97b93a60fd0842eb6d6ef31c877a32aff26e",
+      "tree": "fa12e01f7fbd55b335c7cd4194135af7ab7a5180",
+      "url": "https://github.com/corbet-foss/cchr"
+    },
+    {
+      "commit": "5d0de32c2500d3d3061f25bc54c32bc75bf7c2b7",
+      "metadata_sha256": {
+        ".ci/coverage-runtime/Cargo.toml": "f3ab32cbc4c82b935697aec9d5fb9d94e79f0cece0a29546e158d1e22f708355",
+        "Cargo.lock": "1f61438c76d3a8ab2b8e085e4b157271e59b73417a9f587ec2e1ebc50570ad32",
+        "Cargo.toml": "eb1f83be99debcc9437e529c1ef203abff879a4267bfa218154eff5d941e040d"
+      },
+      "source_sha256": "ef6255ae2b4a16d3949e4492380ec3ffa5e73654a49d3ceb9cc49e8d0f7c8ca6",
+      "tree": "6c087f206f467903cec88253a18e42a32db7f945",
+      "url": "https://github.com/corbet-foss/csrh"
+    },
+    {
+      "commit": "e90f671218be8dc42cf6f09344acfa584dd89267",
+      "metadata_sha256": {
+        ".github/coverage-runtime/Cargo.toml": "f3ab32cbc4c82b935697aec9d5fb9d94e79f0cece0a29546e158d1e22f708355",
+        "Cargo.lock": "6a5c8b46d637dd701b636af0f2f3599323df86454e0f81113be18f7ef06cbe6f",
+        "Cargo.toml": "7e2b294d3694efbea2b3c4d8a4f3771dab0ca8ea3bbbae61405cb80b09af8a48"
+      },
+      "source_sha256": "e5a59f005102794b77352a5371d7dacd96666a2804d41dded88e6ac559ccf134",
+      "tree": "371e2ffdd549f0fa7875c442f93b40d9b18718f8",
+      "url": "https://github.com/corbet-foss/cpfl"
+    },
+    {
+      "commit": "0fe6d351dc6b2df2dc25867b75b0bfa3c2c4a752",
+      "metadata_sha256": {
+        ".github/coverage-runtime/Cargo.toml": "f3ab32cbc4c82b935697aec9d5fb9d94e79f0cece0a29546e158d1e22f708355",
+        "Cargo.lock": "aa1bbd83a49f25b2d17b0bf414b53613c5f7d5e213ac6f4a87f76a42bc25036c",
+        "Cargo.toml": "e1a70dccfd507b93ebbd548fc3d1a39d335a79454f66aa8af4859d77ca5a7038"
+      },
+      "source_sha256": "854582a8a7417edb145515ee3eb32ecf8a002114a13920591a1a6e3cdbb2eaa5",
+      "tree": "e8bcca3ff63dd1666984e8cc11b0ef3583129e85",
+      "url": "https://github.com/corbet-foss/cnvl"
+    },
+    {
+      "commit": "1481fb1c3889b88c9830b0ed97f2254fa7997bc8",
+      "metadata_sha256": {
+        "Cargo.lock": "17b9de1d0cc6ac7bc1e3b8f5adc5fdfce8b398e8fd0eee5d32aa5de2076ed32e",
+        "Cargo.toml": "eaf1a23cb052c441f5091b5f0e35ef153a0d13ddcee48b2c9b4dfb5018af3746"
+      },
+      "source_sha256": "1f2aeb63c2c0b90e6be2960b4e613003434c4f1217ebb70d73a4aa5d0b31e1ea",
+      "tree": "4ff353815c4a9eae113bdb590ba4392a2b026e12",
+      "url": "https://github.com/corbet-foss/cgrp"
+    },
+    {
+      "commit": "3faed521f4b0d6a6279372df25b40e3f257c6b74",
+      "metadata_sha256": {
+        "Cargo.lock": "45bebb0a7de2fdcdc2c72fc68a05b789ff2cc310bc11c4e9b100b2f505b046b1",
+        "Cargo.toml": "c1c0002edb064822101e84d7b262cfc10509ef408266682733d39ff90b26efec"
+      },
+      "source_sha256": "261f67e8447571cbacf7c975092c8990d9c970729aac562b12f3ff8f964e3976",
+      "tree": "f308f9e7cbeb843c95200c58e87c42d7531dad17",
+      "url": "https://github.com/corbet-foss/cthr"
+    },
+    {
+      "commit": "ed86f90c41f31dc23a7e439ab88d64b246676a08",
+      "metadata_sha256": {
+        "Cargo.lock": "2b99f81c925f5a9ee2e6be5170d6d062e3f927a92436551be33f70417131ec7f",
+        "Cargo.toml": "39fdf895c738f655a16b80f4d8287dfe12a349731b063bcc39cb2d65c8388e6f",
+        "engine/Cargo.toml": "a3ef2374b067e08eb6e9777dd09a9fd9cd50b3a96c5e6629b2d9e9e8be08f648",
+        "package-lock.json": "76c38370363ba1073a36fdee3e91f863deea0226d415b0de93b743a02ba95f11",
+        "package.json": "20c8d9fa5ef1848ce525b5d1f97c68723c03176905026f583375e7a1cf0dbc45"
+      },
+      "source_sha256": "23719080dd321e79182a02873801ea0a60966181209fba9432f749ad368aa2f9",
+      "tree": "cdfabb58cca339e1ec3345de71a4dd35a0dbc49f",
+      "url": "https://github.com/corbet-foss/cwlt"
+    },
+    {
+      "commit": "22f3179cd661f46e6d77fda197b171f6c83c637c",
+      "metadata_sha256": {
+        "Cargo.lock": "873cfd89df257d5e3e31d8612b6bab776217736830b282f301d083fb26f765e6",
+        "Cargo.toml": "d408b7efc15ba209c36bde60af585d021de7dc2394ef028527ecf9319d011454"
+      },
+      "source_sha256": "c7f5cdf74191a810c8d01d9b3f089a87595ed8c52d96344c76c9480f7845af8f",
+      "tree": "38941840f99b2667b1785f31f17c3fd34a85eb09",
+      "url": "https://github.com/corbet-foss/cbcn"
+    },
+    {
+      "commit": "17c8b0d791a08b92a22e2b348e2cb64f310e193b",
+      "metadata_sha256": {
+        "Cargo.lock": "f01bc2cc8d601a76a2b23aef0f84e2ac80603b3a1a929b6e7d9b72a48ca45fce",
+        "Cargo.toml": "2aa6f0e978a31b2cef257e9d6ef2010293b6d87577af04733cab23c1e3dfe571"
+      },
+      "source_sha256": "90738b4ffb36aa0488af4329771a6454c5993407c44a36dfff63d4a6afa995d8",
+      "tree": "6365589b772da5c8569efffbb2e2cbaad41bce3e",
+      "url": "https://github.com/corbet-foss/crbk"
+    },
+    {
+      "commit": "699878898662195327012cc00ac10fdd178264e6",
+      "metadata_sha256": {
+        "Cargo.lock": "9733493e95a22cf0b9f6d31514d7932089782d6ba95d191eb4a418b863eacf1b",
+        "Cargo.toml": "e8be0a391c0b7e6b9495cf3b882a9ddfbacf54a0b7911e81594401f9e09fe9b9"
+      },
+      "source_sha256": "f52f90cc593a58a13c195667887737d2fce5b0d6d6d512d2c15eead1b15e568a",
+      "tree": "fac086bcc8f54e67960c6755a13228215ad18048",
+      "url": "https://github.com/corbet-foss/cgrd"
+    },
+    {
+      "commit": "a06a5c5cc9c3989bd190fac7b096baaa8c911b38",
+      "metadata_sha256": {
+        "Cargo.lock": "95b748c7f905938ab71fd5c97cb1bcdb8f618ed14c58a9bb36f7d37e7a69da66",
+        "Cargo.toml": "266ac71173a7587d0613ed9e2d27fffedce315c0e65885badbf87f16c69371b7"
+      },
+      "source_sha256": "e6363097a2e292df83705dc08dc23982e919c8026ad052cc8964819a7a133bf3",
+      "tree": "760df4b17d7221b50d25596bae2ad62b66a04631",
+      "url": "https://github.com/corbet-foss/ckyh"
+    },
+    {
+      "commit": "babb0f0792d56a653551111375b3c5e5a1ae4969",
+      "metadata_sha256": {
+        "Cargo.lock": "62a877981aa5ed1b6aeab6318926576b46000de133d9f310eace8fc87bfe469c",
+        "Cargo.toml": "703bf58294c315c1db409eba2fa2455ac99bfa233ea9e90c8739ec80414abdc7"
+      },
+      "source_sha256": "a597032ad6fa8ad291ccfdc12792da500a02c943bf1ee83a6670ab21d67ab7bb",
+      "tree": "b0e9d93eb057de578ff628516a241564dbc13db5",
+      "url": "https://github.com/corbet-libs/cgth"
+    },
+    {
+      "commit": "43d7cbbe9b65a6fca26131ffdc7d2f95936d1047",
+      "metadata_sha256": {
+        "Cargo.lock": "0180fb6173a60d381ec2e3feebecaf254917d3f60d18e703387f40b692392da4",
+        "Cargo.toml": "5b67ad38339600902934ffd9e1c9c84655c22deb4b6f8ce0cf46157ca01afed9"
+      },
+      "source_sha256": "edee22c9d51e742926bf0a586791216f5985c70eeffdb2e46146642dae787b0c",
+      "tree": "117dfc1ff244a5d41211a1d2d78d6f27ab56d1bd",
+      "url": "https://github.com/corbet-foss/clkp"
+    },
+    {
+      "commit": "296dee88199c2a7a7b3368a4ddae93ed86d74b4e",
+      "metadata_sha256": {
+        "Cargo.lock": "241a4a36e1b3f52af1847013dee9ba7b8b6431a187b6162be29fcab43d9bb660",
+        "Cargo.toml": "b2de69283a1a65fe0b4e683e90a0519c32bdc4839b814b7fb8084489677e2a2e"
+      },
+      "source_sha256": "6e47b8afe3e11ec29970d5ca99c25c2836e219be9bc02f049c8f21ad7192e881",
+      "tree": "685d28a92fa683ce8fab5ca12d4c332193de450e",
+      "url": "https://github.com/corbet-foss/cswb"
+    },
+    {
+      "commit": "65d135fb823d28af0b5c52e69e3bd123818e62e8",
+      "metadata_sha256": {
+        "Cargo.lock": "abbf865f0f3c1ee0d176702e1a16d9a9d71ba41b6b69d192cbaf004b3498ea50",
+        "Cargo.toml": "3204a9ab68a051709353978891d5568281a70da114c57c71a870476031d25874"
+      },
+      "source_sha256": "feb59caf904529093d1b78e48b6188b7cc213b5016362496aaa3b991ad1bbb1f",
+      "tree": "df3bf4743a2a5a5e8f867e374fa54d68a6f7282f",
+      "url": "https://github.com/corbet-foss/cmbl"
+    },
+    {
+      "commit": "1a81a57bc3143041b9266323a83983e0f15a6a96",
+      "metadata_sha256": {
+        "Cargo.lock": "239e1633a056ded529cb0b4c8f096f3fd3936440edde235e27e4911bd2e196ca",
+        "Cargo.toml": "54e954bb574bbe1ec140e0d802e7f6ee0e86e2ea9020fec4919425dc614db581"
+      },
+      "source_sha256": "7699b3c52a9007c85d364d227d8095b19826b900d68c0d09b17ea90d2b4e3415",
+      "tree": "61f2fe1376ce292f885e563cd2f75c216d392566",
+      "url": "https://github.com/corbet-libs/cmsh"
+    }
+  ],
+  "repositories": [
+    {
+      "bundle": "bundles/b8d21aa7fd507b377f10709c.bundle",
+      "commits": {
+        "53ed942cdc1439fcedbc9914cf6cc44f83020d29": "bcc93272afa8b8fdad8f7b592290650d02d17108"
+      },
+      "main": "53ed942cdc1439fcedbc9914cf6cc44f83020d29",
+      "main_observed_at": "2026-10-04T09:43:16.317163+00:00",
+      "url": "https://github.com/corbet-foss/cbcn"
+    },
+    {
+      "bundle": "bundles/bc3714727027dae5f4f55a21.bundle",
+      "commits": {
+        "9d02020641fdb0f8763df88ae87c5cc2c2791fc1": "76e2887d890087ee0c91d523d21d9dba99eff5ba",
+        "b77ef50d231fa6d4fbd47f27008dbef3c7b643c2": "cddc97deae85f4061c375a53b7c0effa7b2dde17"
+      },
+      "main": "b77ef50d231fa6d4fbd47f27008dbef3c7b643c2",
+      "main_observed_at": "2026-10-04T09:43:07.361709+00:00",
+      "url": "https://github.com/corbet-foss/cchr"
+    },
+    {
+      "bundle": "bundles/4d911647345b5b3e43250644.bundle",
+      "commits": {
+        "9f44ffb779f296bd9162fceeee8aa9f62b1a9a66": "4dd6b44936ade6ce7529a8f4d7d747772faea65a"
+      },
+      "main": "9f44ffb779f296bd9162fceeee8aa9f62b1a9a66",
+      "main_observed_at": "2026-10-04T09:43:14.056887+00:00",
+      "url": "https://github.com/corbet-foss/cdht"
+    },
+    {
+      "bundle": "bundles/eac7e60e5bbc0bebbb19fbad.bundle",
+      "commits": {
+        "8063adc8612ac0746d874d20a64c9f7089384ae0": "be904762b39679f96e36d97de3cbecde3ee79d05",
+        "d728fe0c83114a374ac45a25629885cbbfe62567": "5e0587bf6be890f84d4376c3ca7520d6d8ef5246"
+      },
+      "main": "8063adc8612ac0746d874d20a64c9f7089384ae0",
+      "main_observed_at": "2026-10-04T09:43:11.181779+00:00",
+      "url": "https://github.com/corbet-foss/cdlv"
+    },
+    {
+      "bundle": "bundles/5e83fe36db39d70f48696e26.bundle",
+      "commits": {
+        "3a0c2dd56a2d7d3432a2f4d5ab16a83d3f95992a": "bbaa6d6fd312786adb2d420b413f93caaac48698"
+      },
+      "main": "3a0c2dd56a2d7d3432a2f4d5ab16a83d3f95992a",
+      "main_observed_at": "2026-10-04T09:43:26.214183+00:00",
+      "url": "https://github.com/corbet-foss/cfbk"
+    },
+    {
+      "bundle": "bundles/34d83df7835e51a446f025ae.bundle",
+      "commits": {
+        "219611e3dd0c50bbc284bff79f95651453524564": "8dad900ec3f551d0dfcc581c99a093a1525f8d27"
+      },
+      "main": "219611e3dd0c50bbc284bff79f95651453524564",
+      "main_observed_at": "2026-10-04T09:43:26.967960+00:00",
+      "url": "https://github.com/corbet-foss/cfry"
+    },
+    {
+      "bundle": "bundles/36e352c1b4cf50f0d94bf9c6.bundle",
+      "commits": {
+        "d1cacbdb863534183d27de468359f657aa7174fa": "409e0b286c5d1eda5c5b0209e60aff89ae646cbf",
+        "efbc07feea484d1a69ed5a46b27cfefe39c4c551": "391cf16f33ff77ba952096f12cca7327eb2a3dab"
+      },
+      "main": "d1cacbdb863534183d27de468359f657aa7174fa",
+      "main_observed_at": "2026-10-04T09:42:49.710094+00:00",
+      "url": "https://github.com/corbet-foss/cgrd"
+    },
+    {
+      "bundle": "bundles/e5195dcaabb57663ab3aa445.bundle",
+      "commits": {
+        "52fcc459cf55ff17d68bfb37c0b2c0f87271e733": "8406ec4e62c92c93ee7c010e53a78d1c30b91551"
+      },
+      "main": "52fcc459cf55ff17d68bfb37c0b2c0f87271e733",
+      "main_observed_at": "2026-10-04T09:42:50.494214+00:00",
+      "url": "https://github.com/corbet-foss/cgrp"
+    },
+    {
+      "bundle": "bundles/709d3bd8589b3a6d10241116.bundle",
+      "commits": {
+        "08c47d7495b67dc28a795075d9d6ebb65667f663": "df1589440c4b57ec00811f4a3eea3490297a9375"
+      },
+      "main": "08c47d7495b67dc28a795075d9d6ebb65667f663",
+      "main_observed_at": "2026-10-04T09:42:51.229673+00:00",
+      "url": "https://github.com/corbet-foss/ckmg"
+    },
+    {
+      "bundle": "bundles/dc21a0e2aae14b1a42f5decd.bundle",
+      "commits": {
+        "cd8544ec9d1bb769692581bc6f1a6b76289f4e52": "ecd98d5349cc5f2f187a3807b55c98c7fa1baff0"
+      },
+      "main": "cd8544ec9d1bb769692581bc6f1a6b76289f4e52",
+      "main_observed_at": "2026-10-04T09:43:05.733339+00:00",
+      "url": "https://github.com/corbet-foss/ckyh"
+    },
+    {
+      "bundle": "bundles/bde468ec538213b25e75407f.bundle",
+      "commits": {
+        "23bf4db58f06c902a76619974ff7eac7329916f0": "92117907aa1bdf39636e8581a2414d50a7b806d2"
+      },
+      "main": "23bf4db58f06c902a76619974ff7eac7329916f0",
+      "main_observed_at": "2026-10-04T09:43:18.017918+00:00",
+      "url": "https://github.com/corbet-foss/clbs"
+    },
+    {
+      "bundle": "bundles/ad8b5769adf4dc0c1e69d510.bundle",
+      "commits": {
+        "451dd380266f64ab6e70a08be5e7e868617c4ed2": "009ab5dfe9e1cd2bda45cabd6418c944a146fb59",
+        "f5a6059cd34eadcb4782f144f51374f253a938db": "9d457b0f325a84b5fbda4537846b3d4352c04683"
+      },
+      "main": "451dd380266f64ab6e70a08be5e7e868617c4ed2",
+      "main_observed_at": "2026-10-04T09:43:24.741894+00:00",
+      "url": "https://github.com/corbet-foss/clkp"
+    },
+    {
+      "bundle": "bundles/eae94388bf407d2449423ec3.bundle",
+      "commits": {
+        "03e10a13ce9cd8c220c387276821db575e844eb8": "4b836b5d93242e4d4b60128570d98da2792d0e04",
+        "51fbede5d93a49f2b0515ef057d127949b1c5c06": "abe7a676cb711467ef2b7ad184d3404afe0764d9"
+      },
+      "main": "03e10a13ce9cd8c220c387276821db575e844eb8",
+      "main_observed_at": "2026-10-04T09:42:52.005795+00:00",
+      "url": "https://github.com/corbet-foss/clnk"
+    },
+    {
+      "bundle": "bundles/5a16a3c852b48690496ea9ba.bundle",
+      "commits": {
+        "7ac807572a2fc5f0a3c4d3a472359c7368337b1b": "952d5ba7b9454e5257cfc2280f51e94e36524bc4"
+      },
+      "main": "7ac807572a2fc5f0a3c4d3a472359c7368337b1b",
+      "main_observed_at": "2026-10-04T09:43:14.828662+00:00",
+      "url": "https://github.com/corbet-foss/cmbl"
+    },
+    {
+      "bundle": "bundles/24159b22efde4def3edc3682.bundle",
+      "commits": {
+        "259f33871f650ec82f4a6e9f8ded3f7d50a0efc6": "aa23febc480eb5386e5bb3619dc02fb13344d39b",
+        "b6bffafb568bed44083ecc6e847333c7a92b32e1": "b06f2c6f20c3020953d74ccc9617208ab191656a",
+        "d3f059460a3b120cb4bff3c587259edc3dd9b1e0": "7e1424052537b0ca075de5163325f297293a6d25"
+      },
+      "main": "d3f059460a3b120cb4bff3c587259edc3dd9b1e0",
+      "main_observed_at": "2026-10-04T09:43:00.934018+00:00",
+      "url": "https://github.com/corbet-foss/cmmr"
+    },
+    {
+      "bundle": "bundles/0ed2ad0d7178ed3b69b6ee3f.bundle",
+      "commits": {
+        "bd9583956c60a0aadd84b3ba642fae37fbe882e5": "83aae654575f785c44d571640014e03babac9e3c"
+      },
+      "main": "bd9583956c60a0aadd84b3ba642fae37fbe882e5",
+      "main_observed_at": "2026-10-04T09:43:19.136335+00:00",
+      "url": "https://github.com/corbet-foss/cnrl"
+    },
+    {
+      "bundle": "bundles/0c40a2fd547a6f0f40516c3e.bundle",
+      "commits": {
+        "14dcabd259c8b16d6e719b2ee8d7e524d7dc2997": "83992820e7945aeb073aa3280c5e828e6dc13a6e",
+        "eabf269b5d1d85a194911dbd19f6cf49d34892ea": "9bf5929802b923325543f1394763feaa8c17499c"
+      },
+      "main": "eabf269b5d1d85a194911dbd19f6cf49d34892ea",
+      "main_observed_at": "2026-10-04T09:42:52.701473+00:00",
+      "url": "https://github.com/corbet-foss/cnvl"
+    },
+    {
+      "bundle": "bundles/170f88a302d9579b02b8501b.bundle",
+      "commits": {
+        "1e6163ee4d1b306ace34f4ee3ddd062387d8ccea": "f40d5fe2c3c566cdd075c512436367f2a8b03652"
+      },
+      "main": "1e6163ee4d1b306ace34f4ee3ddd062387d8ccea",
+      "main_observed_at": "2026-10-04T09:43:55.597187+00:00",
+      "url": "https://github.com/corbet-foss/cnvy"
+    },
+    {
+      "bundle": "bundles/45999881331efa48f5f6c50b.bundle",
+      "commits": {
+        "038750818f149b5c1736f74baa36633f26cf75b0": "30f0604d8da6f1b8939f7ebe13ec5945c5cf96d1"
+      },
+      "main": "038750818f149b5c1736f74baa36633f26cf75b0",
+      "main_observed_at": "2026-10-04T09:42:53.408814+00:00",
+      "url": "https://github.com/corbet-foss/cpfl"
+    },
+    {
+      "bundle": "bundles/f93dbea23a795240b696eae0.bundle",
+      "commits": {
+        "5b793e7f8d428d97f38ef365f63867261abcb0d5": "6258aed8b0f1f471353d51573cab04c60f61c7c7"
+      },
+      "main": "5b793e7f8d428d97f38ef365f63867261abcb0d5",
+      "main_observed_at": "2026-10-04T09:43:13.375298+00:00",
+      "url": "https://github.com/corbet-foss/cpky"
+    },
+    {
+      "bundle": "bundles/a03e7c484a8eb1c9c65674ce.bundle",
+      "commits": {
+        "71145788c12f25a5f6c89437e9e217dea4480a4b": "6fb9a609adda512b890f835f2480a862a8627842",
+        "7b189964a9513f937ba774d603d4b5a327df640b": "399159cc25ed51433a3ef323d5e8a697e23b7550",
+        "85674ab2e70f11051ba30ab44a8c7d3301ac6ec1": "298d4d1feb801bfd752e889b6df394ca124660c2"
+      },
+      "main": "71145788c12f25a5f6c89437e9e217dea4480a4b",
+      "main_observed_at": "2026-10-04T09:42:54.105627+00:00",
+      "url": "https://github.com/corbet-foss/cpns"
+    },
+    {
+      "bundle": "bundles/d40bcbdf5538c826f64be5db.bundle",
+      "commits": {
+        "29408cbba494f2eb02a7f5b6157b793a82905688": "baf21950905e213905873d3cd7677b927a25a62b",
+        "a37ed12159147ff28aa7867c1e3c85f21c9478b5": "8dd6cf75c43ed539e4587016661498ddc0f243d0"
+      },
+      "main": "a37ed12159147ff28aa7867c1e3c85f21c9478b5",
+      "main_observed_at": "2026-10-04T09:42:54.798225+00:00",
+      "url": "https://github.com/corbet-foss/cprz"
+    },
+    {
+      "bundle": "bundles/1ba273649d2886ecb5d03326.bundle",
+      "commits": {
+        "a23616e906ffa924aa5bda667e7ea1edf3a692d4": "b6f792df595ae050cfb368a7e518394b4ea8f652"
+      },
+      "main": "a23616e906ffa924aa5bda667e7ea1edf3a692d4",
+      "main_observed_at": "2026-10-04T09:43:04.547891+00:00",
+      "url": "https://github.com/corbet-foss/cpsd"
+    },
+    {
+      "bundle": "bundles/ae235de37033c582336b4d1e.bundle",
+      "commits": {
+        "2811a5e1614fbdcd03b493dc8af0e901633d2e5e": "475b9a9af7c7dfe80eae8741ff9c8176b1aa3d6b",
+        "36025fadb8a364857ef893939cd739d48da891b0": "010eb8fc16336c6ac3ba0ab4e69d23b37f3db1af",
+        "50de4fe2713977e85c4fb135f6f1766441aa96cb": "7e346b797b29e07e70a4a3c4967df9a2f279e227",
+        "ee4f73334818e2053c7df3d123a8e3b8cc23b2cf": "bc13346dc5c898a234b64f2463931bc3b83eed4d"
+      },
+      "main": "2811a5e1614fbdcd03b493dc8af0e901633d2e5e",
+      "main_observed_at": "2026-10-04T09:42:55.513037+00:00",
+      "url": "https://github.com/corbet-foss/crbk"
+    },
+    {
+      "bundle": "bundles/9332f816cb0d72fe6ade34f8.bundle",
+      "commits": {
+        "0677b1042c9810c4dfc0cdcfac62b511f7095882": "04eae6f87134bcdf5b5b3e35d84d99862096b581"
+      },
+      "main": "0677b1042c9810c4dfc0cdcfac62b511f7095882",
+      "main_observed_at": "2026-10-04T09:43:20.285417+00:00",
+      "url": "https://github.com/corbet-foss/crgs"
+    },
+    {
+      "bundle": "bundles/1f28509eb516f5c44483c0dc.bundle",
+      "commits": {
+        "6ca3bd1035fcf17c2c88cdae3ed913da49740252": "1bf38faa16dc4dbcc61e473040b06f82931e69a4",
+        "9569c591f35f028fbf802a02fc23c6cf5a35bdf6": "7a71a83c9e82d14f17ae3aad77a867361c1a40af"
+      },
+      "main": "9569c591f35f028fbf802a02fc23c6cf5a35bdf6",
+      "main_observed_at": "2026-10-04T09:43:21.021600+00:00",
+      "url": "https://github.com/corbet-foss/crlt"
+    },
+    {
+      "bundle": "bundles/6ac80dc6a3511a7414cfa241.bundle",
+      "commits": {
+        "5f914e7947a48c8dd0e8d52771e184981bbe6b1d": "5b7b69a84e92e549774933fb5a64e799361a678e",
+        "96f946b89efd67d79f841259ee914a4f6f43dcd0": "99de566beb2cd60821de579bd8c37f22aad1767e",
+        "eac891b771152b17aa3a903edfe9c129e43a371e": "7d760d5e9d346799a5e037192a7102f9e4d957d6",
+        "fac7f49eeb4e4bb9b72de640b46e55d8fe99119c": "301d55bdbb3d6cc5991a9a7eac6511b780d371b4"
+      },
+      "main": "fac7f49eeb4e4bb9b72de640b46e55d8fe99119c",
+      "main_observed_at": "2026-10-04T09:42:56.234546+00:00",
+      "url": "https://github.com/corbet-foss/csgn"
+    },
+    {
+      "bundle": "bundles/d3ae95881d2685145bdb9f42.bundle",
+      "commits": {
+        "2fddfc89a3e3503df1430cd22eaf090ca52bc694": "21cb321418faef5fc830f73d47e2aadb60fb2736",
+        "9fe8a3271ddecf0846d888d038645a55687c2111": "5eb5dfea641b459b4b42eaa660b0c88e2b9a5b34"
+      },
+      "main": "2fddfc89a3e3503df1430cd22eaf090ca52bc694",
+      "main_observed_at": "2026-10-04T09:42:56.989934+00:00",
+      "url": "https://github.com/corbet-foss/cshm"
+    },
+    {
+      "bundle": "bundles/8a983afd3fb450e69ceadc85.bundle",
+      "commits": {
+        "016b156befec58a15770abcf540d328a3a42d8f1": "d67b0cd98b19ae9060560ecbce7d871e5bcf9d4c",
+        "0924ab58b8a216691529e59f967d54a7c858a6b2": "cf19d5a49fe09b9ba76efad514cdc9498befea44",
+        "77a388ea8330c57a32d41329a22a1f4ebd8883a6": "ebe8cb588d435a71c396a9bd5d289763b0d4286c"
+      },
+      "main": "77a388ea8330c57a32d41329a22a1f4ebd8883a6",
+      "main_observed_at": "2026-10-04T09:42:57.858393+00:00",
+      "url": "https://github.com/corbet-foss/csrh"
+    },
+    {
+      "bundle": "bundles/5bf26f8f22521651c4064328.bundle",
+      "commits": {
+        "c489601d07d18d4b34e249f40137c01baf535bd8": "8f5473a20951790d3364a1d618b1fb290b45b520"
+      },
+      "main": "c489601d07d18d4b34e249f40137c01baf535bd8",
+      "main_observed_at": "2026-10-04T09:43:21.786138+00:00",
+      "url": "https://github.com/corbet-foss/cssr"
+    },
+    {
+      "bundle": "bundles/abc9d02f8d22c4ab144ab497.bundle",
+      "commits": {
+        "4b6d712881862483046d2a829106d64e869af1e0": "28c9c93b3d3afd4cb928bc204af3aecb66446945",
+        "b3c2a93718d8b190bfaa2031533fdff4162f1e39": "8cab982e8f5a1becd9f85563fc4db3b6fe798422",
+        "cc221c38d74f5a3f4d99b2679d6e53f4cec4a465": "5e873208356c475b07ad766c8bbf625268b8605d"
+      },
+      "main": "4b6d712881862483046d2a829106d64e869af1e0",
+      "main_observed_at": "2026-10-04T09:43:15.543131+00:00",
+      "url": "https://github.com/corbet-foss/cswb"
+    },
+    {
+      "bundle": "bundles/0c65e1840107b4e8bb4ebf0b.bundle",
+      "commits": {
+        "1f11f064ccd6144def3b48ae5a1ee15f0079d145": "5d0d35559ce899ac2ebb9093790f475e77a70cd4",
+        "5a66c1f9fe6b9e0476c1e82660bd5818f59e5a28": "4bb6fe3958a7ff5322a8f424f58ea3b0bc91438d"
+      },
+      "main": "1f11f064ccd6144def3b48ae5a1ee15f0079d145",
+      "main_observed_at": "2026-10-04T09:43:11.894289+00:00",
+      "url": "https://github.com/corbet-foss/ctcs"
+    },
+    {
+      "bundle": "bundles/6284fd91bacc31d9cd6865aa.bundle",
+      "commits": {
+        "4b4d5ff5308619e79341b308e8ee306f53a75edb": "0bfd1feb79f22234a953e2bbf8347b24d4f01b61",
+        "ce5eabb53b14a1c2936bfbcc3ba2a182e16a3502": "8fc576c44fae418c75787052cd7c93c29dabfcc3",
+        "e719761a51795a115a969f50353df27f8c152bfd": "0869545a1115c0b1d4d2d36b95f63345a9215993"
+      },
+      "main": "4b4d5ff5308619e79341b308e8ee306f53a75edb",
+      "main_observed_at": "2026-10-04T09:43:22.542051+00:00",
+      "url": "https://github.com/corbet-foss/cthl"
+    },
+    {
+      "bundle": "bundles/4011ffd90f50413d326157fe.bundle",
+      "commits": {
+        "6dcdc1adbf67c31bab90b80aa0a9bc49b396ad9f": "c3f1018d1f0c983d8e94009debb459516100a690",
+        "ef2ecc3a0878ac7c2335954c6c77506bd9572b6a": "c7be8c81363f1ba099ee9319c81a8949269b5640"
+      },
+      "main": "6dcdc1adbf67c31bab90b80aa0a9bc49b396ad9f",
+      "main_observed_at": "2026-10-04T09:43:12.658673+00:00",
+      "url": "https://github.com/corbet-foss/cthr"
+    },
+    {
+      "bundle": "bundles/43b34fb36ae9ca8438cfc62a.bundle",
+      "commits": {
+        "88ee8ae5eff1235d43f55d39bfbe2ed6fc2ffa6e": "ee4e44f17767718de5976ef91c3eafca4dcd6adc"
+      },
+      "main": "88ee8ae5eff1235d43f55d39bfbe2ed6fc2ffa6e",
+      "main_observed_at": "2026-10-04T09:42:58.654639+00:00",
+      "url": "https://github.com/corbet-foss/ctnd"
+    },
+    {
+      "bundle": "bundles/9695055bacda6bb26c379257.bundle",
+      "commits": {
+        "9894d84f726132129c81f03a2c42be131d9aa1ac": "259d020cfeb1d8d0956e0cd9a541edbb78b9dd55"
+      },
+      "main": "9894d84f726132129c81f03a2c42be131d9aa1ac",
+      "main_observed_at": "2026-10-04T09:43:27.694749+00:00",
+      "url": "https://github.com/corbet-foss/ctrn"
+    },
+    {
+      "bundle": "bundles/e751ce7b61d31224ed4a2ef1.bundle",
+      "commits": {
+        "11a4dccd3405dfcfb9cf1092167869351aa0da95": "78e16e00bd9ed636a691cb1f6fab73e2d038f246"
+      },
+      "main": "11a4dccd3405dfcfb9cf1092167869351aa0da95",
+      "main_observed_at": "2026-10-04T09:43:06.504063+00:00",
+      "url": "https://github.com/corbet-foss/cvch"
+    },
+    {
+      "bundle": "bundles/d5d5221a08a4a89a358d1759.bundle",
+      "commits": {
+        "31f034c8efeb791b09f06a2add21365011227252": "c987a523942cc9ce58e6bc8f179536be37bdf71c",
+        "b5749ac38ea444d963bf0d979523c04839e4ceeb": "3c8e57063fb542aefe54599e6bdae4d22d38aa1b"
+      },
+      "main": "31f034c8efeb791b09f06a2add21365011227252",
+      "main_observed_at": "2026-10-04T09:43:23.258891+00:00",
+      "url": "https://github.com/corbet-foss/cvfy"
+    },
+    {
+      "bundle": "bundles/d5d89bf4ef192fd221cc7cc9.bundle",
+      "commits": {
+        "0bf0ccbdd77325adb03c7b37527a665e2eeec422": "0aac944636734017cf3a3b002e201b5eeba20dd2",
+        "18460d967e117bcfa368496362c2a8d2c1c6f455": "760efe2ca1f43117c5b643ee883b08ad614c7b48"
+      },
+      "main": "18460d967e117bcfa368496362c2a8d2c1c6f455",
+      "main_observed_at": "2026-10-04T09:43:25.455190+00:00",
+      "url": "https://github.com/corbet-foss/cvlk"
+    },
+    {
+      "bundle": "bundles/f19ee563bdfffa5cb470d468.bundle",
+      "commits": {
+        "48b78065ab0b4c7bbbe9084a5160988e3cd24df3": "6d9ec2a19136748399ef236de859d1fb74f98031"
+      },
+      "main": "48b78065ab0b4c7bbbe9084a5160988e3cd24df3",
+      "main_observed_at": "2026-10-04T09:43:10.455644+00:00",
+      "url": "https://github.com/corbet-foss/cvln"
+    },
+    {
+      "bundle": "bundles/4b93ff81196da778b0fdff3f.bundle",
+      "commits": {
+        "78fcc1d005f9b3a0d4e6edce4e500fd21e0e7fe5": "8dff2d8feb57a9901e908e3de4fa80ab0503654a"
+      },
+      "main": "78fcc1d005f9b3a0d4e6edce4e500fd21e0e7fe5",
+      "main_observed_at": "2026-10-04T09:43:09.683365+00:00",
+      "url": "https://github.com/corbet-foss/cwlt"
+    },
+    {
+      "bundle": "bundles/066927ecbad55790ad690f9f.bundle",
+      "commits": {
+        "e9a49b74dae64c772fb11a518fc59e6ccee7a4a4": "5df2956b494c3c77777887288b5f9ab9333651c7",
+        "ec489110cf73368d69019745cdca6f9d8884f3c5": "37809344dd5ca5243f3c7b308b2f35f609fe2dc2",
+        "f1681ebb167f3d3328f994a6e5d8d5c44f5e68ea": "682c35ffdb98b070fa00b2b858f89fd46d73fd83"
+      },
+      "main": "f1681ebb167f3d3328f994a6e5d8d5c44f5e68ea",
+      "main_observed_at": "2026-10-04T09:42:59.440171+00:00",
+      "url": "https://github.com/corbet-foss/cwst"
+    },
+    {
+      "bundle": "bundles/7eb2cd86da69729730cfa6bf.bundle",
+      "commits": {
+        "000e7056cac53b24be5c2de73289b8f3cf1d463c": "c8febf22f075ca70449785813b5246369a3d7689"
+      },
+      "main": "000e7056cac53b24be5c2de73289b8f3cf1d463c",
+      "main_observed_at": "2026-10-04T09:43:00.198423+00:00",
+      "url": "https://github.com/corbet-foss/cxch"
+    },
+    {
+      "bundle": "bundles/7c93315e3ae8b3462c48ceb2.bundle",
+      "commits": {
+        "f7547de05c0c38f96c0622ca2eea0419e977fe4a": "c5ee73799469c7f54ae373547395ec8930022f84"
+      },
+      "main": "f7547de05c0c38f96c0622ca2eea0419e977fe4a",
+      "main_observed_at": "2026-10-04T09:43:24.011379+00:00",
+      "url": "https://github.com/corbet-foss/czkp"
+    },
+    {
+      "bundle": "bundles/668ace32f22446451ff2eecc.bundle",
+      "commits": {
+        "b7449bdd32e884cfe29eff3bdbf787577bdda545": "29c2dbfe2e49cc199d45fd0f7952c5ddb0868604"
+      },
+      "main": "b7449bdd32e884cfe29eff3bdbf787577bdda545",
+      "main_observed_at": "2026-10-04T09:43:16.734829+00:00",
+      "url": "https://github.com/corbet-libs/cblc"
+    },
+    {
+      "bundle": "bundles/84f64b1c40f162bb4fa8110d.bundle",
+      "commits": {
+        "177b41f314b248f61b361057c69bf3098b8f9f92": "568a185b8ba869787923658b28f154bf8208b86a",
+        "99482d2146965d07fff6ea192e0f476330330b95": "fff0ee58b7401c14de2f73f1488259184fefdcfd"
+      },
+      "main": "99482d2146965d07fff6ea192e0f476330330b95",
+      "main_observed_at": "2026-10-04T09:42:48.422130+00:00",
+      "url": "https://github.com/corbet-libs/cbrd"
+    },
+    {
+      "bundle": "bundles/c0f4a53c27107c6d851eccf9.bundle",
+      "commits": {
+        "14136269af06a07ecf61ace4d5a694fab750c051": "15da5d34db23d7f4b399406df5516a63c86ba4cb",
+        "d28ea916c53cf78f406e8fbb0a198d1ee00fc195": "8466e5e672b4333cd44413175348406f4603e4c3"
+      },
+      "main": "d28ea916c53cf78f406e8fbb0a198d1ee00fc195",
+      "main_observed_at": "2026-10-04T09:42:48.885589+00:00",
+      "url": "https://github.com/corbet-libs/cfrm"
+    },
+    {
+      "bundle": "bundles/2fc5026ae6757115059b07e4.bundle",
+      "commits": {
+        "fe5b263140d55e112a8af6d79ca73077fcfc3d37": "14bf5bc537ec20217a9960c3fce76b3a10757d50"
+      },
+      "main": "fe5b263140d55e112a8af6d79ca73077fcfc3d37",
+      "main_observed_at": "2026-10-04T09:43:02.885617+00:00",
+      "url": "https://github.com/corbet-libs/cfyr"
+    },
+    {
+      "bundle": "bundles/4242bcd836d2c2df8de17ba8.bundle",
+      "commits": {
+        "b68e9f4d2681cb863914c49f84b9a9435ce50819": "a430ac4c6d3a8faa89ca311ea279b615710210af"
+      },
+      "main": "b68e9f4d2681cb863914c49f84b9a9435ce50819",
+      "main_observed_at": "2026-10-04T09:43:04.960505+00:00",
+      "url": "https://github.com/corbet-libs/cglb"
+    },
+    {
+      "bundle": "bundles/6287c9c1c8c8a2284ee8ddae.bundle",
+      "commits": {
+        "51b57bb9834cc3651ce803a5e48b11a001a33c9d": "cc93973b91e9384f24e5624502092ed29aaf0469"
+      },
+      "main": "51b57bb9834cc3651ce803a5e48b11a001a33c9d",
+      "main_observed_at": "2026-10-04T09:43:07.886250+00:00",
+      "url": "https://github.com/corbet-libs/cgth"
+    },
+    {
+      "bundle": "bundles/5c1b6c561cc5ea6b2be2463d.bundle",
+      "commits": {
+        "ec2afa901cdf3242509f63063206cc51d6ac3b44": "eb01692dd38f0f9d9f925b7b8d831516a52a8ee5"
+      },
+      "main": "ec2afa901cdf3242509f63063206cc51d6ac3b44",
+      "main_observed_at": "2026-10-04T09:43:17.221424+00:00",
+      "url": "https://github.com/corbet-libs/cgts"
+    },
+    {
+      "bundle": "bundles/3bee362970243e0d003832c2.bundle",
+      "commits": {
+        "20edabd4a23bab27dd0d90492bacd00ef4e81fa3": "f55fc0a0732de3e281d15fcbacf7b34ce981f65b"
+      },
+      "main": "20edabd4a23bab27dd0d90492bacd00ef4e81fa3",
+      "main_observed_at": "2026-10-04T09:43:18.450525+00:00",
+      "url": "https://github.com/corbet-libs/cmbr"
+    },
+    {
+      "bundle": "bundles/adde64ad2c5182c1f2f21ce9.bundle",
+      "commits": {
+        "09530e0751fb12b16bfee414b0b810bd33ec1c01": "15f81e76fd4b876544773fff70b5c641b5069c75"
+      },
+      "main": "09530e0751fb12b16bfee414b0b810bd33ec1c01",
+      "main_observed_at": "2026-10-04T09:43:01.393040+00:00",
+      "url": "https://github.com/corbet-libs/cmsh"
+    },
+    {
+      "bundle": "bundles/3e3070f680628972ed559458.bundle",
+      "commits": {
+        "002a1f842f28a2a10d93e3bab27bcf805ab48a02": "e3bfa347498ff34b4adc890d48f6cab9df5826b1"
+      },
+      "main": "002a1f842f28a2a10d93e3bab27bcf805ab48a02",
+      "main_observed_at": "2026-10-04T09:43:03.835782+00:00",
+      "url": "https://github.com/corbet-libs/cmty"
+    },
+    {
+      "bundle": "bundles/c04cc061997dcca99793edcc.bundle",
+      "commits": {
+        "9f2f32234933c6fbf7c64369a36ff8630d242372": "8d1be2d20cc22022517c88491b52c76177f80945"
+      },
+      "main": "9f2f32234933c6fbf7c64369a36ff8630d242372",
+      "main_observed_at": "2026-10-04T09:43:02.425906+00:00",
+      "url": "https://github.com/corbet-libs/cnbx"
+    },
+    {
+      "bundle": "bundles/7cc33386cbb8b89970542e55.bundle",
+      "commits": {
+        "550c62532b1dc94b1a92129ded7a306c9a8d52a0": "d5c07eabb6228908adc78b0a75314459de903fff"
+      },
+      "main": "550c62532b1dc94b1a92129ded7a306c9a8d52a0",
+      "main_observed_at": "2026-10-04T09:43:19.555408+00:00",
+      "url": "https://github.com/corbet-libs/cplc"
+    },
+    {
+      "bundle": "bundles/2bc8afebcb8a6be655b2fcdc.bundle",
+      "commits": {
+        "a59dffb840b07ad785a39f33fd81967b890fa7b1": "4e4ce637dce92e025b1aa664abfe1b0885519137"
+      },
+      "main": "a59dffb840b07ad785a39f33fd81967b890fa7b1",
+      "main_observed_at": "2026-10-04T09:43:08.416608+00:00",
+      "url": "https://github.com/corbet-libs/csrn"
+    },
+    {
+      "bundle": "bundles/5ed7736bc7a333e9c820f517.bundle",
+      "commits": {
+        "2c9b2a98a7d0db32256a1e4af5202681fda9ddf1": "f89432052f4d29ff71addb7e4ffc2a4295aedae2"
+      },
+      "main": "2c9b2a98a7d0db32256a1e4af5202681fda9ddf1",
+      "main_observed_at": "2026-10-04T09:43:03.354896+00:00",
+      "url": "https://github.com/corbet-libs/cvld"
+    },
+    {
+      "bundle": "bundles/d851dbc53fea0702271e29bc.bundle",
+      "commits": {
+        "c8a8d532df07b3e4104c095a34e4d6a02bb6bd5d": "e2d53c9502bc22f3f8008e655d7d3c6d760f72bf"
+      },
+      "main": "c8a8d532df07b3e4104c095a34e4d6a02bb6bd5d",
+      "main_observed_at": "2026-10-04T09:43:01.955831+00:00",
+      "url": "https://github.com/corbet-libs/cvlt"
+    },
+    {
+      "bundle": "bundles/2c901646d8e1747844747a31.bundle",
+      "commits": {
+        "3bbdc4a2553e76f032db8c52da1abe1c89a361c4": "430eee71897b7f25377d1d780ea1d427ea906f46"
+      },
+      "main": "3bbdc4a2553e76f032db8c52da1abe1c89a361c4",
+      "main_observed_at": "2026-10-04T09:43:08.924981+00:00",
+      "url": "https://github.com/corbet-libs/cvtl"
+    }
+  ],
+  "root": {
+    "metadata_sha256": {
+      ".ci/coverage-runtime/Cargo.toml": "f3ab32cbc4c82b935697aec9d5fb9d94e79f0cece0a29546e158d1e22f708355",
+      "Cargo.lock": "078f5c02d4b21a4c24994dfb871ec42c621def0ab6f1340db07f592f87dd4c4b",
+      "Cargo.toml": "530347ebe8dd532231ffd1283846243be9f816df7aa96edc7bc66f2155c2650b",
+      "tests/fixture/Cargo.toml": "ae45f933a88828a2a0ce2d06922e871c202e732290ecc1008d690979fcea5598",
+      "tools/package-lock.json": "e70cde8cb472342fd903f1f8a1251b7ee94de2c5bbf86675b6f6be3e08e289f6",
+      "tools/package.json": "54f03d53a8e7a307c157234778a7e4a1020b5f504afdedbe09f6913922bac825"
+    },
+    "url": "https://github.com/corbet-libs/cmsg"
+  },
+  "schema": 1,
+  "scope": "Fixed original observed-source identity transport for explicit hosted browser candidate qualification"
+}

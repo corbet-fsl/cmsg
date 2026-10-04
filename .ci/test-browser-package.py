@@ -21,6 +21,8 @@ class Static(SimpleHTTPRequestHandler):
     def do_GET(self):
         paths = {
             "/__vault-frame-fixture.html": ("text/html", "vault-frame-fixture.html"),
+            "/__vault-close-mismatch.html": ("text/html", "vault-frame-fixture.html"),
+            "/__vault-close-pending.html": ("text/html", "vault-frame-fixture.html"),
             "/__bridge-vectors.js": ("text/javascript", "bridge-browser.mjs"),
         }
         if self.path == "/__redirect-foreign":
@@ -100,7 +102,7 @@ def main():
         """)
         if result is not True:
             raise RuntimeError("generated browser runtime conformance failed")
-        for entry in ["member", "raw", "foreign", "wrong_source", "redirect", "top_rejected", "unread", "forged_ack", "stalled"]:
+        for entry in ["member", "raw", "foreign", "wrong_source", "redirect", "top_rejected", "unread", "forged_ack", "stalled", "close_mismatch", "close_pending"]:
             origin = "https://wallet.example.test" if entry == "foreign" else "https://alpha.example.test"
             page = origin + "/__member-fixture.html"
             if entry == "top_rejected":

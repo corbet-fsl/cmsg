@@ -110,7 +110,7 @@ export async function createVaultClient(configuration: VaultBridgeConfiguration)
       if (valid && reply.error == null) closeResolve(); else closeReject(new CmsgError('reconcile'));
       closing = true; connected = false; cleanup();
       // Only the actual owner acknowledgement proves its admitted work drained.
-      if (reply.error == null) frame.remove();
+      if (valid && reply.error == null) frame.remove();
     } else fail('reconcile');
   }
   function hello(event: MessageEvent) {

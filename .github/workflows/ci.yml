@@ -5,6 +5,20 @@ on:
     paths: ["Cargo.*", "src/**", "tests/**", "examples/**", "tools/**", ".ci/**", ".github/**"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      selector:
+        description: Original suite or explicit original candidate browser composition
+        type: choice
+        default: ordinary
+        options: [ordinary, browser-package-candidates]
+      source_commit:
+        description: Reviewed exact source commit (candidate selector only)
+        type: string
+        required: false
+      source_sha256:
+        description: Reviewed PAX source archive SHA256 (candidate selector only)
+        type: string
+        required: false
 permissions:
   contents: read
 concurrency:
@@ -16,6 +30,7 @@ env:
   RUST_TEST_THREADS: '2'
 jobs:
   resolve:
+    if: github.event_name != 'workflow_dispatch' || inputs.selector != 'browser-package-candidates'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -224,3 +239,39 @@ jobs:
             wasm-coverage.json
             wasm-coverage.lcov
             wasm-coverage.txt
+
+  candidate-browser:
+    if: github.event_name == 'workflow_dispatch' && inputs.selector == 'browser-package-candidates' && github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CMSG_HOSTED_RUNNER: ubuntu-latest
+      CMSG_HOSTED_PUBLIC: 'true'
+      CMSG_EXPECTED_COMMIT: ${{ inputs.source_commit }}
+      CMSG_EXPECTED_SOURCE_SHA256: ${{ inputs.source_sha256 }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Record preparation start and job-local Cargo paths
+        run: |
+          echo "CMSG_HOSTED_STARTED=$(date +%s)" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$RUNNER_TEMP/cmsg-cargo" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cmsg-target" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Prepare original ephemeral hosted browser tools
+        run: |
+          python3 -m pip install -r .ci/requirements.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y caddy libcap2-bin
+          sudo systemctl stop caddy
+          sudo setcap cap_net_bind_service=+ep "$(command -v caddy)"
+      - name: Qualify exact original candidate browser composition
+        run: python3 .ci/browser-hosted.py

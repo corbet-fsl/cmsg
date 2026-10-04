@@ -4,3 +4,11 @@ project = "cmsg"
 [checks.native]
 kind = "commands"
 commands = [["bash", ".ci/native.sh"]]
+
+[checks.browser-package]
+kind = "commands"
+commands = [["timeout", "--kill-after=30s", "1800s", "bash", ".ci/browser-package.sh"]]
+
+[checks.browser-package-candidates]
+kind = "commands"
+commands = [["bash", ".ci/browser-package.sh"]]

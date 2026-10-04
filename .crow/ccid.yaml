@@ -7,6 +7,60 @@ variables:
   SOURCE_SHA256: {default: ""}
   DEPENDENCY_SOURCE_ARCHIVE: {default: ""}
   DEPENDENCY_SOURCE_SHA256: {default: ""}
+  CMSG_CBCN_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CBCN_SOURCE_SHA256: {default: ""}
+  CMSG_CBRD_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CBRD_SOURCE_SHA256: {default: ""}
+  CMSG_CCHR_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CCHR_SOURCE_SHA256: {default: ""}
+  CMSG_CFRM_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CFRM_SOURCE_SHA256: {default: ""}
+  CMSG_CFYR_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CFYR_SOURCE_SHA256: {default: ""}
+  CMSG_CGRD_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CGRD_SOURCE_SHA256: {default: ""}
+  CMSG_CGRP_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CGRP_SOURCE_SHA256: {default: ""}
+  CMSG_CGTH_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CGTH_SOURCE_SHA256: {default: ""}
+  CMSG_CKMG_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CKMG_SOURCE_SHA256: {default: ""}
+  CMSG_CKYH_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CKYH_SOURCE_SHA256: {default: ""}
+  CMSG_CLKP_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CLKP_SOURCE_SHA256: {default: ""}
+  CMSG_CLNK_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CLNK_SOURCE_SHA256: {default: ""}
+  CMSG_CMBL_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CMBL_SOURCE_SHA256: {default: ""}
+  CMSG_CMSH_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CMSH_SOURCE_SHA256: {default: ""}
+  CMSG_CNBX_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CNBX_SOURCE_SHA256: {default: ""}
+  CMSG_CNVL_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CNVL_SOURCE_SHA256: {default: ""}
+  CMSG_CNVY_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CNVY_SOURCE_SHA256: {default: ""}
+  CMSG_CPFL_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CPFL_SOURCE_SHA256: {default: ""}
+  CMSG_CRBK_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CRBK_SOURCE_SHA256: {default: ""}
+  CMSG_CSRH_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CSRH_SOURCE_SHA256: {default: ""}
+  CMSG_CSWB_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CSWB_SOURCE_SHA256: {default: ""}
+  CMSG_CTHR_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CTHR_SOURCE_SHA256: {default: ""}
+  CMSG_CVLD_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CVLD_SOURCE_SHA256: {default: ""}
+  CMSG_CVLT_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CVLT_SOURCE_SHA256: {default: ""}
+  CMSG_CWLT_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CWLT_SOURCE_SHA256: {default: ""}
+  CMSG_CWST_SOURCE_ARCHIVE: {default: ""}
+  CMSG_CWST_SOURCE_SHA256: {default: ""}
+  CMSG_MINICOV_BUNDLE: {default: ""}
+  CMSG_MINICOV_SHA256: {default: ""}
   CI_TOOL_ARCHIVE: {default: ""}
   CI_TOOL_SHA256: {default: ""}
   CI_TOOL_BINARY: {default: ""}
@@ -71,6 +125,8 @@ steps:
                 if len(matches) != 1 or not matches[0].isfile() or matches[0].size > 1024 * 1024:
                     raise SystemExit('invalid consumer member')
                 program = package.extractfile(matches[0]).read()
+        if hashlib.sha256(program).hexdigest() != '293450018834cd60ff58e0c62d78de8cfcf21c060fb4de5d905200afd0bd84da':
+            raise SystemExit('unreviewed source closure consumer')
         sys.argv = ['closure.py', 'consume', '--archive', archive, '--sha256', digest,
                     '--source-archive', source, '--source-sha256', source_digest,
                     '--commit', commit, '--repository', repository, '--scratch', scratch,

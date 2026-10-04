@@ -4,6 +4,25 @@
 <body>
 <script type="module">
 import {startVaultHost} from '/browser.js';
+// Corrupt only the wire response of the real owner for hostile-peer vectors.
+// All requests still execute through the original generated Wasm runtime.
+if (location.pathname.startsWith('/__vault-close-')) {
+  const original = MessagePort.prototype.postMessage;
+  let injected = false;
+  MessagePort.prototype.postMessage = function (message, ...rest) {
+    if (!injected && typeof message === 'string') {
+      const reply = JSON.parse(message);
+      if (location.pathname === '/__vault-close-mismatch.html' && reply.kind === 'closed') {
+        injected = true;
+        message = JSON.stringify({...reply, id: null, error: null});
+      } else if (location.pathname === '/__vault-close-pending.html' && reply.kind === 'output') {
+        injected = true;
+        message = JSON.stringify({kind: 'closed', id: reply.id + 1, error: null});
+      }
+    }
+    return original.call(this, message, ...rest);
+  };
+}
 try {
   const fixture = await (await fetch('/__fixture')).json();
   const host = await startVaultHost({
