@@ -13,8 +13,106 @@ pub type Cancel = Empty;
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Status {
     Idle,
-    Pending { expires_at: u64 },
+    Pending {
+        expires_at: u64,
+    },
     Complete,
     Cancelled,
     Expired,
+    /// The server accepted the passkey; compound device custody is still needed.
+    AuthenticatedPendingCustody,
+}
+
+/// Public deployment inputs for the actual native browser ceremony. These are
+/// trusted constructor inputs, never fields in a local action body.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Configuration {
+    pub page: String,
+    pub origin: String,
+    pub relying_party: String,
+}
+
+/// Browser handover status, never a server authentication or vault-ready claim.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CallbackStatus {
+    Ready,
+    Running,
+    HandedBack,
+    Cancelled,
+    Failed,
+    Reconcile,
+}
+
+#[cfg(target_arch = "wasm32")]
+mod callback;
+#[cfg(target_arch = "wasm32")]
+pub use callback::CliLogin;
+
+impl Configuration {
+    pub(crate) fn context(&self) -> Result<cfyr::passkeys::Context> {
+        let page = url::Url::parse(&self.page).map_err(|_| ErrorCode::InvalidRequest)?;
+        if page.scheme() != "https"
+            || page.origin().ascii_serialization() != self.origin
+            || !page.username().is_empty()
+            || page.password().is_some()
+            || page.query().is_some()
+            || page.fragment().is_some()
+            || !page
+                .host_str()
+                .is_some_and(|host| host.starts_with("vault."))
+        {
+            return Err(ErrorCode::InvalidRequest);
+        }
+        cfyr::passkeys::Context::new(&self.origin, &self.relying_party)
+            .map_err(|_| ErrorCode::InvalidRequest)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) mod native;
+
+pub(super) async fn start(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Start,
+) -> Result<(Status, Vec<Event>)> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        native::start(door, key)
+            .await
+            .map(|status| (status, vec![]))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (door, key);
+        Err(ErrorCode::Unavailable)
+    }
+}
+pub(super) async fn poll(door: &mut Door, key: &[u8; 32], _: Poll) -> Result<(Status, Vec<Event>)> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        native::poll(door, key).map(|status| (status, vec![]))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (door, key);
+        Err(ErrorCode::Unavailable)
+    }
+}
+pub(super) async fn cancel(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Cancel,
+) -> Result<(Status, Vec<Event>)> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        native::cancel(door, key).map(|status| (status, vec![]))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (door, key);
+        Err(ErrorCode::Unavailable)
+    }
 }

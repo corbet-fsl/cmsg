@@ -22,8 +22,8 @@ pub enum Scope {
 /// Distinct configured owner sessions for one local portal origin. Public
 /// bootstrap is a transport with no session; remote authority is never minted.
 pub struct Sessions {
-    primary: Scope,
-    clients: BTreeMap<Scope, cfyr::Foyer<Transport>>,
+    pub(super) primary: Scope,
+    pub(super) clients: BTreeMap<Scope, cfyr::Foyer<Transport>>,
 }
 
 impl Sessions {
@@ -47,6 +47,7 @@ impl Sessions {
 
 pub(super) struct Binding {
     pub role: Role,
+    pub root_board: bool,
     pub sessions: Sessions,
     pub uncertain: bool,
 }
@@ -187,19 +188,22 @@ impl Binding {
         // This checks the local portal surface, not the membership's remote
         // role. An admin/root member uses an ordinary member portal/session for
         // member actions; cvld independently checks the real membership rights.
+        let scope = match operation.scope {
+            ServiceScope::Primary => self.sessions.primary,
+            ServiceScope::Exact(scope) => scope,
+        };
         let allowed = match operation.access {
             Access::Any => true,
             Access::Member => self.role == Role::Member,
-            Access::Admin => self.role == Role::Admin,
+            Access::Admin => {
+                self.role == Role::Admin
+                    || (self.role == Role::Root && self.root_board && scope == Scope::Community)
+            }
             Access::Root => self.role == Role::Root,
         };
         if !allowed {
             return Err(ErrorCode::Unauthorized);
         }
-        let scope = match operation.scope {
-            ServiceScope::Primary => self.sessions.primary,
-            ServiceScope::Exact(scope) => scope,
-        };
         let client = self
             .sessions
             .clients
@@ -307,7 +311,7 @@ pub(super) async fn refresh(
     Ok((Empty {}, vec![]))
 }
 
-fn map_error(error: cfyr::Error) -> ErrorCode {
+pub(super) fn map_error(error: cfyr::Error) -> ErrorCode {
     match error {
         cfyr::Error::Invalid => ErrorCode::InvalidRequest,
         cfyr::Error::Unauthorized | cfyr::Error::Forbidden | cfyr::Error::WrongHost => {

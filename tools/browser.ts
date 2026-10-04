@@ -3,11 +3,38 @@ import {
   createCmsgClient, CmsgError, type BrowserConfiguration, type Output,
   type VaultBridgeConfiguration, type VaultHostConfiguration,
   type VaultBridgeRequest, type VaultBridgeReply,
+  type CliLoginConfiguration, type CliCallbackStatus,
 } from './client.js';
 export type {BrowserConfiguration, VaultBridgeConfiguration, VaultHostConfiguration} from './client.js';
+export type {CliLoginConfiguration, CliCallbackStatus} from './client.js';
 export const bridgeProtocol = __BRIDGE_PROTOCOL__ as const;
 type Code = Extract<Output, {status: 'error'}>['error'];
 const failure = (error: Code): Output => ({status: 'error', error});
+
+/** Native CLI callback page; trusted entry consumes the fragment before loading Wasm.
+ * This exposes only progress and handover, never a launch/callback capability.
+ */
+export async function prepareCliLogin(configuration: CliLoginConfiguration, launch: string) {
+  const {default: init, CliLogin} = await import('./wasm/cmsg.js');
+  await init();
+  const owner = new CliLogin(JSON.stringify(configuration), launch);
+  let disposed = false;
+  let finalStatus: CliCallbackStatus | undefined;
+  return {
+    status(): CliCallbackStatus { return disposed ? finalStatus! : JSON.parse(owner.status()) as CliCallbackStatus; },
+    async begin(): Promise<CliCallbackStatus> {
+      if (disposed) throw new CmsgError('unavailable');
+      return JSON.parse(await owner.begin()) as CliCallbackStatus;
+    },
+    cancel(): CliCallbackStatus {
+      if (disposed) throw new CmsgError('unavailable');
+      return JSON.parse(owner.cancel()) as CliCallbackStatus;
+    },
+    dispose(): void {
+      if (!disposed) { finalStatus = JSON.parse(owner.cancel()) as CliCallbackStatus; disposed = true; owner.free(); }
+    },
+  };
+}
 
 /** Partial non-custody page runtime; the member PWA uses createVaultClient. */
 export async function createBrowserClient(configuration: BrowserConfiguration) {

@@ -220,6 +220,8 @@ async fn configured_native_owner_constructs_actual_https_clients_without_claimin
         role: Role::Member,
         primary: foyer::Scope::Community,
         trust: None,
+        login: None,
+        root_board: false,
         services: vec![browser::Service {
             scope: foyer::Scope::Community,
             base: "https://api.alpha.example.test".into(),

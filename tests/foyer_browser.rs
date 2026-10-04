@@ -330,6 +330,8 @@ async fn browser_owner_has_private_pairing_bounded_admission_and_drained_disposa
         role,
         primary: scope,
         trust: None,
+        login: None,
+        root_board: false,
         forum: (origin == MEMBER).then(|| board::Configuration {
             forum_origin: "https://forum.alpha.example.test".into(),
             maximum_response_bytes: 65_536,

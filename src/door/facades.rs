@@ -253,6 +253,8 @@ impl Door {
     /// lock revokes the original checkpoint even if another owner still holds a
     /// SharedStore clone; merely dropping this Door cannot provide that guarantee.
     pub(super) async fn close_owned(mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        super::login::native::drain(&mut self).await;
         self.grants.clear();
         for (_, vault) in std::mem::take(&mut self.vaults) {
             vault.lock().await;

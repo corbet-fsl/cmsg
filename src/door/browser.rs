@@ -27,12 +27,16 @@ pub struct Configuration {
     pub community: String,
     pub origin: String,
     pub role: Role,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub root_board: bool,
     pub primary: foyer::Scope,
     pub services: Vec<Service>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forum: Option<board::Configuration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trust: Option<TrustConfiguration>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login: Option<login::Configuration>,
 }
 
 /// Public top-level UI configuration. The isolated vault frame owns custody.
@@ -140,10 +144,21 @@ impl Configuration {
     /// the verified browser origin retains them; this does not create custody.
     pub(crate) fn construct(mut self) -> Result<Door> {
         let community = self.community.clone();
-        let mut door = Door::new(super::Configuration::new(
-            self.community,
-            BTreeMap::from([(self.role, BTreeSet::from([self.origin.clone()]))]),
-        )?);
+        let configuration = if self.root_board {
+            if self.community != "root"
+                || self.role != Role::Root
+                || self.primary != foyer::Scope::Community
+            {
+                return Err(ErrorCode::InvalidRequest);
+            }
+            super::Configuration::root_board(self.origin.clone())?
+        } else {
+            super::Configuration::new(
+                self.community,
+                BTreeMap::from([(self.role, BTreeSet::from([self.origin.clone()]))]),
+            )?
+        };
+        let mut door = Door::new(configuration);
         if !(1..=2).contains(&self.services.len()) {
             return Err(ErrorCode::InvalidRequest);
         }
@@ -198,6 +213,13 @@ impl Configuration {
             sessions = sessions.with_service(scope, client)?;
         }
         door.bind_foyer(&self.origin, self.role, sessions)?;
+        if let Some(login) = self.login {
+            login.context()?;
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                door.login_configuration.insert(self.origin.clone(), login);
+            }
+        }
         if let Some(forum) = self.forum {
             door.configure_board(&self.origin, forum, board::SystemClock)?;
         }

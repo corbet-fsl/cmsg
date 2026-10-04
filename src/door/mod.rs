@@ -73,6 +73,7 @@ pub enum Role {
 pub struct Configuration {
     community: String,
     origins: BTreeMap<Role, BTreeSet<String>>,
+    root_board: bool,
 }
 
 impl Configuration {
@@ -94,7 +95,22 @@ impl Configuration {
                 }
             }
         }
-        Ok(Self { community, origins })
+        Ok(Self {
+            community,
+            origins,
+            root_board: false,
+        })
+    }
+
+    /// Explicit trusted root-board portal. This selects only a local command
+    /// surface; the original service must still authorize its real session.
+    pub fn root_board(origin: String) -> Result<Self> {
+        let mut configuration = Self::new(
+            "root".into(),
+            BTreeMap::from([(Role::Root, BTreeSet::from([origin]))]),
+        )?;
+        configuration.root_board = true;
+        Ok(configuration)
     }
 }
 
@@ -206,6 +222,10 @@ pub struct Door {
     boards: BTreeMap<String, Box<dyn facades::BoundBoard>>,
     meshes: BTreeMap<String, facades::BoundMesh>,
     vaults: BTreeMap<String, Box<dyn facades::BoundVault>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    login_configuration: BTreeMap<String, login::Configuration>,
+    #[cfg(not(target_arch = "wasm32"))]
+    logins: BTreeMap<[u8; 32], login::native::State>,
 }
 
 impl Door {
@@ -218,6 +238,10 @@ impl Door {
             boards: BTreeMap::new(),
             meshes: BTreeMap::new(),
             vaults: BTreeMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            login_configuration: BTreeMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            logins: BTreeMap::new(),
         }
     }
 
@@ -236,6 +260,8 @@ impl Door {
             .get(&role)
             .is_some_and(|set| set.contains(origin))
             || self.foyers.contains_key(origin)
+            || (self.config.root_board
+                && (role != Role::Root || sessions.primary != foyer::Scope::Community))
         {
             return Err(ErrorCode::Unauthorized);
         }
@@ -243,6 +269,7 @@ impl Door {
             origin.into(),
             foyer::Binding {
                 role,
+                root_board: self.config.root_board,
                 sessions,
                 uncertain: false,
             },
@@ -255,6 +282,15 @@ impl Door {
             return Err(ErrorCode::Clock);
         }
         self.clock_floor = now;
+        #[cfg(not(target_arch = "wasm32"))]
+        for key in self
+            .grants
+            .iter()
+            .filter_map(|(key, grant)| (now >= grant.expires).then_some(*key))
+            .collect::<Vec<_>>()
+        {
+            login::native::retire(self, &key);
+        }
         self.grants.retain(|_, grant| now < grant.expires);
         Ok(())
     }
@@ -319,6 +355,8 @@ impl Door {
 
     /// Trusted embedding revocation (including termination of a paired client).
     pub fn revoke(&mut self, token: &ClientToken) {
+        #[cfg(not(target_arch = "wasm32"))]
+        login::native::retire(self, &token_hash(token.expose_for_transport()));
         self.grants
             .remove(&token_hash(token.expose_for_transport()));
     }

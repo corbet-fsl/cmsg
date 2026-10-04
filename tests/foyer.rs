@@ -280,3 +280,82 @@ async fn real_owner_unknown_reply_oversize_and_cancellation_never_allow_blind_re
         .unwrap();
     assert_eq!(stats(base).await, vec![1, 1, 1]);
 }
+
+#[tokio::test]
+async fn explicit_root_board_routes_admin_actions_but_other_root_surfaces_stay_denied() {
+    let fixture = fixture();
+    let now = fixture["now"].as_u64().unwrap();
+    for (explicit, community, primary, row, expected) in [
+        (true, "root", foyer::Scope::Community, "root_board", "ok"),
+        (
+            false,
+            "root",
+            foyer::Scope::Community,
+            "root_board",
+            "error",
+        ),
+        (false, "alpha", foyer::Scope::Community, "root", "error"),
+        (false, "root", foyer::Scope::Global, "global_root", "error"),
+    ] {
+        let config = if explicit {
+            Configuration::root_board(ROOT.into()).unwrap()
+        } else {
+            Configuration::new(
+                community.into(),
+                BTreeMap::from([(Role::Root, BTreeSet::from([ROOT.into()]))]),
+            )
+            .unwrap()
+        };
+        let mut door = Door::new(config);
+        door.bind_foyer(
+            ROOT,
+            Role::Root,
+            foyer::Sessions::new(primary, session(&fixture[row])),
+        )
+        .unwrap();
+        let token = grant(&mut door, ROOT, Role::Root, now);
+        let output = surface::invoke(
+            &mut door,
+            ROOT,
+            token.expose_for_transport(),
+            "foyer.setting_set",
+            1,
+            json!({"key":"quota", "value":5,
+                "inherit":false, "effective_at":now + 86_400}),
+            now,
+        )
+        .await;
+        let output = serde_json::to_value(output).unwrap();
+        assert_eq!(output["status"], expected);
+        if explicit {
+            assert!(output["result"]["policy_epoch"].as_u64().unwrap() > 1);
+            assert_eq!(
+                serde_json::to_value(
+                    surface::invoke(
+                        &mut door,
+                        ROOT,
+                        token.expose_for_transport(),
+                        "foyer.handle_reserve",
+                        1,
+                        json!({"handle":"fictional"}),
+                        now
+                    )
+                    .await
+                )
+                .unwrap()["error"],
+                "unauthorized"
+            );
+        } else {
+            assert_eq!(output["error"], "unauthorized");
+        }
+    }
+    let mut root = Door::new(Configuration::root_board(ROOT.into()).unwrap());
+    assert!(matches!(
+        root.bind_foyer(
+            ROOT,
+            Role::Root,
+            foyer::Sessions::new(foyer::Scope::Global, session(&fixture["global_root"]))
+        ),
+        Err(ErrorCode::Unauthorized)
+    ));
+}

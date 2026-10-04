@@ -1,6 +1,7 @@
 use super::*;
 use board::{depart as board_depart, heartbeat as board_heartbeat};
 use foyer::refresh as foyer_refresh;
+use login::{cancel as login_cancel, poll as login_poll, start as login_start};
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
@@ -181,17 +182,13 @@ async fn mesh_disconnect(door: &mut Door, key: &[u8; 32], _: Empty) -> Result<(E
     Ok((Empty {}, vec![Event::MeshDisconnected]))
 }
 
-async fn login(_: &mut Door, _: &[u8; 32], _: Empty) -> Result<(super::login::Status, Vec<Event>)> {
-    // Neither a raw passkey callback nor server authentication alone is accepted
-    // device custody. The real compound Vault bootstrap must bind before use.
-    Err(ErrorCode::Unavailable)
-}
-
 pub(super) fn owner_types() -> Value {
-    serde_json::json!({"GroupView": schema::<cbrd::GroupView>(), "DiscoveryPage": schema::<cbrd::DiscoveryPage>(), "BrowserConfiguration": schema::<browser::Configuration>(), "VaultBridgeConfiguration": schema::<browser::VaultBridgeConfiguration>(), "VaultHostConfiguration": schema::<browser::VaultHostConfiguration>(), "VaultBridgeRequest": schema::<browser::VaultBridgeRequest>(), "VaultBridgeReply": schema::<browser::VaultBridgeReply>()})
+    serde_json::json!({"CliLoginConfiguration": schema::<login::Configuration>(), "CliCallbackStatus": schema::<login::CallbackStatus>(), "GroupView": schema::<cbrd::GroupView>(), "DiscoveryPage": schema::<cbrd::DiscoveryPage>(), "BrowserConfiguration": schema::<browser::Configuration>(), "VaultBridgeConfiguration": schema::<browser::VaultBridgeConfiguration>(), "VaultHostConfiguration": schema::<browser::VaultHostConfiguration>(), "VaultBridgeRequest": schema::<browser::VaultBridgeRequest>(), "VaultBridgeReply": schema::<browser::VaultBridgeReply>()})
 }
 
 async fn revoke(door: &mut Door, key: &[u8; 32], _: Empty) -> Result<(Revoked, Vec<Event>)> {
+    #[cfg(not(target_arch = "wasm32"))]
+    login::native::retire(door, key);
     door.grants.remove(key);
     Ok((Revoked { revoked: true }, vec![Event::ClientRevoked]))
 }
@@ -229,9 +226,9 @@ actions! {
     "mesh.status" => mesh_status(Empty) -> Vec<cmsh::BackendView>, Read, Mesh;
     "mesh.disconnect" => mesh_disconnect(Empty) -> Empty, LocalLifecycle, Mesh;
     "vault.lock" => vault_lock(Empty) -> Empty, LocalLifecycle, Vault;
-    "login.start" => login(super::login::Start) -> super::login::Status, LocalBootstrap, Foyer;
-    "login.poll" => login(super::login::Poll) -> super::login::Status, Read, Foyer;
-    "login.cancel" => login(super::login::Cancel) -> super::login::Status, LocalBootstrap, Foyer;
+    "login.start" => login_start(super::login::Start) -> super::login::Status, LocalBootstrap, Foyer;
+    "login.poll" => login_poll(super::login::Poll) -> super::login::Status, LocalBootstrap, Foyer;
+    "login.cancel" => login_cancel(super::login::Cancel) -> super::login::Status, LocalBootstrap, Foyer;
 }
 
 pub(super) fn action(name: &str) -> Option<&'static Action> {
