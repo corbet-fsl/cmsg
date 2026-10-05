@@ -237,3 +237,34 @@ generated login, actual frame and popup clicks, original HPKE, verified Foyer
 session, authenticated lobby and unavailable custody. Native shared-lifecycle
 regressions remain in place. Compilation/execution, generated equality and full
 coverage are required; adding fixture source does not qualify a browser.
+
+
+### Trusted login custody handover
+
+`Door::prepare_login_custody(origin, &ClientToken, now)` is a trusted Rust
+composition method, absent from the action registry and every generated wire
+projection. The shared native/browser login owner consumes the original opaque
+Passkeys result directly into `cvlt::PreparedOpen` once. It requires the matching
+local origin and live grant with `login.start`, a Member portal with Community as
+its primary service, an unambiguous Foyer, and the same successfully installed
+original session before its exclusive deadline. Foyer correlates the session with
+a weak opaque generation stamp; equal public user/role/deadline values are not
+session equality. Reauthentication or logout invalidates an earlier stamp.
+
+No Store is opened and no root, Wallet or authority is created by this handover.
+A missing PRF or initializer refusal consumes the attempt; repeating it cannot
+recover the original secret. Cancelling before handover drops the retained result.
+After handover, the preparation belongs to the trusted composer, which must drop
+it on cancellation and recheck current authority before binding custody. The
+login remains `authenticated_pending_custody`; cancellation after taking the
+preparation does not pretend to revoke its independent ownership. Complete and
+runtime readiness still require the original accepted owners and checkpoint.
+
+The added shared Rust fixture uses original owner-generated challenges, an actual
+maintained software PRF authenticator and real server session acceptance on native
+and Wasm targets. It covers one-use transfer, exact local scope/origin, original
+session replacement/logout/expiry, grant expiry, cancellation, clock regression,
+uncertainty and initializer refusal. Its software gesture is not a platform or
+popup qualification. The separate actual HTTPS popup/HPKE fixture, native/Wasm
+compilation, full coverage and successful Authority/Wallet composition remain
+required; no execution claim accompanies this source change.
