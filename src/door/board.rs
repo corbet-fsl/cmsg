@@ -92,17 +92,19 @@ fn current_version(foyer: &mut foyer::Binding, community: &str, expires: u64) ->
     if now >= expires {
         return Err(ErrorCode::Unauthorized);
     }
-    let charter = foyer.current(community, now)?;
-    let settings = cfrm::crbk::ForumSettings::from_snapshot(
-        charter.settings(now).map_err(|_| ErrorCode::Refused)?,
-    )
-    .map_err(|_| ErrorCode::Refused)?;
-    let version = env!("CARGO_PKG_VERSION")
-        .parse()
-        .map_err(|_| ErrorCode::Unavailable)?;
-    if !settings.accepts_client(&version) {
-        return Err(ErrorCode::UnsupportedVersion);
-    }
+    foyer.current(community, now, |charter| {
+        let settings = cfrm::crbk::ForumSettings::from_snapshot(
+            charter.settings(now).map_err(|_| ErrorCode::Refused)?,
+        )
+        .map_err(|_| ErrorCode::Refused)?;
+        let version = env!("CARGO_PKG_VERSION")
+            .parse()
+            .map_err(|_| ErrorCode::Unavailable)?;
+        if !settings.accepts_client(&version) {
+            return Err(ErrorCode::UnsupportedVersion);
+        }
+        Ok(())
+    })?;
     Ok(now)
 }
 
