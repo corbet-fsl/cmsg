@@ -247,6 +247,22 @@ impl Door {
             .map(Foyer::live_membership)
             .ok_or(ErrorCode::Unavailable)
     }
+
+    /// Lend a weak scoped read of the same community's sole current Charter.
+    /// The trusted composer reborrows after waits; no policy snapshot or grant
+    /// crosses the generated action interface.
+    pub fn current_policy(&self, origin: &str) -> Result<cfyr::policy::CurrentPolicy<Transport>> {
+        let binding = self.foyers.get(origin).ok_or(ErrorCode::Unavailable)?;
+        if binding.role != Role::Member || binding.uncertain {
+            return Err(ErrorCode::Unauthorized);
+        }
+        binding
+            .sessions
+            .clients
+            .get(&Scope::Community)
+            .map(Foyer::current_policy)
+            .ok_or(ErrorCode::Unavailable)
+    }
 }
 
 /// Borrow only the original retained community Foyer. Public request data never
@@ -258,16 +274,20 @@ impl Binding {
             .get_mut(&Scope::Community)
             .ok_or(ErrorCode::Unavailable)
     }
-    pub(super) fn current(
+    pub(super) fn current<R>(
         &mut self,
         community: &str,
         now: u64,
-    ) -> Result<&cfyr::trust::VerifiedCharter> {
-        let current = self.community()?.current(now).map_err(trust_error)?;
-        if current.community() != community {
-            return Err(ErrorCode::Unauthorized);
-        }
-        Ok(current)
+        inspect: impl FnOnce(&cfyr::trust::VerifiedCharter) -> Result<R>,
+    ) -> Result<R> {
+        self.community()?
+            .current(now, |current| {
+                if current.community() != community {
+                    return Err(ErrorCode::Unauthorized);
+                }
+                inspect(current)
+            })
+            .map_err(trust_error)?
     }
 }
 
@@ -301,7 +321,7 @@ pub(super) async fn refresh(
         .clone();
     let community = door.config.community.clone();
     let binding = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
-    let trust = binding.community()?.trust().map_err(trust_error)?;
+    let mut trust = binding.community()?.trust().map_err(trust_error)?;
     let failed_clock = std::cell::Cell::new(false);
     let clock = || {
         match cbrd::clnk::Clock::now(&board::SystemClock) {
@@ -326,8 +346,9 @@ pub(super) async fn refresh(
         return Err(ErrorCode::Clock);
     }
     result.map_err(trust_error)?;
+    drop(trust);
     let now = cbrd::clnk::Clock::now(&board::SystemClock).map_err(|_| ErrorCode::Clock)? / 1000;
-    binding.current(&community, now)?;
+    binding.current(&community, now, |_| Ok(()))?;
     door.observe(now)?;
     Ok((Empty {}, vec![]))
 }

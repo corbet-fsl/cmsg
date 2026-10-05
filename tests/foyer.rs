@@ -96,10 +96,18 @@ async fn local_http_routes_real_member_admin_root_and_rejects_foreign_authority(
             )
             .unwrap();
             assert!(door.live_membership(ADMIN).is_err());
+            assert!(door.current_policy(ADMIN).is_err());
             assert!(door.live_membership(ROOT).is_err());
             assert!(door.live_membership(WALLET).is_err());
+            assert!(door.current_policy(WALLET).is_err());
             assert!(
                 door.live_membership("https://foreign.example.test")
+                    .is_err()
+            );
+            assert!(
+                door.current_policy(MEMBER)
+                    .unwrap()
+                    .with_current(now, |_| ())
                     .is_err()
             );
             // This fixture supplied an actual bearer at construction; it did
