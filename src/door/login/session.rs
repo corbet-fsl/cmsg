@@ -22,10 +22,12 @@ pub(crate) enum State {
         expires: u64,
         custody: VaultOutcome,
     },
-    // Retained opaquely until the compound Vault initializer can consume it.
+    // Retained opaquely until the trusted Vault preparation consumes it once.
     Authenticated {
-        _session: cfyr::SessionInfo,
-        _custody: VaultOutcome,
+        session: cfyr::SessionInfo,
+        binding: cfyr::session::SessionBinding<foyer::Transport>,
+        scope: foyer::Scope,
+        custody: Option<VaultOutcome>,
     },
     Cancelled,
     Refused(ErrorCode),
@@ -134,15 +136,24 @@ pub(super) fn poll(door: &mut Door, key: &[u8; 32]) -> Result<Status> {
                 let binding = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
                 match result {
                     Ok(session) => {
+                        let stamp = client.session_binding();
                         binding.sessions.clients.insert(scope, client);
                         binding.uncertain = false;
-                        (
-                            State::Authenticated {
-                                _session: session,
-                                _custody: custody,
-                            },
-                            Ok(Status::AuthenticatedPendingCustody),
-                        )
+                        match stamp {
+                            Ok(stamp) => (
+                                State::Authenticated {
+                                    session,
+                                    binding: stamp,
+                                    scope,
+                                    custody: Some(custody),
+                                },
+                                Ok(Status::AuthenticatedPendingCustody),
+                            ),
+                            Err(error) => {
+                                let error = foyer::map_error(error);
+                                (State::Refused(error), Err(error))
+                            }
+                        }
                     }
                     Err(error) => {
                         let error = foyer::map_error(error);
@@ -183,6 +194,14 @@ pub(super) fn cancel(door: &mut Door, key: &[u8; 32]) -> Result<Status> {
                 .insert(*key, State::Refused(ErrorCode::Reconcile));
             Err(ErrorCode::Reconcile)
         }
+        Some(State::Authenticated {
+            custody: Some(_), ..
+        }) => {
+            // Public authentication already completed, but no custody owner has
+            // taken this result. Cancellation drops only the retained secret.
+            door.logins.insert(*key, State::Cancelled);
+            Ok(Status::Cancelled)
+        }
         Some(state) => {
             door.logins.insert(*key, state);
             poll(door, key)
@@ -206,3 +225,71 @@ pub(crate) async fn drain(door: &mut Door) {
         }
     }
 }
+
+impl Door {
+    /// Consume one successful member login directly into the original Vault
+    /// preparation. Trusted Rust composition only: absent from every action,
+    /// Wasm/JSON projection and callback. This neither opens a Store nor grants
+    /// custody/readiness; production Authority, Records and Wallet remain needed.
+    ///
+    /// A returned preparation has independent ownership. Cancelling or revoking
+    /// this login afterwards cannot reclaim it; the trusted composer must drop
+    /// it on cancellation and never bind owners from an expired/replaced session.
+    pub fn prepare_login_custody(
+        &mut self,
+        origin: &str,
+        token: &ClientToken,
+        now: u64,
+    ) -> Result<cvlt::PreparedOpen> {
+        self.observe(now)?;
+        let key = token_hash(token.expose_for_transport());
+        let grant = self.grants.get(&key).ok_or(ErrorCode::Unauthorized)?;
+        if grant.origin != origin || !grant.actions.contains("login.start") {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let owner = self.foyers.get(origin).ok_or(ErrorCode::Unavailable)?;
+        if owner.role != Role::Member || owner.sessions.primary != foyer::Scope::Community {
+            return Err(ErrorCode::Unauthorized);
+        }
+        if owner.uncertain {
+            return Err(ErrorCode::Reconcile);
+        }
+        let state = self.logins.get_mut(&key).ok_or(ErrorCode::Refused)?;
+        let State::Authenticated {
+            session,
+            binding,
+            scope,
+            custody,
+        } = state
+        else {
+            return Err(ErrorCode::Refused);
+        };
+        if *scope != foyer::Scope::Community || now >= session.expires {
+            // An expired or mismatched login can never keep a usable secret.
+            *state = State::Refused(ErrorCode::Unauthorized);
+            return Err(ErrorCode::Unauthorized);
+        }
+        let current = owner
+            .sessions
+            .clients
+            .get(scope)
+            .ok_or(ErrorCode::Unavailable)?;
+        if let Err(error) = binding.check(current, now) {
+            let error = foyer::map_error(error);
+            *state = State::Refused(error);
+            return Err(error);
+        }
+        // Taking happens before the original initializer, including its refusal.
+        // A later poll remains authenticated_pending_custody; a retry can never
+        // recover a consumed capability or silently start another ceremony.
+        match custody.take().ok_or(ErrorCode::Refused)? {
+            VaultOutcome::Ready(unlock) => cvlt::PreparedOpen::new(unlock, &self.config.community)
+                .map_err(|_| ErrorCode::Refused),
+            VaultOutcome::Locked(_) => Err(ErrorCode::Unavailable),
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "../../../tests/support/login_custody.rs"]
+mod custody_tests;

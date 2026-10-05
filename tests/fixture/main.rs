@@ -165,6 +165,19 @@ async fn main() {
         .call("register_begin", json!({"passport":proof}))
         .await
         .unwrap();
+    // Independent real public registrations for the shared native/Wasm custody
+    // source fixture. Only original passport presentation and registration begin
+    // produce these challenges; the test's actual authenticator must finish them.
+    let mut custody_registrations = serde_json::Map::new();
+    for target in ["native", "browser"] {
+        let (_, passport, _) = wallet_passport(&wallet).await;
+        let proof = presentation(&service, member_host, None, &passport).await;
+        let registration = client(&service, member_host, None)
+            .call("register_begin", json!({"passport":proof}))
+            .await
+            .unwrap();
+        custody_registrations.insert(target.into(), registration);
+    }
     let admin_host = "api.admin.alpha.example.test";
     let mut member = enrol_community(&service, member_host, &passport).await;
     let vault_session = login(
@@ -303,6 +316,7 @@ async fn main() {
     let data = json!({
         "now": NOW + 1,
         "browser_registration": browser_registration,
+        "custody_registrations": custody_registrations,
         "login_faults": login_faults,
         "global": {"base": wallet.base, "host": WALLET, "session": global_member.session},
         "member": {"base": service.base, "host": member_host, "session": member.session},

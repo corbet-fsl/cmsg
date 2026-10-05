@@ -58,6 +58,9 @@ web-sys = { version = "0.3", features = ["Window", "Location", "Event", "EventTa
 cfyr = { git = "https://github.com/corbet-libs/cfyr", branch = "main", default-features = false, features = ["browser"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
+[dev-dependencies]
+cpky = { git = "https://github.com/corbet-foss/cpky", branch = "main", features = ["test-authenticator"] }
+
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 futures-util = "0.3"
 gloo-net = "0.6"
