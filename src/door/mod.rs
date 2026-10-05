@@ -11,6 +11,8 @@ mod json;
 pub mod login;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
+#[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
+pub mod network_native;
 mod registry;
 pub mod surface;
 

@@ -39,6 +39,9 @@ sha2 = "0.10"
 data-encoding = "2.9"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ctrn = { git = "https://github.com/corbet-foss/ctrn", branch = "main", optional = true }
+arti-client = { version = "0.46", default-features = false, optional = true }
+tor-rtcompat = { version = "0.46", default-features = false, features = ["tokio", "rustls"], optional = true }
 cbrd = { git = "https://github.com/corbet-libs/cbrd", branch = "main", default-features = false, features = ["http"] }
 futures-util = "0.3"
 cfyr = { git = "https://github.com/corbet-libs/cfyr", branch = "main", default-features = false, features = ["http"] }
@@ -76,6 +79,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(owned_browser_coverage)"] 
 
 [features]
 conformance = []
+native-tor = ["ckmg/native-tor", "cmsh/tor", "dep:ctrn", "dep:arti-client", "dep:tor-rtcompat"]
 
 [[example]]
 name = "client-conformance"
