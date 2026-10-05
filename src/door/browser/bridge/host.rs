@@ -201,6 +201,7 @@ impl VaultHost {
         ));
         let weak = Rc::downgrade(&state);
         let target = parent;
+        let announce_origin = member_origin.clone();
         let hello = Closure::wrap(Box::new(move |event: MessageEvent| {
             if event.data().as_string().as_deref() != Some(READY) {
                 return;
@@ -307,6 +308,15 @@ impl VaultHost {
             .map_err(|_| ErrorCode::Unavailable)?;
         host.window
             .add_event_listener_with_callback("pagehide", host.leaving.as_ref().unchecked_ref())
+            .map_err(|_| ErrorCode::Unavailable)?;
+        // Configuration/Wasm startup can finish after the frame's load event.
+        // Announce only after both guards exist; the UI answers with the same
+        // original handshake and this owner still verifies its exact parent.
+        host.window
+            .parent()
+            .map_err(|_| ErrorCode::Unavailable)?
+            .ok_or(ErrorCode::Unauthorized)?
+            .post_message(&JsValue::from_str(READY), &announce_origin)
             .map_err(|_| ErrorCode::Unavailable)?;
         Ok(host)
     }

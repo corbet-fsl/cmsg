@@ -1,4 +1,4 @@
-import {createVaultClient, bridgeProtocol} from '/browser.js';
+import {createVaultClient, createConfiguredVaultClient, bridgeProtocol} from '/browser.js';
 const MEMBER = 'https://alpha.example.test';
 const VAULT = 'https://vault.alpha.example.test';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -62,6 +62,30 @@ export async function member() {
   check((await client.invoke('runtime.status', {})).error === 'unavailable', 'closed client reused');
   check(!performance.getEntriesByType('resource').some(entry => entry.name.endsWith('.wasm')), 'UI instantiated custody Wasm');
 }
+export async function configured() {
+  const client = await createConfiguredVaultClient();
+  try {
+    const status = await client.call('runtime.status', {});
+    check(status.community === 'alpha' && status.preload === 'unavailable', 'configured original owner missing');
+    const feed = await client.call('foyer.trust_feed', {});
+    check(Array.isArray(feed.manifest) && feed.manifest.length > 0, 'original remote Foyer forwarding missing');
+    check((await client.invoke('login.start', {})).error === 'unavailable', 'configured custody fabricated');
+    check(document.querySelector('[data-cmsg-vault]')?.isConnected, 'configured owner frame lost');
+    check(!performance.getEntriesByType('resource').some(entry => entry.name.endsWith('.wasm')), 'member loaded custody Wasm');
+  } finally { await client.dispose(); }
+  check(!document.querySelector('[data-cmsg-vault]'), 'configured owner did not acknowledge drain');
+}
+async function configuration_refused() {
+  let refused = false;
+  try { await createConfiguredVaultClient(); }
+  catch (error) { refused = error.code === 'unavailable'; }
+  check(refused, 'invalid public configuration accepted');
+  check(!document.querySelector('[data-cmsg-vault]'), 'invalid configuration constructed custody frame');
+}
+export const configured_malformed = configuration_refused;
+export const configured_oversize = configuration_refused;
+export const configured_redirect = configuration_refused;
+export const configured_stall = configuration_refused;
 async function invalid_close_retains_custody(page, withPending) {
   const client = await createVaultClient({member_origin: MEMBER, vault_origin: VAULT,
     vault_url: VAULT + page, timeout_millis: 10000});

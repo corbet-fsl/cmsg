@@ -11,6 +11,73 @@ export const bridgeProtocol = __BRIDGE_PROTOCOL__ as const;
 type Code = Extract<Output, {status: 'error'}>['error'];
 const failure = (error: Code): Output => ({status: 'error', error});
 
+const setupMillis = 10_000;
+const configurationBytes = 65_536;
+type Disposable = {dispose(): Promise<void>};
+
+/** Public deployment inputs only. Paths are fixed by the embedding contract;
+ * action bodies, query parameters and the member channel cannot override them.
+ */
+async function configured<T, O extends Disposable>(path: string, construct: (configuration: T) => Promise<O>): Promise<O> {
+  const controller = new AbortController();
+  let closed = false;
+  let stop!: () => void;
+  const stopped = new Promise<never>((_, reject) => {
+    stop = () => { closed = true; controller.abort(); reject(new CmsgError('unavailable')); };
+  });
+  const timer = setTimeout(stop, setupMillis);
+  addEventListener('pagehide', stop, {once: true});
+  const opening = (async () => {
+    const response = await fetch(path, {cache: 'no-store', credentials: 'omit', redirect: 'error',
+      referrerPolicy: 'no-referrer', signal: controller.signal});
+    if (closed || !response.ok || !response.body) throw new CmsgError('unavailable');
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+      for (;;) {
+        const {done, value} = await reader.read();
+        if (closed) throw new CmsgError('unavailable');
+        if (done) break;
+        length += value.byteLength;
+        if (length > configurationBytes) { await reader.cancel(); throw new CmsgError('capacity'); }
+        chunks.push(value);
+      }
+    } finally { reader.releaseLock(); }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    const configuration = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes)) as T;
+    if (closed) throw new CmsgError('unavailable');
+    // Original constructors validate the generated shape and actual origins.
+    // Imports/Wasm cannot be aborted: late owners must still drain themselves.
+    const owner = await construct(configuration);
+    if (closed) { void owner.dispose().catch(() => {}); throw new CmsgError('unavailable'); }
+    return owner;
+  })();
+  try { return await Promise.race([opening, stopped]); }
+  catch { throw new CmsgError('unavailable'); }
+  finally { closed = true; controller.abort(); clearTimeout(timer); removeEventListener('pagehide', stop); }
+}
+
+/** Production member entry; this module never loads custody Wasm on this path. */
+export function createConfiguredVaultClient() {
+  if (window.top !== window || location.protocol !== 'https:') return Promise.reject(new CmsgError('unauthorized'));
+  return configured<VaultBridgeConfiguration, Awaited<ReturnType<typeof createVaultClient>>>(
+    '/cmsg/member.json', createVaultClient,
+  );
+}
+
+/** Production vault entry. Its own origin supplies the original host configuration. */
+export function startConfiguredVaultHost() {
+  if (window.parent === window || window.parent !== window.top || location.protocol !== 'https:') {
+    return Promise.reject(new CmsgError('unauthorized'));
+  }
+  return configured<VaultHostConfiguration, Awaited<ReturnType<typeof startVaultHost>>>(
+    '/cmsg/vault.json', startVaultHost,
+  );
+}
+
 /** Native CLI callback page; trusted entry consumes the fragment before loading Wasm.
  * This exposes only progress and handover, never a launch/callback capability.
  */
@@ -141,7 +208,15 @@ export async function createVaultClient(configuration: VaultBridgeConfiguration)
     } else fail('reconcile');
   }
   function hello(event: MessageEvent) {
-    if (event.data !== bridgeProtocol.connect) return;
+    if (event.data !== bridgeProtocol.connect && event.data !== bridgeProtocol.ready) return;
+    // Wasm/configuration may finish after the iframe load event. The original
+    // owner announces that it is listening; only our exact frame can trigger it.
+    if (event.data === bridgeProtocol.ready) {
+      if (event.isTrusted && event.origin === vault && event.source === frame.contentWindow
+          && event.ports.length === 0 && !port && !closing) frame.contentWindow?.postMessage(bridgeProtocol.ready, vault);
+      else for (const unwanted of event.ports) unwanted.close();
+      return;
+    }
     if (!event.isTrusted || event.origin !== vault || event.source !== frame.contentWindow || event.ports.length !== 1 || port || closing) {
       for (const unwanted of event.ports) unwanted.close(); return;
     }

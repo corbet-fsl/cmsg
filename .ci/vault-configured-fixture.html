@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Original configured Vault owner fixture</title>
+<body>
+<script type="module">
+// Construct the original owner strictly after load: the member's first READY
+// has already been sent. No generated transport or Wasm behavior is replaced.
+addEventListener('load', () => {
+  setTimeout(async () => {
+    try {
+      const {startConfiguredVaultHost} = await import('/browser.js');
+      const host = await startConfiguredVaultHost();
+      document.body.dataset.owner = 'constructed';
+      addEventListener('pagehide', () => { void host.dispose(); }, {once: true});
+    } catch { document.body.dataset.owner = 'refused'; }
+  }, 100);
+}, {once: true});
+</script>

@@ -4,10 +4,12 @@ from contextlib import ExitStack
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
+import json
 import os
 import shutil
 from pathlib import Path
 import threading
+import time
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -15,6 +17,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 
 class Static(SimpleHTTPRequestHandler):
+    configuration_case = "configured"
+
     def log_message(self, *_):
         pass
 
@@ -24,8 +28,47 @@ class Static(SimpleHTTPRequestHandler):
             "/__vault-close-mismatch.html": ("text/html", "vault-frame-fixture.html"),
             "/__vault-close-pending.html": ("text/html", "vault-frame-fixture.html"),
             "/__bridge-vectors.js": ("text/javascript", "bridge-browser.mjs"),
+            "/__vault-configured.html": ("text/html", "vault-configured-fixture.html"),
         }
-        if self.path == "/__redirect-foreign":
+        if self.path in ["/cmsg/member.json", "/cmsg/vault.json"]:
+            member = self.path == "/cmsg/member.json"
+            configuration = ({
+                "member_origin": "https://alpha.example.test",
+                "vault_origin": "https://vault.alpha.example.test",
+                "vault_url": "https://vault.alpha.example.test/__vault-configured.html",
+                "timeout_millis": 10000,
+            } if member else {
+                "member_origin": "https://alpha.example.test",
+                "runtime": {
+                    "community": "alpha", "origin": "https://vault.alpha.example.test",
+                    "role": "member", "primary": "community", "services": [{
+                        "scope": "community", "base": "https://api.alpha.example.test",
+                        "host": "api.alpha.example.test",
+                    }],
+                },
+            })
+            case = self.configuration_case if member else "configured"
+            if case == "configured_redirect":
+                self.send_response(302)
+                self.send_header("Location", "https://wallet.example.test/cmsg/member.json")
+                self.end_headers()
+                return
+            if case == "configured_stall":
+                time.sleep(11)
+            data = json.dumps(configuration).encode()
+            if case == "configured_malformed":
+                data = b'{"member_origin":'
+            elif case == "configured_oversize":
+                data = b" " * 65537
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            try:
+                self.wfile.write(data)
+            except BrokenPipeError:
+                pass  # The original loader aborted the faulted transport.
+        elif self.path == "/__redirect-foreign":
             self.send_response(302)
             self.send_header("Location", "https://wallet.example.test/__member-fixture.html")
             self.end_headers()
@@ -102,7 +145,8 @@ def main():
         """)
         if result is not True:
             raise RuntimeError("generated browser runtime conformance failed")
-        for entry in ["member", "raw", "foreign", "wrong_source", "redirect", "top_rejected", "unread", "forged_ack", "stalled", "close_mismatch", "close_pending"]:
+        for entry in ["member", "configured", "configured_malformed", "configured_oversize", "configured_redirect", "configured_stall", "raw", "foreign", "wrong_source", "redirect", "top_rejected", "unread", "forged_ack", "stalled", "close_mismatch", "close_pending"]:
+            Static.configuration_case = entry
             origin = "https://wallet.example.test" if entry == "foreign" else "https://alpha.example.test"
             page = origin + "/__member-fixture.html"
             if entry == "top_rejected":
