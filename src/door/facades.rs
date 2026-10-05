@@ -88,6 +88,23 @@ impl<T: clnk::Transport, R> BoundBoard for BoardBinding<T, R> {
 pub(super) struct BoundMesh {
     mesh: cmsh::Mesh,
     listener: cmsh::Listening,
+    _lifetime: Option<MeshLifetime>,
+}
+/// Retain the actual transport shutdown with Mesh, including failed startup,
+/// dropped initialization, panic fencing and ordinary owner destruction.
+pub(super) struct MeshLifetime(Option<Box<dyn FnOnce()>>);
+impl MeshLifetime {
+    #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
+    pub(super) fn new(close: impl FnOnce() + 'static) -> Self {
+        Self(Some(Box::new(close)))
+    }
+}
+impl Drop for MeshLifetime {
+    fn drop(&mut self) {
+        if let Some(close) = self.0.take() {
+            close();
+        }
+    }
 }
 impl BoundMesh {
     pub fn view(&self) -> Vec<cmsh::BackendView> {
@@ -367,17 +384,32 @@ impl Door {
     /// already scoped backend owners; a caller cannot choose peer/network scope.
     /// This does not claim backend health or completed Inbox receive integration.
     pub async fn bind_mesh(&mut self, origin: &str, mesh: cmsh::Mesh) -> Result<()> {
+        self.bind_mesh_owned(origin, mesh, None).await
+    }
+
+    pub(super) async fn bind_mesh_owned(
+        &mut self,
+        origin: &str,
+        mesh: cmsh::Mesh,
+        lifetime: Option<MeshLifetime>,
+    ) -> Result<()> {
         self.member_origin(origin)?;
         if self.meshes.contains_key(origin) {
             return Err(ErrorCode::InvalidRequest);
         }
         let listener = mesh.listen().await.map_err(|_| ErrorCode::Unavailable)?;
-        self.meshes
-            .insert(origin.into(), BoundMesh { mesh, listener });
+        self.meshes.insert(
+            origin.into(),
+            BoundMesh {
+                mesh,
+                listener,
+                _lifetime: lifetime,
+            },
+        );
         Ok(())
     }
 
-    fn member_origin(&self, origin: &str) -> Result<()> {
+    pub(super) fn member_origin(&self, origin: &str) -> Result<()> {
         if self
             .config
             .origins
