@@ -228,6 +228,27 @@ impl Binding {
     }
 }
 
+impl Door {
+    /// Lend only the configured community Foyer's weak live-membership read
+    /// port to the trusted custody composer. This is not a public action or a
+    /// session, G3, signing or runtime-readiness grant.
+    pub fn live_membership(
+        &self,
+        origin: &str,
+    ) -> Result<cfyr::membership::LiveMembership<Transport>> {
+        let binding = self.foyers.get(origin).ok_or(ErrorCode::Unavailable)?;
+        if binding.role != Role::Member || binding.uncertain {
+            return Err(ErrorCode::Unauthorized);
+        }
+        binding
+            .sessions
+            .clients
+            .get(&Scope::Community)
+            .map(Foyer::live_membership)
+            .ok_or(ErrorCode::Unavailable)
+    }
+}
+
 /// Borrow only the original retained community Foyer. Public request data never
 /// chooses another service or supplies a policy snapshot.
 impl Binding {

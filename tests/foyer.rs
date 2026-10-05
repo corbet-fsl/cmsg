@@ -2,7 +2,7 @@
 //! no accepting test transport or server feature in the cmsg production graph.
 #![cfg(not(target_arch = "wasm32"))]
 use cmsg::door::{foyer, native, *};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -95,20 +95,39 @@ async fn local_http_routes_real_member_admin_root_and_rejects_foreign_authority(
                     .unwrap(),
             )
             .unwrap();
-            assert!(door
-                .bind_foyer(
+            assert!(door.live_membership(ADMIN).is_err());
+            assert!(door.live_membership(ROOT).is_err());
+            assert!(door.live_membership(WALLET).is_err());
+            assert!(
+                door.live_membership("https://foreign.example.test")
+                    .is_err()
+            );
+            // This fixture supplied an actual bearer at construction; it did
+            // not run the original Foyer login/deadline adoption. The selected
+            // community port exists but cannot invent its session deadline.
+            assert!(
+                door.live_membership(MEMBER)
+                    .unwrap()
+                    .observe(|| now)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                door.bind_foyer(
                     MEMBER,
                     Role::Root,
                     foyer::Sessions::new(foyer::Scope::Community, session(&fixture["root"]))
                 )
-                .is_err());
-            assert!(door
-                .bind_foyer(
+                .is_err()
+            );
+            assert!(
+                door.bind_foyer(
                     MEMBER,
                     Role::Member,
                     foyer::Sessions::new(foyer::Scope::Community, session(&fixture["member"]))
                 )
-                .is_err());
+                .is_err()
+            );
             assert!(
                 foyer::Sessions::new(foyer::Scope::Global, session(&fixture["global"]))
                     .with_service(foyer::Scope::Global, session(&fixture["global"]))
@@ -167,9 +186,11 @@ async fn local_http_routes_real_member_admin_root_and_rejects_foreign_authority(
         invoke(&member, "foyer.login_finish", json!({})).await,
         json!({"status":"error","error":"unsupported_action"})
     );
-    assert!(!catalog()
-        .iter()
-        .any(|action| action.action == "foyer.development_gate"));
+    assert!(
+        !catalog()
+            .iter()
+            .any(|action| action.action == "foyer.development_gate")
+    );
     for raw in [
         br#"{"action":"foyer.setting_set","version":1,"body":{"key":"quota","key":"different","value":1,"inherit":false,"effective_at":1}}"#.as_slice(),
         br#"{"action":"foyer.setting_set","version":1,"body":{"key":"quota","value":{"a":1,"a":2},"inherit":false,"effective_at":1}}"#,
