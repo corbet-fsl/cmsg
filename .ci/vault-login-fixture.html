@@ -1,0 +1,10 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Original vault login owner</title><body>
+<button type="button" id="continue" disabled>Continue in the secure vault</button>
+<script type="module">
+import {startConfiguredVaultHost} from '/browser.js';
+const host = await startConfiguredVaultHost();
+const button = document.getElementById('continue');
+const timer = setInterval(() => { button.disabled = host.loginStatus() !== 'ready'; }, 50);
+button.onclick = () => { try { host.continueLogin(); } catch { document.body.dataset.failed = 'true'; } };
+addEventListener('pagehide', () => { clearInterval(timer); host.cancelLogin(); void host.dispose(); }, {once:true});
+</script></body></html>

@@ -14,6 +14,7 @@ import time
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
+from login_browser import run_login
 
 
 class Static(SimpleHTTPRequestHandler):
@@ -29,6 +30,8 @@ class Static(SimpleHTTPRequestHandler):
             "/__vault-close-pending.html": ("text/html", "vault-frame-fixture.html"),
             "/__bridge-vectors.js": ("text/javascript", "bridge-browser.mjs"),
             "/__vault-configured.html": ("text/html", "vault-configured-fixture.html"),
+            "/__vault-login.html": ("text/html", "vault-login-fixture.html"),
+            "/__popup-login.html": ("text/html", "popup-login-fixture.html"),
         }
         if self.path in ["/cmsg/member.json", "/cmsg/vault.json"]:
             member = self.path == "/cmsg/member.json"
@@ -47,6 +50,15 @@ class Static(SimpleHTTPRequestHandler):
                     }],
                 },
             })
+            if self.configuration_case == "login":
+                if member:
+                    configuration["vault_url"] = "https://vault.alpha.example.test/__vault-login.html"
+                else:
+                    configuration["runtime"]["login"] = {
+                        "page": "https://vault.alpha.example.test/__popup-login.html",
+                        "origin": "https://vault.alpha.example.test",
+                        "relying_party": "alpha.example.test",
+                    }
             case = self.configuration_case if member else "configured"
             if case == "configured_redirect":
                 self.send_response(302)
@@ -162,6 +174,8 @@ def main():
             if result is not True:
                 raise RuntimeError("actual isolated Vault bridge conformance failed")
         print("Generated browser module passed actual HTTPS/Wasm lifecycle conformance.")
+        Static.configuration_case = "login"
+        run_login(driver)
 
 
 if __name__ == "__main__":

@@ -13,10 +13,10 @@ tab or test page outside the installed PWA does not establish this result. The
 frame must load its own pinned VaultHostConfiguration; the UI never supplies a
 service session, credential, PRF or key through its channel.
 
-Current source has only partial runtime construction: `login.start` is unavailable
-until original Passkeys, independently verified G3 and durable Vault composition
-exist. That refusal is an expected incomplete result, never a passkey success.
-The manual page neither substitutes an authenticator nor manufactures completion.
+Current source composes generated frame startup and the original sealed popup
+login. It can report authenticated_pending_custody after real server acceptance;
+compound Vault custody and Mesh remain separate prerequisites. No browser or
+installed-mode qualification is claimed until this checklist actually passes.
 
 Every browser uses one original cpky top-level vault-origin popup route. Keyhole
 keeps its existing crossOrigin refusal; there is no iframe ceremony branch or

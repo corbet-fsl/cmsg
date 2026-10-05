@@ -178,8 +178,9 @@ without that parameter disposal closes only the generated client wrapper.
 
 The default browser constructor binds actual unauthenticated Foyer transports
 and optionally the real configured Forum transport/Link/Board. Board initially
-reports Disconnected; login, custody and Mesh remain unavailable until their
-real initializers are composed. This is an explicit partial runtime, with no
+reports Disconnected. Configured login uses the original sealed popup and retained
+public server authentication, but custody and Mesh require their real initializers.
+This is an explicit partial runtime, with no
 ready event or preload transition. Trusted Rust can attach an already-composed
 Door through BrowserRuntime::attach without exposing its sessions or capability.
 The actual browser regression and generated-module smoke test retain these
@@ -209,3 +210,30 @@ signed minimum-version enforcement. It is not a qualified Board startup or
 complete discovery implementation. DiscoveryPage already comes from the Board
 owner; its runtime path also needs the original committed Profile loader and
 current Profile/Charter/contact verification, with no accepting substitute.
+
+
+### Browser passkey login ownership
+
+The existing `login.start/poll/cancel` registry rows are shared by native and
+browser owners. The vault host alone installs the private frame gesture slot;
+page-only BrowserRuntime construction cannot do so. Start fetches the original
+Foyer discoverable challenge, prepares CPKY and returns Pending. The visible
+vault document calls `VaultHost.continue_login` synchronously on its own real
+click; it never routes activation through the member MessagePort. The popup
+consumes its public launch before loading the generated CMSG owner and calls
+`PopupLogin` for its own Continue and sealed handover. No secret or credential is
+projected through the generated client.
+
+Door retains the original wait and server-finish futures. Only the public
+assertion enters Foyer; opaque custody stays with the Rust session owner. Old
+completion/cancellation cannot mutate a newer frame gesture generation. Owner
+shutdown drains an admitted login_finish before clearing grants. Unknown
+post-send effects remain fenced and are never retried as a new login. Current
+success is `authenticated_pending_custody`, never Complete or network readiness.
+
+The real HTTPS fixture seeds a pending registration through the original
+passport/server path, enrolls a real browser test credential, then exercises
+generated login, actual frame and popup clicks, original HPKE, verified Foyer
+session, authenticated lobby and unavailable custody. Native shared-lifecycle
+regressions remain in place. Compilation/execution, generated equality and full
+coverage are required; adding fixture source does not qualify a browser.

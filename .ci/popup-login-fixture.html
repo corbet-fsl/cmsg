@@ -1,0 +1,43 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>Original popup login owner</title><body>
+<button type="button" id="register" disabled>Create the test credential</button>
+<button type="button" id="continue" disabled>Continue with passkey</button>
+<script>
+const launch = location.hash;
+history.replaceState(null, '', location.pathname);
+(async () => {
+  const {preparePopupLogin} = await import('/browser.js');
+  const owner = await preparePopupLogin({page: location.origin + location.pathname,
+    origin: location.origin, relying_party:'alpha.example.test'}, launch);
+  const fixture = await (await fetch('/__fixture')).json();
+  // Test setup only: the browser's native WebAuthn JSON converters and real
+  // server challenge create this target's resident credential. No session or
+  // successful domain result is constructed. No PRF evaluation is requested in
+  // setup; the subsequent original CPKY login performs its actual PRF evaluation.
+  const register = document.getElementById('register'); register.disabled = false;
+  register.onclick = async () => {
+    register.disabled = true;
+    try {
+      const request = fixture.browser_registration;
+      const options = PublicKeyCredential.parseCreationOptionsFromJSON(request.options.publicKey);
+      options.extensions = {...options.extensions, prf:{}};
+      const credential = await navigator.credentials.create({publicKey:options});
+      if (credential.getClientExtensionResults().prf?.results) throw new Error('unexpected setup result');
+      const publicCredential = credential.toJSON();
+      for (const name of ['prf','hmacGetSecret','hmac_get_secret']) delete publicCredential.clientExtensionResults[name];
+      const response = await fetch('https://api.alpha.example.test/v1/register_finish', {
+        method:'POST', credentials:'omit', redirect:'error', headers:{'content-type':'application/json'},
+        body:JSON.stringify({ceremony:request.ceremony,credential:publicCredential}),
+      });
+      if (!response.ok) throw new Error('registration refused');
+      document.body.dataset.registered = 'true';
+      document.getElementById('continue').disabled = false;
+    } catch { document.body.dataset.failed = 'true'; }
+  };
+  document.getElementById('continue').onclick = async () => {
+    try { document.body.dataset.state = await owner.begin(); }
+    catch { document.body.dataset.state = 'refused'; }
+  };
+  addEventListener('pagehide', () => owner.dispose(), {once:true});
+  document.body.dataset.state = owner.status();
+})().catch(() => { document.body.dataset.failed = 'true'; });
+</script></body></html>

@@ -97,7 +97,8 @@ impl BrowserRuntime {
                 // A vanished waiter does not alter child completion ownership.
                 let _ = command.reply.send(result);
             }
-            door.revoke(&token);
+            // Close admission first, then drain an admitted login_finish before
+            // clearing grants. Revoking first would drop that retained future.
             door.close_owned().await;
             let _ = finished.send(());
         });

@@ -187,8 +187,7 @@ pub(super) fn owner_types() -> Value {
 }
 
 async fn revoke(door: &mut Door, key: &[u8; 32], _: Empty) -> Result<(Revoked, Vec<Event>)> {
-    #[cfg(not(target_arch = "wasm32"))]
-    login::native::retire(door, key);
+    login::session::retire(door, key);
     door.grants.remove(key);
     Ok((Revoked { revoked: true }, vec![Event::ClientRevoked]))
 }

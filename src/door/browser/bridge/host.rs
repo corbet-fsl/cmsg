@@ -18,6 +18,7 @@ struct Retained {
     _timeout: gloo_timers::callback::Timeout,
 }
 struct State {
+    gesture: login::browser::Gesture,
     sender: RefCell<mpsc::Sender<Command>>,
     port: RefCell<Option<MessagePort>>,
     handler: RefCell<Option<Closure<dyn FnMut(MessageEvent)>>>,
@@ -31,6 +32,7 @@ struct State {
 }
 impl State {
     fn close(&self) {
+        self.gesture.cancel();
         self.closing.set(true);
         self.sender.borrow_mut().close_channel();
     }
@@ -157,7 +159,7 @@ pub struct VaultHost {
 impl VaultHost {
     /// Trusted Rust composition inside the pinned vault frame. Ceremony results
     /// must enter through original cpky custody, never this public API channel.
-    pub fn attach(door: Door, member_origin: String, vault_origin: String) -> Result<Self> {
+    pub fn attach(mut door: Door, member_origin: String, vault_origin: String) -> Result<Self> {
         vault_pair(&member_origin, &vault_origin)?;
         let window = window()?;
         if actual_origin()? != vault_origin {
@@ -176,9 +178,12 @@ impl VaultHost {
         {
             return Err(ErrorCode::Unauthorized);
         }
+        let gesture = login::browser::Gesture::default();
+        door.browser_gesture = Some(gesture.clone());
         let runtime = BrowserRuntime::owned(door, vault_origin, Role::Member)?;
         let (sender, mut receiver) = mpsc::channel::<Command>(MAX_CLIENTS);
         let state = Rc::new(State {
+            gesture,
             sender: RefCell::new(sender),
             port: RefCell::new(None),
             handler: RefCell::new(None),
@@ -323,6 +328,22 @@ impl VaultHost {
 }
 #[wasm_bindgen]
 impl VaultHost {
+    /// Redacted presentation for the actual frame's Continue control.
+    pub fn login_status(&self) -> String {
+        serde_json::to_string(&self.state.gesture.status()).expect("fixed callback status")
+    }
+    /// Synchronous trusted-frame activation, never dispatched through the UI port.
+    pub fn continue_login(&self) -> std::result::Result<(), JsValue> {
+        if self.state.closing.get() {
+            return Err(error(ErrorCode::Unavailable));
+        }
+        self.state.gesture.open().map_err(error)
+    }
+    /// Cancel only the prepared/passkey phase. Server completion remains owned
+    /// by Door and cannot be rolled back through this presentation control.
+    pub fn cancel_login(&self) {
+        self.state.gesture.cancel();
+    }
     /// Construct only actual partial owners. Complete login still requires the
     /// original cpky frame/popup custody + G3 + durable Vault constructor.
     #[wasm_bindgen(constructor)]

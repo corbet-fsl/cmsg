@@ -215,10 +215,7 @@ impl Configuration {
         door.bind_foyer(&self.origin, self.role, sessions)?;
         if let Some(login) = self.login {
             login.context()?;
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                door.login_configuration.insert(self.origin.clone(), login);
-            }
+            door.login_configuration.insert(self.origin.clone(), login);
         }
         if let Some(forum) = self.forum {
             door.configure_board(&self.origin, forum, board::SystemClock)?;

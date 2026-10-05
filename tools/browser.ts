@@ -84,14 +84,26 @@ export function startConfiguredVaultHost() {
 export async function prepareCliLogin(configuration: CliLoginConfiguration, launch: string) {
   const {default: init, CliLogin} = await import('./wasm/cmsg.js');
   await init();
-  const owner = new CliLogin(JSON.stringify(configuration), launch);
+  return callbackControl(new CliLogin(JSON.stringify(configuration), launch));
+}
+
+/** Same-origin popup handover. Only the original owner's progress is public. */
+export async function preparePopupLogin(configuration: CliLoginConfiguration, launch: string) {
+  const {default: init, PopupLogin} = await import('./wasm/cmsg.js');
+  await init();
+  const owner = new PopupLogin(JSON.stringify(configuration), launch);
+  try { await owner.ready(); return callbackControl(owner); }
+  catch { owner.cancel(); owner.free(); throw new CmsgError('unavailable'); }
+}
+
+function callbackControl(owner: {status(): string; begin(): Promise<unknown>; cancel(): string; free(): void}) {
   let disposed = false;
   let finalStatus: CliCallbackStatus | undefined;
   return {
     status(): CliCallbackStatus { return disposed ? finalStatus! : JSON.parse(owner.status()) as CliCallbackStatus; },
     async begin(): Promise<CliCallbackStatus> {
       if (disposed) throw new CmsgError('unavailable');
-      return JSON.parse(await owner.begin()) as CliCallbackStatus;
+      return JSON.parse(await owner.begin() as string) as CliCallbackStatus;
     },
     cancel(): CliCallbackStatus {
       if (disposed) throw new CmsgError('unavailable');
@@ -120,10 +132,15 @@ export async function startVaultHost(configuration: VaultHostConfiguration) {
   await init();
   const host = new VaultHost(JSON.stringify(configuration));
   let disposal: Promise<void> | undefined;
-  return {dispose(): Promise<void> {
-    disposal ??= host.dispose().finally(() => host.free());
-    return disposal;
-  }};
+  return {
+    loginStatus(): CliCallbackStatus | null { return JSON.parse(host.login_status()) as CliCallbackStatus | null; },
+    continueLogin(): void { host.continue_login(); },
+    cancelLogin(): void { host.cancel_login(); },
+    dispose(): Promise<void> {
+      disposal ??= host.dispose().finally(() => host.free());
+      return disposal;
+    },
+  };
 }
 
 /** UI-only transport: no Wasm, authenticator, bearer or custody is instantiated here. */

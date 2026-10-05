@@ -4,8 +4,8 @@ mod owner;
 use owner::*;
 use serde_json::json;
 use std::sync::{
-    Arc,
     atomic::{AtomicUsize, Ordering},
+    Arc,
 };
 
 struct Fault {
@@ -157,6 +157,14 @@ async fn main() {
     let (mut global_member, passport, public) = wallet_passport(&wallet).await;
     let service = community_with_burst("alpha", &public, 1000).await;
     let member_host = "api.alpha.example.test";
+    // Public challenge for a real browser fixture credential. Membership still
+    // requires the original passport and Keyhole finish; no session is seeded.
+    let (_, browser_passport, _) = wallet_passport(&wallet).await;
+    let proof = presentation(&service, member_host, None, &browser_passport).await;
+    let browser_registration = client(&service, member_host, None)
+        .call("register_begin", json!({"passport":proof}))
+        .await
+        .unwrap();
     let admin_host = "api.admin.alpha.example.test";
     let mut member = enrol_community(&service, member_host, &passport).await;
     let vault_session = login(
@@ -294,6 +302,7 @@ async fn main() {
     let proxy_task = tokio::spawn(async move { axum::serve(listener, proxy).await.unwrap() });
     let data = json!({
         "now": NOW + 1,
+        "browser_registration": browser_registration,
         "login_faults": login_faults,
         "global": {"base": wallet.base, "host": WALLET, "session": global_member.session},
         "member": {"base": service.base, "host": member_host, "session": member.session},

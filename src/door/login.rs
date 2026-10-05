@@ -23,7 +23,7 @@ pub enum Status {
     AuthenticatedPendingCustody,
 }
 
-/// Public deployment inputs for the actual native browser ceremony. These are
+/// Public deployment inputs for the original native or browser popup ceremony. These are
 /// trusted constructor inputs, never fields in a local action body.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -70,8 +70,15 @@ impl Configuration {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(super) mod browser;
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) mod native;
+#[cfg(target_arch = "wasm32")]
+mod popup;
+pub(super) mod session;
+#[cfg(target_arch = "wasm32")]
+pub use popup::PopupLogin;
 
 pub(super) async fn start(
     door: &mut Door,
@@ -86,33 +93,18 @@ pub(super) async fn start(
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (door, key);
-        Err(ErrorCode::Unavailable)
+        browser::start(door, key)
+            .await
+            .map(|status| (status, vec![]))
     }
 }
 pub(super) async fn poll(door: &mut Door, key: &[u8; 32], _: Poll) -> Result<(Status, Vec<Event>)> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        native::poll(door, key).map(|status| (status, vec![]))
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = (door, key);
-        Err(ErrorCode::Unavailable)
-    }
+    session::poll(door, key).map(|status| (status, vec![]))
 }
 pub(super) async fn cancel(
     door: &mut Door,
     key: &[u8; 32],
     _: Cancel,
 ) -> Result<(Status, Vec<Event>)> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        native::cancel(door, key).map(|status| (status, vec![]))
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = (door, key);
-        Err(ErrorCode::Unavailable)
-    }
+    session::cancel(door, key).map(|status| (status, vec![]))
 }

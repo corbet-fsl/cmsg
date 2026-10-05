@@ -222,10 +222,10 @@ pub struct Door {
     boards: BTreeMap<String, Box<dyn facades::BoundBoard>>,
     meshes: BTreeMap<String, facades::BoundMesh>,
     vaults: BTreeMap<String, Box<dyn facades::BoundVault>>,
-    #[cfg(not(target_arch = "wasm32"))]
     login_configuration: BTreeMap<String, login::Configuration>,
-    #[cfg(not(target_arch = "wasm32"))]
-    logins: BTreeMap<[u8; 32], login::native::State>,
+    logins: BTreeMap<[u8; 32], login::session::State>,
+    #[cfg(target_arch = "wasm32")]
+    browser_gesture: Option<login::browser::Gesture>,
 }
 
 impl Door {
@@ -238,10 +238,10 @@ impl Door {
             boards: BTreeMap::new(),
             meshes: BTreeMap::new(),
             vaults: BTreeMap::new(),
-            #[cfg(not(target_arch = "wasm32"))]
             login_configuration: BTreeMap::new(),
-            #[cfg(not(target_arch = "wasm32"))]
             logins: BTreeMap::new(),
+            #[cfg(target_arch = "wasm32")]
+            browser_gesture: None,
         }
     }
 
@@ -282,14 +282,13 @@ impl Door {
             return Err(ErrorCode::Clock);
         }
         self.clock_floor = now;
-        #[cfg(not(target_arch = "wasm32"))]
         for key in self
             .grants
             .iter()
             .filter_map(|(key, grant)| (now >= grant.expires).then_some(*key))
             .collect::<Vec<_>>()
         {
-            login::native::retire(self, &key);
+            login::session::retire(self, &key);
         }
         self.grants.retain(|_, grant| now < grant.expires);
         Ok(())
@@ -355,8 +354,7 @@ impl Door {
 
     /// Trusted embedding revocation (including termination of a paired client).
     pub fn revoke(&mut self, token: &ClientToken) {
-        #[cfg(not(target_arch = "wasm32"))]
-        login::native::retire(self, &token_hash(token.expose_for_transport()));
+        login::session::retire(self, &token_hash(token.expose_for_transport()));
         self.grants
             .remove(&token_hash(token.expose_for_transport()));
     }
