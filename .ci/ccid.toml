@@ -1,0 +1,26 @@
+schema = 1
+project = "cmsg"
+
+# All Linux verification gates are ported into .ci/verify.sh in CI ordering
+# (dependency-policy -> check incl. generated-surface/conformance/wasm-pack ->
+# coverage-nightly native + wasm browser). kind="cargo" is not used: gates
+# need --locked/--all-targets/--features/--keep-going combinations, a fmt
+# patch dance (not --check), registry redirects, node/python policy and
+# generation scripts, wasm-pack, and nightly native+browser coverage that the
+# cargo kind cannot express. No cargo-deny gate exists in this repo's CI,
+# so no deny probe is declared.
+
+[checks.verify]
+kind = "commands"
+commands = [["bash", ".ci/verify.sh"]]
+cache_tools = [["rustc", "-vV"], ["cargo", "--version"], ["rustup", "run", "nightly", "rustc", "-vV"], ["rustup", "run", "nightly", "cargo", "llvm-cov", "--version"], ["node", "--version"], ["python3", "--version"], ["wasm-pack", "--version"], ["clang", "--version"], ["chromedriver", "--version"], ["chromium", "--version"]]
+cache_outputs = ["coverage.json", "coverage.lcov", "coverage.txt", "wasm-coverage.json", "wasm-coverage.lcov", "wasm-coverage.txt", "registry.json"]
+
+[render]
+tool_revision = "81ebac8e86e20bc93b69d5e912bbcb0c0d036d58"
+
+[jobs.verify]
+scheduler = "crow"
+checks = ["verify"]
+workflow = "repository-jobs"
+command = ["bash", ".ci/run-cached.sh"]

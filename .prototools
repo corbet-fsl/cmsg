@@ -1,0 +1,2 @@
+# Crow worker Rust channel. Channel only; never an exact version.
+rust = "stable"
