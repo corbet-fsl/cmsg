@@ -39,33 +39,42 @@ fn paired() -> (Door, ClientToken) {
 fn value(output: Output) -> Value {
     serde_json::to_value(output).unwrap()
 }
-fn call(door: &mut Door, token: &ClientToken, action: &str, now: u64) -> Value {
-    value(surface::invoke(
-        door,
-        ORIGIN,
-        token.expose_for_transport(),
-        action,
-        1,
-        json!({}),
-        now,
-    ))
+async fn call(door: &mut Door, token: &ClientToken, action: &str, now: u64) -> Value {
+    value(
+        surface::invoke(
+            door,
+            ORIGIN,
+            token.expose_for_transport(),
+            action,
+            1,
+            json!({}),
+            now,
+        )
+        .await,
+    )
 }
 fn error(code: ErrorCode) -> Value {
     value(Output::Error { error: code })
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn unavailable_owners_never_release_preload() {
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn unavailable_owners_never_release_preload() {
     let (mut door, token) = paired();
-    let response = call(&mut door, &token, "runtime.status", 11);
+    let response = call(&mut door, &token, "runtime.status", 11).await;
     assert_eq!(response["status"], "ok");
     assert_eq!(response["result"]["community"], "community-a");
     assert_eq!(response["result"]["preload"], "unavailable");
     assert_eq!(
-        call(&mut door, &token, "board.status", 11),
+        call(&mut door, &token, "board.status", 11).await,
         error(ErrorCode::Unavailable)
     );
+    for action in ["login.start", "login.poll", "login.cancel"] {
+        assert_eq!(
+            call(&mut door, &token, action, 11).await,
+            error(ErrorCode::Unavailable)
+        );
+    }
     let board = catalog()
         .into_iter()
         .find(|a| a.action == "board.status")
@@ -81,7 +90,7 @@ fn unavailable_owners_never_release_preload() {
         assert_eq!(status, "unavailable");
     }
     assert_eq!(
-        call(&mut door, &token, "group.join", 12),
+        call(&mut door, &token, "group.join", 12).await,
         error(ErrorCode::UnsupportedAction)
     );
     assert!(!serde_json::to_string(&response)
@@ -90,26 +99,33 @@ fn unavailable_owners_never_release_preload() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn capabilities_are_bound_to_origin_scope_role_and_actions() {
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn capabilities_are_bound_to_origin_scope_role_and_actions() {
     let (mut door, token) = paired();
     let input = br#"{"action":"runtime.status","version":1,"body":{}}"#;
     assert_eq!(
-        value(door.dispatch(
-            "https://attacker.example",
-            token.expose_for_transport(),
-            input,
-            11
-        )),
+        value(
+            door.dispatch(
+                "https://attacker.example",
+                token.expose_for_transport(),
+                input,
+                11
+            )
+            .await
+        ),
         error(ErrorCode::Unauthorized)
     );
     assert_eq!(
-        value(door.dispatch(ORIGIN, "not a token", input, 11)),
+        value(door.dispatch(ORIGIN, "not a token", input, 11).await),
         error(ErrorCode::Unauthorized)
     );
     let mut foreign = Door::new(config("community-b"));
     assert_eq!(
-        value(foreign.dispatch(ORIGIN, token.expose_for_transport(), input, 11)),
+        value(
+            foreign
+                .dispatch(ORIGIN, token.expose_for_transport(), input, 11)
+                .await
+        ),
         error(ErrorCode::Unauthorized)
     );
     assert!(door
@@ -125,39 +141,45 @@ fn capabilities_are_bound_to_origin_scope_role_and_actions() {
         )
         .unwrap();
     assert_eq!(
-        call(&mut door, &read, "client.revoke", 12),
+        call(&mut door, &read, "client.revoke", 12).await,
         error(ErrorCode::Unauthorized)
     );
-    assert_eq!(call(&mut door, &read, "runtime.status", 12)["status"], "ok");
+    assert_eq!(
+        call(&mut door, &read, "runtime.status", 12).await["status"],
+        "ok"
+    );
     let admin = door
         .pair_client("https://admin.example", Role::Admin, actions(), 12, 30)
         .unwrap();
     assert_eq!(
-        value(door.dispatch(ORIGIN, admin.expose_for_transport(), input, 12)),
+        value(
+            door.dispatch(ORIGIN, admin.expose_for_transport(), input, 12)
+                .await
+        ),
         error(ErrorCode::Unauthorized)
     );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn revocation_expiry_and_clock_regression_fail_closed() {
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn revocation_expiry_and_clock_regression_fail_closed() {
     let (mut door, token) = paired();
     assert_eq!(
-        call(&mut door, &token, "runtime.status", 9),
+        call(&mut door, &token, "runtime.status", 9).await,
         error(ErrorCode::Clock)
     );
-    let response = call(&mut door, &token, "client.revoke", 11);
+    let response = call(&mut door, &token, "client.revoke", 11).await;
     assert_eq!(response["result"], json!({"revoked": true}));
     assert_eq!(response["events"], json!([{"event":"client_revoked"}]));
     assert_eq!(
-        call(&mut door, &token, "runtime.status", 12),
+        call(&mut door, &token, "runtime.status", 12).await,
         error(ErrorCode::Unauthorized)
     );
     let token = door
         .pair_client(ORIGIN, Role::Member, actions(), 12, 20)
         .unwrap();
     assert_eq!(
-        call(&mut door, &token, "runtime.status", 20),
+        call(&mut door, &token, "runtime.status", 20).await,
         error(ErrorCode::Unauthorized)
     );
     let token = door
@@ -165,14 +187,14 @@ fn revocation_expiry_and_clock_regression_fail_closed() {
         .unwrap();
     door.revoke(&token);
     assert_eq!(
-        call(&mut door, &token, "runtime.status", 21),
+        call(&mut door, &token, "runtime.status", 21).await,
         error(ErrorCode::Unauthorized)
     );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn reject_ambiguous_overlarge_or_foreign_requests() {
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn reject_ambiguous_overlarge_or_foreign_requests() {
     let (mut door, token) = paired();
     for bytes in [
         b"not json".as_slice(),
@@ -182,36 +204,45 @@ fn reject_ambiguous_overlarge_or_foreign_requests() {
         br#"{"action":"runtime.status","version":1,"body":{},"role":"root"}"#,
     ] {
         assert_eq!(
-            value(door.dispatch(ORIGIN, token.expose_for_transport(), bytes, 11)),
+            value(
+                door.dispatch(ORIGIN, token.expose_for_transport(), bytes, 11)
+                    .await
+            ),
             error(ErrorCode::InvalidRequest)
         );
     }
     assert_eq!(
-        value(surface::invoke(
-            &mut door,
-            ORIGIN,
-            token.expose_for_transport(),
-            "runtime.status",
-            2,
-            json!({}),
-            11
-        )),
+        value(
+            surface::invoke(
+                &mut door,
+                ORIGIN,
+                token.expose_for_transport(),
+                "runtime.status",
+                2,
+                json!({}),
+                11
+            )
+            .await
+        ),
         error(ErrorCode::UnsupportedVersion)
     );
     assert_eq!(
-        value(door.dispatch(
-            ORIGIN,
-            token.expose_for_transport(),
-            &vec![b' '; MAX_BODY_BYTES + 1],
-            11
-        )),
+        value(
+            door.dispatch(
+                ORIGIN,
+                token.expose_for_transport(),
+                &vec![b' '; MAX_BODY_BYTES + 1],
+                11
+            )
+            .await
+        ),
         error(ErrorCode::Capacity)
     );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn client_pairing_is_bounded_and_not_a_public_action() {
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn client_pairing_is_bounded_and_not_a_public_action() {
     let mut door = Door::new(config("community-a"));
     for i in 0..MAX_CLIENTS {
         let token = door
@@ -253,8 +284,8 @@ fn client_pairing_is_bounded_and_not_a_public_action() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn configuration_refuses_cross_role_origins_and_non_origins() {
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn configuration_refuses_cross_role_origins_and_non_origins() {
     for origin in [
         "null",
         "https://member.example/path",
@@ -295,10 +326,10 @@ fn configuration_refuses_cross_role_origins_and_non_origins() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn projections_share_typed_action_bodies_and_refusal_semantics() {
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn projections_share_typed_action_bodies_and_refusal_semantics() {
     let (mut door, token) = paired();
-    let description = call(&mut door, &token, "runtime.describe", 11);
+    let description = call(&mut door, &token, "runtime.describe", 11).await;
     let bundle = surface::bundle();
     assert_eq!(description["result"], bundle["actions"]);
     for action in catalog() {
@@ -323,6 +354,7 @@ fn projections_share_typed_action_bodies_and_refusal_semantics() {
         (ErrorCode::UnsupportedAction, 64),
         (ErrorCode::UnsupportedVersion, 64),
         (ErrorCode::Unauthorized, 77),
+        (ErrorCode::Refused, 77),
         (ErrorCode::Unavailable, 69),
         (ErrorCode::Capacity, 75),
         (ErrorCode::Clock, 75),
@@ -349,12 +381,13 @@ async fn native_http_uses_identical_capability_checks_and_no_store_errors() {
         }
     }
     let (mut door, token) = paired();
-    let expected = call(&mut door, &token, "runtime.status", 11);
-    let app = native::router(
-        door,
+    let expected = call(&mut door, &token, "runtime.status", 11).await;
+    let (app, token) = native::router_with(
+        || async { Ok(paired()) },
         BTreeSet::from(["localhost:3000".into()]),
         Arc::new(Clock),
     )
+    .await
     .unwrap();
     for (host, origin, credential, status) in [
         (
@@ -421,12 +454,12 @@ async fn http_rejects_ambiguous_headers_and_bounds_every_route() {
             11
         }
     }
-    let (door, token) = paired();
-    let app = native::router(
-        door,
+    let (app, token) = native::router_with(
+        || async { Ok(paired()) },
         BTreeSet::from(["localhost:3000".into()]),
         Arc::new(Clock),
     )
+    .await
     .unwrap();
     let request = || {
         Request::post("/v1/runtime.status")
@@ -499,18 +532,26 @@ async fn http_rejects_ambiguous_headers_and_bounds_every_route() {
         "x".repeat(254),
     ] {
         assert!(native::router(
-            Door::new(config("a")),
+            move || async move { Ok(Door::new(config("a"))) },
             BTreeSet::from([host]),
             Arc::new(Clock)
         )
+        .await
         .is_err());
     }
-    assert!(native::router(Door::new(config("a")), BTreeSet::new(), Arc::new(Clock)).is_err());
     assert!(native::router(
-        Door::new(config("a")),
+        move || async move { Ok(Door::new(config("a"))) },
+        BTreeSet::new(),
+        Arc::new(Clock)
+    )
+    .await
+    .is_err());
+    assert!(native::router(
+        move || async move { Ok(Door::new(config("a"))) },
         (0..9).map(|n| format!("localhost:{n}")).collect(),
         Arc::new(Clock)
     )
+    .await
     .is_err());
 }
 
@@ -524,14 +565,21 @@ async fn native_client_executes_real_loopback_door_and_preserves_raw_input() {
             11
         }
     }
-    let (mut door, token) = paired();
-    let other_token = door
-        .pair_client("https://admin.example", Role::Admin, actions(), 10, 100)
-        .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let base = format!("http://{address}");
-    let app = native::router(door, BTreeSet::from([address.to_string()]), Arc::new(Clock)).unwrap();
+    let (app, (token, other_token)) = native::router_with(
+        || async {
+            let (mut door, token) = paired();
+            let other_token =
+                door.pair_client("https://admin.example", Role::Admin, actions(), 10, 100)?;
+            Ok((door, (token, other_token)))
+        },
+        BTreeSet::from([address.to_string()]),
+        Arc::new(Clock),
+    )
+    .await
+    .unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let client = native::Client::new(&base, ORIGIN, token).unwrap();
     let status = client
@@ -614,20 +662,20 @@ async fn native_client_executes_real_loopback_door_and_preserves_raw_input() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn imported_capability_is_only_an_encoding_until_the_door_authorizes_it() {
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn imported_capability_is_only_an_encoding_until_the_door_authorizes_it() {
     let (mut door, token) = paired();
     let received = ClientToken::from_protected_transport(zeroize::Zeroizing::new(
         token.expose_for_transport().as_bytes().to_vec(),
     ))
     .unwrap();
     assert_eq!(
-        call(&mut door, &received, "runtime.status", 11)["status"],
+        call(&mut door, &received, "runtime.status", 11).await["status"],
         "ok"
     );
     door.revoke(&token);
     assert_eq!(
-        call(&mut door, &received, "runtime.status", 11),
+        call(&mut door, &received, "runtime.status", 11).await,
         error(ErrorCode::Unauthorized)
     );
     for bytes in [vec![], vec![b'!'; 43], vec![b'A'; 44], vec![255; 43]] {
@@ -639,14 +687,14 @@ fn imported_capability_is_only_an_encoding_until_the_door_authorizes_it() {
     let unknown =
         ClientToken::from_protected_transport(zeroize::Zeroizing::new(vec![b'A'; 43])).unwrap();
     assert_eq!(
-        call(&mut door, &unknown, "runtime.status", 11),
+        call(&mut door, &unknown, "runtime.status", 11).await,
         error(ErrorCode::Unauthorized)
     );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn configuration_and_capability_limits_are_exact() {
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn configuration_and_capability_limits_are_exact() {
     for (community, origins) in [
         ("x".repeat(254), BTreeMap::new()),
         ("a".into(), BTreeMap::new()),
@@ -690,7 +738,10 @@ fn configuration_and_capability_limits_are_exact() {
         Err(ErrorCode::Clock)
     ));
     assert_eq!(
-        value(door.dispatch(&"x".repeat(2049), token.expose_for_transport(), b"{}", 11)),
+        value(
+            door.dispatch(&"x".repeat(2049), token.expose_for_transport(), b"{}", 11)
+                .await
+        ),
         error(ErrorCode::Unauthorized)
     );
 }
@@ -825,11 +876,15 @@ async fn lost_mutation_response_requires_reconciliation_and_is_never_retried() {
             11
         }
     }
-    let (door, token) = paired();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let actual =
-        native::router(door, BTreeSet::from([address.to_string()]), Arc::new(Clock)).unwrap();
+    let (actual, token) = native::router_with(
+        || async { Ok(paired()) },
+        BTreeSet::from([address.to_string()]),
+        Arc::new(Clock),
+    )
+    .await
+    .unwrap();
     let count = Arc::new(AtomicUsize::new(0));
     let proxy_count = count.clone();
     // This proxy executes the actual Door and only damages its first response.
@@ -894,8 +949,8 @@ fn profiling_runtime_is_linked() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn trusted_vault_origin_is_explicit_and_keeps_its_own_capability() {
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn trusted_vault_origin_is_explicit_and_keeps_its_own_capability() {
     let (mut door, member_token) = paired();
     let vault = "https://vault.example";
     let token = door
@@ -903,27 +958,39 @@ fn trusted_vault_origin_is_explicit_and_keeps_its_own_capability() {
         .unwrap();
     let input = br#"{"action":"runtime.status","version":1,"body":{}}"#;
     assert_eq!(
-        value(door.dispatch(vault, token.expose_for_transport(), input, 11))["status"],
+        value(
+            door.dispatch(vault, token.expose_for_transport(), input, 11)
+                .await
+        )["status"],
         "ok"
     );
     assert_eq!(
-        value(door.dispatch(vault, member_token.expose_for_transport(), input, 11)),
+        value(
+            door.dispatch(vault, member_token.expose_for_transport(), input, 11)
+                .await
+        ),
         error(ErrorCode::Unauthorized)
     );
     assert_eq!(
-        value(door.dispatch(ORIGIN, token.expose_for_transport(), input, 11)),
+        value(
+            door.dispatch(ORIGIN, token.expose_for_transport(), input, 11)
+                .await
+        ),
         error(ErrorCode::Unauthorized)
     );
     assert!(door
         .pair_client(vault, Role::Admin, actions(), 11, 20)
         .is_err());
     assert_eq!(
-        value(door.dispatch(
-            "https://unlisted-vault.example",
-            token.expose_for_transport(),
-            input,
-            11
-        )),
+        value(
+            door.dispatch(
+                "https://unlisted-vault.example",
+                token.expose_for_transport(),
+                input,
+                11
+            )
+            .await
+        ),
         error(ErrorCode::Unauthorized)
     );
 }

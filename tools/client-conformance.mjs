@@ -43,10 +43,18 @@ try {
     { status: 'error', error: 'invalid_request' });
   assert.deepEqual(await post('{"action":"runtime.status","version":1,"body":{}}', 'https://foreign.example'),
     { status: 'error', error: 'unauthorized' });
+  const events = [];
+  const unsubscribe = client.subscribe(event => events.push(event));
+  client.subscribe(() => { throw new Error('synthetic observer failure'); });
   assert.deepEqual(await client.invoke('client.revoke', {}),
     { status: 'ok', result: { revoked: true }, events: [{ event: 'client_revoked' }] });
   await assert.rejects(client.call('runtime.status', {}),
     error => error instanceof CmsgError && error.code === 'unauthorized');
+  assert.deepEqual(events, [{ event: 'client_revoked' }]);
+  unsubscribe();
+  await client.dispose();
+  await client.dispose();
+  assert.deepEqual(await client.invoke('runtime.status', {}), { status: 'error', error: 'unavailable' });
   console.log('Generated TypeScript client passed actual local Door HTTP conformance.');
 } finally {
   clearTimeout(timer);

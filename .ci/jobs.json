@@ -1,9 +1,45 @@
 {
   "schema": 1,
   "generator": "ccid render v1",
-  "tool_revision": "81ebac8e86e20bc93b69d5e912bbcb0c0d036d58",
-  "manifest_sha256": "eb80e03650b2f76dd84ddd1141d1e1cc83c9705dfda1798f6c9a67fc65e337f9",
+  "tool_revision": "53c129c2efa3b9279d2ecbc237d15acdfb656d8c",
+  "manifest_sha256": "95434a8ca7253c79a84000259b6ab430bed963c7ffbd22606323d169d3258386",
   "jobs": {
+    "v01-push": {
+      "job": "v01-push",
+      "scheduler": "crow",
+      "checks": [
+        "v01-push"
+      ],
+      "workflow": "repository-jobs",
+      "command": [
+        "ccid:run-declared-checks"
+      ],
+      "push_branches": [
+        "v01"
+      ],
+      "refresh": {
+        "branch": "v01",
+        "sources": [
+          "git.corbet.ch/corbet-libs",
+          "git.corbet.ch/corbet-foss"
+        ],
+        "prepare_commands": [
+          [
+            "python3",
+            ".ci/v01-lock.py"
+          ]
+        ]
+      },
+      "environment": {
+        "CARGO_NET_GIT_FETCH_WITH_CLI": "true",
+        "CARGO_NET_RETRY": "0",
+        "CARGO_PROFILE_DEV_DEBUG": "0",
+        "CARGO_PROFILE_TEST_DEBUG": "0",
+        "CARGO_TARGET_DIR": "/caches/cargo/cmsg-v01/target",
+        "CI_JOBS": "2",
+        "CI_TEST_THREADS": "2"
+      }
+    },
     "verify": {
       "job": "verify",
       "scheduler": "crow",

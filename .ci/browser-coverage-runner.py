@@ -1,7 +1,11 @@
 """Run upstream browser tests and wait for its actual coverage upload before exit."""
 import os
+import importlib.util
+from contextlib import ExitStack
+from pathlib import Path
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -25,6 +29,7 @@ def main():
 
     threading.Thread(target=collect, daemon=True).start()
     driver = None
+    resources = ExitStack()
     try:
         deadline = time.monotonic() + 120
         address = None
@@ -41,12 +46,24 @@ def main():
                 address = match.group()
         if address is None:
             raise RuntimeError("upstream test server startup timed out")
+        origin = os.environ.get("CMSG_BROWSER_ORIGIN")
+        fixture_options = []
+        if origin:
+            spec = importlib.util.spec_from_file_location("fixture_browser", Path(__file__).with_name("fixture-browser.py"))
+            fixture = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(fixture)
+            fixture_options = resources.enter_context(fixture.proxy(os.environ["CMSG_FOYER_FIXTURE"], address, origin))
         options = webdriver.ChromeOptions()
         options.add_argument("--headless=new")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+        for argument in fixture_options:
+            options.add_argument(argument)
         options.set_capability("goog:loggingPrefs", {"browser": "ALL"})
-        driver = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=options)
+        chromedriver = shutil.which("chromedriver")
+        if chromedriver is None:
+            raise RuntimeError("qualified browser environment lacks chromedriver")
+        driver = webdriver.Chrome(service=Service(chromedriver), options=options)
         driver.set_page_load_timeout(120)
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": """
             window.__coverageLog = [];
@@ -73,7 +90,7 @@ def main():
                 return response;
             };
         """})
-        driver.get(address)
+        driver.get(origin or address)
         deadline = time.monotonic() + 120
         state = {}
         while time.monotonic() < deadline:
@@ -86,6 +103,9 @@ def main():
             if state["error"] or "test result: FAILED" in state["text"]:
                 raise RuntimeError(state["error"] or "upstream browser tests failed")
             if re.search(r"test result: ok\. [1-9][0-9]* passed", state["text"]):
+                if os.environ.get("CMSG_COLLECT_COVERAGE") != "1":
+                    print(state["text"], flush=True)
+                    return
                 driver.set_script_timeout(30)
                 captured = driver.execute_async_script("""
                     const done = arguments[0];
@@ -117,6 +137,7 @@ def main():
                 if entry["level"] == "SEVERE":
                     print(entry["message"], file=sys.stderr)
             driver.quit()
+        resources.close()
         process.terminate()
         try:
             process.wait(timeout=5)
@@ -126,4 +147,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if any("foyer_browser" in argument for argument in sys.argv[1:]) and not os.environ.get("CMSG_BROWSER_ORIGIN"):
+        # One upstream process per portal produces distinct actual profile files.
+        # No profile overwrite or browser-origin/CORS impersonation is needed.
+        for portal in ["alpha.example.test", "vault.alpha.example.test", "wallet.example.test",
+                       "admin.alpha.example.test", "admin.root.example.test"]:
+            print("Executing actual HTTPS portal:", portal, flush=True)
+            subprocess.run([sys.executable, __file__, *sys.argv[1:]],
+                           env=dict(os.environ, CMSG_BROWSER_ORIGIN="https://" + portal), check=True)
+    else:
+        main()

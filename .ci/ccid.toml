@@ -1,5 +1,6 @@
 schema = 1
 project = "cmsg"
+repository = "https://git.corbet.ch/corbet-libs/cmsg.git"
 
 # All Linux verification gates are ported into .ci/verify.sh in CI ordering
 # (dependency-policy -> check incl. generated-surface/conformance/wasm-pack ->
@@ -17,10 +18,39 @@ cache_tools = [["rustc", "-vV"], ["cargo", "--version"], ["rustup", "run", "nigh
 cache_outputs = ["coverage.json", "coverage.lcov", "coverage.txt", "wasm-coverage.json", "wasm-coverage.lcov", "wasm-coverage.txt", "registry.json"]
 
 [render]
-tool_revision = "81ebac8e86e20bc93b69d5e912bbcb0c0d036d58"
+tool_revision = "53c129c2efa3b9279d2ecbc237d15acdfb656d8c"
 
 [jobs.verify]
 scheduler = "crow"
 checks = ["verify"]
 workflow = "repository-jobs"
 command = ["bash", ".ci/run-cached.sh"]
+
+# Official v01 push execution only (automatic v01 pushes, including
+# dependency pushes). No runtime network/browser/coverage qualification.
+# Gates are direct cargo invocations, truly --offline --locked, with the
+# --offline/--locked flags before any -- separator: options after it are
+# test/program arguments, not Cargo flags. One Rust newest-head refresh
+# plus the existing checked-in lock driver (.ci/v01-lock.py, unchanged)
+# runs before the freeze. The retired manual v01-fast stopgap and its
+# shell drivers are removed; this job is the only v01 gate.
+[checks.v01-push]
+kind = "commands"
+commands = [["cargo", "check", "--offline", "--locked", "--all-targets", "--features", "native-tor,test-authenticator"], ["cargo", "clippy", "--offline", "--locked", "--all-targets", "--features", "native-tor,test-authenticator", "--", "-D", "warnings"], ["cargo", "test", "--offline", "--locked", "--lib", "--features", "native-tor,test-authenticator", "--", "--skip", "door::login::native::tests::unknown_session_result_and_cancelled_reply_fence_original_foyer", "--skip", "door::login::session::custody_tests::actual_login_custody_is_consumed_once_with_local_and_original_session_refusals"]]
+
+[jobs.v01-push]
+scheduler = "crow"
+checks = ["v01-push"]
+workflow = "repository-jobs"
+command = ["ccid:run-declared-checks"]
+push_branches = ["v01"]
+# Newest-head refresh scope for push execution: every first-party v01 git
+# dependency under these canonical prefixes, resolved once before gates.
+# prepare_commands runs the EXISTING unchanged compatibility driver after
+# refresh and before the freeze (explicit port candidate, still referenced
+# after stopgap burn).
+refresh = { branch = "v01", sources = ["git.corbet.ch/corbet-libs", "git.corbet.ch/corbet-foss"], prepare_commands = [["python3", ".ci/v01-lock.py"]] }
+# Declared warm worker environment for prepare/refresh/check (manual
+# sentinel route included): existing warm target, build parallelism, fetch
+# policy. Reserved identity/status keys cannot be set here (validated).
+environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-v01/target", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_TEST_DEBUG = "0", CARGO_NET_GIT_FETCH_WITH_CLI = "true", CARGO_NET_RETRY = "0", CI_JOBS = "2", CI_TEST_THREADS = "2" }

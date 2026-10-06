@@ -71,7 +71,14 @@ def self_test():
 if __name__ == '__main__':
     self_test()
     if '--self-test' not in sys.argv:
-        paths = subprocess.check_output(['git', 'ls-files', '-z'], text=True).split('\0')
+        if Path('.git').exists():
+            paths = subprocess.check_output(['git', 'ls-files', '-z'], text=True).split('\0')
+        else:
+            # ccid extracts a SHA-bound committed source archive without .git.
+            # Build/generated output cannot introduce a second dependency graph.
+            paths = [str(path) for pattern in ('Cargo.toml', 'Cargo.lock')
+                     for path in Path('.').rglob(pattern)
+                     if not {'target', 'node_modules', 'generated', 'evidence', 'owner'}.intersection(path.parts)]
         for name in paths:
             path = Path(name)
             if path.name == 'Cargo.toml':

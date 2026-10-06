@@ -1,0 +1,44 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Passkey integration check</title>
+<h1>Passkey integration check</h1>
+<p>Use the community site installed from Safari. This page calls the original generated client and records only a coarse result. It cannot create successful custody on its own.</p>
+<button id="connect">Connect the vault frame</button>
+<button data-action="login.start" disabled>Start sign-in</button>
+<button data-action="login.poll" disabled>Check sign-in</button>
+<button data-action="login.cancel" disabled>Cancel sign-in</button>
+<button id="close" disabled>Close the runtime</button>
+<output id="result" aria-live="polite">Not connected</output>
+<script type="module">
+import {createVaultClient} from '/browser.js';
+const result = document.querySelector('#result');
+let client;
+const controls = () => document.querySelectorAll('[data-action], #close');
+function show(value) { result.textContent = value; }
+document.querySelector('#connect').onclick = async event => {
+  event.target.disabled = true;
+  try {
+    const response = await fetch('/cmsg-client-config.json', {credentials: 'omit', cache: 'no-store'});
+    if (!response.ok) throw new Error();
+    client = await createVaultClient(await response.json());
+    for (const button of controls()) button.disabled = false;
+    show('Connected. This does not mean authentication or custody completed.');
+  } catch { show('Connection refused or unavailable. No success recorded.'); }
+};
+for (const button of document.querySelectorAll('[data-action]')) {
+  button.onclick = async () => {
+    button.disabled = true;
+    try {
+      const output = await client.invoke(button.dataset.action, {});
+      show(output.status === 'error' ? output.error : output.result.state);
+    } catch { show('Outcome unknown. Reconcile; do not automatically retry.'); }
+    finally { button.disabled = false; }
+  };
+}
+document.querySelector('#close').onclick = async () => {
+  for (const button of controls()) button.disabled = true;
+  try { await client.dispose(); show('Actual runtime drain acknowledged.'); }
+  catch { show('Drain outcome unknown. No rollback or successful closure recorded.'); }
+};
+</script>

@@ -7,3 +7,10 @@
 /generated/
 /registry.json
 __pycache__/
+/tests/fixture/target/
+/tests/fixture/owner/
+/fixture-metadata.json
+/fixture-owner.json
+
+runtime-metadata.json
+evidence/
