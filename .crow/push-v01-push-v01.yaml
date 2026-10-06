@@ -19,7 +19,7 @@ steps:
   - name: push-job
     image: bash
     environment:
-      CCID_REVISION: '53c129c2efa3b9279d2ecbc237d15acdfb656d8c'
+      CCID_REVISION: '15f0a693f485cc1f4dfb35f0ee1f3a0fca8778fb'
       CI_TOOL_BINARY: {from_secret: CI_TOOL_BINARY_STATIC}
       CI_TOOL_BINARY_SHA256: {from_secret: CI_TOOL_BINARY_SHA256_STATIC}
     commands:

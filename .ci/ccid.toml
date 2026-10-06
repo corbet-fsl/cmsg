@@ -18,7 +18,7 @@ cache_tools = [["rustc", "-vV"], ["cargo", "--version"], ["rustup", "run", "nigh
 cache_outputs = ["coverage.json", "coverage.lcov", "coverage.txt", "wasm-coverage.json", "wasm-coverage.lcov", "wasm-coverage.txt", "registry.json"]
 
 [render]
-tool_revision = "53c129c2efa3b9279d2ecbc237d15acdfb656d8c"
+tool_revision = "15f0a693f485cc1f4dfb35f0ee1f3a0fca8778fb"
 
 [jobs.verify]
 scheduler = "crow"

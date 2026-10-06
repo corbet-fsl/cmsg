@@ -46,15 +46,14 @@ export PATH="$(dirname "$CCID_BIN"):$CARGO_HOME/bin:$PROTO_HOME/shims:$PROTO_HOM
 export CI_JOBS="${CI_JOBS:-2}" CARGO_BUILD_JOBS="${CI_JOBS:-2}"
 export RUST_TEST_THREADS="${CI_TEST_THREADS:-2}"
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
-if [ -n "${GIT_CONFIG_COUNT:-}" ]; then
-  echo 'GIT_CONFIG_COUNT is already set; refusing to overwrite job git config' >&2
-  exit 2
-fi
+# Preserve the resolver runtime configuration when present.
+if [ -z "${GIT_CONFIG_COUNT:-}" ]; then
 export GIT_CONFIG_COUNT=2
 export GIT_CONFIG_KEY_0='url.https://git.corbet.ch/corbet-libs/.insteadOf'
 export GIT_CONFIG_VALUE_0='https://github.com/corbet-libs/'
 export GIT_CONFIG_KEY_1='url.https://git.corbet.ch/corbet-foss/.insteadOf'
 export GIT_CONFIG_VALUE_1='https://github.com/corbet-foss/'
+fi
 # Shared-first toolchain lock: jobs share a provisioned toolchain and take
 # exclusive only to provision missing pieces. Same lock file, so old
 # whole-job-exclusive runners interoperate (they just serialize).
