@@ -17,7 +17,7 @@ if os.environ.get('CHECKS') == 'browser-package-candidates':
     from browser_candidates import candidate_door, sha
     candidate = candidate_door(owner, client_owners)
 else:
-    if not re.fullmatch(r"git\+https://github\.com/corbet-libs/cvld\?branch=main#[0-9a-f]{40}", owner["source"]):
+    if not re.fullmatch(r"git\+https://git\.corbet\.ch/corbet-libs/cvld\?branch=main#[0-9a-f]{40}", owner["source"]):
         raise SystemExit("Expected a resolved main revision of the door owner")
     if len(client_owners) != 1 or client_owners[0]["source"] != owner["source"]:
         raise SystemExit("Fixture and production client must use exactly the same door source")

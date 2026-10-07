@@ -285,7 +285,7 @@ def main():
     report = scratch / 'report'
     report.mkdir()
     environment = dict(os.environ, CI='github-actions', CI_COMMIT_SHA=os.environ['GITHUB_SHA'],
-                       CI_REPOSITORY_URL='https://github.com/corbet-libs/cmsg',
+                       CI_REPOSITORY_URL='https://git.corbet.ch/corbet-libs/cmsg',
                        SOURCE_SHA256=os.environ['CMSG_EXPECTED_SOURCE_SHA256'],
                        CHECKS='browser-package-candidates', CI_JOBS='2', CI_MEMORY_MB='16384',
                        CARGO_BUILD_JOBS='2', RUST_TEST_THREADS='2', PYTHONDONTWRITEBYTECODE='1',

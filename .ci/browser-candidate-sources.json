@@ -3,182 +3,182 @@
     "cbcn": {
       "archive_sha256": "c7f5cdf74191a810c8d01d9b3f089a87595ed8c52d96344c76c9480f7845af8f",
       "commit": "22f3179cd661f46e6d77fda197b171f6c83c637c",
-      "repository": "https://github.com/corbet-foss/cbcn",
+      "repository": "https://git.corbet.ch/corbet-foss/cbcn",
       "tree": "38941840f99b2667b1785f31f17c3fd34a85eb09",
       "version": "0.1.0"
     },
     "cbrd": {
       "archive_sha256": "69a7e643f3f4faca6f94aab1c139f7dcda06f9c8da09a5c5f1e8b734fb6fc0a9",
       "commit": "b33538a8b45ad6e9a26ba37cf52acff7e0d9021f",
-      "repository": "https://github.com/corbet-libs/cbrd",
+      "repository": "https://git.corbet.ch/corbet-libs/cbrd",
       "tree": "edcd86fcfa39b7758fdf254d632990eb64bdc796",
       "version": "0.1.0"
     },
     "cchr": {
       "archive_sha256": "060b1e2784af5d3ab59acf4287ec97b93a60fd0842eb6d6ef31c877a32aff26e",
       "commit": "3df50afbcad33138849e50e23bf4d54d8be15935",
-      "repository": "https://github.com/corbet-foss/cchr",
+      "repository": "https://git.corbet.ch/corbet-foss/cchr",
       "tree": "fa12e01f7fbd55b335c7cd4194135af7ab7a5180",
       "version": "0.1.0"
     },
     "cfrm": {
       "archive_sha256": "d6ae57f0e1da354bc7fc94740d2b7889bd6c603d081d701124348bc5fae92302",
       "commit": "47c77e9659f638a9cd42ad9cb148f7f4ffc67e53",
-      "repository": "https://github.com/corbet-libs/cfrm",
+      "repository": "https://git.corbet.ch/corbet-libs/cfrm",
       "tree": "bde4e5a4054528063ff13b7dd46c1000ccb87f37",
       "version": "0.2.0"
     },
     "cfyr": {
       "archive_sha256": "8d7d5e542c15c14f1a3b120a2c67f254a8699303132c375d86ef1c8798a1f571",
       "commit": "59c3b9a2dc668235b830cfc940b8dab11e856899",
-      "repository": "https://github.com/corbet-libs/cfyr",
+      "repository": "https://git.corbet.ch/corbet-libs/cfyr",
       "tree": "83365269d443fd251d36e15ec95d0a5d6511191a",
       "version": "0.0.0"
     },
     "cgrd": {
       "archive_sha256": "f52f90cc593a58a13c195667887737d2fce5b0d6d6d512d2c15eead1b15e568a",
       "commit": "699878898662195327012cc00ac10fdd178264e6",
-      "repository": "https://github.com/corbet-foss/cgrd",
+      "repository": "https://git.corbet.ch/corbet-foss/cgrd",
       "tree": "fac086bcc8f54e67960c6755a13228215ad18048",
       "version": "0.0.0"
     },
     "cgrp": {
       "archive_sha256": "1f2aeb63c2c0b90e6be2960b4e613003434c4f1217ebb70d73a4aa5d0b31e1ea",
       "commit": "1481fb1c3889b88c9830b0ed97f2254fa7997bc8",
-      "repository": "https://github.com/corbet-foss/cgrp",
+      "repository": "https://git.corbet.ch/corbet-foss/cgrp",
       "tree": "4ff353815c4a9eae113bdb590ba4392a2b026e12",
       "version": "0.1.0"
     },
     "cgth": {
       "archive_sha256": "a597032ad6fa8ad291ccfdc12792da500a02c943bf1ee83a6670ab21d67ab7bb",
       "commit": "babb0f0792d56a653551111375b3c5e5a1ae4969",
-      "repository": "https://github.com/corbet-libs/cgth",
+      "repository": "https://git.corbet.ch/corbet-libs/cgth",
       "tree": "b0e9d93eb057de578ff628516a241564dbc13db5",
       "version": "0.1.0"
     },
     "ckmg": {
       "archive_sha256": "ff3608127eb3f1990fcbc2a44084cc72af879640681cba15dbccb2550999d0ce",
       "commit": "af81d8dccd82522f0b765ff140324da67ca4e57b",
-      "repository": "https://github.com/corbet-foss/ckmg",
+      "repository": "https://git.corbet.ch/corbet-foss/ckmg",
       "tree": "ed65bac06e88b026b4ab3200847234338a9884a7",
       "version": "0.0.0"
     },
     "ckyh": {
       "archive_sha256": "e6363097a2e292df83705dc08dc23982e919c8026ad052cc8964819a7a133bf3",
       "commit": "a06a5c5cc9c3989bd190fac7b096baaa8c911b38",
-      "repository": "https://github.com/corbet-foss/ckyh",
+      "repository": "https://git.corbet.ch/corbet-foss/ckyh",
       "tree": "760df4b17d7221b50d25596bae2ad62b66a04631",
       "version": "0.0.0"
     },
     "clkp": {
       "archive_sha256": "edee22c9d51e742926bf0a586791216f5985c70eeffdb2e46146642dae787b0c",
       "commit": "43d7cbbe9b65a6fca26131ffdc7d2f95936d1047",
-      "repository": "https://github.com/corbet-foss/clkp",
+      "repository": "https://git.corbet.ch/corbet-foss/clkp",
       "tree": "117dfc1ff244a5d41211a1d2d78d6f27ab56d1bd",
       "version": "0.1.0"
     },
     "clnk": {
       "archive_sha256": "50d65b1be16073ef1949f4d18c12ac1b139cb91cb477497cbfe128e3717d5c8c",
       "commit": "dad831e54b3172ec678e3442e0fd576a000c9777",
-      "repository": "https://github.com/corbet-foss/clnk",
+      "repository": "https://git.corbet.ch/corbet-foss/clnk",
       "tree": "096290a7c7f68bb739e6d474ee890cd60187ec6e",
       "version": "0.1.0"
     },
     "cmbl": {
       "archive_sha256": "feb59caf904529093d1b78e48b6188b7cc213b5016362496aaa3b991ad1bbb1f",
       "commit": "65d135fb823d28af0b5c52e69e3bd123818e62e8",
-      "repository": "https://github.com/corbet-foss/cmbl",
+      "repository": "https://git.corbet.ch/corbet-foss/cmbl",
       "tree": "df3bf4743a2a5a5e8f867e374fa54d68a6f7282f",
       "version": "0.1.0"
     },
     "cmsh": {
       "archive_sha256": "7699b3c52a9007c85d364d227d8095b19826b900d68c0d09b17ea90d2b4e3415",
       "commit": "1a81a57bc3143041b9266323a83983e0f15a6a96",
-      "repository": "https://github.com/corbet-libs/cmsh",
+      "repository": "https://git.corbet.ch/corbet-libs/cmsh",
       "tree": "61f2fe1376ce292f885e563cd2f75c216d392566",
       "version": "0.0.0"
     },
     "cnbx": {
       "archive_sha256": "15f815c5b213607549705c8f73b4222dd983c5f327124b7fe98926be50dbc6d7",
       "commit": "28ec3882db4f445fa11f994a67966ea01a6b07ad",
-      "repository": "https://github.com/corbet-libs/cnbx",
+      "repository": "https://git.corbet.ch/corbet-libs/cnbx",
       "tree": "1a72220c0aa1365ab1ba93919e89d47d70df623d",
       "version": "0.1.0"
     },
     "cnvl": {
       "archive_sha256": "854582a8a7417edb145515ee3eb32ecf8a002114a13920591a1a6e3cdbb2eaa5",
       "commit": "0fe6d351dc6b2df2dc25867b75b0bfa3c2c4a752",
-      "repository": "https://github.com/corbet-foss/cnvl",
+      "repository": "https://git.corbet.ch/corbet-foss/cnvl",
       "tree": "e8bcca3ff63dd1666984e8cc11b0ef3583129e85",
       "version": "0.0.0"
     },
     "cnvy": {
       "archive_sha256": "85f782d2b0cc542c64d77a63bb7c66ac4d642a024b90ac1c46c33cb0da34ddfd",
       "commit": "ae67e589b787cba9f2ed4277bb10a7dba5222600",
-      "repository": "https://github.com/corbet-foss/cnvy",
+      "repository": "https://git.corbet.ch/corbet-foss/cnvy",
       "tree": "638d2b79b44e0febaef78536e67b5d0d1cdad579",
       "version": "0.1.0"
     },
     "cpfl": {
       "archive_sha256": "e5a59f005102794b77352a5371d7dacd96666a2804d41dded88e6ac559ccf134",
       "commit": "e90f671218be8dc42cf6f09344acfa584dd89267",
-      "repository": "https://github.com/corbet-foss/cpfl",
+      "repository": "https://git.corbet.ch/corbet-foss/cpfl",
       "tree": "371e2ffdd549f0fa7875c442f93b40d9b18718f8",
       "version": "0.0.0"
     },
     "crbk": {
       "archive_sha256": "90738b4ffb36aa0488af4329771a6454c5993407c44a36dfff63d4a6afa995d8",
       "commit": "17c8b0d791a08b92a22e2b348e2cb64f310e193b",
-      "repository": "https://github.com/corbet-foss/crbk",
+      "repository": "https://git.corbet.ch/corbet-foss/crbk",
       "tree": "6365589b772da5c8569efffbb2e2cbaad41bce3e",
       "version": "0.0.0"
     },
     "csrh": {
       "archive_sha256": "ef6255ae2b4a16d3949e4492380ec3ffa5e73654a49d3ceb9cc49e8d0f7c8ca6",
       "commit": "5d0de32c2500d3d3061f25bc54c32bc75bf7c2b7",
-      "repository": "https://github.com/corbet-foss/csrh",
+      "repository": "https://git.corbet.ch/corbet-foss/csrh",
       "tree": "6c087f206f467903cec88253a18e42a32db7f945",
       "version": "0.1.0"
     },
     "cswb": {
       "archive_sha256": "6e47b8afe3e11ec29970d5ca99c25c2836e219be9bc02f049c8f21ad7192e881",
       "commit": "296dee88199c2a7a7b3368a4ddae93ed86d74b4e",
-      "repository": "https://github.com/corbet-foss/cswb",
+      "repository": "https://git.corbet.ch/corbet-foss/cswb",
       "tree": "685d28a92fa683ce8fab5ca12d4c332193de450e",
       "version": "0.1.0"
     },
     "cthr": {
       "archive_sha256": "261f67e8447571cbacf7c975092c8990d9c970729aac562b12f3ff8f964e3976",
       "commit": "3faed521f4b0d6a6279372df25b40e3f257c6b74",
-      "repository": "https://github.com/corbet-foss/cthr",
+      "repository": "https://git.corbet.ch/corbet-foss/cthr",
       "tree": "f308f9e7cbeb843c95200c58e87c42d7531dad17",
       "version": "0.1.0"
     },
     "cvld": {
       "archive_sha256": "fd22d634928b05251af9abba5e5d035da6942e1561f4012b9275a0f9c9421caa",
       "commit": "d2897b13480fc1853bf57635e5724dc04e34b51c",
-      "repository": "https://github.com/corbet-libs/cvld",
+      "repository": "https://git.corbet.ch/corbet-libs/cvld",
       "tree": "ff3f9cd322751fc4423cf768085ecb241321ef4e",
       "version": "0.2.0"
     },
     "cvlt": {
       "archive_sha256": "37acfb92f1d1cf40f481a82d9b7e2bdc808c30ee56f43258d5221b4b2df8a8b3",
       "commit": "c6dc1a633340c92586c44c304d304149c647e1b9",
-      "repository": "https://github.com/corbet-libs/cvlt",
+      "repository": "https://git.corbet.ch/corbet-libs/cvlt",
       "tree": "c694f79b5d7fb45f5abdf59ab2bd0b72ccee6c24",
       "version": "0.0.0"
     },
     "cwlt": {
       "archive_sha256": "23719080dd321e79182a02873801ea0a60966181209fba9432f749ad368aa2f9",
       "commit": "ed86f90c41f31dc23a7e439ab88d64b246676a08",
-      "repository": "https://github.com/corbet-foss/cwlt",
+      "repository": "https://git.corbet.ch/corbet-foss/cwlt",
       "tree": "cdfabb58cca339e1ec3345de71a4dd35a0dbc49f",
       "version": "0.0.0"
     },
     "cwst": {
       "archive_sha256": "3c482c56cdc81049a1fec055d6e02dca7419233c7e998b97a6da3b8ecd4702c0",
       "commit": "de04691c4c654ddbc5f0cd985e342606059b98ba",
-      "repository": "https://github.com/corbet-foss/cwst",
+      "repository": "https://git.corbet.ch/corbet-foss/cwst",
       "tree": "4700fe09adcb5c410801265eaf7146de9614e95c",
       "version": "0.0.0"
     }

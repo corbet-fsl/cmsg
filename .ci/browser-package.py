@@ -16,8 +16,8 @@ import tomllib
 ROOT = Path.cwd().resolve()
 REPORT = Path(os.environ['CI_ACCEPTANCE_ARTIFACTS']).resolve(strict=True)
 LOCKS = ['Cargo.lock', 'tests/fixture/Cargo.lock', 'tools/package-lock.json']
-FIRST_PARTY = re.compile(r'git\+https://github\.com/(corbet-foss|corbet-labs|corbet-libs|cmtymeet)/')
-MAIN = re.compile(r'git\+https://github\.com/(corbet-foss|corbet-labs|corbet-libs|cmtymeet)/'
+FIRST_PARTY = re.compile(r'git\+https://git\.corbet\.ch/(corbet-foss|corbet-labs|corbet-libs|cmtymeet)/')
+MAIN = re.compile(r'git\+https://git\.corbet\.ch/(corbet-foss|corbet-labs|corbet-libs|cmtymeet)/'
                   r'([A-Za-z0-9][A-Za-z0-9_.-]*)\?branch=main#([0-9a-f]{40})')
 
 
@@ -149,7 +149,7 @@ def main():
              {'browser-package', 'browser-package-candidates'}),
             'exact admitted browser-package selector required')
     require(os.environ.get('CI_REPOSITORY_URL', '').removesuffix('.git') ==
-            'https://github.com/corbet-libs/cmsg', 'canonical source identity required')
+            'https://git.corbet.ch/corbet-libs/cmsg', 'canonical source identity required')
     for name, length in [('CI_COMMIT_SHA', 40), ('SOURCE_SHA256', 64),
                          ('DEPENDENCY_CLOSURE_SHA256', 64)]:
         require(re.fullmatch(f'[0-9a-f]{{{length}}}', os.environ.get(name, '')),
