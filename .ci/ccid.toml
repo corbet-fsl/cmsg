@@ -18,7 +18,7 @@ cache_env = ["CMSG_WASM_CLANG"]
 cache_outputs = ["coverage.json", "coverage.lcov", "coverage.txt", "wasm-coverage.json", "wasm-coverage.lcov", "wasm-coverage.txt", "registry.json"]
 
 [render]
-tool_revision = "81ebac8e86e20bc93b69d5e912bbcb0c0d036d58"
+tool_revision = "223adb5a008f4ed1ba36d1f52796ccd29077db6e"
 
 [jobs.verify]
 scheduler = "crow"
