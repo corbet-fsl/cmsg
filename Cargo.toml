@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 rust-version = "1.97"
 description = "Device-local Member door and generated client projections"
-repository = "https://github.com/corbet-libs/cmsg"
+repository = "https://git.corbet.ch/corbet-libs/cmsg"
 license-file = "LICENSE.md"
 readme = "README.md"
 publish = false
@@ -23,7 +23,7 @@ include = [
 crate-type = ["rlib"]
 
 [dependencies]
-cbrd = { git = "https://github.com/corbet-libs/cbrd", branch = "main" }
+cbrd = { git = "https://git.corbet.ch/corbet-libs/cbrd", branch = "main" }
 schemars = "1"
 url = "2"
 getrandom = "0.3"
