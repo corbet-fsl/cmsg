@@ -23,6 +23,23 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> Clone for VaultBoardOwner<B, C, E
         }
     }
 }
+impl<B: cwst::backend::Backend, C, E, A, R, W> VaultBoardOwner<B, C, E, A, R, W> {
+    fn require_open(&self) -> Result<()> {
+        if self.lifetime.is_closed() {
+            Err(ErrorCode::Unauthorized)
+        } else {
+            Ok(())
+        }
+    }
+
+    // A sibling closes the lifetime synchronously, even while this owner holds
+    // the retained Vault. No value or signing intent may escape a completed wait
+    // after that close; rejected values (including IntentGuard) drop here.
+    fn after_wait<T>(&self, result: Result<T>) -> Result<T> {
+        self.require_open()?;
+        result
+    }
+}
 impl<B, C, E, A, R, W> board::CommittedOwner for VaultBoardOwner<B, C, E, A, R, W>
 where
     B: cwst::backend::Backend,
@@ -41,6 +58,7 @@ where
                 return Err(ErrorCode::Unauthorized);
             }
             let mut retained = self.retained.lock().await;
+            self.require_open()?;
             let custody = retained.as_mut().ok_or(ErrorCode::Unavailable)?;
             let storage = custody.vault.storage().clone();
             let store = storage.lock().await;
@@ -75,6 +93,7 @@ where
                 return Err(ErrorCode::Unauthorized);
             }
             let mut retained = self.retained.lock().await;
+            self.require_open()?;
             let custody = retained.as_mut().ok_or(ErrorCode::Unavailable)?;
             let now =
                 ckmg::Clock::now(&mut super::super::custody::SystemClock).map_err(keys_error)?;
@@ -107,6 +126,7 @@ where
                 return Err(ErrorCode::Unauthorized);
             }
             let mut retained = self.retained.lock().await;
+            self.require_open()?;
             let identity = retained
                 .as_mut()
                 .ok_or(ErrorCode::Unavailable)?
@@ -124,11 +144,13 @@ where
                 return Err(ErrorCode::Unauthorized);
             }
             let mut retained = self.retained.lock().await;
-            retained
+            self.require_open()?;
+            let result = retained
                 .as_mut()
                 .ok_or(ErrorCode::Unavailable)?
                 .snapshot(request)
-                .await
+                .await;
+            self.after_wait(result)
         })
     }
     fn history(&mut self, request: Conversation) -> OwnedFuture<'_, Vec<cnbx::Message>> {
@@ -137,11 +159,13 @@ where
                 return Err(ErrorCode::Unauthorized);
             }
             let mut retained = self.retained.lock().await;
-            retained
+            self.require_open()?;
+            let result = retained
                 .as_mut()
                 .ok_or(ErrorCode::Unavailable)?
                 .history(request)
-                .await
+                .await;
+            self.after_wait(result)
         })
     }
     fn relation(&mut self, request: Relation) -> OwnedFuture<'_, cnbx::Relation> {
@@ -150,11 +174,13 @@ where
                 return Err(ErrorCode::Unauthorized);
             }
             let mut retained = self.retained.lock().await;
-            retained
+            self.require_open()?;
+            let result = retained
                 .as_mut()
                 .ok_or(ErrorCode::Unavailable)?
                 .relation(request)
-                .await
+                .await;
+            self.after_wait(result)
         })
     }
     fn delivery(&mut self, request: Delivery) -> OwnedFuture<'_, Option<cnbx::DeliveryStatus>> {
@@ -163,11 +189,13 @@ where
                 return Err(ErrorCode::Unauthorized);
             }
             let mut retained = self.retained.lock().await;
-            retained
+            self.require_open()?;
+            let result = retained
                 .as_mut()
                 .ok_or(ErrorCode::Unavailable)?
                 .delivery(request)
-                .await
+                .await;
+            self.after_wait(result)
         })
     }
     fn sign_board<'a>(
@@ -182,11 +210,13 @@ where
                 return Err(ErrorCode::Unauthorized);
             }
             let mut retained = self.retained.lock().await;
-            retained
+            self.require_open()?;
+            let result = retained
                 .as_mut()
                 .ok_or(ErrorCode::Unavailable)?
                 .sign_board(prepared, origin, now, expires)
-                .await
+                .await;
+            self.after_wait(result)
         })
     }
     fn lock(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + 'static>> {
