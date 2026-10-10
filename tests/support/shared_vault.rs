@@ -1,4 +1,6 @@
 //! Original Store/Vault cleanup only: Keys stay locked and Authority refuses.
+#[path = "current.rs"]
+mod current_tests;
 use super::*;
 use crate::door::board::CommittedOwner;
 use futures_util::FutureExt;

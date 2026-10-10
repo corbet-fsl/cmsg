@@ -1,4 +1,5 @@
 //! Concrete Forum construction and owner-prepared current-device operations.
+use super::current::check_version;
 use super::*;
 use cbrd::{cfrm, clnk};
 
@@ -172,29 +173,6 @@ fn possession() -> cfrm::Possession {
     }
 }
 
-fn current_version(foyer: &mut foyer::Binding, community: &str, expires: u64) -> Result<u64> {
-    let now = clnk::Clock::now(&SystemClock).map_err(|_| ErrorCode::Clock)? / 1000;
-    if now >= expires {
-        return Err(ErrorCode::Unauthorized);
-    }
-    foyer.current(community, now, |charter| check_version(charter, now))?;
-    Ok(now)
-}
-
-fn check_version(charter: &cfyr::trust::VerifiedCharter, now: u64) -> Result<()> {
-    let settings = cfrm::crbk::ForumSettings::from_snapshot(
-        charter.settings(now).map_err(|_| ErrorCode::Refused)?,
-    )
-    .map_err(|_| ErrorCode::Refused)?;
-    let version = env!("CARGO_PKG_VERSION")
-        .parse()
-        .map_err(|_| ErrorCode::Unavailable)?;
-    if !settings.accepts_client(&version) {
-        return Err(ErrorCode::UnsupportedVersion);
-    }
-    Ok(())
-}
-
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "../../tests/support/board.rs"]
 mod tests;
@@ -210,7 +188,7 @@ async fn execute(door: &mut Door, key: &[u8; 32], request: cfrm::Request) -> Res
     let board = door.boards.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     let vault = door.vaults.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     let foyer = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
-    let now = current_version(foyer, &door.config.community, expires)?;
+    let now = current::version(foyer, &door.config.community, expires, door.clock_floor)?;
     let mut nonce = [0; 16];
     getrandom::fill(&mut nonce).map_err(|_| ErrorCode::Unavailable)?;
     let prepared = board.prepare(request, nonce)?;
@@ -220,7 +198,7 @@ async fn execute(door: &mut Door, key: &[u8; 32], request: cfrm::Request) -> Res
     } = vault.sign_board(&prepared, &origin, now, expires).await?;
     // Custody can await its real Store/authority. Reborrow the original Foyer
     // policy and compare the maintained runtime version after that wait too.
-    current_version(foyer, &door.config.community, expires)?;
+    current::version(foyer, &door.config.community, expires, now)?;
     // The actor owns the prepared request, signing intent and remote completion.
     // Neither a dropped caller nor local disposal can produce an implicit retry.
     board.execute(prepared, signature).await

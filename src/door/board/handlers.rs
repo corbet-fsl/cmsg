@@ -541,7 +541,7 @@ async fn page(
     board.require_committed()?;
     let vault = door.vaults.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     let foyer = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
-    let now = current_version(foyer, &door.config.community, expires)?;
+    let now = current::version(foyer, &door.config.community, expires, door.clock_floor)?;
     let mut nonce = [0; 16];
     getrandom::fill(&mut nonce).map_err(|_| ErrorCode::Unavailable)?;
     let prepared = board.prepare(request, nonce)?;
@@ -549,7 +549,7 @@ async fn page(
         signature,
         admitted: _admitted,
     } = vault.sign_board(&prepared, &origin, now, expires).await?;
-    current_version(foyer, &door.config.community, expires)?;
+    current::version(foyer, &door.config.community, expires, now)?;
     let result = if watch {
         board.watch(prepared, signature, expires).await?
     } else {

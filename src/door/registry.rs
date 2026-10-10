@@ -128,36 +128,53 @@ async fn inbox_snapshot(
     key: &[u8; 32],
     request: facades::Relation,
 ) -> Result<(cnbx::ConversationView, Vec<Event>)> {
-    let origin = origin(door, key)?.to_owned();
-    let vault = door.vaults.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
-    Ok((vault.snapshot(request).await?, vec![]))
+    inbox_read(door, key, |vault| vault.snapshot(request)).await
 }
 async fn inbox_history(
     door: &mut Door,
     key: &[u8; 32],
     request: facades::Conversation,
 ) -> Result<(Vec<cnbx::Message>, Vec<Event>)> {
-    let origin = origin(door, key)?.to_owned();
-    let vault = door.vaults.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
-    Ok((vault.history(request).await?, vec![]))
+    inbox_read(door, key, |vault| vault.history(request)).await
 }
 async fn inbox_relation(
     door: &mut Door,
     key: &[u8; 32],
     request: facades::Relation,
 ) -> Result<(cnbx::Relation, Vec<Event>)> {
-    let origin = origin(door, key)?.to_owned();
-    let vault = door.vaults.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
-    Ok((vault.relation(request).await?, vec![]))
+    inbox_read(door, key, |vault| vault.relation(request)).await
 }
 async fn inbox_delivery(
     door: &mut Door,
     key: &[u8; 32],
     request: facades::Delivery,
 ) -> Result<(Option<cnbx::DeliveryStatus>, Vec<Event>)> {
-    let origin = origin(door, key)?.to_owned();
+    inbox_read(door, key, |vault| vault.delivery(request)).await
+}
+
+async fn inbox_read<T: 'static>(
+    door: &mut Door,
+    key: &[u8; 32],
+    read: impl for<'a> FnOnce(&'a mut dyn facades::BoundVault) -> facades::OwnedFuture<'a, T>,
+) -> Result<(T, Vec<Event>)> {
+    let grant = door.grants.get(key).ok_or(ErrorCode::Unauthorized)?;
+    let origin = grant.origin.clone();
+    let expires = grant.expires;
+    let mut policy = door.current_policy(&origin)?;
     let vault = door.vaults.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
-    Ok((vault.delivery(request).await?, vec![]))
+    let (result, completed) = current::read(
+        vault.as_mut(),
+        &mut policy,
+        current::Scope {
+            community: &door.config.community,
+            expires,
+            floor: door.clock_floor,
+        },
+        read,
+    )
+    .await?;
+    door.observe(completed)?;
+    Ok((result, vec![]))
 }
 async fn vault_lock(door: &mut Door, key: &[u8; 32], _: Empty) -> Result<(Empty, Vec<Event>)> {
     let origin = origin(door, key)?.to_owned();

@@ -16,6 +16,10 @@ Keys owner accepts `lineage`; subsequent Inbox reads recheck it and load from
 that Vault's authenticated Store. `inbox.history`, `inbox.relation` and
 `inbox.delivery_status` return the original Threads, Contacts and Delivery DTOs.
 No separate snapshot/store or caller-supplied pseudonym authorizes a read.
+Every Inbox read checks Foyer's current signed minimum runtime version before
+and after the owner await, with the same grant expiry and a nonregressing clock.
+An updated requirement can withhold a completed read. Lifecycle and login
+actions remain available so the client can refresh, lock or close its owners.
 
 `board.status` and `board.disconnect` return the actual Board Status.
 `vault.lock` consumes and locks the actual Vault before emitting VaultLocked.

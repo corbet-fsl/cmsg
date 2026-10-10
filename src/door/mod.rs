@@ -6,6 +6,7 @@
 pub mod board;
 pub mod browser;
 mod composition;
+mod current;
 pub use composition::VaultComposer;
 pub mod custody;
 pub mod facades;
