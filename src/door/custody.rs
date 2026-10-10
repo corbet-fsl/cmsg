@@ -1,5 +1,5 @@
 //! Separate fresh transport and member checks over the original Foyer/Records.
-use super::{Door, ErrorCode, foyer::Transport};
+use super::{foyer::Transport, Door, ErrorCode};
 use ckmg::{Action, Authorization, Binding, Clock, Error, PublicKey};
 use futures_util::lock::Mutex;
 use std::{cell::Cell, rc::Rc};

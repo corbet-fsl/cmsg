@@ -15,7 +15,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::signal::unix::{SignalKind, signal};
+use tokio::signal::unix::{signal, SignalKind};
 
 type Result<T> = std::result::Result<T, &'static str>;
 const FILE_LIMIT: u64 = 1024 * 1024;

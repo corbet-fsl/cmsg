@@ -1,6 +1,6 @@
 use super::*;
 use futures_channel::{mpsc, oneshot};
-use futures_util::{FutureExt, StreamExt, future::LocalBoxFuture};
+use futures_util::{future::LocalBoxFuture, FutureExt, StreamExt};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,

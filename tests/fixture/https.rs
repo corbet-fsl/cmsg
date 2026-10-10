@@ -12,12 +12,12 @@ use tokio::{
     time::timeout,
 };
 use tokio_rustls::{
-    TlsAcceptor,
     rustls::{
-        ServerConfig,
         crypto::ring,
-        pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+        pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
+        ServerConfig,
     },
+    TlsAcceptor,
 };
 
 const MAX_CONNECTIONS: usize = 64;

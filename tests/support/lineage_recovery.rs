@@ -202,12 +202,10 @@ async fn malformed_tampered_and_rolled_back_clock_refuse_before_authority() {
     for wire in [b"not-a-checkpoint".to_vec(), tampered] {
         let mut authority = observer(&lineage, ckmg::Action::ReadLineage, false);
         let mut clock = FixtureClock(Rc::new(Cell::new(NOW)));
-        assert!(
-            inspector()
-                .read_lineage(&wire, READ_EVIDENCE, &mut clock, &mut authority)
-                .await
-                .is_err()
-        );
+        assert!(inspector()
+            .read_lineage(&wire, READ_EVIDENCE, &mut clock, &mut authority)
+            .await
+            .is_err());
         assert_eq!(authority.calls.get(), 0);
     }
     for (evidence, at, expect) in [

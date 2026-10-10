@@ -25,11 +25,9 @@ fn forwarding_catalog_preserves_owner_metadata_and_withholds_session_secrets() {
             .unwrap()
             .clone();
         assert_eq!(tool["annotations"]["readOnlyHint"], false);
-        assert!(
-            !serde_json::to_string(&description.result)
-                .unwrap()
-                .contains("\"token\"")
-        );
+        assert!(!serde_json::to_string(&description.result)
+            .unwrap()
+            .contains("\"token\""));
     }
 }
 

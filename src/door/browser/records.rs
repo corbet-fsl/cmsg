@@ -1,13 +1,13 @@
 //! Original Records and application operations over one browser Tor listener.
-use super::super::{ErrorCode, Result, network_browser::BrowserTor};
+use super::super::{network_browser::BrowserTor, ErrorCode, Result};
 use cdht::{
-    Capacity,
     rpc::{
-        UnverifiedPeerInfoBytes,
         envelope::TimeWindow,
-        peers::{Advertisement, DHTV, DIRECT, ExtensionDialInfo},
+        peers::{Advertisement, ExtensionDialInfo, DHTV, DIRECT},
+        UnverifiedPeerInfoBytes,
     },
     watches::WatchLimits,
+    Capacity,
 };
 use cmsh::{
     tor_applications::TorApplications,
@@ -19,8 +19,8 @@ use cmsh::{
 };
 use futures_channel::oneshot;
 use futures_util::{
+    future::{select, AbortHandle, Abortable, Either, LocalBoxFuture, Shared},
     FutureExt,
-    future::{AbortHandle, Abortable, Either, LocalBoxFuture, Shared, select},
 };
 use std::{
     cell::{Cell, RefCell},

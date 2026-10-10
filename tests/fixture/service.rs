@@ -5,8 +5,8 @@ mod owner;
 use owner::*;
 use serde_json::json;
 use std::sync::{
-    Arc,
     atomic::{AtomicUsize, Ordering},
+    Arc,
 };
 
 struct Fault {

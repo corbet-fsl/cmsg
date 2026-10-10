@@ -1,7 +1,7 @@
 //! Native platform preparation; completion and fences use the shared owner.
-use super::session::{State, origin, passkey_error};
 #[cfg(test)]
 use super::session::{cancel, poll};
+use super::session::{origin, passkey_error, State};
 use super::*;
 #[cfg(test)]
 use cfyr::passkeys::VaultOutcome;
