@@ -8,7 +8,7 @@ use clnk::BrowserTransport as Transport;
 use clnk::HttpTransport as Transport;
 
 mod handlers;
-pub(super) use handlers::{attend, discovery, search};
+pub(super) use handlers::{attend, discovery, search, watch};
 pub use handlers::{CommittedOwner, CommittedRead, OwnerFuture, ReadPolicy, SignedAttendance};
 
 /// Only the user's paging choice crosses the public boundary. Link supplies
@@ -18,6 +18,14 @@ pub use handlers::{CommittedOwner, CommittedRead, OwnerFuture, ReadPolicy, Signe
 pub struct Search {
     pub cursor: Option<Vec<u8>>,
     pub page_size: u16,
+}
+
+/// Supply DiscoveryPage.watch from Search or Watch, not its separate paging
+/// cursor. Board checks the exact held window; no roster or publication is input.
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Watch {
+    pub cursor: Vec<u8>,
 }
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]

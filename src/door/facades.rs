@@ -46,6 +46,14 @@ pub(super) trait BoundBoard {
     fn discovery(&mut self, _expires: u64) -> OwnedFuture<'_, Vec<cbrd::Discovery>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    fn watch(
+        &mut self,
+        _prepared: cbrd::Prepared,
+        _signature: Vec<u8>,
+        _expires: u64,
+    ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn status(&self) -> cbrd::Status;
     fn disconnect(&mut self) -> cbrd::Status;
     fn prepare(&mut self, request: cbrd::cfrm::Request, nonce: [u8; 16]) -> Result<cbrd::Prepared>;

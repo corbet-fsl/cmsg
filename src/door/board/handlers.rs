@@ -75,6 +75,16 @@ struct OwnedBoard<T, R, O> {
     attendance_pending: bool,
 }
 
+enum PageKind {
+    Search,
+    Watch,
+}
+
+enum PendingPage {
+    Search(cbrd::PendingSearch),
+    Watch(cbrd::PendingWatch),
+}
+
 impl Door {
     /// Bind an original Board together with the parent's scoped committed-read
     /// and attendance-signing owner. The Board must not already be installed.
@@ -233,6 +243,74 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
         attempt.completed = result.is_ok();
         result
     }
+
+    async fn page(
+        &mut self,
+        prepared: cbrd::Prepared,
+        signature: Vec<u8>,
+        expires: u64,
+        kind: PageKind,
+    ) -> Result<cbrd::DiscoveryPage> {
+        self.idle()?;
+        let action = match kind {
+            PageKind::Search => "search",
+            PageKind::Watch => "watch",
+        };
+        if prepared.action() != action {
+            return Err(ErrorCode::InvalidRequest);
+        }
+        let mut request = prepared.request().clone();
+        request
+            .possession_mut()
+            .ok_or(ErrorCode::InvalidRequest)?
+            .signature = signature.clone();
+        self.inner.pending = Some(request);
+        let mut disclosure = Disclosure {
+            board: &mut self.inner.board,
+            completed: false,
+        };
+        let received = match kind {
+            PageKind::Search => disclosure
+                .board
+                .receive_search(prepared, signature)
+                .await
+                .map(PendingPage::Search),
+            PageKind::Watch => disclosure
+                .board
+                .receive_watch(prepared, signature)
+                .await
+                .map(PendingPage::Watch),
+        };
+        // Board hides Link's completion classification. Retain the original
+        // request after failure/cancellation; never infer that it is retryable.
+        let pending = received.map_err(|_| ErrorCode::Reconcile)?;
+        let community = disclosure.board.community().to_owned();
+        let board = &mut *disclosure.board;
+        let current = &mut self.current;
+        let policy = &self.policy;
+        let result = self
+            .owner
+            .with_current(|read| {
+                with_context(current, policy, &community, expires, read, |context, _| {
+                    match pending {
+                        PendingPage::Search(pending) => {
+                            board.finish_search_committed(pending, context)
+                        }
+                        PendingPage::Watch(pending) => {
+                            board.finish_watch_committed(pending, context)
+                        }
+                    }
+                    .map(|page| page.discovery())
+                    .map_err(board_error)
+                })
+            })
+            .await;
+        // A typed pending page proves the read completed. Local disclosure
+        // refusal cannot authorize replay of that original network request.
+        self.inner.pending = None;
+        disclosure.completed = result.is_ok();
+        result
+    }
 }
 
 /// A cancelled/panicked post-network authority read must clear presence/cache,
@@ -366,48 +444,15 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
         signature: Vec<u8>,
         expires: u64,
     ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
-        Box::pin(async move {
-            self.idle()?;
-            if prepared.action() != "search" {
-                return Err(ErrorCode::InvalidRequest);
-            }
-            let mut request = prepared.request().clone();
-            request
-                .possession_mut()
-                .ok_or(ErrorCode::InvalidRequest)?
-                .signature = signature.clone();
-            self.inner.pending = Some(request);
-            let mut disclosure = Disclosure {
-                board: &mut self.inner.board,
-                completed: false,
-            };
-            let pending = match disclosure.board.receive_search(prepared, signature).await {
-                Ok(pending) => pending,
-                // Board intentionally hides the underlying Link error. Without
-                // the original completion classification, retain and reconcile.
-                Err(_) => return Err(ErrorCode::Reconcile),
-            };
-            let community = disclosure.board.community().to_owned();
-            let board = &mut *disclosure.board;
-            let current = &mut self.current;
-            let policy = &self.policy;
-            let result = self
-                .owner
-                .with_current(|read| {
-                    with_context(current, policy, &community, expires, read, |context, _| {
-                        board
-                            .finish_search_committed(pending, context)
-                            .map(|page| page.discovery())
-                            .map_err(board_error)
-                    })
-                })
-                .await;
-            // A typed PendingSearch proves the network read completed. Local
-            // disclosure refusal is not a reason to replay that network request.
-            self.inner.pending = None;
-            disclosure.completed = result.is_ok();
-            result
-        })
+        Box::pin(self.page(prepared, signature, expires, PageKind::Search))
+    }
+    fn watch(
+        &mut self,
+        prepared: cbrd::Prepared,
+        signature: Vec<u8>,
+        expires: u64,
+    ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
+        Box::pin(self.page(prepared, signature, expires, PageKind::Watch))
     }
     fn discovery(&mut self, expires: u64) -> OwnedFuture<'_, Vec<cbrd::Discovery>> {
         Box::pin(async move {
@@ -455,6 +500,40 @@ pub(in crate::door) async fn search(
     key: &[u8; 32],
     request: Search,
 ) -> Result<(cbrd::DiscoveryPage, Vec<Event>)> {
+    page(
+        door,
+        key,
+        cfrm::Request::Search(cfrm::SearchInput {
+            possession: possession(),
+            cursor: request.cursor,
+            page_size: request.page_size,
+        }),
+    )
+    .await
+}
+
+pub(in crate::door) async fn watch(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: Watch,
+) -> Result<(cbrd::DiscoveryPage, Vec<Event>)> {
+    page(
+        door,
+        key,
+        cfrm::Request::Watch(cfrm::WatchInput {
+            possession: possession(),
+            cursor: request.cursor,
+        }),
+    )
+    .await
+}
+
+async fn page(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: cfrm::Request,
+) -> Result<(cbrd::DiscoveryPage, Vec<Event>)> {
+    let watch = matches!(request, cfrm::Request::Watch(_));
     let grant = door.grants.get(key).ok_or(ErrorCode::Unauthorized)?;
     let origin = grant.origin.clone();
     let expires = grant.expires;
@@ -465,20 +544,18 @@ pub(in crate::door) async fn search(
     let now = current_version(foyer, &door.config.community, expires)?;
     let mut nonce = [0; 16];
     getrandom::fill(&mut nonce).map_err(|_| ErrorCode::Unavailable)?;
-    let prepared = board.prepare(
-        cfrm::Request::Search(cfrm::SearchInput {
-            possession: possession(),
-            cursor: request.cursor,
-            page_size: request.page_size,
-        }),
-        nonce,
-    )?;
+    let prepared = board.prepare(request, nonce)?;
     let facades::SignedBoard {
         signature,
         admitted: _admitted,
     } = vault.sign_board(&prepared, &origin, now, expires).await?;
     current_version(foyer, &door.config.community, expires)?;
-    Ok((board.search(prepared, signature, expires).await?, vec![]))
+    let result = if watch {
+        board.watch(prepared, signature, expires).await?
+    } else {
+        board.search(prepared, signature, expires).await?
+    };
+    Ok((result, vec![]))
 }
 pub(in crate::door) async fn discovery(
     door: &mut Door,

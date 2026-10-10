@@ -4,11 +4,10 @@
 effect and bounded errors. HTTP, MCP tools, CLI command descriptions and
 TypeScript are projections of this registry, not separate definitions.
 
-The local actions are `runtime.status`, `runtime.describe`, and
+Local lifecycle actions include `runtime.status`, `runtime.describe`, and
 `client.revoke`. `login.start`, `login.poll` and `login.cancel` share owner Rust
-lifecycle types and currently refuse until the actual passkey/Vault bootstrap
-is bound. Launch URLs, callback capabilities, assertions and PRF secrets are
-never login response fields.
+lifecycle types and require the actual passkey bootstrap. Launch URLs, callback
+capabilities, assertions and PRF secrets are never login response fields.
 
 Trusted embedding binds actual Board, Vault and Mesh values through
 `bind_board`, `bind_vault` and `bind_mesh`. Each is fixed to a configured member
@@ -204,12 +203,21 @@ completion. Original request/session/nonce/signature remain private after an
 uncertain response; further mutation is fenced and never retried automatically.
 A signed departure emits BoardDisconnected only after the child completes.
 
-This source still needs the concrete actual G3 authority constructor, lower
-exact signing-intent support, and Foyer-owned current Charter projection for
-signed minimum-version enforcement. It is not a qualified Board startup or
-complete discovery implementation. DiscoveryPage already comes from the Board
-owner; its runtime path also needs the original committed Profile loader and
-current Profile/Charter/contact verification, with no accepting substitute.
+`board.attend` loads the committed Profile through the retained Vault owner.
+`board.search` accepts only `cursor` and `page_size`; `board.watch` accepts only
+the opaque `cursor` returned in the preceding page's `watch` field. Watch updates
+that exact held search window through Board's original delta operation. Both
+return the owner's `DiscoveryPage`, including the next watch cursor.
+`board.discovery` rechecks the held view before returning display entries.
+
+Search and watch retain the original signed request through the network wait.
+Before disclosure, they reload the committed Profile under the same Vault and
+rebuild verification from Foyer's current signed Charter, including the published
+minimum client version. Cancellation or failed current verification clears the
+held view. Uncertain network completion requires reconciliation; it never triggers
+an automatic retry. Restricted contact-detail fields remain refused when their
+required detector is unavailable. Full admission/accounting and successful
+native/browser end-to-end discovery qualification remain outstanding.
 
 
 ### Browser passkey login ownership
@@ -226,7 +234,10 @@ projected through the generated client.
 
 Door retains the original wait and server-finish futures. Only the public
 assertion enters Foyer; opaque custody stays with the Rust session owner. Old
-completion/cancellation cannot mutate a newer frame gesture generation. Owner
+completion/cancellation cannot mutate a newer frame gesture generation. An unsent
+ceremony expires at its reported deadline, discards even a queued callback, and
+permits a fresh attempt. An already-started server finish keeps its uncertainty
+fence until the original result or reconciliation; expiry cannot roll it back. Owner
 shutdown drains an admitted login_finish before clearing grants. Unknown
 post-send effects remain fenced and are never retried as a new login. Current
 success is `authenticated_pending_custody`, never Complete or network readiness.

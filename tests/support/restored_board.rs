@@ -261,3 +261,64 @@ async fn deferred_board_never_replaces_an_existing_original_board() {
     ));
     door.close_owned().await;
 }
+
+struct RefusingForum(Rc<Cell<usize>>);
+impl clnk::Transport for RefusingForum {
+    async fn post(&self, _: &str, body: Vec<u8>) -> std::result::Result<Vec<u8>, clnk::ErrorCode> {
+        self.0.set(self.0.get() + 1);
+        let call = cfrm::Call::decode(&body, MAX_BODY_BYTES)?;
+        let error = cfrm::execute(&call).unwrap_err();
+        Ok(serde_json::to_vec(&cfrm::Failure { error }).unwrap())
+    }
+}
+
+#[tokio::test]
+async fn watch_with_real_vault_but_no_current_foyer_refuses_before_forum_send() {
+    let (mut door, _) = configuration(None).construct_restoring().unwrap();
+    let (owner, _) = bind_fixture(&mut door).await;
+    let calls = Rc::new(Cell::new(0));
+    let board = cbrd::Board::new(
+        "alpha".into(),
+        clnk::Link::at(
+            RefusingForum(calls.clone()),
+            "alpha".into(),
+            ORIGIN.into(),
+            SystemClock,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .with_search(cbrd::ViewLimits {
+        candidates: 8,
+        publication_bytes: MAX_BODY_BYTES,
+    })
+    .unwrap();
+    door.bind_board_with_owner(ORIGIN, board, owner, forum().read_policy)
+        .unwrap();
+    let now = clnk::Clock::now(&SystemClock).unwrap() / 1000;
+    let token = door
+        .pair_client(
+            ORIGIN,
+            Role::Member,
+            BTreeSet::from(["board.watch".into()]),
+            now,
+            now + 60,
+        )
+        .unwrap();
+    let request = br#"{"action":"board.watch","version":1,"body":{"cursor":[1]}}"#;
+    let result = door
+        .dispatch(ORIGIN, token.expose_for_transport(), request, now)
+        .await;
+    assert!(matches!(
+        result,
+        Output::Error {
+            error: ErrorCode::Unavailable
+        }
+    ));
+    assert_eq!(calls.get(), 0);
+    assert_eq!(
+        door.boards.get(ORIGIN).unwrap().status().connection,
+        clnk::State::Disconnected
+    );
+    door.close_owned().await;
+}

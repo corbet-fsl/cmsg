@@ -1,7 +1,7 @@
 use super::*;
 use board::{
     attend as board_attend, depart as board_depart, discovery as board_discovery,
-    heartbeat as board_heartbeat, search as board_search,
+    heartbeat as board_heartbeat, search as board_search, watch as board_watch,
 };
 use foyer::refresh as foyer_refresh;
 use login::{cancel as login_cancel, poll as login_poll, start as login_start};
@@ -220,6 +220,7 @@ actions! {
     "board.status" => board_status(Empty) -> cbrd::Status, Read, Board;
     "board.attend" => board_attend(Empty) -> cbrd::Status, BoardRecord, Board;
     "board.search" => board_search(board::Search) -> cbrd::DiscoveryPage, BoardRecord, Board;
+    "board.watch" => board_watch(board::Watch) -> cbrd::DiscoveryPage, BoardRecord, Board;
     "board.discovery" => board_discovery(Empty) -> Vec<cbrd::Discovery>, VaultAccess, Board;
     "board.heartbeat" => board_heartbeat(Empty) -> cbrd::cfrm::LiveOutput, BoardRecord, Board;
     "board.depart" => board_depart(Empty) -> cbrd::cfrm::EmptyOutput, BoardRecord, Board;

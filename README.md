@@ -2,15 +2,19 @@
 
 The device-local Member door for cmtymeet. `cmsg::door` owns one action registry
 and dispatcher, with generated HTTP/OpenAPI/MCP/CLI/TypeScript projections.
-Current local actions provide unavailable-runtime status, schema discovery and
-client revocation, guarded by bounded origin-bound capabilities. The native
-client forwards original bytes to the same dispatcher.
+Bounded origin-bound capabilities guard lifecycle actions, Foyer forwarding,
+passkey login, Board discovery and committed Inbox reads. The native client
+forwards original bytes to the same dispatcher. Each operation requires its
+actual bound owners; a local capability cannot create remote member authority.
 
 [Local API and native client](docs/LOCAL-API.md) · [Door contract](docs/CONTRACT.md)
 
-Domain facades, production pairing, current admission and combined checkpoint
-integration remain incomplete. No local status or historical fixture establishes
-member readiness or full network acceptance.
+Already-enrolled restoration retains the same Vault for Board and Inbox. Search
+and watch results are rechecked against the current signed policy and committed
+profile before disclosure. First enrollment, message mutations, group and room
+journeys, and complete admission/accounting integration remain incomplete.
+Runtime preload stays unavailable; these partial paths do not establish full
+network acceptance.
 
 ## Historical implementation
 
