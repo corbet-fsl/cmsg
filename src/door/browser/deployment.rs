@@ -119,6 +119,7 @@ mod runtime {
         pub(crate) fn composer(
             self,
             community: &str,
+            board: Option<crate::door::board::PendingBoard>,
         ) -> Result<Box<dyn crate::door::VaultComposer>> {
             if !(1..=64).contains(&self.transport.streams)
                 || !(1..=600_000).contains(&self.transport.bootstrap_ms)
@@ -179,8 +180,8 @@ mod runtime {
             let mut scope = Sha256::new();
             scope.update(b"cmsg.tor.scope.v1\0");
             scope.update(community.as_bytes());
-            Ok(Box::new(browser::restore::Composer::new(
-                browser::restore::Configuration {
+            Ok(Box::new(
+                browser::restore::Composer::new(browser::restore::Configuration {
                     transport: network_browser::Configuration {
                         limits: ctrn::Limits {
                             streams: self.transport.streams,
@@ -214,8 +215,9 @@ mod runtime {
                     },
                     watcher: RefuseWatches,
                     database: self.database,
-                },
-            )))
+                })
+                .with_board(board),
+            ))
         }
     }
 }

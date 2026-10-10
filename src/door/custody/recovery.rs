@@ -30,6 +30,8 @@ pub type RecoveredVault<B, N> = cvlt::Vault<
 pub struct RestoredVault<B: cwst::backend::Backend, N: cdht::Network> {
     pub vault: RecoveredVault<B, N>,
     pub intent: ckmg::IntentAdmission,
+    /// The exact same session lifetime checked by this Vault's member authority.
+    pub lifetime: CustodyLifetime,
 }
 
 impl<N: cdht::Network + Clone> RecoveryOwners<'_, N> {
@@ -42,6 +44,7 @@ impl<N: cdht::Network + Clone> RecoveryOwners<'_, N> {
         network: N,
         backend: B,
     ) -> super::super::Result<RestoredVault<B, N>> {
+        let lifetime = self.authority.live.lifetime.clone();
         let mut guard = CheckGuard {
             closed: self.authority.live.lifetime.closed.clone(),
             accepted: false,
@@ -86,6 +89,7 @@ impl<N: cdht::Network + Clone> RecoveryOwners<'_, N> {
         Ok(RestoredVault {
             vault,
             intent: self.intent,
+            lifetime,
         })
     }
 }

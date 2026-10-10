@@ -153,6 +153,21 @@ pub mod records;
 pub mod restore;
 
 impl Configuration {
+    /// Restoring hosts retain their original Board until the same Vault can
+    /// supply its committed-read/signing owner. Validate before starting custody.
+    #[cfg(any(feature = "native-tor", feature = "browser-tor", test))]
+    pub(crate) fn construct_restoring(mut self) -> Result<(Door, Option<board::PendingBoard>)> {
+        if self.role != Role::Member {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let board = self
+            .forum
+            .take()
+            .map(|forum| forum.prepare(&self.community, &self.origin))
+            .transpose()?;
+        Ok((self.construct()?, board))
+    }
+
     /// Build only actual configured service clients. A native owner thread or
     /// the verified browser origin retains them; this does not create custody.
     pub fn construct(self) -> Result<Door> {

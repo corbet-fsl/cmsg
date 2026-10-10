@@ -19,6 +19,10 @@ fn configured() -> (Door, ClientToken) {
             timeout_millis: 1000,
             search_candidates: 32,
             search_publication_bytes: MAX_BODY_BYTES,
+            read_policy: ReadPolicy {
+                admission_action: "fixture".into(),
+                maximum_snapshot_age: 60,
+            },
         },
         SystemClock,
     )

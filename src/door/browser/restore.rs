@@ -33,6 +33,7 @@ type Completion = Shared<LocalBoxFuture<'static, Result<()>>>;
 /// Completion comes only from the parent’s fresh session/Vault finalizer.
 pub struct Composer<W: TorWatcher + 'static> {
     configuration: Option<Configuration<W>>,
+    board: Option<crate::door::board::PendingBoard>,
     client: Option<TransportClient>,
     transport: Option<TransportOwner>,
     network: Option<Network<W>>,
@@ -61,6 +62,7 @@ impl<W: TorWatcher + 'static> Composer<W> {
     pub fn new(configuration: Configuration<W>) -> Self {
         Self {
             configuration: Some(configuration),
+            board: None,
             client: None,
             transport: None,
             network: None,
@@ -70,6 +72,11 @@ impl<W: TorWatcher + 'static> Composer<W> {
             closed: false,
             draining: None,
         }
+    }
+
+    pub(crate) fn with_board(mut self, board: Option<crate::door::board::PendingBoard>) -> Self {
+        self.board = board;
+        self
     }
 
     async fn restore(
@@ -134,8 +141,12 @@ impl<W: TorWatcher + 'static> Composer<W> {
             .map_err(|_| ErrorCode::Unauthorized)?;
         let owners = member.prepare_recovery(&candidate, network.clone()).await?;
         let restored = owners.open(network, backend).await?;
-        door.bind_vault_with_intent(origin, restored.vault, restored.intent)
+        let owner = door
+            .bind_vault_with_board_owner(origin, restored.vault, restored.intent, restored.lifetime)
             .await?;
+        if let Some(board) = self.board.take() {
+            board.bind(door, origin, owner)?;
+        }
         let retained = self.network.take().ok_or(ErrorCode::Unavailable)?;
         let (cleanup, binding) = Mesh::prepare_bind(door, origin, retained);
         self.mesh_drain = Some(cleanup);
@@ -218,6 +229,7 @@ impl<W: TorWatcher + 'static> VaultComposer for Composer<W> {
         }
         self.closed = true;
         self.configuration.take();
+        self.board.take();
         let mesh_drain = self.mesh_drain.take();
         if let Some(cleanup) = &mesh_drain {
             cleanup.close();

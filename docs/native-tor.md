@@ -52,14 +52,15 @@ None accepts a publication, member identity, revision floor, device signature,
 policy snapshot, possession object or authority verdict. Raw network search
 entries are never public results; Search produces its original Discovery DTOs.
 
-Trusted native construction must use `Door::configure_board_with_owner` instead
-of `configure_board`, or `Door::bind_board_with_owner` for an already constructed
-original Board. Pass a `board::CommittedOwner` and an explicit `board::ReadPolicy`
-(admission action and maximum signed-snapshot age). An existing Board is not
-silently replaced. Hosts using the public configuration constructor must defer
-its optional Forum construction and install this bound Board once custody's
-shared owner capability is available. Ordinary public configuration still binds
-only the original Board and these operations refuse with `unavailable`.
+Forum configuration requires an explicit `read_policy` (admission action and
+maximum signed-snapshot age); missing, empty or zero policy values refuse.
+Trusted construction uses `Door::configure_board_with_owner` with that
+configuration and the shared `board::CommittedOwner`, or
+`Door::bind_board_with_owner` for an already constructed original Board.
+An existing Board is never silently replaced. Native and browser restoring hosts
+validate and retain the optional original Board before login, then bind it to the
+recovered Vault's shared owner and exact custody lifetime. Ordinary partial hosts
+bind only the original Board; attendance and discovery remain unavailable.
 
 `Door::bind_vault_with_board_owner` now retains the actual Vault once and returns
 its narrow `VaultBoardOwner`. Use that owner when binding Board. Inbox reads,
@@ -148,7 +149,11 @@ lineage and fresh HTTPS checks before `RecoveryOwners::open` lends the Store.
 An empty local backend restores the existing remote compound checkpoint; absent
 recovery data refuses and never falls back to account or Vault creation.
 
-The recovered Vault and intent bind to Door before the same Network binds Mesh.
+The recovered Vault and intent bind to Door through its shared Board owner before
+the same Network binds Mesh. A configured Forum consumes its retained original
+Board at this point, using the same Vault, intent and custody lifetime. An absent
+Forum stays absent. Every read still obtains current Keys and the Foyer Charter;
+restricted-text verification remains unavailable until a real detector exists.
 The Mesh cleanup handle is retained before awaiting binding. Every eligible
 login result then invokes `complete_login_recovery` afresh; transport construction
 alone never reports login completion or runtime readiness. A cancellation guard

@@ -28,6 +28,42 @@ pub struct Configuration {
     pub timeout_millis: u32,
     pub search_candidates: usize,
     pub search_publication_bytes: usize,
+    pub read_policy: ReadPolicy,
+}
+
+/// Validated original Board retained until the restoring host has real custody.
+/// No owner or attendance authority is created by this preparation.
+#[cfg(any(feature = "native-tor", feature = "browser-tor", test))]
+pub(crate) struct PendingBoard {
+    board: cbrd::Board<Transport>,
+    policy: ReadPolicy,
+    origin: String,
+}
+#[cfg(any(feature = "native-tor", feature = "browser-tor", test))]
+impl Configuration {
+    pub(crate) fn prepare(self, community: &str, origin: &str) -> Result<PendingBoard> {
+        validate_policy(&self.read_policy)?;
+        let policy = self.read_policy.clone();
+        Ok(PendingBoard {
+            board: construct_board(community, origin, self, SystemClock)?,
+            policy,
+            origin: origin.into(),
+        })
+    }
+}
+#[cfg(any(feature = "native-tor", feature = "browser-tor", test))]
+impl PendingBoard {
+    pub(crate) fn bind<O: CommittedOwner + 'static>(
+        self,
+        door: &mut Door,
+        origin: &str,
+        owner: O,
+    ) -> Result<()> {
+        if origin != self.origin {
+            return Err(ErrorCode::Unauthorized);
+        }
+        door.bind_board_with_owner(origin, self.board, owner, self.policy)
+    }
 }
 
 /// Actual Unix milliseconds for Link. Its own clock floor rejects regression.
@@ -66,6 +102,7 @@ impl Door {
         config: Configuration,
         clock: impl clnk::Clock + 'static,
     ) -> Result<()> {
+        validate_policy(&config.read_policy)?;
         let board = construct_board(&self.config.community, origin, config, clock)?;
         self.bind_board(origin, board)
     }
@@ -78,11 +115,19 @@ impl Door {
         config: Configuration,
         clock: impl clnk::Clock + 'static,
         owner: O,
-        policy: ReadPolicy,
     ) -> Result<()> {
+        validate_policy(&config.read_policy)?;
+        let policy = config.read_policy.clone();
         let board = construct_board(&self.config.community, origin, config, clock)?;
         self.bind_board_with_owner(origin, board, owner, policy)
     }
+}
+
+fn validate_policy(policy: &ReadPolicy) -> Result<()> {
+    if policy.admission_action.is_empty() || policy.maximum_snapshot_age == 0 {
+        return Err(ErrorCode::InvalidRequest);
+    }
+    Ok(())
 }
 
 fn construct_board(
@@ -145,6 +190,10 @@ fn check_version(charter: &cfyr::trust::VerifiedCharter, now: u64) -> Result<()>
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "../../tests/support/board.rs"]
 mod tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "../../tests/support/restored_board.rs"]
+mod restored_tests;
 
 async fn execute(door: &mut Door, key: &[u8; 32], request: cfrm::Request) -> Result<cfrm::Reply> {
     let grant = door.grants.get(key).ok_or(ErrorCode::Unauthorized)?;

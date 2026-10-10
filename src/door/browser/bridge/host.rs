@@ -383,13 +383,10 @@ impl VaultHost {
                 Some(deployment) => {
                     #[cfg(feature = "browser-tor")]
                     {
-                        let composer = deployment.composer(&config.runtime.community)?;
-                        Self::attach_with_composer(
-                            config.runtime.construct()?,
-                            config.member_origin,
-                            origin,
-                            composer,
-                        )
+                        let community = config.runtime.community.clone();
+                        let (door, board) = config.runtime.construct_restoring()?;
+                        let composer = deployment.composer(&community, board)?;
+                        Self::attach_with_composer(door, config.member_origin, origin, composer)
                     }
                     #[cfg(not(feature = "browser-tor"))]
                     {

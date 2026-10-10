@@ -19,6 +19,8 @@ pub struct CommittedRead<'a, B: cwst::backend::Backend> {
 
 /// Explicit trusted deployment policy. No default action or snapshot age exists;
 /// neither field is accepted by a public Board action.
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ReadPolicy {
     pub admission_action: String,
     pub maximum_snapshot_age: u64,

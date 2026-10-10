@@ -22,6 +22,7 @@ pub struct Configuration<W: TorWatcher, B: Backend> {
 /// Use through Embedded::start_composed on its existing active LocalSet.
 pub struct Composer<W: TorWatcher + 'static, B: Backend + 'static> {
     configuration: Option<Configuration<W, B>>,
+    board: Option<crate::door::board::PendingBoard>,
     network: Option<network::Network<W>>,
     network_drain: Option<network::Drain>,
     mesh: Option<mesh::Owner<W>>,
@@ -47,12 +48,18 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
     pub fn new(configuration: Configuration<W, B>) -> Self {
         Self {
             configuration: Some(configuration),
+            board: None,
             network: None,
             network_drain: None,
             mesh: None,
             mesh_drain: None,
             closed: false,
         }
+    }
+
+    pub(crate) fn with_board(mut self, board: Option<crate::door::board::PendingBoard>) -> Self {
+        self.board = board;
+        self
     }
 
     async fn restore(
@@ -99,8 +106,12 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
         // before lending Store custody. Missing records never create new state.
         let owners = member.prepare_recovery(&candidate, network.clone()).await?;
         let restored = owners.open(network, config.backend).await?;
-        door.bind_vault_with_intent(origin, restored.vault, restored.intent)
+        let owner = door
+            .bind_vault_with_board_owner(origin, restored.vault, restored.intent, restored.lifetime)
             .await?;
+        if let Some(board) = self.board.take() {
+            board.bind(door, origin, owner)?;
+        }
         let retained = self.network.take().ok_or(ErrorCode::Unavailable)?;
         let (drain, binding) = mesh::Owner::prepare_bind(door, origin, retained);
         self.mesh_drain = Some(drain);
@@ -193,6 +204,7 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> VaultComposer for Composer<W
         self.mesh.take();
         self.network.take();
         self.configuration.take();
+        self.board.take();
         // Original independent cleanup already runs on this same LocalSet.
         // Keep both completion handles for the parent's pre-Store drain barrier.
     }

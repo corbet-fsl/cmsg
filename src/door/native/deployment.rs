@@ -1,7 +1,7 @@
 //! Public native deployment data; actual custody begins only after login.
 use super::{Clock, DeviceConfiguration, Embedded, Pairing};
 use crate::door::{
-    ErrorCode, Result, Role, VaultComposer, browser::deployment as budgets, catalog, scenario,
+    browser::deployment as budgets, catalog, scenario, ErrorCode, Result, Role, VaultComposer,
 };
 use cmsh::tor_discovery::TorWatcher;
 use schemars::JsonSchema;
@@ -88,8 +88,8 @@ impl NativeDeployment {
         Embedded::start_composed(
             move || async move {
                 let community = self.runtime.community.clone();
-                let door = self.runtime.construct()?;
-                let composer = tor.composer(&community)?;
+                let (door, board) = self.runtime.construct_restoring()?;
+                let composer = tor.composer(&community, board)?;
                 Ok((door, composer))
             },
             pairing,
@@ -100,7 +100,11 @@ impl NativeDeployment {
 }
 
 impl TorDeployment {
-    fn composer(self, community: &str) -> Result<Box<dyn VaultComposer>> {
+    fn composer(
+        self,
+        community: &str,
+        board: Option<crate::door::board::PendingBoard>,
+    ) -> Result<Box<dyn VaultComposer>> {
         // Check public shape early; original Node, Arti, discovery and Records
         // validators still run when the original login starts actual custody.
         if !(1..=1024).contains(&self.transport.streams)
@@ -175,8 +179,8 @@ impl TorDeployment {
         let mut scope = Sha256::new();
         scope.update(b"cmsg.tor.scope.v1\0");
         scope.update(community.as_bytes());
-        Ok(Box::new(scenario::restore::Composer::new(
-            scenario::restore::Configuration {
+        Ok(Box::new(
+            scenario::restore::Composer::new(scenario::restore::Configuration {
                 network: scenario::network::Configuration {
                     tor: arti_client::config::TorClientConfigBuilder::default(),
                     directories: ctrn::arti::Directories {
@@ -214,7 +218,8 @@ impl TorDeployment {
                 },
                 watcher: RefuseWatches,
                 backend: cwst::native::FileBackend::new(self.store_directory),
-            },
-        )))
+            })
+            .with_board(board),
+        ))
     }
 }
