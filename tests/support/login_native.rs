@@ -3,6 +3,144 @@ use super::*;
 use serde_json::{json, Value};
 const ORIGIN: &str = "https://alpha.example.test";
 
+fn pending_door(now: u64) -> (Door, [u8; 32]) {
+    let mut door = Door::new(
+        crate::door::Configuration::new(
+            "alpha".into(),
+            BTreeMap::from([(Role::Member, BTreeSet::from([ORIGIN.into()]))]),
+        )
+        .unwrap(),
+    );
+    // This transport is never called. Only the real local lifecycle is under test.
+    let client = foyer::Foyer::new(
+        foyer::Transport::new(
+            "https://alpha.example.test".into(),
+            "alpha.example.test".into(),
+            None,
+        )
+        .unwrap(),
+    );
+    door.bind_foyer(
+        ORIGIN,
+        Role::Member,
+        foyer::Sessions::new(foyer::Scope::Community, client),
+    )
+    .unwrap();
+    let token = door
+        .pair_client(
+            ORIGIN,
+            Role::Member,
+            BTreeSet::from(["login.start".into(), "login.poll".into()]),
+            now,
+            now + 60,
+        )
+        .unwrap();
+    let key = crate::door::token_hash(token.expose_for_transport());
+    door.foyers.get_mut(ORIGIN).unwrap().uncertain = true;
+    (door, key)
+}
+
+struct Dropped(std::rc::Rc<std::cell::Cell<bool>>);
+impl Drop for Dropped {
+    fn drop(&mut self) {
+        self.0.set(true);
+    }
+}
+
+#[test]
+fn unsent_login_expires_at_its_deadline_without_polling_a_queued_callback() {
+    use std::{cell::Cell, rc::Rc, task::Poll};
+    for ready in [false, true] {
+        let (mut door, key) = pending_door(100);
+        let polled = Rc::new(Cell::new(0));
+        let dropped = Rc::new(Cell::new(false));
+        let count = polled.clone();
+        let guard = Dropped(dropped.clone());
+        let future = futures_util::future::poll_fn(move |_| {
+            let _ = &guard;
+            count.set(count.get() + 1);
+            if ready {
+                Poll::Ready(Err(cfyr::passkeys::Error::Cancelled))
+            } else {
+                Poll::Pending
+            }
+        })
+        .boxed_local();
+        door.logins.insert(
+            key,
+            State::Waiting {
+                future,
+                ceremony: "unsent-ceremony".into(),
+                expires: 110,
+            },
+        );
+        if !ready {
+            door.observe(109).unwrap();
+            assert_eq!(
+                poll(&mut door, &key),
+                Ok(Status::Pending { expires_at: 110 })
+            );
+            assert_eq!(polled.get(), 1);
+            assert!(!dropped.get());
+            assert!(door.foyers[ORIGIN].uncertain);
+        }
+        let before = polled.get();
+        door.observe(110).unwrap();
+        assert_eq!(poll(&mut door, &key), Ok(Status::Expired));
+        assert_eq!(polled.get(), before);
+        assert!(dropped.get());
+        assert!(!door.foyers[ORIGIN].uncertain);
+        assert!(matches!(door.logins[&key], State::Expired));
+        assert_eq!(poll(&mut door, &key), Ok(Status::Expired));
+        assert_eq!(cancel(&mut door, &key), Ok(Status::Expired));
+        assert_eq!(door.observe(109), Err(ErrorCode::Clock));
+        assert_eq!(poll(&mut door, &key), Ok(Status::Expired));
+    }
+}
+
+#[test]
+fn ceremony_expiry_keeps_a_started_server_write_fenced_until_reconciliation() {
+    let (mut door, key) = pending_door(100);
+    let client = door
+        .foyers
+        .get_mut(ORIGIN)
+        .unwrap()
+        .sessions
+        .clients
+        .remove(&foyer::Scope::Community)
+        .unwrap();
+    let dropped = std::rc::Rc::new(std::cell::Cell::new(false));
+    let guard = Dropped(dropped.clone());
+    let future = async move {
+        let _guard = guard;
+        futures_util::future::pending::<()>().await;
+        (client, Err(cfyr::Error::Unavailable))
+    }
+    .boxed_local();
+    door.logins.insert(
+        key,
+        State::Finishing {
+            future,
+            scope: foyer::Scope::Community,
+            expires: 110,
+            custody: VaultOutcome::Locked(cfyr::passkeys::Error::PrfUnavailable),
+        },
+    );
+    door.observe(110).unwrap();
+    assert_eq!(
+        poll(&mut door, &key),
+        Ok(Status::Pending { expires_at: 110 })
+    );
+    assert!(!dropped.get());
+    assert!(door.foyers[ORIGIN].uncertain);
+    assert!(door.foyers[ORIGIN].sessions.clients.is_empty());
+    assert_eq!(cancel(&mut door, &key), Err(ErrorCode::Reconcile));
+    assert!(dropped.get());
+    assert!(door.foyers[ORIGIN].uncertain);
+    assert!(door.foyers[ORIGIN].sessions.clients.is_empty());
+    assert_eq!(poll(&mut door, &key), Err(ErrorCode::Reconcile));
+}
+
 #[tokio::test]
 async fn unknown_session_result_and_cancelled_reply_fence_original_foyer() {
     let path = std::env::var("CMSG_FOYER_FIXTURE").expect("use the original owner fixture");

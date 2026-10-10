@@ -30,6 +30,7 @@ pub(crate) enum State {
         custody: Option<VaultOutcome>,
     },
     Cancelled,
+    Expired,
     Refused(ErrorCode),
 }
 
@@ -57,6 +58,14 @@ pub(super) fn poll(door: &mut Door, key: &[u8; 32]) -> Result<Status> {
         };
     };
     let (state, status) = match state {
+        State::Waiting { expires, .. } if door.clock_floor >= expires => {
+            // No assertion has reached Foyer yet. Drop even a queued callback
+            // before polling it and release only this unsent ceremony's fence.
+            if let Some(binding) = door.foyers.get_mut(&origin) {
+                binding.uncertain = false;
+            }
+            (State::Expired, Ok(Status::Expired))
+        }
         State::Waiting {
             mut future,
             ceremony,
@@ -168,6 +177,7 @@ pub(super) fn poll(door: &mut Door, key: &[u8; 32]) -> Result<Status> {
         },
         state @ State::Authenticated { .. } => (state, Ok(Status::AuthenticatedPendingCustody)),
         State::Cancelled => (State::Cancelled, Ok(Status::Cancelled)),
+        State::Expired => (State::Expired, Ok(Status::Expired)),
         State::Refused(error) => (State::Refused(error), Err(error)),
     };
     door.logins.insert(*key, state);

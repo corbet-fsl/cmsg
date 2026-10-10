@@ -150,7 +150,7 @@ impl Gesture {
 pub(super) async fn start(door: &mut Door, key: &[u8; 32]) -> Result<Status> {
     let origin = origin(door, key)?;
     match door.logins.get(key) {
-        Some(State::Cancelled) => {
+        Some(State::Cancelled | State::Expired) => {
             door.logins.remove(key);
         }
         Some(State::Refused(error)) if *error != ErrorCode::Reconcile => {

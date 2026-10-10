@@ -46,7 +46,7 @@ impl Door {
                 .get(key)
                 .is_none_or(|grant| grant.origin == origin);
             let finished = match state {
-                State::Cancelled => true,
+                State::Cancelled | State::Expired => true,
                 State::Refused(error) => *error != ErrorCode::Reconcile,
                 _ => false,
             };
