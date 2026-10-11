@@ -2572,7 +2572,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#b0c5c23d1d3104dfdf0f84ed44ce58030faf7cf5"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#1586f2072fee1a17945a2c74d52613e854aaa10e"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
