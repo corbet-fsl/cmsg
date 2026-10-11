@@ -10,10 +10,12 @@ mod checkpoint;
 mod custody;
 mod genesis;
 mod pending;
+mod request;
 pub use checkpoint::{CheckpointAcquisition, CurrentEnrollment, SubmittedEnrollment};
 pub use custody::CommunityAccount;
 pub use genesis::PreparedAccount;
 pub use pending::PendingBinding;
+pub use request::{AcceptedResponse, ProvenGenesis, SignedApplyExtended};
 
 /// Distinct local intentions reserved by the trusted recovery composer. No
 /// caller can admit arbitrary transcript bytes through this opaque owner.

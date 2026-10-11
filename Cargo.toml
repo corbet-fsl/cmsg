@@ -92,6 +92,7 @@ wasm-bindgen-test = "0.3"
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 tempfile = "3"
+ed25519-dalek = "2"
 csgn = { git = "https://git.corbet.ch/corbet-foss/csgn", branch = "main", default-features = false, features = ["volatile-signer"] }
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }

@@ -171,6 +171,18 @@ impl<'p> SubmittedEnrollment<'p> {
     }
 }
 
+impl<'p> CurrentEnrollment<'p> {
+    /// The device authorization signed with the delegation, unchanged.
+    pub(super) fn authorization(&self) -> &admission::DeviceAuthorization {
+        &self.enrolled.prepared.delegation.authorization
+    }
+
+    /// The retained admission owner; every use re-authenticates around awaits.
+    pub(super) fn admission_mut(&mut self) -> &mut AccountAdmission<'p> {
+        &mut self.enrolled.prepared.admission
+    }
+}
+
 impl CurrentEnrollment<'_> {
     /// Reobserve the real same-session HTTPS owner after external work, retaining
     /// this exact original publication. New slots/roots require a new preparation,
