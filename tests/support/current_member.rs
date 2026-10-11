@@ -232,7 +232,7 @@ async fn cancelled_final_store_read_discards_the_genuine_ordinary_member_lease()
         let cpky::VaultOutcome::Ready(unlock) = outcome else {
             panic!("real PRF required")
         };
-        let prf = unlock.import(ckmg::passkey::PrfOutput::from_bytes).unwrap();
+        let prf = unlock.import(|bytes| ckmg::passkey::PrfOutput::from_bytes(bytes)).unwrap();
         let (transport, lifetime) = door
             .transport_authority(
                 origin,
