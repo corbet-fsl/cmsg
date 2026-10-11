@@ -1,5 +1,6 @@
 """Import real owner fixtures from the exact resolved server source."""
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -33,6 +34,21 @@ for name in names:
     if candidate and sha(destination / name) != candidate['required_fixture_files']['tests/support/' + name]:
         raise SystemExit('Copied original candidate fixture differs')
 receipt = {"source": owner["source"], "files": names}
+if not candidate:
+    # Reuse this exact server owner's existing native build environment.
+    shell = (source / ".ci/check-shell.nix").resolve()
+    if not shell.is_relative_to(source):
+        raise SystemExit("Owner build shell escapes its source directory")
+    source_hash = hashlib.sha256(shell.read_bytes()).hexdigest()
+    copied_shell = destination / "check-shell.nix"
+    shutil.copyfile(shell, copied_shell)
+    copied_hash = hashlib.sha256(copied_shell.read_bytes()).hexdigest()
+    if copied_hash != source_hash:
+        raise SystemExit("Copied original owner build shell differs")
+    receipt["build_shell"] = {
+        "source_path": ".ci/check-shell.nix",
+        "sha256": copied_hash,
+    }
 if candidate:
     receipt.update(candidate=candidate, manifest_path=owner['manifest_path'], package_id=owner['id'])
 Path("fixture-owner.json").write_text(json.dumps(receipt, indent=2) + "\n")
