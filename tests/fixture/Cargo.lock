@@ -1381,7 +1381,7 @@ dependencies = [
 [[package]]
 name = "cmbl"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#6b099d520f377c98fa07d8f5afe7c4fadba6b28c"
+source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#98a33ea9b95f96e872f577820a6047be902a1a44"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
@@ -1401,7 +1401,7 @@ dependencies = [
 [[package]]
 name = "cmbr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmbr?branch=main#f4d9dda7a6e40af874e62e49c6b7b294e76207af"
+source = "git+https://git.corbet.ch/corbet-libs/cmbr?branch=main#d85cc93b7daa96adff7596f2c3708653f880e82e"
 dependencies = [
  "cgrd",
  "cgts",
@@ -1486,7 +1486,7 @@ dependencies = [
 [[package]]
 name = "cmty"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#53ac7ca0372543cb4a6fe978e39fac78618c4ff8"
+source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#64d1c2b711fa96ed8bfe7580901a043d3961d968"
 dependencies = [
  "cgts",
  "chrono",

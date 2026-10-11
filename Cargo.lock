@@ -1226,7 +1226,7 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#0333f00c13971c53bfbe55172fb986ec83e793d8"
+source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#fe0b8f265b2af8d410b6fd7674f7fd5add00bae6"
 dependencies = [
  "cnvy",
  "cpky",
@@ -1472,7 +1472,7 @@ dependencies = [
 [[package]]
 name = "cmbl"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#6b099d520f377c98fa07d8f5afe7c4fadba6b28c"
+source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#98a33ea9b95f96e872f577820a6047be902a1a44"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
@@ -1529,6 +1529,7 @@ dependencies = [
  "cwlt",
  "cwst",
  "data-encoding",
+ "ed25519-dalek 2.2.0",
  "futures-channel",
  "futures-util",
  "getrandom 0.3.4",
