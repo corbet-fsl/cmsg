@@ -215,6 +215,22 @@ async fn proof(
                     }
                     None => String::new(),
                 };
+                let feed = reqwest::Client::new()
+                    .post(format!("{}/v1/trust_feed", service.base))
+                    .header("host", host.as_str())
+                    .json(&json!({}))
+                    .send()
+                    .await
+                    .unwrap()
+                    .text()
+                    .await
+                    .unwrap();
+                eprintln!(
+                    "community clock {}; trust feed {} bytes, head {}",
+                    service.clock.0.load(std::sync::atomic::Ordering::SeqCst),
+                    feed.len(),
+                    feed.chars().take(300).collect::<String>()
+                );
                 eprintln!(
                     "presentation_challenge on {host} refused: {error:?}; session {}; http {status}",
                     session.is_some()
