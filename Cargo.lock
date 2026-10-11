@@ -1186,7 +1186,7 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#a150f55fca9c2049dd91cd1d0d67e8568dea2f64"
+source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#fd13065464be65856431b8d6cddc3b9ec8e68c96"
 dependencies = [
  "cnvy",
  "cpky",
@@ -1475,6 +1475,7 @@ dependencies = [
  "cshm",
  "ctrn",
  "cvlt",
+ "cwlt",
  "cwst",
  "data-encoding",
  "futures-channel",
@@ -2037,7 +2038,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#a9ff78aab8f43c6eeaab72c9167c53de6b72ed43"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#db0046f9a92d7adcfaa2b86481fbfc30ad60a21b"
 dependencies = [
  "cgrp",
  "ckmg",
@@ -2172,7 +2173,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#5858a5c11ad54d8f70daf6ab853fa099ce75b928"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#d1aad02cddd53c4ff75d3188df1056189864c0fc"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -2212,7 +2213,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#bdeca48182a64b613c6528b47c91815c4a07920f"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#716ea997e6d5b20932f4060f39611bc1cfa444b0"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2227,7 +2228,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#bdeca48182a64b613c6528b47c91815c4a07920f"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#716ea997e6d5b20932f4060f39611bc1cfa444b0"
 dependencies = [
  "chacha20poly1305 0.11.0",
  "czkp",
