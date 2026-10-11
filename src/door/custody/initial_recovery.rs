@@ -171,6 +171,8 @@ impl<C: Clock, N: cdht::Network> Authority for InitialRecoveryAuthority<'_, '_, 
 ///
 /// The result is not a usable Vault. Its normal recovery/Store opening remains
 /// a separate owner join; no old certificate or unfinished intent is renewed.
+/// Production Tor callers must obtain `network` from `Network::initial_records`
+/// before moving `initial`, so transport never re-locks its held Foyer session.
 pub async fn complete_initial_recovery<B: cwst::backend::Backend, N: cdht::Network + Clone>(
     mut creation: cvlt::InitialCreation<B>,
     initial: cfyr::membership::InitialCreationLease<'_, Transport>,

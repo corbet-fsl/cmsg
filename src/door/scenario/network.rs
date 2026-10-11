@@ -472,6 +472,24 @@ impl<W: TorWatcher + 'static> Network<W> {
         }
         Ok(&self.records)
     }
+
+    /// Lend the original record network for initial ACK/recovery only when its
+    /// transport uses an independent original Foyer. Reusing the held initial
+    /// session would deadlock its fresh transport membership observation.
+    /// Each owner still checks its own actual member/device on every use.
+    pub fn initial_records(
+        &self,
+        initial: &cfyr::membership::InitialCreationLease<'_, super::super::foyer::Transport>,
+    ) -> Result<cmsh::tor_records::TorRecordNetwork<TransportClient, Verifier, W>> {
+        self.control.live()?;
+        self.control
+            .transport
+            .borrow()
+            .as_ref()
+            .ok_or(ErrorCode::Unavailable)?
+            .require_independent_initial(initial)?;
+        Ok(self.records()?.network())
+    }
     pub fn discovery(&self) -> Result<&Arc<Discovery>> {
         Ok(self.records()?.discovery())
     }

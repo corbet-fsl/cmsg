@@ -48,6 +48,7 @@ pub struct TransportOwner {
     stop: Option<oneshot::Sender<()>>,
     task: Option<tokio::task::JoinHandle<()>>,
     member: Option<custody::MemberAuthorityBuilder>,
+    foyer: cfyr::policy::CurrentPolicy<super::foyer::Transport>,
     session: Arc<()>,
 }
 
@@ -109,6 +110,7 @@ impl Door {
         let (authority, lifetime) =
             self.transport_authority(origin, binding.clone(), device, custody::SystemClock)?;
         let member = self.member_authority_builder(origin, &authority)?;
+        let foyer = self.current_policy(origin)?;
         let session = prepared
             .transport(binding, custody::SystemClock, authority)
             .map_err(|_| ErrorCode::Unavailable)?;
@@ -139,6 +141,7 @@ impl Door {
                 stop: Some(stop),
                 task: Some(task),
                 member: Some(member),
+                foyer,
                 session: session_id,
             },
         ))
@@ -146,6 +149,18 @@ impl Door {
 }
 
 impl TransportOwner {
+    fn require_independent_initial(
+        &self,
+        initial: &cfyr::membership::InitialCreationLease<'_, super::foyer::Transport>,
+    ) -> super::Result<()> {
+        if self.lifetime.is_closed() {
+            return Err(ErrorCode::Unauthorized);
+        }
+        initial
+            .require_independent_owner(&self.foyer)
+            .map_err(|_| ErrorCode::Unauthorized)
+    }
+
     /// Consume the captured original Foyer ports once, after Records handles
     /// exist. This releases no key, lineage authority or bootstrap permission.
     pub fn take_member_authority(&mut self) -> super::Result<custody::MemberAuthorityBuilder> {

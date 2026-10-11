@@ -511,6 +511,8 @@ impl<C: Clock, R: cdht::runtime::Backend> ckmg::Authority for AcknowledgmentAuth
 /// server-bound creation. Dedicated completion and every normal Keys Use retain
 /// their separate real checks. The result is still an outer pending lifecycle;
 /// recovery publication, forced selection and ordinary reopening remain required.
+/// Production Tor callers must obtain `network` from `Network::initial_records`
+/// before moving `initial`, so transport never re-locks its held Foyer session.
 pub async fn acknowledge_initial_publication<B: cwst::backend::Backend, N: cdht::Network>(
     read: cvlt::InitialLineageRead<B>,
     mut initial: cfyr::membership::InitialCreationLease<'_, Transport>,
