@@ -127,6 +127,30 @@ impl SignedApplyExtended {
         self.extended_request_digest
     }
 
+    /// Accept only the extended request digest as the acceptance binding of the
+    /// pending companion. The plain request digest is never a binding: the
+    /// operator's acceptance signs the extended one.
+    pub fn check_binding_digest(&self, digest: [u8; 32]) -> Result<()> {
+        if digest != self.extended_request_digest {
+            return Err(ErrorCode::Unauthorized);
+        }
+        Ok(())
+    }
+
+    /// Acceptance binding for the lower owner: request id, EXTENDED request
+    /// digest and the pinned operator key from the verified material.
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    pub fn acceptance_binding(
+        &self,
+        operator_key: [u8; 32],
+    ) -> ckmg::wallet_engine::account::AcceptanceBinding {
+        ckmg::wallet_engine::account::AcceptanceBinding {
+            request_id: self.request.request_id,
+            request_digest: self.extended_request_digest,
+            operator_key,
+        }
+    }
+
     /// Rebuild the derived data from stored outbox bytes after a restart, under the
     /// current pinned extension policy. Digests are recomputed; nothing is re-signed
     /// or regenerated.
@@ -568,6 +592,18 @@ mod tests {
             mutate(&mut changed);
             assert!(verify_acceptance(&changed, &request, &policy(), &key()).is_err());
         }
+    }
+
+    #[test]
+    fn a_binding_built_from_the_plain_request_digest_is_refused() {
+        let request = signed();
+        assert!(request
+            .check_binding_digest(request.request_digest)
+            .is_err());
+        assert!(request.check_binding_digest([0; 32]).is_err());
+        request
+            .check_binding_digest(request.extended_request_digest())
+            .unwrap();
     }
 
     #[test]
