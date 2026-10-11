@@ -1065,7 +1065,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#4a933fc30a8f8d9e1a5801ed2f826a82efd9b861"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#b3199a85a05e7c4f060a0e19ec8d19ffc8f63abc"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1362,7 +1362,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 [[package]]
 name = "clbs"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/clbs?branch=main#22d7bb5ee516fe6f0f833f3b21b0c8e4f6c4351b"
+source = "git+https://git.corbet.ch/corbet-foss/clbs?branch=main#171a46f16850205691de113129398999c9675eda"
 dependencies = [
  "serde",
  "serde_json",
@@ -1922,7 +1922,7 @@ dependencies = [
 [[package]]
 name = "cssr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cssr?branch=main#d519df2e9538a3c5ce50f8727eb56ed98395cabb"
+source = "git+https://git.corbet.ch/corbet-foss/cssr?branch=main#248daf5a40a0e6525ebe3d7b7d7b24ce4da01ab4"
 dependencies = [
  "crlt",
  "czkp",
@@ -2030,7 +2030,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#b8b510ba4da57097a9239f7a860cd5b4347de90c"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#86ef415a18716d6fd1daee7b0c7c14a2da872b3a"
 dependencies = [
  "axum",
  "cblc",
