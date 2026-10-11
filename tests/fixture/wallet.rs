@@ -30,7 +30,7 @@ impl Fixture {
         config.root_bootstrap_file = None;
         let wallet_owner = Door::global(config, Arc::new(SystemClock))
             .await
-            .map_err(refused)?;
+            .map_err(|_| refused_stage("Wallet construction"))?;
         let wallet_router = cvld::api::router(wallet_owner.clone());
         let wallet = https::HttpsFixture::start(
             fixed_host(wallet_router, owner::WALLET),
@@ -60,10 +60,10 @@ impl Fixture {
             .map_err(refused)?;
         let public: GlobalPublic =
             serde_json::from_value(call(&transport, wallet.base_url(), "global_public").await?)
-                .map_err(refused)?;
+                .map_err(|_| refused_stage("GlobalPublic decoding"))?;
         let wallet_feed: TrustFeed =
             serde_json::from_value(call(&transport, wallet.base_url(), "wallet_trust_feed").await?)
-                .map_err(refused)?;
+                .map_err(|_| refused_stage("Wallet trust feed decoding"))?;
 
         let community_dir = Arc::new(tempfile::tempdir()?);
         let mut config = owner::community_config(community_dir.path(), COMMUNITY, &public, 1000);
@@ -71,7 +71,7 @@ impl Fixture {
         config.admin.bootstrap_file = None;
         let community_owner = Door::community(config, Arc::new(SystemClock))
             .await
-            .map_err(refused)?;
+            .map_err(|_| refused_stage("community construction"))?;
         let community = https::HttpsFixture::start(
             fixed_host(cvld::api::router(community_owner.clone()), COMMUNITY_HOST),
             community_dir.clone(),
@@ -81,7 +81,7 @@ impl Fixture {
         .await?;
         let community_feed: TrustFeed =
             serde_json::from_value(call(&transport, community.base_url(), "trust_feed").await?)
-                .map_err(refused)?;
+                .map_err(|_| refused_stage("community trust feed decoding"))?;
         let data = json!({
             "clock":"SystemClock",
             "now":SystemClock.now(),
@@ -149,17 +149,26 @@ fn fixed_host(router: axum::Router, host: &'static str) -> axum::Router {
     ))
 }
 async fn call(client: &reqwest::Client, origin: &str, action: &str) -> io::Result<Value> {
+    let stage = match action {
+        "global_public" => "GlobalPublic read",
+        "wallet_trust_feed" => "Wallet trust feed read",
+        "trust_feed" => "community trust feed read",
+        _ => return Err(refused_stage("unsupported fixture read")),
+    };
     client
         .post(format!("{origin}/v1/{action}"))
         .json(&json!({}))
         .send()
         .await
-        .map_err(refused)?
+        .map_err(|_| refused_stage(stage))?
         .error_for_status()
-        .map_err(refused)?
+        .map_err(|_| refused_stage(stage))?
         .json()
         .await
-        .map_err(refused)
+        .map_err(|_| refused_stage(stage))
+}
+fn refused_stage(stage: &'static str) -> io::Error {
+    io::Error::other(format!("original wallet fixture owner refused at {stage}"))
 }
 fn refused(_: impl std::fmt::Debug) -> io::Error {
     io::Error::other("original wallet fixture owner refused")
