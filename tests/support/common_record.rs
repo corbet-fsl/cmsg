@@ -164,6 +164,7 @@ pub(super) async fn exercise(
     let checkpoint = records.checkpoint(&opening.locator()).await.unwrap();
     drop(records);
     let recovered = opening.prepare_initial_recovery(&checkpoint).unwrap();
+    let mut policy = door.current_policy(origin).unwrap();
     let lease = initial(&door, origin, &mut policy).await;
     let owners = custody::prepare_initial_recovery(&recovered, lease, network.clone())
         .await
