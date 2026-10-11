@@ -239,28 +239,8 @@ async fn run() -> Result<()> {
 }
 
 // Original ckyh storage requires a multithread runtime for its blocking bridge.
-// The unoptimized original owner futures are deep; give every thread real room
-// instead of the 2 MiB default worker stack.
-const STACK: usize = 64 * 1024 * 1024;
-
-fn main() -> std::process::ExitCode {
-    std::thread::Builder::new()
-        .stack_size(STACK)
-        .spawn(|| {
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .thread_stack_size(STACK)
-                .enable_all()
-                .build()
-                .expect("fixture runtime")
-                .block_on(entry())
-        })
-        .expect("fixture thread")
-        .join()
-        .unwrap_or(std::process::ExitCode::FAILURE)
-}
-
-async fn entry() -> std::process::ExitCode {
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
+async fn main() -> std::process::ExitCode {
     let result = match std::env::args().nth(1).as_deref() {
         Some("--current-owner") => current::run().await,
         Some("--wallet-owner") => current::run_wallet().await,

@@ -187,8 +187,27 @@ async fn login_faults(
     (json!({"base":base,"host":WALLET,"requests":requests}), task)
 }
 
-#[tokio::main]
-async fn main() {
+// The unoptimized original owner futures are deep; give every runtime thread real
+// room instead of the 2 MiB default worker stack.
+const STACK: usize = 64 * 1024 * 1024;
+
+fn main() {
+    std::thread::Builder::new()
+        .stack_size(STACK)
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .thread_stack_size(STACK)
+                .enable_all()
+                .build()
+                .expect("fixture runtime")
+                .block_on(entry())
+        })
+        .expect("fixture thread")
+        .join()
+        .expect("fixture thread panicked");
+}
+
+async fn entry() {
     let mut args = std::env::args().skip(1);
     let path = args.next().expect("private fixture output path");
     let tls_paths = match args.next().as_deref() {
