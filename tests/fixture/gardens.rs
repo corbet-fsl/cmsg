@@ -225,11 +225,21 @@ async fn proof(
                     .text()
                     .await
                     .unwrap();
+                let parsed: serde_json::Value = serde_json::from_str(&feed).unwrap();
+                let shape: Vec<String> = parsed
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(key, value)| match value {
+                        serde_json::Value::Array(items) => format!("{key}[{}]", items.len()),
+                        serde_json::Value::Object(_) => format!("{key}{{}}"),
+                        other => format!("{key}={other}"),
+                    })
+                    .collect();
                 eprintln!(
-                    "community clock {}; trust feed {} bytes, head {}",
+                    "community clock {}; trust feed fields {}",
                     service.clock.0.load(std::sync::atomic::Ordering::SeqCst),
-                    feed.len(),
-                    feed.chars().take(300).collect::<String>()
+                    shape.join(" ")
                 );
                 eprintln!(
                     "presentation_challenge on {host} refused: {error:?}; session {}; http {status}",
