@@ -40,7 +40,7 @@ cmmr = { git = "https://git.corbet.ch/corbet-foss/cmmr.git", branch = "v01" }
 cdht = { git = "https://git.corbet.ch/corbet-foss/cdht.git", branch = "v01" }
 cmsh = { git = "https://git.corbet.ch/corbet-libs/cmsh.git", branch = "v01" }
 cvlt = { git = "https://git.corbet.ch/corbet-libs/cvlt.git", branch = "v01", features = ["wallet"] }
-cnbx = { git = "https://git.corbet.ch/corbet-libs/cnbx.git", branch = "v01" }
+cnbx = { git = "https://git.corbet.ch/corbet-libs/cnbx.git", branch = "inbox-contacts" }
 ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "v01" }
 cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "v01" }
 schemars = "1"

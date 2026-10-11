@@ -12,6 +12,7 @@ pub use composition::VaultComposer;
 pub mod custody;
 pub mod facades;
 pub mod foyer;
+mod inbox;
 mod json;
 pub mod login;
 #[cfg(not(target_arch = "wasm32"))]
