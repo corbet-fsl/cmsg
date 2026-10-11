@@ -1,0 +1,371 @@
+//! Dedicated completion of one original durable, server-bound creation intent.
+use super::initial::SharedClock;
+use super::*;
+
+/// Dedicated original-owner publication refusal. Server unknown outcomes retain
+/// Foyer's Reconcile status instead of being flattened into rejected authority.
+#[derive(Debug)]
+pub enum InitialPublicationError {
+    Initial(cvlt::InitialError),
+    Foyer(cfyr::Error),
+}
+impl From<cvlt::InitialError> for InitialPublicationError {
+    fn from(error: cvlt::InitialError) -> Self {
+        Self::Initial(error)
+    }
+}
+
+fn refused() -> cvlt::InitialError {
+    cvlt::InitialError::Keys(Error::Unauthorized)
+}
+
+/// Reopen the exact original incomplete operation from one inseparable Passkeys
+/// assertion/PRF result and its current same-key enrollment owner. Missing data
+/// never creates, and returning this pending owner grants neither Use nor ACK.
+pub async fn reopen_initial_publication<'p, B: cwst::backend::Backend>(
+    authentication: cfyr::passkeys::Authentication,
+    mut initial: cfyr::membership::InitialCreationLease<'p, Transport>,
+    backend: B,
+    clock: &mut impl Clock,
+) -> Result<
+    (
+        cvlt::InitialCreation<B>,
+        cfyr::membership::InitialCreationLease<'p, Transport>,
+    ),
+    cvlt::InitialError,
+> {
+    let (credential, vault) = authentication.into_parts();
+    if credential.credential_id().map_err(|_| refused())?
+        != initial.credential_id().map_err(|_| refused())?
+    {
+        return Err(refused());
+    }
+    let cfyr::passkeys::VaultOutcome::Ready(unlock) = vault else {
+        return Err(refused());
+    };
+    let mut clock = SharedClock::new(clock);
+    let mut failed = false;
+    let scope = initial
+        .with_current(
+            || {
+                clock.now().unwrap_or_else(|_| {
+                    failed = true;
+                    u64::MAX
+                })
+            },
+            |current| current.community().to_owned(),
+        )
+        .map_err(|_| refused())?;
+    if failed {
+        return Err(cvlt::InitialError::Keys(Error::Clock));
+    }
+    let creation = cvlt::PreparedOpen::new(unlock, &scope)
+        .map_err(cvlt::InitialError::Open)?
+        .reopen_initial(backend)
+        .await?;
+    if creation.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+        return Err(refused());
+    }
+    initial
+        .check(|| {
+            clock.now().unwrap_or_else(|_| {
+                failed = true;
+                u64::MAX
+            })
+        })
+        .map_err(|_| refused())?;
+    if failed {
+        return Err(cvlt::InitialError::Keys(Error::Clock));
+    }
+    Ok((creation, initial))
+}
+
+/// Obtain the original dedicated receipt assertion from the maintained Passkeys
+/// owner, retain all immutable publication inputs in the actual encrypted Store,
+/// then bind that exact commitment through the original same-key server CAS.
+/// There is no generic signer, replacement root, or unfinished-intent renewal.
+pub async fn prepare_initial_publication<
+    'p,
+    B: cwst::backend::Backend,
+    A: cfyr::passkeys::Authenticator,
+>(
+    creation: cvlt::InitialCreation<B>,
+    mut initial: cfyr::membership::InitialCreationLease<'p, Transport>,
+    passkeys: &mut cfyr::passkeys::Client<A>,
+    clock: &mut impl Clock,
+    entropy: &mut impl ckmg::Entropy,
+) -> Result<
+    (
+        cvlt::InitialCreation<B>,
+        cfyr::membership::InitialCreationLease<'p, Transport>,
+    ),
+    InitialPublicationError,
+> {
+    let mut clock = SharedClock::new(clock);
+    if creation.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+        return Err(refused().into());
+    }
+    let certificate = initial.certificate_bytes().map_err(|_| refused())?.to_vec();
+    let member = initial.observation().map_err(|_| refused())?.member.clone();
+    let challenge = creation
+        .receipt()
+        .passkey_challenge()
+        .map_err(cvlt::InitialError::Keys)?;
+    let now = clock.now().map_err(cvlt::InitialError::Keys)?;
+    let mut failed = false;
+    let options = initial
+        .with_current(
+            || {
+                clock.now().unwrap_or_else(|_| {
+                    failed = true;
+                    u64::MAX
+                })
+            },
+            |current| {
+                let certificate = current
+                    .passkey_certificate(&certificate, &member, now)
+                    .map_err(|_| refused())?;
+                serde_json::to_value(certificate.request(challenge, now).map_err(|_| refused())?)
+                    .map_err(|_| refused())
+            },
+        )
+        .map_err(|_| refused())??;
+    if failed {
+        return Err(cvlt::InitialError::Keys(Error::Clock).into());
+    }
+    let (public, unused_unlock) = passkeys
+        .sign_in(options)
+        .await
+        .map_err(|_| refused())?
+        .into_parts();
+    drop(unused_unlock);
+    // Parse only through the original secret-rejecting Keyhole response codec;
+    // it alone decodes the original WebAuthn signed byte fields.
+    if serde_json::to_vec(public.as_json())
+        .map_err(|_| refused())?
+        .len()
+        > cvlt::MAX_LINEAGE_EVIDENCE_BYTES
+    {
+        return Err(refused().into());
+    }
+    let public: ckyh::PublicKeyCredential =
+        serde_json::from_value(public.into_json()).map_err(|_| refused())?;
+    let assertion = ckyh::lineage::Assertion {
+        credential_id: public.raw_id.to_vec(),
+        client_data_json: public.response.client_data_json.to_vec(),
+        authenticator_data: public.response.authenticator_data.to_vec(),
+        signature: public.response.signature.to_vec(),
+        user_handle: public
+            .response
+            .user_handle
+            .as_ref()
+            .map(|value| value.to_vec()),
+    };
+    let now = clock.now().map_err(cvlt::InitialError::Keys)?;
+    let evidence = initial
+        .with_current(
+            || {
+                clock.now().unwrap_or_else(|_| {
+                    failed = true;
+                    u64::MAX
+                })
+            },
+            |current| {
+                let (_, author) = creation
+                    .receipt()
+                    .attested_lineage()
+                    .map_err(cvlt::InitialError::Keys)?;
+                if current.revocations().device_revoked(author.value()) {
+                    return Err(refused());
+                }
+                cvlt::LineageEvidence::prepare(
+                    current,
+                    creation.receipt(),
+                    &assertion,
+                    &certificate,
+                    &member,
+                    now,
+                )
+                .map_err(|_| refused())
+            },
+        )
+        .map_err(|_| refused())??;
+    if failed {
+        return Err(cvlt::InitialError::Keys(Error::Clock).into());
+    }
+    let expires = initial.expires().map_err(|_| refused())?;
+    let creation = creation
+        .prepare(&evidence, expires, &mut clock, entropy)
+        .await?;
+    let publication = creation.publication_commitment()?;
+    let initial = initial
+        .bind_publication(publication, || {
+            clock.now().unwrap_or_else(|_| {
+                failed = true;
+                u64::MAX
+            })
+        })
+        .await
+        .map_err(InitialPublicationError::Foyer)?;
+    if failed {
+        return Err(InitialPublicationError::Foyer(cfyr::Error::Reconcile));
+    }
+    Ok((creation, initial))
+}
+
+struct Completion<'p, C> {
+    initial: cfyr::membership::InitialCreationLease<'p, Transport>,
+    clock: C,
+    receipt: ckmg::Receipt,
+    intent: ckmg::CompletionIntent,
+    location: ckmg::Locator,
+    sealed_digest: [u8; 32],
+    publication: [u8; 32],
+    closed: bool,
+}
+fn same_intent(a: &ckmg::CompletionIntent, b: &ckmg::CompletionIntent) -> bool {
+    a.outer_generation == b.outer_generation
+        && a.outer_digest == b.outer_digest
+        && a.inner_version == b.inner_version
+        && a.inner_operation == b.inner_operation
+        && a.inner_digest == b.inner_digest
+        && a.nonce == b.nonce
+        && a.packed_evidence == b.packed_evidence
+        && a.prepared_at == b.prepared_at
+        && a.expires == b.expires
+}
+impl<C: Clock> Completion<'_, C> {
+    fn current(&mut self, request: ckmg::CompletionAuthorization<'_>) -> Result<u64, Error> {
+        if self.closed {
+            return Err(Error::Unauthorized);
+        }
+        self.closed = true;
+        if request.receipt != &self.receipt
+            || request.location != &self.location
+            || request.sealed_digest != &self.sealed_digest
+            || !same_intent(request.intent, &self.intent)
+            || request.authority_reference
+                != self
+                    .initial
+                    .credential_id()
+                    .map_err(|_| Error::Unauthorized)?
+            || self
+                .initial
+                .publication()
+                .map_err(|_| Error::Unauthorized)?
+                != Some(self.publication)
+        {
+            return Err(Error::Unauthorized);
+        }
+        let commitment = request.receipt.initial_publication_commitment(
+            &request.intent.nonce,
+            &request.intent.packed_evidence,
+            request.intent.prepared_at,
+            request.intent.expires,
+        )?;
+        if commitment != self.publication {
+            return Err(Error::Unauthorized);
+        }
+        let evidence = cvlt::LineageEvidence::from_packed(&request.intent.packed_evidence)
+            .map_err(|_| Error::Unauthorized)?;
+        let (lineage, author) = request.receipt.attested_lineage()?;
+        let observation = self
+            .initial
+            .observation()
+            .map_err(|_| Error::Unauthorized)?;
+        if observation.member != lineage.binding.member()
+            || !observation.device_keys.contains(author.value())
+        {
+            return Err(Error::Unauthorized);
+        }
+        let now = self.clock.now()?;
+        if now < request.now.max(request.intent.prepared_at) || now >= request.intent.expires {
+            return Err(Error::Clock);
+        }
+        let mut failed = false;
+        self.initial
+            .with_current(
+                || {
+                    self.clock.now().unwrap_or_else(|_| {
+                        failed = true;
+                        u64::MAX
+                    })
+                },
+                |current| {
+                    if current.revocations().device_revoked(author.value()) {
+                        return Err(Error::Revoked);
+                    }
+                    let observed = evidence
+                        .verify(current, lineage.binding.member(), now)
+                        .map_err(|_| Error::Unauthorized)?;
+                    if observed.lineage(now).map_err(|_| Error::Unauthorized)? != lineage
+                        || observed.author(now).map_err(|_| Error::Unauthorized)? != author
+                        || observed
+                            .credential_id(now)
+                            .map_err(|_| Error::Unauthorized)?
+                            != request.authority_reference
+                    {
+                        return Err(Error::Unauthorized);
+                    }
+                    Ok(())
+                },
+            )
+            .map_err(|_| Error::Unauthorized)??;
+        if failed {
+            return Err(Error::Clock);
+        }
+        let completed = self.initial.checked_at().map_err(|_| Error::Unauthorized)?;
+        if completed < now || completed >= request.intent.expires {
+            return Err(Error::Clock);
+        }
+        self.closed = false;
+        Ok(completed)
+    }
+}
+impl<C: Clock> ckmg::Authority for Completion<'_, C> {
+    async fn check(&mut self, _: Authorization<'_>) -> Result<(), Error> {
+        Err(Error::Unauthorized)
+    }
+    async fn check_completion(
+        &mut self,
+        request: ckmg::CompletionAuthorization<'_>,
+    ) -> Result<u64, Error> {
+        self.current(request)
+    }
+    fn check_completion_current(
+        &mut self,
+        request: ckmg::CompletionAuthorization<'_>,
+    ) -> Result<u64, Error> {
+        self.current(request)
+    }
+}
+
+/// Complete only this actual Prepared checkpoint under a fresh original same-key
+/// seed/publication lease. Every generation, digest, receipt and immutable field
+/// is captured from the authenticated owner and compared again before signing.
+pub async fn retain_initial_publication<B: cwst::backend::Backend>(
+    creation: cvlt::InitialCreation<B>,
+    initial: cfyr::membership::InitialCreationLease<'_, Transport>,
+    clock: &mut impl Clock,
+) -> Result<cvlt::InitialCreation<B>, cvlt::InitialError> {
+    if creation.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+        return Err(refused());
+    }
+    let publication = creation.publication_commitment()?;
+    if initial.publication().map_err(|_| refused())? != Some(publication) {
+        return Err(refused());
+    }
+    let (intent, location, sealed_digest) = creation.completion_binding()?;
+    let mut clock = SharedClock::new(clock);
+    let mut authority = Completion {
+        initial,
+        clock: clock.clone(),
+        receipt: creation.receipt().clone(),
+        intent,
+        location,
+        sealed_digest,
+        publication,
+        closed: false,
+    };
+    creation.retain(&mut clock, &mut authority).await
+}

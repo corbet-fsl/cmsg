@@ -1,6 +1,9 @@
 #![cfg(not(target_arch = "wasm32"))]
 //! Actual HTTPS enrollment, original Passkeys custody and real encrypted CAS.
-use cmsg::door::custody::{activate_initial, reopen_initial_enrollment, retain_initial_enrollment};
+use cmsg::door::custody::{
+    activate_initial, prepare_initial_publication, reopen_initial_enrollment,
+    reopen_initial_publication, retain_initial_enrollment, retain_initial_publication,
+};
 use cpky::{
     Context,
     software::{SoftwareAuthenticator, TestConfiguration},
@@ -161,7 +164,61 @@ async fn original_registration_tuple_activates_only_after_durable_candidate_and_
                 .member(),
             input["member"].as_str().unwrap()
         );
-        // Pending is not normal Use or recovery; the original inspector still refuses.
+        let initial = api
+            .live_membership()
+            .observe_lease(|| now)
+            .await
+            .unwrap()
+            .passkey_certificate(&mut policy, || now)
+            .await
+            .unwrap()
+            .initial_creation(|| now)
+            .await
+            .unwrap();
+        let (creation, initial) =
+            prepare_initial_publication(creation, initial, &mut keys, &mut clock, &mut entropy)
+                .await
+                .unwrap();
+        assert_eq!(creation.phase().unwrap(), cvlt::InitialPhase::Prepared);
+        let publication = creation.publication_commitment().unwrap();
+        assert_eq!(initial.publication().unwrap(), Some(publication));
+        let exact_intent = creation.completion_binding().unwrap().0;
+        // Loss after the actual server bind reopens the same durable operation.
+        // A fresh owner observation confirms its exact immutable winner.
+        let (creation, initial) = if before_finish {
+            drop((creation, initial));
+            let challenge = api.begin_browser_login().await.unwrap();
+            let authentication = keys.sign_in(challenge.options).await.unwrap();
+            let initial = api
+                .live_membership()
+                .observe_lease(|| now)
+                .await
+                .unwrap()
+                .passkey_certificate(&mut policy, || now)
+                .await
+                .unwrap()
+                .initial_creation(|| now)
+                .await
+                .unwrap();
+            let (creation, initial) =
+                reopen_initial_publication(authentication, initial, backend.clone(), &mut clock)
+                    .await
+                    .unwrap();
+            assert_eq!(creation.publication_commitment().unwrap(), publication);
+            assert_eq!(
+                creation.completion_binding().unwrap().0.packed_evidence,
+                exact_intent.packed_evidence
+            );
+            (creation, initial)
+        } else {
+            (creation, initial)
+        };
+        let creation = retain_initial_publication(creation, initial, &mut clock)
+            .await
+            .unwrap();
+        assert_eq!(creation.phase().unwrap(), cvlt::InitialPhase::Retained);
+        assert_eq!(creation.publication_commitment().unwrap(), publication);
+        // Retaining original signed outputs is not publication, ACK or normal Use.
         drop(creation);
     }
 }

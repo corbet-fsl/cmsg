@@ -4,7 +4,12 @@ use ckmg::{Action, Authorization, Binding, Clock, Error, PublicKey};
 use futures_util::lock::Mutex;
 use std::{cell::Cell, rc::Rc};
 
+mod genesis;
 mod initial;
+pub use genesis::{
+    InitialPublicationError, prepare_initial_publication, reopen_initial_publication,
+    retain_initial_publication,
+};
 mod recovery;
 pub use initial::{
     EnrollmentError, InitialEnrollment, activate_initial, reopen_initial_enrollment,
@@ -274,6 +279,9 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
         let completed = self
             .policy
             .with_current(now, |current| {
+                if current.revocations().device_revoked(request.device.value()) {
+                    return Err(Error::Unauthorized);
+                }
                 let mut selected: Option<cvlt::VerifiedLineageObservation<'_>> = None;
                 for evidence in read.evidence() {
                     // Invalid observed material refuses the observation; never roll

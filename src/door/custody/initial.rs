@@ -143,7 +143,21 @@ pub async fn reopen_initial_enrollment<B: cwst::backend::Backend>(
     Ok(InitialEnrollment { candidate, device })
 }
 
-struct SharedClock<'a, C>(Rc<RefCell<&'a mut C>>);
+pub(super) struct SharedClock<'a, C>(Rc<RefCell<ClockState<'a, C>>>);
+struct ClockState<'a, C> {
+    clock: &'a mut C,
+    floor: Option<u64>,
+    failed: bool,
+}
+impl<'a, C> SharedClock<'a, C> {
+    pub(super) fn new(clock: &'a mut C) -> Self {
+        Self(Rc::new(RefCell::new(ClockState {
+            clock,
+            floor: None,
+            failed: false,
+        })))
+    }
+}
 impl<C> Clone for SharedClock<'_, C> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
@@ -151,7 +165,20 @@ impl<C> Clone for SharedClock<'_, C> {
 }
 impl<C: Clock> Clock for SharedClock<'_, C> {
     fn now(&mut self) -> Result<u64, Error> {
-        self.0.borrow_mut().now()
+        let mut state = self.0.borrow_mut();
+        if state.failed {
+            return Err(Error::Clock);
+        }
+        // Keep every observed sample across owner and operation clones. A clock
+        // error, regression or unwind permanently fences this live attempt.
+        state.failed = true;
+        let now = state.clock.now()?;
+        if state.floor.is_some_and(|floor| now < floor) {
+            return Err(Error::Clock);
+        }
+        state.floor = Some(now);
+        state.failed = false;
+        Ok(now)
     }
 }
 
@@ -203,6 +230,7 @@ impl<C: Clock> Activation<'_, C> {
         };
         let scope = self.initial.with_current(&mut sample, |current| {
             current.community() == request.binding.community()
+                && !current.revocations().device_revoked(request.device.value())
         });
         let completed = self.initial.check(&mut sample);
         if failed_clock {
@@ -262,7 +290,7 @@ pub async fn activate_initial<B: cwst::backend::Backend>(
         return Err(cvlt::InitialError::Keys(Error::Unauthorized));
     }
     let durable = candidate.activation_intent()?;
-    let mut shared = SharedClock(Rc::new(RefCell::new(clock)));
+    let mut shared = SharedClock::new(clock);
     let mut authority = Activation {
         initial,
         clock: shared.clone(),
@@ -273,4 +301,39 @@ pub async fn activate_initial<B: cwst::backend::Backend>(
     candidate
         .activate(&mut shared, entropy, &mut authority)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    struct Samples(VecDeque<Result<u64, Error>>);
+    impl Clock for Samples {
+        fn now(&mut self) -> Result<u64, Error> {
+            self.0.pop_front().expect("declared clock sample")
+        }
+    }
+
+    #[test]
+    fn original_owner_and_operation_clones_share_a_terminal_monotonic_floor() {
+        let mut source = Samples(VecDeque::from([Ok(100), Ok(90), Ok(110)]));
+        let mut operation = SharedClock::new(&mut source);
+        let mut owner = operation.clone();
+        assert_eq!(operation.now().unwrap(), 100);
+        assert_eq!(owner.now().unwrap_err(), Error::Clock);
+        assert_eq!(operation.now().unwrap_err(), Error::Clock);
+        drop((owner, operation));
+        assert_eq!(source.0.front(), Some(&Ok(110)));
+    }
+
+    #[test]
+    fn original_clock_error_cannot_be_cleared_by_a_later_success() {
+        let mut source = Samples(VecDeque::from([Ok(100), Err(Error::Clock), Ok(110)]));
+        let mut operation = SharedClock::new(&mut source);
+        let mut owner = operation.clone();
+        assert_eq!(owner.now().unwrap(), 100);
+        assert_eq!(operation.now().unwrap_err(), Error::Clock);
+        assert_eq!(owner.now().unwrap_err(), Error::Clock);
+    }
 }

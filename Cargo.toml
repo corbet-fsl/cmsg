@@ -29,6 +29,7 @@ refresh = ["cfyr"]
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh", branch = "main", default-features = false }
 cchr = { git = "https://git.corbet.ch/corbet-foss/cchr.git", branch = "v01" }
 cpfl = { git = "https://git.corbet.ch/corbet-foss/cpfl.git", branch = "v01" }
 cshm = { git = "https://git.corbet.ch/corbet-foss/cshm", branch = "main" }
