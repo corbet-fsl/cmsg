@@ -24,6 +24,8 @@ use std::{
     process::{Child, Command, Stdio},
     time::Duration,
 };
+#[path = "initial_tor/wallet.rs"]
+mod wallet;
 
 fn now() -> u64 {
     ckmg::Clock::now(&mut custody::SystemClock).unwrap()
@@ -46,6 +48,12 @@ impl Drop for Fixture {
 }
 impl Fixture {
     async fn start() -> Self {
+        Self::selected("--current-owner").await
+    }
+    async fn wallet() -> Self {
+        Self::selected("--wallet-owner").await
+    }
+    async fn selected(selector: &'static str) -> Self {
         let binary = std::env::var("CMSG_ACCEPTANCE_FIXTURE")
             .expect("original current-time fixture binary required");
         let directory = tempfile::tempdir().unwrap();
@@ -59,7 +67,7 @@ impl Fixture {
         std::fs::write(&key, include_bytes!("support/current-tls/key.pem")).unwrap();
         let output = directory.path().join("fixture.json");
         let child = Command::new(binary)
-            .arg("--current-owner")
+            .arg(selector)
             .arg(directory.path())
             .arg(chain)
             .arg(key)
@@ -86,7 +94,11 @@ impl Fixture {
         }
         let value: Value = serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
         assert_eq!(value["clock"], "SystemClock");
-        assert_eq!(value["holders"], 6);
+        if selector == "--current-owner" {
+            assert_eq!(value["holders"], 6);
+        } else {
+            assert_eq!(value["wallet"]["scope"], "wallet");
+        }
         original.value = value;
         original
     }
@@ -288,6 +300,16 @@ async fn start(
     member: &str,
     config: network::Configuration,
 ) -> Native {
+    start_scope(door, origin, opening, "alpha", member, config).await
+}
+async fn start_scope(
+    door: &Door,
+    origin: &str,
+    opening: &cvlt::PreparedOpen,
+    scope: &str,
+    member: &str,
+    config: network::Configuration,
+) -> Native {
     let window = cdht::rpc::envelope::TimeWindow {
         behind_us: 60_000_000,
         ahead_us: 5_000_000,
@@ -296,7 +318,7 @@ async fn start(
         .prepare_native_transport(
             origin,
             opening,
-            ckmg::Binding::new("alpha", member).unwrap(),
+            ckmg::Binding::new(scope, member).unwrap(),
             window,
         )
         .unwrap();
@@ -729,9 +751,12 @@ async fn original_enrollment_retirement_and_reopen_over_private_tor() {
     // independently driven by the multithread runtime's original transport.
     tokio::task::LocalSet::new()
         .run_until(async {
-            tokio::time::timeout(Duration::from_secs(900), journey())
-                .await
-                .unwrap();
+            tokio::time::timeout(Duration::from_secs(900), async {
+                journey().await;
+                wallet::journey().await;
+            })
+            .await
+            .unwrap();
         })
         .await;
 }

@@ -3,25 +3,19 @@
 //! The validating record transport is inert; this is no Tor or account-proof claim.
 use cmsg::door::{
     custody::{self, SystemClock},
-    foyer::{Scope, Sessions},
-    Configuration, Door, Role,
-};
-use cpky::{
-    software::{SoftwareAuthenticator, TestConfiguration},
-    Context,
+    foyer::Scope,
+    Role,
 };
 use serde_json::{json, Value};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::Duration,
-};
+use std::time::Duration;
 
 #[path = "support/initial_network.rs"]
 mod initial_network;
 
-fn now() -> u64 {
-    ckmg::Clock::now(&mut SystemClock).unwrap()
-}
+#[path = "support/wallet.rs"]
+mod wallet;
+use wallet::*;
+
 fn fixture() -> Value {
     let path = std::env::var("CMSG_FOYER_FIXTURE").expect("original owner fixture required");
     let fixture: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
@@ -30,99 +24,6 @@ fn fixture() -> Value {
     assert_eq!(actual["wallet"]["scope"], "wallet");
     actual
 }
-fn passkeys(world: &Value) -> cpky::Client<SoftwareAuthenticator> {
-    let origin = world["passkey_origin"].as_str().unwrap();
-    cpky::Client::new(
-        Context::new(origin, world["rp_id"].as_str().unwrap()).unwrap(),
-        SoftwareAuthenticator::new(
-            origin,
-            TestConfiguration {
-                user_verified: true,
-                prf: true,
-                evaluate_at_create: false,
-            },
-        )
-        .unwrap(),
-    )
-}
-async fn foyer(world: &Value, wallet: bool) -> cfyr::Foyer<cfyr::HttpClient> {
-    let roots = [include_bytes!("support/current-tls/ca.der").to_vec()];
-    let origin = world["base"].as_str().unwrap().to_owned();
-    let configuration = cfyr::trust::Configuration {
-        origin: origin.clone(),
-        community: world["scope"].as_str().unwrap().into(),
-        key_ring: serde_json::from_value(world["trust_key_ring"].clone()).unwrap(),
-        minimum_revision: 1,
-        ring_revision: 0,
-    };
-    let following = cfyr::trust::Config {
-        retry_entropy: 27,
-        refresh_seconds: 30,
-        poll_seconds: 1,
-        request_seconds: 30,
-        initial_backoff_seconds: 1,
-        maximum_backoff_seconds: 10,
-        maximum_staleness_seconds: 900,
-    };
-    let mut trust = if wallet {
-        cfyr::trust::Trust::wallet_native(configuration, following, &roots)
-    } else {
-        cfyr::trust::Trust::native(configuration, following, &roots)
-    }
-    .unwrap();
-    trust.start(now).await.unwrap();
-    cfyr::Foyer::with_trust(
-        cfyr::HttpClient::with_roots(origin, "127.0.0.1".into(), None, &roots).unwrap(),
-        trust,
-    )
-}
-async fn login(
-    api: &mut cfyr::Foyer<cfyr::HttpClient>,
-    keys: &mut cpky::Client<SoftwareAuthenticator>,
-) {
-    let challenge = api.begin_browser_login().await.unwrap();
-    let (credential, unlock) = keys.sign_in(challenge.options).await.unwrap().into_parts();
-    drop(unlock);
-    api.finish_browser_login(challenge.ceremony, credential)
-        .await
-        .unwrap();
-}
-async fn initial<'p>(
-    door: &Door,
-    origin: &str,
-    policy: &'p mut cfyr::policy::CurrentPolicy<cfyr::HttpClient>,
-) -> cfyr::membership::InitialCreationLease<'p, cfyr::HttpClient> {
-    door.live_wallet_membership(origin)
-        .unwrap()
-        .observe_lease(now)
-        .await
-        .unwrap()
-        .passkey_certificate(policy, now)
-        .await
-        .unwrap()
-        .initial_creation(now)
-        .await
-        .unwrap()
-}
-fn bound(
-    community: &str,
-    origin: &str,
-    role: Role,
-    scope: Scope,
-    api: cfyr::Foyer<cfyr::HttpClient>,
-) -> Door {
-    let mut door = Door::new(
-        Configuration::new(
-            community.into(),
-            BTreeMap::from([(role, BTreeSet::from([origin.to_owned()]))]),
-        )
-        .unwrap(),
-    );
-    door.bind_foyer(origin, role, Sessions::new(scope, api))
-        .unwrap();
-    door
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community() {
     tokio::time::timeout(Duration::from_secs(180), async {

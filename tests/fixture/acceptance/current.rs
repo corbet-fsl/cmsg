@@ -3,6 +3,8 @@
 //! production gate qualification. Both actual Doors use SystemClock throughout.
 #[path = "../owner/mod.rs"]
 mod owner;
+#[path = "../wallet.rs"]
+mod wallet;
 
 use super::*;
 use cvld::{api::*, cli::Client, service::Clock};
@@ -160,6 +162,46 @@ async fn presentation(community: &OriginalOwner, passport: &cpsd::Passport) -> V
 }
 
 pub(super) async fn run() -> Result<()> {
+    run_selected(false).await
+}
+pub(super) async fn run_wallet() -> Result<()> {
+    run_selected(true).await
+}
+
+enum Fixture {
+    Community(https::HttpsFixture),
+    Wallet(wallet::Fixture),
+}
+impl Fixture {
+    async fn shutdown(self) -> Result<()> {
+        match self {
+            Self::Community(fixture) => fixture.shutdown().await,
+            Self::Wallet(fixture) => fixture.shutdown().await,
+        }
+        .map_err(|_| "HTTPS shutdown failed")
+    }
+}
+async fn start_selected(
+    wallet: bool,
+    directory: &Path,
+    chain: &Path,
+    key: &Path,
+) -> Result<(Fixture, Value)> {
+    if wallet {
+        let fixture = wallet::Fixture::start(chain, key)
+            .await
+            .map_err(|_| "Wallet startup failed")?;
+        let data = fixture.data.clone();
+        Ok((Fixture::Wallet(fixture), data))
+    } else {
+        let (fixture, feed) = start(directory, chain, key).await?;
+        let data = json!({"https":{"base":fixture.base_url()},
+            "trust_key_ring":feed.key_ring,"holders":HOLDERS,"clock":"SystemClock",
+            "passport_gate":"original development fixture"});
+        Ok((Fixture::Community(fixture), data))
+    }
+}
+async fn run_selected(wallet: bool) -> Result<()> {
     let args: Vec<_> = std::env::args_os().skip(2).take(5).collect();
     if args.len() != 4 || args.iter().any(|arg| arg.as_encoded_bytes().len() > 4096) {
         return Err("usage: --current-owner FIXTURE_DIR CHAIN KEY OUTPUT");
@@ -183,8 +225,8 @@ pub(super) async fn run() -> Result<()> {
     }
     let mut interrupt = signal(SignalKind::interrupt()).map_err(|_| "signal setup failed")?;
     let mut terminate = signal(SignalKind::terminate()).map_err(|_| "signal setup failed")?;
-    let (fixture, feed) = tokio::select! {
-        result = tokio::time::timeout(STARTUP_LIMIT, start(&directory, &chain, &key)) =>
+    let (fixture, data) = tokio::select! {
+        result = tokio::time::timeout(STARTUP_LIMIT, start_selected(wallet, &directory, &chain, &key)) =>
             result.map_err(|_| "owner startup timed out")??,
         _ = interrupt.recv() => return Ok(()),
         _ = terminate.recv() => return Ok(()),
@@ -192,9 +234,7 @@ pub(super) async fn run() -> Result<()> {
     let result = async {
         let mut file = tempfile::NamedTempFile::new_in(&directory).map_err(|_| "output preparation failed")?;
         file.as_file().set_permissions(fs::Permissions::from_mode(0o600)).map_err(|_| "output permissions failed")?;
-        serde_json::to_writer(&mut file, &json!({"https":{"base":fixture.base_url()},
-            "trust_key_ring":feed.key_ring,"holders":HOLDERS,"clock":"SystemClock",
-            "passport_gate":"original development fixture"})).map_err(|_| "output write failed")?;
+        serde_json::to_writer(&mut file, &data).map_err(|_| "output write failed")?;
         file.write_all(b"\n").map_err(|_| "output write failed")?;
         file.as_file().sync_all().map_err(|_| "output sync failed")?;
         file.persist_noclobber(&output).map_err(|_| "output publication failed")?;

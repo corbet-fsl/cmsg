@@ -241,11 +241,10 @@ async fn run() -> Result<()> {
 // Original ckyh storage requires a multithread runtime for its blocking bridge.
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> std::process::ExitCode {
-    let current_owner = std::env::args().nth(1).as_deref() == Some("--current-owner");
-    let result = if current_owner {
-        current::run().await
-    } else {
-        run().await
+    let result = match std::env::args().nth(1).as_deref() {
+        Some("--current-owner") => current::run().await,
+        Some("--wallet-owner") => current::run_wallet().await,
+        _ => run().await,
     };
     match result {
         Ok(()) => std::process::ExitCode::SUCCESS,
