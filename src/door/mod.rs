@@ -3,6 +3,7 @@
 //! Client grants are local capabilities, never remote member/admin/root authority.
 //! Pairing belongs to the trusted embedding runtime; it is not an API action.
 //! Unavailable domain owners cannot be replaced by caller-provided success values.
+pub mod accounting;
 pub mod board;
 pub mod browser;
 mod composition;
