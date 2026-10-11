@@ -6,10 +6,10 @@ use cmsg::door::custody::{
     retain_initial_enrollment, retain_initial_publication,
 };
 use cpky::{
-    Context,
     software::{SoftwareAuthenticator, TestConfiguration},
+    Context,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[path = "support/initial_network.rs"]
 mod initial_network;
@@ -116,12 +116,10 @@ async fn original_registration_tuple_activates_only_after_durable_candidate_and_
         .await
         .unwrap();
         // The real first durable Store exists before any accepting finish call.
-        assert!(
-            cwst::backend::Backend::read(&backend)
-                .await
-                .unwrap()
-                .is_some()
-        );
+        assert!(cwst::backend::Backend::read(&backend)
+            .await
+            .unwrap()
+            .is_some());
         let device = candidate.device();
         let candidate = if before_finish {
             drop(candidate);
@@ -253,17 +251,15 @@ async fn original_registration_tuple_activates_only_after_durable_candidate_and_
             // A retained first-read witness cannot replace the fresh network
             // read required by normal Keys Use. Failure consumes only the live
             // attempt; the exact staged operation remains durable for restart.
-            assert!(
-                acknowledge_initial_publication(
-                    read,
-                    initial,
-                    initial_network::Nodes::new(),
-                    &mut clock,
-                    &mut entropy,
-                )
-                .await
-                .is_err()
-            );
+            assert!(acknowledge_initial_publication(
+                read,
+                initial,
+                initial_network::Nodes::new(),
+                &mut clock,
+                &mut entropy,
+            )
+            .await
+            .is_err());
             assert_eq!(
                 cwst::backend::Backend::read(&backend).await.unwrap(),
                 durable
@@ -431,13 +427,11 @@ async fn another_keys_prf_cannot_be_labeled_with_the_accepted_original_credentia
         .await
         .unwrap();
     assert_eq!(initial.credential_id().unwrap(), id_b);
-    assert!(
-        initial
-            .observation()
-            .unwrap()
-            .device_keys
-            .contains(device_a.value())
-    );
+    assert!(initial
+        .observation()
+        .unwrap()
+        .device_keys
+        .contains(device_a.value()));
     drop(initial);
     let challenge = api.begin_browser_login().await.unwrap();
     let authentication = a.sign_in(challenge.options).await.unwrap();
@@ -448,9 +442,7 @@ async fn another_keys_prf_cannot_be_labeled_with_the_accepted_original_credentia
     );
     let challenge = api.begin_browser_login().await.unwrap();
     let authentication = b.sign_in(challenge.options).await.unwrap();
-    assert!(
-        reopen_initial_enrollment(authentication, "alpha", backend)
-            .await
-            .is_err()
-    );
+    assert!(reopen_initial_enrollment(authentication, "alpha", backend)
+        .await
+        .is_err());
 }

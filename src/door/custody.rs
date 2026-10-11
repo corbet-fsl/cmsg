@@ -1,5 +1,5 @@
 //! Separate fresh transport and member checks over the original Foyer/Records.
-use super::{Door, ErrorCode, foyer::Transport};
+use super::{foyer::Transport, Door, ErrorCode};
 use ckmg::{Action, Authorization, Binding, Clock, Error, PublicKey};
 use futures_util::lock::Mutex;
 use std::{cell::Cell, rc::Rc};
@@ -9,13 +9,13 @@ mod initial_recovery;
 pub use initial_recovery::complete_initial_recovery;
 mod initial;
 pub use genesis::{
-    InitialPublicationError, acknowledge_initial_publication, prepare_initial_publication,
-    reopen_initial_publication, retain_initial_publication,
+    acknowledge_initial_publication, prepare_initial_publication, reopen_initial_publication,
+    retain_initial_publication, InitialPublicationError,
 };
 mod recovery;
 pub use initial::{
-    EnrollmentError, InitialEnrollment, activate_initial, reopen_initial_enrollment,
-    retain_initial_enrollment,
+    activate_initial, reopen_initial_enrollment, retain_initial_enrollment, EnrollmentError,
+    InitialEnrollment,
 };
 pub use recovery::{RecoveredVault, RecoveryAuthority, RecoveryOwners, RestoredVault};
 
