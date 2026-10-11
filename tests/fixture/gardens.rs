@@ -65,18 +65,8 @@ async fn found(
         Ok(value) => value,
         Err(error) => {
             // Test-side diagnosis only: which Reconcile site fired for this founding.
-            let phase = service
-                .door
-                .community_backend()
-                .unwrap()
-                .lock()
-                .await
-                .facade
-                .membership()
-                .community_phase()
-                .await;
             eprintln!(
-                "founding {scope} refused: {error:?}; phase {phase:?}; clocks global={} community={}",
+                "founding {scope} refused: {error:?}; clocks global={} community={}",
                 wallet.clock.0.load(std::sync::atomic::Ordering::SeqCst),
                 service.clock.0.load(std::sync::atomic::Ordering::SeqCst),
             );
