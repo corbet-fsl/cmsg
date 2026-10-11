@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Worker-only native qualification. Browser/coverage gates remain independent.
 set -euo pipefail
+# Keep actual compiler/test diagnostics in the retained product job stream.
+exec 2>&1
 mkdir -p evidence/native
 rustc --version --verbose > evidence/native/rustc.txt
 retain_locks() {
@@ -11,10 +13,8 @@ retain_locks() {
 }
 trap retain_locks EXIT
 python3 .ci/check-first-party.py
-# Resolve once, retain even on a later failure, and reuse for every following check.
-cargo update
-cargo update --manifest-path tests/fixture/Cargo.toml
-date -u +%FT%TZ > evidence/native/resolved-at.txt
+# The separate declared resolver retains both locks before this qualification.
+# Every Cargo operation below consumes that reviewed immutable graph.
 cp Cargo.lock evidence/native/Cargo.lock
 cp tests/fixture/Cargo.lock evidence/native/fixture-Cargo.lock
 sha256sum Cargo.lock tests/fixture/Cargo.lock > evidence/native/locks.sha256

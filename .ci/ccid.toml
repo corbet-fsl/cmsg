@@ -26,6 +26,31 @@ checks = ["verify"]
 workflow = "repository-jobs"
 command = ["bash", ".ci/run-cached.sh"]
 
+# The existing real owner fixture route, with resolution separated from checks.
+[checks.native-owner]
+kind = "commands"
+commands = [["bash", ".ci/native.sh"]]
+cache_outputs = ["evidence/native/fixture-owner.json", "evidence/native/locks.sha256"]
+
+[checks.resolve-dependencies]
+kind = "commands"
+commands = [["bash", ".ci/resolve-dependencies.sh"]]
+cache_outputs = ["Cargo.lock", "tests/fixture/Cargo.lock"]
+
+[jobs.native-owner]
+scheduler = "crow"
+checks = ["native-owner"]
+workflow = "repository-jobs"
+command = ["ccid:run-declared-checks"]
+environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-v01/target", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_TEST_DEBUG = "0", CARGO_NET_GIT_FETCH_WITH_CLI = "true", CARGO_NET_RETRY = "0", CI_JOBS = "2", CI_TEST_THREADS = "2" }
+
+[jobs.resolve-dependencies]
+scheduler = "crow"
+checks = ["resolve-dependencies"]
+workflow = "repository-jobs"
+command = ["ccid:run-declared-checks"]
+environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-v01/target", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_TEST_DEBUG = "0", CARGO_NET_GIT_FETCH_WITH_CLI = "true", CARGO_NET_RETRY = "0", CI_JOBS = "2", CI_TEST_THREADS = "2" }
+
 # Official v01 push execution only (automatic v01 pushes, including
 # dependency pushes). No runtime network/browser/coverage qualification.
 # Gates are direct cargo invocations, truly --offline --locked, with the

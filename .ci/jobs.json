@@ -2,8 +2,48 @@
   "schema": 1,
   "generator": "ccid render v1",
   "tool_revision": "53c129c2efa3b9279d2ecbc237d15acdfb656d8c",
-  "manifest_sha256": "95434a8ca7253c79a84000259b6ab430bed963c7ffbd22606323d169d3258386",
+  "manifest_sha256": "0f480ce9474f564ff988f9a589732b321150aee75039d86748df1bd8229453df",
   "jobs": {
+    "native-owner": {
+      "job": "native-owner",
+      "scheduler": "crow",
+      "checks": [
+        "native-owner"
+      ],
+      "workflow": "repository-jobs",
+      "command": [
+        "ccid:run-declared-checks"
+      ],
+      "environment": {
+        "CARGO_NET_GIT_FETCH_WITH_CLI": "true",
+        "CARGO_NET_RETRY": "0",
+        "CARGO_PROFILE_DEV_DEBUG": "0",
+        "CARGO_PROFILE_TEST_DEBUG": "0",
+        "CARGO_TARGET_DIR": "/caches/cargo/cmsg-v01/target",
+        "CI_JOBS": "2",
+        "CI_TEST_THREADS": "2"
+      }
+    },
+    "resolve-dependencies": {
+      "job": "resolve-dependencies",
+      "scheduler": "crow",
+      "checks": [
+        "resolve-dependencies"
+      ],
+      "workflow": "repository-jobs",
+      "command": [
+        "ccid:run-declared-checks"
+      ],
+      "environment": {
+        "CARGO_NET_GIT_FETCH_WITH_CLI": "true",
+        "CARGO_NET_RETRY": "0",
+        "CARGO_PROFILE_DEV_DEBUG": "0",
+        "CARGO_PROFILE_TEST_DEBUG": "0",
+        "CARGO_TARGET_DIR": "/caches/cargo/cmsg-v01/target",
+        "CI_JOBS": "2",
+        "CI_TEST_THREADS": "2"
+      }
+    },
     "v01-push": {
       "job": "v01-push",
       "scheduler": "crow",

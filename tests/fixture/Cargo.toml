@@ -10,14 +10,14 @@ publish = false
 resolver = "3"
 
 [dependencies]
-cvld = { git = "https://git.corbet.ch/corbet-libs/cvld.git", branch = "v01", default-features = false, features = ["development-gate", "client-http"] }
-cmty = { git = "https://git.corbet.ch/corbet-libs/cmty.git", branch = "v01" }
-cpsd = { git = "https://git.corbet.ch/corbet-foss/cpsd.git", branch = "v01", default-features = false, features = ["storage"] }
-csgn = { git = "https://git.corbet.ch/corbet-foss/csgn.git", branch = "v01", features = ["libsql"] }
-cglb = { git = "https://git.corbet.ch/corbet-libs/cgbl.git", branch = "v01" }
-ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh.git", branch = "v01" }
-cvch = { git = "https://git.corbet.ch/corbet-foss/cvch.git", branch = "v01" }
-cpns = { git = "https://git.corbet.ch/corbet-foss/cpns.git", branch = "v01" }
+cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "main", default-features = false, features = ["development-gate", "client-http"] }
+cmty = { git = "https://git.corbet.ch/corbet-libs/cmty", branch = "main" }
+cpsd = { git = "https://git.corbet.ch/corbet-foss/cpsd", branch = "main", default-features = false, features = ["storage"] }
+csgn = { git = "https://git.corbet.ch/corbet-foss/csgn", branch = "main", features = ["libsql"] }
+cgbl = { git = "https://git.corbet.ch/corbet-libs/cgbl.git", branch = "main" }
+ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh", branch = "main" }
+cvch = { git = "https://git.corbet.ch/corbet-foss/cvch", branch = "main" }
+cpns = { git = "https://git.corbet.ch/corbet-foss/cpns", branch = "main" }
 ed25519-dalek = "2"
 axum = "0.8"
 hyper = { version = "1", features = ["server", "http1"] }
