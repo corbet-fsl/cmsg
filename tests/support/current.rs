@@ -154,7 +154,7 @@ impl PublicFeed {
         )
     }
 
-    async fn refresh(&self, foyer: &foyer::Foyer<foyer::Transport>, now: u64, bytes: Vec<u8>) {
+    async fn refresh(&self, foyer: &mut foyer::Foyer<foyer::Transport>, now: u64, bytes: Vec<u8>) {
         *self.bytes.write().unwrap() = bytes;
         let mut trust = foyer.trust().unwrap();
         trust.refresh(now).unwrap();
@@ -231,10 +231,12 @@ async fn signed_minimum_version_guards_every_inbox_action_without_disabling_clea
     assert_eq!(checks.get(), 0);
     server
         .refresh(
-            door.foyers[ORIGIN]
+            door.foyers
+                .get_mut(ORIGIN)
+                .unwrap()
                 .sessions
                 .clients
-                .get(&foyer::Scope::Community)
+                .get_mut(&foyer::Scope::Community)
                 .unwrap(),
             live_now(),
             feed(now, 2, env!("CARGO_PKG_VERSION")),
@@ -260,10 +262,12 @@ async fn signed_minimum_version_guards_every_inbox_action_without_disabling_clea
     assert_eq!(checks.get(), 4);
     server
         .refresh(
-            door.foyers[ORIGIN]
+            door.foyers
+                .get_mut(ORIGIN)
+                .unwrap()
                 .sessions
                 .clients
-                .get(&foyer::Scope::Community)
+                .get_mut(&foyer::Scope::Community)
                 .unwrap(),
             live_now(),
             feed(now, 3, "999.0.0"),
@@ -326,7 +330,7 @@ async fn current_original_charter_allows_real_committed_inbox_history() {
 async fn minimum_version_raised_while_real_keys_wait_withholds_completed_history() {
     let now = 2_000_000_000;
     let server = PublicFeed::new(feed(now, 1, env!("CARGO_PKG_VERSION"))).await;
-    let foyer = server.foyer(now).await;
+    let mut foyer = server.foyer(now).await;
     let mut current = foyer.current_policy();
     let (mut owner, gate, checks) = open_fixture().await;
     let clock = Time(Arc::new(AtomicU64::new(now)));
@@ -348,7 +352,9 @@ async fn minimum_version_raised_while_real_keys_wait_withholds_completed_history
     ));
     assert!(read.as_mut().now_or_never().is_none());
     assert_eq!(checks.get(), 1);
-    server.refresh(&foyer, now, feed(now, 2, "999.0.0")).await;
+    server
+        .refresh(&mut foyer, now, feed(now, 2, "999.0.0"))
+        .await;
     drop(held);
     assert_eq!(read.await.err(), Some(ErrorCode::UnsupportedVersion));
     Box::new(owner).lock().await;
