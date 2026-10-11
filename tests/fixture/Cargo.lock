@@ -1065,7 +1065,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#db2e41b6eab26dab39c7291d5840460e7bd21581"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#4a933fc30a8f8d9e1a5801ed2f826a82efd9b861"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1486,7 +1486,7 @@ dependencies = [
 [[package]]
 name = "cmty"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#96b9983439b787b1cb766803766357e932b71378"
+source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#53ac7ca0372543cb4a6fe978e39fac78618c4ff8"
 dependencies = [
  "cgts",
  "chrono",

@@ -1045,7 +1045,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#db2e41b6eab26dab39c7291d5840460e7bd21581"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#4a933fc30a8f8d9e1a5801ed2f826a82efd9b861"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1203,7 +1203,7 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#836425b9bc49541f43038ce6dd6113514f4132bc"
+source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#bef1020f43e27c3a0da345362a592d36f7410c33"
 dependencies = [
  "cnvy",
  "cpky",
@@ -1236,7 +1236,7 @@ dependencies = [
 [[package]]
 name = "cgrp"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=v01#3b93ced34837ae3277f56ab0929a3bbbcd409f47"
+source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=v01#36a9c4af1728434c6be6137bbf669e4aaef18867"
 dependencies = [
  "ckmg",
  "cwst",
@@ -2057,10 +2057,13 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#db0046f9a92d7adcfaa2b86481fbfc30ad60a21b"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#b2bf3a7b5b3ab1b7d896d817e392dc5796e26031"
 dependencies = [
+ "cchr",
  "cgrp",
  "ckmg",
+ "cpfl",
+ "cshm",
  "ctcs",
  "cwst",
  "getrandom 0.2.17",
@@ -2232,7 +2235,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#1112d172af98d948db8c59f64f0fcb81e9767277"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#f3431c67018785c4e1d3facd43c6e71700797a67"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2247,7 +2250,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#1112d172af98d948db8c59f64f0fcb81e9767277"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#f3431c67018785c4e1d3facd43c6e71700797a67"
 dependencies = [
  "chacha20poly1305 0.11.0",
  "czkp",
