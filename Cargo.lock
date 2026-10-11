@@ -1345,7 +1345,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#b6416ae0707f968c0835dc3aec5c01057eaf394a"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#7cbc7b7cfca7d6461c26b29251fa7e6c17615cf4"
 dependencies = [
  "cchr",
  "cgrp",
@@ -1353,6 +1353,7 @@ dependencies = [
  "clnk",
  "cnvl",
  "cpfl",
+ "crbk",
  "cshm",
  "csrh",
  "ctnd",
@@ -1360,6 +1361,7 @@ dependencies = [
  "cxch",
  "schemars 1.2.2",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1519,7 +1521,7 @@ dependencies = [
 [[package]]
 name = "cgrp"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=v01#36a9c4af1728434c6be6137bbf669e4aaef18867"
+source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=v01#dc356a2f620371d9a22ea25580057a9e3d99491b"
 dependencies = [
  "ckmg",
  "cwst",
