@@ -236,6 +236,23 @@ async fn proof(
                         other => format!("{key}={other}"),
                     })
                     .collect();
+                if let Ok(typed) = serde_json::from_value::<TrustFeed>(parsed.clone()) {
+                    if let Ok(ring) = csgn::KeyRing::from_cbor(&typed.key_ring) {
+                        for (label, bytes) in [("manifest", &typed.manifest), ("settings", &typed.settings)] {
+                            let now = service.clock.0.load(std::sync::atomic::Ordering::SeqCst);
+                            match ring.verify(bytes, csgn::Kind::SettingsSnapshot, now) {
+                                Ok(verified) => eprintln!(
+                                    "{label} verifies at {now}: {}",
+                                    String::from_utf8_lossy(verified.payload())
+                                        .chars()
+                                        .take(700)
+                                        .collect::<String>()
+                                ),
+                                Err(error) => eprintln!("{label} does not verify at {now}: {error:?}"),
+                            }
+                        }
+                    }
+                }
                 eprintln!(
                     "community clock {}; trust feed fields {}",
                     service.clock.0.load(std::sync::atomic::Ordering::SeqCst),
