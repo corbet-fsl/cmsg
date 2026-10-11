@@ -1333,7 +1333,7 @@ dependencies = [
  "cbcn",
  "cmbl",
  "csgn",
- "czkp",
+ "czkp 0.0.0 (git+https://git.corbet.ch/corbet-foss/czkp?branch=main)",
  "data-encoding",
  "ed25519-dalek 2.2.0",
  "p256 0.13.2",
@@ -1345,7 +1345,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#b6416ae0707f968c0835dc3aec5c01057eaf394a"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#7cbc7b7cfca7d6461c26b29251fa7e6c17615cf4"
 dependencies = [
  "cchr",
  "cgrp",
@@ -1353,6 +1353,7 @@ dependencies = [
  "clnk",
  "cnvl",
  "cpfl",
+ "crbk",
  "cshm",
  "csrh",
  "ctnd",
@@ -1360,6 +1361,7 @@ dependencies = [
  "cxch",
  "schemars 1.2.2",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1519,7 +1521,7 @@ dependencies = [
 [[package]]
 name = "cgrp"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=v01#36a9c4af1728434c6be6137bbf669e4aaef18867"
+source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=v01#dc356a2f620371d9a22ea25580057a9e3d99491b"
 dependencies = [
  "ckmg",
  "cwst",
@@ -1826,7 +1828,7 @@ dependencies = [
  "cshm",
  "ctrn",
  "cvlt",
- "cwlt",
+ "cwlt 0.0.0 (git+https://git.corbet.ch/corbet-foss/cwlt?branch=main)",
  "cwst",
  "data-encoding",
  "ed25519-dalek 2.2.0",
@@ -1876,7 +1878,7 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=v01#313e9d4808a954013e168e906e5c46af05da4ca4"
+source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=v01#bac5e44fb97b38e69b249348505dc532ebe7ca9e"
 dependencies = [
  "cdlv",
  "cgrp",
@@ -1884,6 +1886,7 @@ dependencies = [
  "ctcs",
  "cthr",
  "cwst",
+ "cwvs",
  "schemars 1.2.2",
  "serde",
 ]
@@ -2572,7 +2575,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#b8b510ba4da57097a9239f7a860cd5b4347de90c"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#86ef415a18716d6fd1daee7b0c7c14a2da872b3a"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -2601,7 +2604,7 @@ dependencies = [
  "cpky",
  "cprz",
  "cprz-pad",
- "cwlt",
+ "cwlt 0.0.0 (git+https://git.corbet.ch/corbet-foss/cwlt?branch=main)",
  "cwst",
  "futures",
  "serde",
@@ -2618,9 +2621,23 @@ dependencies = [
  "ckmg",
  "cpsd",
  "cwst",
- "czkp",
+ "czkp 0.0.0 (git+https://git.corbet.ch/corbet-foss/czkp?branch=main)",
  "serde",
  "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "cwlt"
+version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt.git?branch=v01#0ce76e9a44a5d1738a83be9f8dcd4839f4f3006c"
+dependencies = [
+ "czkp 0.0.0 (git+https://git.corbet.ch/corbet-foss/czkp.git?branch=v01)",
+ "data-encoding",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "utoipa",
  "wasm-bindgen",
 ]
 
@@ -2633,7 +2650,7 @@ dependencies = [
  "barretenberg-rs",
  "bn254_blackbox_solver",
  "chacha20poly1305 0.11.0",
- "czkp",
+ "czkp 0.0.0 (git+https://git.corbet.ch/corbet-foss/czkp?branch=main)",
  "data-encoding",
  "ed25519-dalek 3.0.0",
  "flate2",
@@ -2674,6 +2691,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cwvs"
+version = "0.1.0"
+source = "git+https://git.corbet.ch/corbet-foss/cwvs.git?branch=v01#8807b49ffdc3c8a79433b1a7586aa61f4b15e175"
+dependencies = [
+ "cdlv",
+ "ckmg",
+ "ctcs",
+ "cthr",
+ "cwlt 0.0.0 (git+https://git.corbet.ch/corbet-foss/cwlt.git?branch=v01)",
+ "cwst",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+]
+
+[[package]]
 name = "cxch"
 version = "0.1.0"
 source = "git+https://git.corbet.ch/corbet-foss/cxch.git?branch=v01#1c0031673b852eb352bafaf2769d3098a1bb191d"
@@ -2701,6 +2735,23 @@ dependencies = [
  "rs_merkle",
  "serde",
  "sha2 0.11.0",
+]
+
+[[package]]
+name = "czkp"
+version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-foss/czkp.git?branch=v01#1217e02ea7cfb99613cea50b3e87288efb392bb5"
+dependencies = [
+ "ark-bn254",
+ "ark-ff 0.6.0",
+ "data-encoding",
+ "ed25519-dalek 3.0.0",
+ "pso-poseidon",
+ "rs_merkle",
+ "schemars 1.2.2",
+ "serde",
+ "sha2 0.11.0",
+ "utoipa",
 ]
 
 [[package]]
@@ -7258,6 +7309,8 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
+ "serde",
+ "serde_json",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
@@ -10360,6 +10413,29 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "utoipa"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8765fe27aeff71012a3f90fa474cf1df863a7d0dd81ed25de4e63fff2544994f"
+dependencies = [
+ "indexmap 2.14.2",
+ "serde",
+ "serde_json",
+ "utoipa-gen",
+]
+
+[[package]]
+name = "utoipa-gen"
+version = "6.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d935f1c83fdf8b88f09bbe050d0cea78ea4afee6d7b0317403228c1200b2c8ab"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.8",
+]
 
 [[package]]
 name = "uuid"
