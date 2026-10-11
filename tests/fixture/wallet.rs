@@ -48,8 +48,8 @@ impl Fixture {
             key,
         )
         .await?;
-        let roots = std::fs::read(chain)?;
-        let root = reqwest::Certificate::from_pem(&roots).map_err(refused)?;
+        let root = reqwest::Certificate::from_der(include_bytes!("../support/current-tls/ca.der"))
+            .map_err(refused)?;
         // The fixture's original provisioned TLS identity authenticates these
         // owner reads. No request selects a host, URL, issuer or trust ring.
         let transport = reqwest::Client::builder()
