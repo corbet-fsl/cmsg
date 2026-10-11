@@ -1,6 +1,8 @@
 //! Launch an original owner from trusted, CI-supplied ephemeral configuration.
 #![forbid(unsafe_code)]
 
+#[path = "acceptance/current.rs"]
+mod current;
 mod https;
 
 use cvld::{
@@ -15,7 +17,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 
 type Result<T> = std::result::Result<T, &'static str>;
 const FILE_LIMIT: u64 = 1024 * 1024;
@@ -239,7 +241,13 @@ async fn run() -> Result<()> {
 // Original ckyh storage requires a multithread runtime for its blocking bridge.
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> std::process::ExitCode {
-    match run().await {
+    let current_owner = std::env::args().nth(1).as_deref() == Some("--current-owner");
+    let result = if current_owner {
+        current::run().await
+    } else {
+        run().await
+    };
+    match result {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("{message}");
