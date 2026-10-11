@@ -38,6 +38,7 @@ pub enum Effect {
     LocalLifecycle,
     VaultAccess,
     BoardRecord,
+    InboxRecord,
 }
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -248,7 +249,7 @@ actions! {
     "inbox.relation" => inbox_relation(facades::Relation) -> cnbx::Relation, VaultAccess, Inbox;
     "inbox.delivery_status" => inbox_delivery(facades::Delivery) -> Option<cnbx::DeliveryStatus>, VaultAccess, Inbox;
     "inbox.blocking_rules" => inbox_blocking_rules(Empty) -> Vec<String>, VaultAccess, Inbox;
-    "inbox.contact_act" => inbox_contact_act(inbox::ContactAct) -> cnbx::Relation, VaultAccess, Inbox;
+    "inbox.contact_act" => inbox_contact_act(inbox::ContactAct) -> cnbx::Relation, InboxRecord, Inbox;
     "mesh.status" => mesh_status(Empty) -> Vec<cmsh::BackendView>, Read, Mesh;
     "mesh.disconnect" => mesh_disconnect(Empty) -> Empty, LocalLifecycle, Mesh;
     "vault.lock" => vault_lock(Empty) -> Empty, LocalLifecycle, Vault;
