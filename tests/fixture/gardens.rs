@@ -261,6 +261,8 @@ async fn root_member(
     handle: &str,
 ) -> Member {
     let host = format!("api.{scope}.example.test");
+    // Link before any member session exists: the link changes the target's state.
+    wallet.door.link_community_creation(&service.door).await.unwrap();
     let presentation = proof(service, scope, holder, None).await;
     let ceremony: Ceremony = serde_json::from_value(
         client(service, &host, None)
@@ -270,7 +272,6 @@ async fn root_member(
     )
     .unwrap();
     let mut member = finish_enrol(service, &host, ceremony).await;
-    wallet.door.link_community_creation(&service.door).await.unwrap();
     found(wallet, operator, service, scope, holder, &member, handle).await;
     garden_session(service, scope, &mut member).await;
     member
