@@ -137,7 +137,8 @@ mod tests {
     fn signed_settings_project_to_the_decided_group_policy() {
         let policy = cbrd::project_group_policy(&snapshot(), VALID_UNTIL).unwrap();
         assert_eq!(policy, expected());
-        let source = cbrd::SettingsPolicy::new(&snapshot(), VALID_UNTIL);
+        let binding = snapshot();
+        let source = cbrd::SettingsPolicy::new(&binding, VALID_UNTIL);
         assert_eq!(source.current(COMMUNITY, 10).unwrap(), expected());
     }
 
@@ -194,7 +195,8 @@ mod tests {
 
     #[test]
     fn source_refuses_foreign_community_expiry_and_invalid_policy() {
-        let source = cbrd::SettingsPolicy::new(&snapshot(), VALID_UNTIL);
+        let binding = snapshot();
+        let source = cbrd::SettingsPolicy::new(&binding, VALID_UNTIL);
         assert_eq!(source.current("beta", 10), Err(cgrp::Error::Authority));
         assert_eq!(
             source.current(COMMUNITY, VALID_UNTIL),
