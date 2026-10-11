@@ -1065,7 +1065,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#4a933fc30a8f8d9e1a5801ed2f826a82efd9b861"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#b3199a85a05e7c4f060a0e19ec8d19ffc8f63abc"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1922,7 +1922,7 @@ dependencies = [
 [[package]]
 name = "cssr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cssr?branch=main#d519df2e9538a3c5ce50f8727eb56ed98395cabb"
+source = "git+https://git.corbet.ch/corbet-foss/cssr?branch=main#248daf5a40a0e6525ebe3d7b7d7b24ce4da01ab4"
 dependencies = [
  "crlt",
  "czkp",
