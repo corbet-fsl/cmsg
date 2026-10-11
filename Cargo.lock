@@ -1257,7 +1257,7 @@ dependencies = [
 [[package]]
 name = "cchr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=v01#59a4b164f81407fd5b47e3b60490b3596a0e6191"
+source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=v01#69b07fd8a95c1923c3e11fe18c6de3c4c33f0e77"
 dependencies = [
  "cbcn",
  "cgrd",
@@ -1366,7 +1366,7 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#93f0b1f5b0c903f9635ad39d746f19e293e8c9ad"
+source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#d4f6ee421ce6cd2a71f8149181f0312556eaf491"
 dependencies = [
  "cnvy",
  "cpky",
@@ -1527,7 +1527,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#fdc2e3ecb5f2b973140b9aac8a75ccf896721d87"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#ff8f924a41b174cb3ea97a552d43d6eee5313256"
 dependencies = [
  "arti-client",
  "blake3",
@@ -1561,7 +1561,7 @@ dependencies = [
 [[package]]
 name = "ckyh"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckyh?branch=main#ee4714b4bdd624dbb192a9a8ecf4d28d0e838dfa"
+source = "git+https://git.corbet.ch/corbet-foss/ckyh?branch=main#681dc2f1376069b96dd4608e8d08320ad14d5539"
 dependencies = [
  "ciborium",
  "csgn",
@@ -2481,7 +2481,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#1de4e5a43181e2f594b52264c894c920937e3387"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#00f946c839bc6e1364d3af4583534fad1c5a5e06"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -2500,7 +2500,7 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#20618733c8941b375810db65ff9bdf0beee47c27"
+source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#80c91585a09bf84b660a9e0da3ca6b68b63af205"
 dependencies = [
  "blake3",
  "cchr",
@@ -2521,7 +2521,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#9ff590b360ec5911f60eafc9cd21787ab61ed2db"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#9eeeb5164d79804e4e52578d47128d8816430ff1"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2536,12 +2536,14 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#9ff590b360ec5911f60eafc9cd21787ab61ed2db"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#9eeeb5164d79804e4e52578d47128d8816430ff1"
 dependencies = [
  "chacha20poly1305 0.11.0",
  "czkp",
  "ed25519-dalek 3.0.0",
  "getrandom 0.4.3",
+ "hpke",
+ "rs_merkle",
  "serde",
  "serde_json",
  "zeroize",
