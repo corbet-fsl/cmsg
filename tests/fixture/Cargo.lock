@@ -1401,7 +1401,7 @@ dependencies = [
 [[package]]
 name = "cmbr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmbr?branch=main#d85cc93b7daa96adff7596f2c3708653f880e82e"
+source = "git+https://git.corbet.ch/corbet-libs/cmbr?branch=main#31a67722df759eaedb5ae3b8d4c9d5fc0df6beb7"
 dependencies = [
  "cgrd",
  "cgts",
@@ -1486,7 +1486,7 @@ dependencies = [
 [[package]]
 name = "cmty"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#2b7042597fa46a386e8fadeb01561107f93d1308"
+source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#7ae6d1d3614956adca87d1df892cde9a6c6058cb"
 dependencies = [
  "cgts",
  "chrono",
@@ -2030,7 +2030,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#3d777235938dcd83fe27b77cb6222a26d274e110"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#b0c5c23d1d3104dfdf0f84ed44ce58030faf7cf5"
 dependencies = [
  "axum",
  "cblc",
@@ -2050,6 +2050,7 @@ dependencies = [
  "csgn",
  "cssr",
  "cthl",
+ "cvch",
  "czkp",
  "ed25519-dalek 2.2.0",
  "ed25519-dalek 3.0.0",
