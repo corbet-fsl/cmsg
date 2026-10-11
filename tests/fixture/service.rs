@@ -17,6 +17,31 @@ struct Fault {
     release: tokio::sync::Notify,
 }
 
+/// The owner's community constructor without its automatic founding: this fixture
+/// founds each community itself through the public GlobalRoot actions, because it
+/// needs the founder's own Root session (cvld's helper keeps its founder private).
+async fn community_unfounded(name: &str, public: &cvld::api::GlobalPublic, burst: u32) -> Running {
+    let dir = tempfile::tempdir().unwrap();
+    let config = community_config(dir.path(), name, public, burst);
+    let clock = Arc::new(TestClock(std::sync::atomic::AtomicU64::new(NOW)));
+    let door = cvld::service::Door::community(config, clock.clone())
+        .await
+        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let router = cvld::api::router(door.clone());
+    let task = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    Running {
+        base,
+        door,
+        clock,
+        task,
+        dir,
+    }
+}
+
 // The exact production root-board constructor, with a fictional public issuer.
 async fn root_board(public: &cvld::api::GlobalPublic, source: &Running) -> Running {
     let dir = tempfile::tempdir().unwrap();
@@ -234,7 +259,7 @@ async fn entry() {
     };
     let wallet = global(1000).await;
     let (mut global_member, passport, public) = wallet_passport(&wallet).await;
-    let service = community_with_burst("alpha", &public, 1000).await;
+    let service = community_unfounded("alpha", &public, 1000).await;
     let global_root = enrol(
         &wallet,
         ROOT,
