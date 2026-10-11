@@ -1065,7 +1065,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#03e5c7b47f589b46f257f96c577d4237a65d64c7"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#db2e41b6eab26dab39c7291d5840460e7bd21581"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1401,7 +1401,7 @@ dependencies = [
 [[package]]
 name = "cmbr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmbr?branch=main#0ae838c3bc6dd972b95f08e9e336cbed6693cd0f"
+source = "git+https://git.corbet.ch/corbet-libs/cmbr?branch=main#99d2b0faf6801d6deedae75ad9520fc0f4816bd7"
 dependencies = [
  "cgrd",
  "cgts",
@@ -1673,7 +1673,7 @@ dependencies = [
 [[package]]
 name = "cplc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cplc?branch=main#bc5e86a189be3da9f65985a2d74a5b839746bc21"
+source = "git+https://git.corbet.ch/corbet-libs/cplc?branch=main#93af1b08505ce57cc52f9b114843cd243105ed26"
 dependencies = [
  "cbcn",
  "cblc",
@@ -1684,6 +1684,7 @@ dependencies = [
  "crlt",
  "csgn",
  "cshm",
+ "cvch",
  "data-encoding",
  "serde",
  "serde_json",
@@ -2029,7 +2030,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#57d42ff13bf170cfec6d885feccd808197302a25"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#4b0b30b358e1d94e0ff8c2138d82e3631cbf842c"
 dependencies = [
  "axum",
  "cblc",
