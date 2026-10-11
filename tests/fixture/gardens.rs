@@ -202,9 +202,18 @@ async fn proof(
             Err(error) => {
                 let status = match session {
                     Some(token) => {
-                        call_status(service, &host, Some(token), "presentation_challenge", json!({})).await
+                        let response = reqwest::Client::new()
+                            .post(format!("{}/v1/presentation_challenge", service.base))
+                            .header("host", host.as_str())
+                            .bearer_auth(token)
+                            .json(&json!({}))
+                            .send()
+                            .await
+                            .unwrap();
+                        let code = response.status().as_u16();
+                        format!("{code} {}", response.text().await.unwrap())
                     }
-                    None => 0,
+                    None => String::new(),
                 };
                 eprintln!(
                     "presentation_challenge on {host} refused: {error:?}; session {}; http {status}",
