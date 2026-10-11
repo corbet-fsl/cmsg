@@ -14,7 +14,7 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 # accepting another branch or URL spelling is not an integration repair.
 ORIGINAL = {
     'corbet-foss': frozenset({
-        'cchr', 'cdht', 'cdlv', 'cfbk', 'cfry', 'cgrp', 'ckmg', 'clnk',
+        'cchr', 'cdht', 'cdlv', 'cfry', 'cgrp', 'ckmg', 'clnk',
         'cmbl', 'cmmr', 'cnvl', 'cnvy', 'cpfl', 'cpky', 'cprz', 'csrh',
         'csrn', 'cswb', 'ctcs', 'cthr', 'ctnd', 'ctrn', 'cwst', 'cxch',
     }),
