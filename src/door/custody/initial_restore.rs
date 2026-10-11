@@ -54,6 +54,7 @@ pub async fn prepare_initial_recovery<'a, 'p, N: cdht::Network + Clone>(
         records: None,
         closed: false,
         account_intent: None,
+        delegation_intent: None,
         account_signing: None,
     };
     let reader = candidate
@@ -95,6 +96,41 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
         let (admission, verifier) = ckmg::intent_channel();
         self.authority.account_intent = Some(verifier);
         Ok((self, admission))
+    }
+
+    /// Enable the fixed account enrollment composer with separate one-use
+    /// admission channels for root authorization and the complete delegation.
+    /// The returned owner exposes no arbitrary transcript-admission method.
+    pub fn with_accounting_intents(
+        mut self,
+    ) -> super::super::Result<(Self, super::super::accounting::AccountingIntents)> {
+        if self.authority.closed
+            || self.authority.account_intent.is_some()
+            || self.authority.delegation_intent.is_some()
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        self.authority
+            .initial
+            .origin()
+            .map_err(|_| ErrorCode::Unauthorized)?;
+        let (root, root_verifier) = ckmg::intent_channel();
+        let (device, device_verifier) = ckmg::intent_channel();
+        self.authority.account_intent = Some(root_verifier);
+        self.authority.delegation_intent = Some(device_verifier);
+        let expires = self
+            .authority
+            .initial
+            .expires()
+            .map_err(|_| ErrorCode::Unauthorized)?;
+        Ok((
+            self,
+            super::super::accounting::AccountingIntents {
+                root,
+                device,
+                expires,
+            },
+        ))
     }
 
     /// Open only the actual authenticated local winner, or restore the selected
@@ -175,6 +211,37 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
             .await
             .map_err(|_| ErrorCode::Unavailable)?;
         super::super::passport::GlobalPassport::recovered(origin, vault).await
+    }
+
+    /// Restore only the existing community account and seal its actual recovery
+    /// origin into the local account composer. No caller origin, new key or
+    /// ordinary missing-state initialization is accepted by this constructor.
+    pub async fn open_community_account<B: cwst::backend::Backend>(
+        self,
+        network: N,
+        backend: B,
+    ) -> super::super::Result<
+        super::super::accounting::CommunityAccount<
+            B,
+            SystemClock,
+            ckmg::SystemEntropy,
+            InitialRecoveryAuthority<'a, 'p, SystemClock, N>,
+            cvlt::PasskeyRecords<cvlt::TorPasskeyRecord<'static, N>>,
+        >,
+    > {
+        let origin = self
+            .authority
+            .initial
+            .origin()
+            .map_err(|_| ErrorCode::Unauthorized)?
+            .to_owned();
+        let vault = self
+            .open_root(network, backend)
+            .await?
+            .restore_community_account()
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?;
+        super::super::accounting::CommunityAccount::recovered(origin, vault).await
     }
 
     /// Restore both original existing Wallet owners after the complete root
