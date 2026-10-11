@@ -28,6 +28,7 @@ impl Fixture {
         let wallet_dir = Arc::new(tempfile::tempdir()?);
         let mut config = owner::wallet_config_at(wallet_dir.path(), 1000, SystemClock.now()).await;
         config.root_bootstrap_file = None;
+        eprintln!("original wallet fixture entering Wallet construction");
         let wallet_owner = Door::global(config, Arc::new(SystemClock))
             .await
             .map_err(|_| refused_stage("Wallet construction"))?;
@@ -69,6 +70,7 @@ impl Fixture {
         let mut config = owner::community_config(community_dir.path(), COMMUNITY, &public, 1000);
         config.root.bootstrap_file = None;
         config.admin.bootstrap_file = None;
+        eprintln!("original wallet fixture entering community construction");
         let community_owner = Door::community(config, Arc::new(SystemClock))
             .await
             .map_err(|_| refused_stage("community construction"))?;
@@ -155,6 +157,7 @@ async fn call(client: &reqwest::Client, origin: &str, action: &str) -> io::Resul
         "trust_feed" => "community trust feed read",
         _ => return Err(refused_stage("unsupported fixture read")),
     };
+    eprintln!("original wallet fixture entering {stage}");
     client
         .post(format!("{origin}/v1/{action}"))
         .json(&json!({}))
