@@ -4,7 +4,13 @@ use super::*;
 use crate::door::{current, registry, Invocation, Output};
 use csgn::{Kind, SecretKey, Signer};
 use serde_json::{json, Value};
-use std::{path::Path, sync::Arc};
+use std::{
+    path::Path,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 #[path = "../fixture/https.rs"]
 mod https;
@@ -12,11 +18,11 @@ mod https;
 const ORIGIN: &str = "https://member.example.test";
 
 #[derive(Clone)]
-struct Time(Rc<Cell<u64>>);
+struct Time(Arc<AtomicU64>);
 impl cbrd::clnk::Clock for Time {
     fn now(&self) -> std::result::Result<u64, cmmr::Error> {
         self.0
-            .get()
+            .load(Ordering::SeqCst)
             .checked_mul(1000)
             .ok_or(cmmr::Error::Unavailable)
     }
@@ -290,7 +296,7 @@ async fn current_original_charter_allows_real_committed_inbox_history() {
     let foyer = server.foyer(now).await;
     let mut current = foyer.current_policy();
     let (mut owner, _, checks) = open_fixture().await;
-    let clock = Time(Rc::new(Cell::new(now)));
+    let clock = Time(Arc::new(AtomicU64::new(now)));
     let (history, completed) = current::read_with_clock(
         &mut owner,
         &mut current,
@@ -323,7 +329,7 @@ async fn minimum_version_raised_while_real_keys_wait_withholds_completed_history
     let foyer = server.foyer(now).await;
     let mut current = foyer.current_policy();
     let (mut owner, gate, checks) = open_fixture().await;
-    let clock = Time(Rc::new(Cell::new(now)));
+    let clock = Time(Arc::new(AtomicU64::new(now)));
     let held = gate.lock().await;
     let mut read = Box::pin(current::read_with_clock(
         &mut owner,
@@ -358,7 +364,7 @@ async fn expired_grant_regressed_clock_or_disposed_current_foyer_withhold_real_w
         let foyer = server.foyer(now).await;
         let mut current = foyer.current_policy();
         let (mut owner, gate, checks) = open_fixture().await;
-        let clock = Time(Rc::new(Cell::new(now)));
+        let clock = Time(Arc::new(AtomicU64::new(now)));
         let held = gate.lock().await;
         let mut read = Box::pin(current::read_with_clock(
             &mut owner,
@@ -378,8 +384,8 @@ async fn expired_grant_regressed_clock_or_disposed_current_foyer_withhold_real_w
         assert!(read.as_mut().now_or_never().is_none());
         assert_eq!(checks.get(), 1);
         match failure {
-            0 => clock.0.set(now + 60),
-            1 => clock.0.set(now - 1),
+            0 => clock.0.store(now + 60, Ordering::SeqCst),
+            1 => clock.0.store(now - 1, Ordering::SeqCst),
             2 => (),
             _ => unreachable!(),
         }
