@@ -54,6 +54,10 @@ pub(super) trait BoundBoard {
     ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    /// Local group views from the committed Groups checkpoint; no Forum traffic.
+    fn groups(&mut self, _expires: u64) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn status(&self) -> cbrd::Status;
     fn disconnect(&mut self) -> cbrd::Status;
     fn prepare(&mut self, request: cbrd::cfrm::Request, nonce: [u8; 16]) -> Result<cbrd::Prepared>;
