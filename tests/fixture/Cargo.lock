@@ -2030,7 +2030,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#b8b510ba4da57097a9239f7a860cd5b4347de90c"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#86ef415a18716d6fd1daee7b0c7c14a2da872b3a"
 dependencies = [
  "axum",
  "cblc",

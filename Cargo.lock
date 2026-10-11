@@ -1892,7 +1892,7 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=v01#01e1089204e8b9d0373d6d6f14d418e729d9e755"
+source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=v01#b8050d369ea241cc19b939fdc6ed09ac97907e3b"
 dependencies = [
  "cdlv",
  "cgrp 0.1.0 (git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=v01)",
@@ -2589,7 +2589,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#b8b510ba4da57097a9239f7a860cd5b4347de90c"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#86ef415a18716d6fd1daee7b0c7c14a2da872b3a"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -7323,6 +7323,8 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
+ "serde",
+ "serde_json",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
