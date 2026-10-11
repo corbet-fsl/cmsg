@@ -53,6 +53,36 @@ async fn root_board(public: &cvld::api::GlobalPublic) -> Running {
     }
 }
 
+// Original owner login request preparation, without completing the assertion
+// until the fault transport forwards it. The selected main owner keeps this
+// helper in client_contract.rs rather than exporting it from support/mod.rs.
+async fn login_request(
+    service: &Running,
+    host: &str,
+    authenticator: &mut webauthn_authenticator_rs::softtoken::SoftToken,
+    user: &str,
+    credential: &[u8],
+) -> serde_json::Value {
+    use webauthn_authenticator_rs::AuthenticatorBackend;
+    let client = client(service, host, None);
+    let start: cvld::api::Ceremony = serde_json::from_value(
+        client
+            .call("login_begin", json!({"user":user,"credential":credential}))
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let challenge: ckyh::RequestChallengeResponse = serde_json::from_value(start.options).unwrap();
+    let credential = authenticator
+        .perform_auth(
+            ckyh::Url::parse(&format!("https://{host}")).unwrap(),
+            challenge.public_key,
+            300_000,
+        )
+        .unwrap();
+    json!({"ceremony":start.ceremony,"credential":credential})
+}
+
 // Fault only the transport after the original owner accepts a real assertion.
 async fn login_faults(
     service: &Running,
