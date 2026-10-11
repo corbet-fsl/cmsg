@@ -1275,7 +1275,7 @@ dependencies = [
 [[package]]
 name = "cdht"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdht.git?branch=v01#f13a4750d1b69534234723900a79e1b2342394e8"
+source = "git+https://git.corbet.ch/corbet-foss/cdht.git?branch=v01#b3173c70644dacd8f5e9b1bd6478859fe03b4f03"
 dependencies = [
  "blake3",
  "capnp",
@@ -1366,7 +1366,7 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#58862bcbe6e0c83ec544b8e109a6bc3c02d641ff"
+source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#93f0b1f5b0c903f9635ad39d746f19e293e8c9ad"
 dependencies = [
  "cnvy",
  "cpky",
@@ -1561,7 +1561,7 @@ dependencies = [
 [[package]]
 name = "ckyh"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckyh?branch=main#3df3597f033841dbab7b13e7e0a44cffa4f8fb7c"
+source = "git+https://git.corbet.ch/corbet-foss/ckyh?branch=main#ee4714b4bdd624dbb192a9a8ecf4d28d0e838dfa"
 dependencies = [
  "ciborium",
  "csgn",
@@ -1654,6 +1654,7 @@ dependencies = [
  "cdht",
  "cfyr",
  "ckmg",
+ "ckyh",
  "cmmr",
  "cmsh",
  "cnbx",
@@ -1973,7 +1974,7 @@ dependencies = [
 [[package]]
 name = "cpns"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpns?branch=main#b526789817e61b33fb685ba84e61854f94eb758c"
+source = "git+https://git.corbet.ch/corbet-foss/cpns?branch=main#6f6954b70b8d4e39d47c2a73325eabc6ee59fe7d"
 dependencies = [
  "getrandom 0.4.3",
  "sha2 0.11.0",
@@ -2480,7 +2481,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#0b0287427dcc03ad1f242338272f704575c4f19f"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#1de4e5a43181e2f594b52264c894c920937e3387"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -2499,7 +2500,7 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#16c9853fb54de9075d75951a71faacb342f51fb4"
+source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#20618733c8941b375810db65ff9bdf0beee47c27"
 dependencies = [
  "blake3",
  "cchr",
