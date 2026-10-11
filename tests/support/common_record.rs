@@ -4,7 +4,10 @@ use super::{initial_network, wallet::*};
 use cmsg::door::{custody, foyer::Scope, record, Role};
 use serde_json::{json, Value};
 
-async fn initial<'p>(
+#[path = "community_policy.rs"]
+mod policy_cases;
+
+pub(super) async fn initial<'p>(
     door: &cmsg::door::Door,
     origin: &str,
     policy: &'p mut cfyr::policy::CurrentPolicy<cmsg::door::foyer::Transport>,
@@ -22,12 +25,12 @@ async fn initial<'p>(
         .unwrap()
 }
 
-pub(super) async fn exercise(
+pub(super) async fn enrolled(
     world: &Value,
     mut api: cfyr::Foyer<cfyr::HttpClient>,
     passport: Value,
     member: &str,
-) {
+) -> Community {
     let origin = world["passkey_origin"].as_str().unwrap();
     let mut clock = custody::SystemClock;
     let mut entropy = ckmg::SystemEntropy;
@@ -115,6 +118,37 @@ pub(super) async fn exercise(
     .unwrap();
     drop(retired);
 
+    Community {
+        door,
+        keys,
+        backend,
+        network,
+        device,
+    }
+}
+
+pub(super) struct Community {
+    pub door: cmsg::door::Door,
+    pub keys: cpky::Client<cpky::software::SoftwareAuthenticator>,
+    pub backend: cwst::backend::Memory,
+    pub network: initial_network::Nodes,
+    pub device: ckmg::PublicKey,
+}
+
+pub(super) async fn exercise(
+    world: &Value,
+    api: cfyr::Foyer<cfyr::HttpClient>,
+    passport: Value,
+    member: &str,
+) {
+    let Community {
+        door,
+        mut keys,
+        backend,
+        network,
+        device,
+    } = enrolled(world, api, passport, member).await;
+    let origin = world["passkey_origin"].as_str().unwrap();
     let mut companion = foyer(world, false).await;
     let challenge = companion.begin_browser_login().await.unwrap();
     let (credential, outcome) = keys.sign_in(challenge.options).await.unwrap().into_parts();
@@ -187,6 +221,8 @@ pub(super) async fn exercise(
         before
     );
     assert_eq!(vault.account_projection().await.unwrap(), projection);
+
+    policy_cases::exercise(world, &mut keys).await;
 
     // A genuine callback unwind consumes the local source attempt permanently.
     let mut source = source_door

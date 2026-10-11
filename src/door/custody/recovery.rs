@@ -132,7 +132,13 @@ impl MemberAuthorityBuilder {
             policy,
             records,
             intent,
+            pending_current,
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+                reached_current: _,
         } = provisional;
+        if pending_current.is_some() {
+            return Err(ErrorCode::Unauthorized);
+        }
         drop(records); // provisional read custody ends here, before Store restore
         drop(intent);
         let builder = MemberAuthorityBuilder {

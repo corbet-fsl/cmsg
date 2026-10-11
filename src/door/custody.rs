@@ -16,6 +16,7 @@ pub use genesis::{
     acknowledge_initial_publication, prepare_initial_publication, reopen_initial_publication,
     retain_initial_publication, InitialPublicationError,
 };
+mod current_member;
 mod recovery;
 pub use initial::{
     activate_initial, reopen_initial_enrollment, retain_global_initial_enrollment,
@@ -204,6 +205,9 @@ pub struct MemberAuthority<C, B: cdht::runtime::Backend> {
     policy: cfyr::policy::CurrentPolicy<Transport>,
     records: cvlt::LineageRecords<B>,
     intent: Option<ckmg::IntentVerifier>,
+    pending_current: Option<current_member::PendingCurrent>,
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    reached_current: Option<tokio::sync::oneshot::Sender<()>>,
 }
 /// Retained original Foyer ports for constructing member authority after Tor
 /// starts and Records handles exist. No root, accepted lineage or grant is held.
@@ -236,6 +240,9 @@ impl MemberAuthorityBuilder {
             policy: self.policy,
             records,
             intent: None,
+            pending_current: None,
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            reached_current: None,
         })
     }
     /// Construct exact local signing admission with this same member owner.
@@ -252,6 +259,7 @@ impl MemberAuthorityBuilder {
 }
 impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C, B> {
     async fn check(&mut self, mut request: Authorization<'_>) -> Result<(), Error> {
+        self.discard_pending_current();
         self.live.lifetime.check(&request)?;
         let signing = match request.action {
             Action::Use if request.signing.is_none() => false,
@@ -342,6 +350,24 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
         }
         guard.accepted = true;
         Ok(())
+    }
+
+    async fn check_record_recipient(&mut self, request: Authorization<'_>) -> Result<(), Error> {
+        self.check_scoped_current(request, current_member::Purpose::RecordRecipient)
+            .await
+    }
+    async fn check_device_signing(&mut self, request: Authorization<'_>) -> Result<(), Error> {
+        self.check_scoped_current(request, current_member::Purpose::DeviceSigning)
+            .await
+    }
+    fn discard_current_attempt(&mut self) {
+        self.discard_pending_current();
+    }
+    fn check_record_recipient_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
+        self.finish_scoped_current(request, current_member::Purpose::RecordRecipient)
+    }
+    fn check_device_signing_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
+        self.finish_scoped_current(request, current_member::Purpose::DeviceSigning)
     }
 }
 
