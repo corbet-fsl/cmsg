@@ -20,36 +20,8 @@ async fn anchor(service: &Running, host: &str, scope: &str) -> cpsd::Authenticat
     )
 }
 
-async fn role(
-    service: &Running,
-    scope: &str,
-    member: &mut Member,
-    admitted: &CredentialResponse,
-    role: crgs::Role,
-) {
-    assert_eq!(admitted.lobby.state, "admitted");
-    let db = crlt::Db::open(crlt::Config::new(
-        format!(
-            "file://{}",
-            service.dir.path().join("community.db").display()
-        ),
-        "",
-    ))
-    .await
-    .unwrap();
-    db.migrate(&cvld::service::community_migrations())
-        .await
-        .unwrap();
-    crgs::Register::new(
-        crgs::LibsqlStorage::new(db.community(scope).unwrap()),
-        crgs::ReleasePeriod::default(),
-    )
-    .set_role(
-        &crgs::MemberId::new(admitted.lobby.member_id.as_bytes().to_vec()).unwrap(),
-        role,
-    )
-    .await
-    .unwrap();
+/// Move a founded or promoted member to its garden (admin host) session.
+async fn garden_session(service: &Running, scope: &str, member: &mut Member) {
     let host = format!("api.admin.{scope}.example.test");
     member.session = login(
         service,
@@ -59,6 +31,57 @@ async fn role(
         &member.credential,
     )
     .await;
+}
+
+/// Found `scope` for real: its first Root member prepares an original creation
+/// recipient, the Global Root operator initializes the community through the
+/// public action, and the member redeems the signed invitation with every
+/// configured admission gate. No library hook or role setter is involved.
+async fn found(
+    wallet: &Running,
+    operator: &Member,
+    service: &Running,
+    scope: &str,
+    holder: &cpsd::OpaqueHolder,
+    member: &Member,
+    handle: &str,
+) -> CredentialResponse {
+    let host = format!("api.{scope}.example.test");
+    let session = Some(member.session.as_str());
+    let recipient = client(service, &host, session)
+        .call(
+            "community_creation_recipient",
+            json!({"id":null,"expires_at":NOW + 300}),
+        )
+        .await
+        .unwrap();
+    let invitation = client(wallet, ROOT, Some(&operator.session))
+        .call(
+            "community_creation_initialize",
+            json!({"community":scope,"recipient":recipient["recipient"]}),
+        )
+        .await
+        .unwrap();
+    let pseudonym = holder
+        .pseudonym(&cpsd::CommunityId::new(scope).unwrap())
+        .to_hex();
+    gates(service, &host, member, &pseudonym, scope, handle).await;
+    let presentation = proof(service, scope, holder, session).await;
+    let admitted: CredentialResponse = serde_json::from_value(
+        client(service, &host, session)
+            .call(
+                "credential_issue",
+                json!({
+                    "presentation":presentation,"devices":[member.signing_key],
+                    "creation":invitation["invitation"]
+                }),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(admitted.lobby.state, "admitted");
+    admitted
 }
 
 async fn gates(
@@ -83,7 +106,8 @@ async fn gates(
         .unwrap();
 }
 
-pub async fn admin(wallet: &Running, source: &Running) -> Member {
+/// An ordinary admitted member promoted by the founded Root under its garden session.
+pub async fn admin(wallet: &Running, source: &Running, root: &Member) -> Member {
     let (_, passport, _) = wallet_passport(wallet).await;
     let host = "api.alpha.example.test";
     let mut member = enrol_community(source, host, &passport).await;
@@ -92,7 +116,19 @@ pub async fn admin(wallet: &Running, source: &Running) -> Member {
         .to_hex();
     gates(source, host, &member, &pseudonym, "alpha", "fixture_admin").await;
     let admitted = issue_community(source, host, &member, &passport).await;
-    role(source, "alpha", &mut member, &admitted, crgs::Role::Admin).await;
+    assert_eq!(admitted.lobby.state, "admitted");
+    client(
+        source,
+        "api.admin.alpha.example.test",
+        Some(&root.session),
+    )
+    .call(
+        "member_role_set",
+        json!({"member":admitted.lobby.member_id,"role":"admin"}),
+    )
+    .await
+    .unwrap();
+    garden_session(source, "alpha", &mut member).await;
     member
 }
 
@@ -177,6 +213,8 @@ async fn proof(
 }
 
 async fn root_member(
+    wallet: &Running,
+    operator: &Member,
     service: &Running,
     scope: &str,
     holder: &cpsd::OpaqueHolder,
@@ -192,28 +230,20 @@ async fn root_member(
     )
     .unwrap();
     let mut member = finish_enrol(service, &host, ceremony).await;
-    let pseudonym = holder
-        .pseudonym(&cpsd::CommunityId::new(scope).unwrap())
-        .to_hex();
-    gates(service, &host, &member, &pseudonym, scope, handle).await;
-    let presentation = proof(service, scope, holder, Some(&member.session)).await;
-    let admitted: CredentialResponse = serde_json::from_value(
-        client(service, &host, Some(&member.session))
-            .call(
-                "credential_issue",
-                json!({"presentation":presentation,"devices":[member.signing_key]}),
-            )
-            .await
-            .unwrap(),
-    )
-    .unwrap();
-    role(service, scope, &mut member, &admitted, crgs::Role::Root).await;
+    wallet.door.link_community_creation(&service.door).await.unwrap();
+    found(wallet, operator, service, scope, holder, &member, handle).await;
+    garden_session(service, scope, &mut member).await;
     member
 }
 
-pub async fn roots(wallet: &Running, source: &Running, board: &Running) -> (Member, Member) {
+pub async fn roots(
+    wallet: &Running,
+    operator: &Member,
+    source: &Running,
+    board: &Running,
+) -> (Member, Member) {
     let mut holder = holder(wallet).await;
-    let source_member = root_member(source, "alpha", &holder, "fixture_source_root").await;
+    let source_member = root_member(wallet, operator, source, "alpha", &holder, "fixture_source_root").await;
     let garden = client(
         source,
         "api.admin.alpha.example.test",
@@ -255,6 +285,6 @@ pub async fn roots(wallet: &Running, source: &Running, board: &Running) -> (Memb
             &cpsd::BlindRootBoardCredential::from_bytes(&answer.bytes).unwrap(),
         )
         .unwrap();
-    let board_member = root_member(board, "root", &holder, "fixture_board_root").await;
+    let board_member = root_member(wallet, operator, board, "root", &holder, "fixture_board_root").await;
     (source_member, board_member)
 }

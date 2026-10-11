@@ -282,7 +282,6 @@ async fn entry() {
         &member.credential,
     )
     .await;
-    let admin = gardens::admin(&wallet, &service).await;
     let global_root = enrol(
         &wallet,
         ROOT,
@@ -290,7 +289,10 @@ async fn entry() {
     )
     .await;
     let board = root_board(&public, &service).await;
-    let (root, board_root) = gardens::roots(&wallet, &service, &board).await;
+    // Real founding: the community and the root board start Uninitialized and each
+    // first Root is created through the Global Root operator's public actions.
+    let (root, board_root) = gardens::roots(&wallet, &global_root, &service, &board).await;
+    let admin = gardens::admin(&wallet, &service, &root).await;
     service.clock.set(NOW + 1);
     board.clock.set(NOW + 1);
     let mut faults = Vec::new();
