@@ -48,10 +48,14 @@ async fn found(
 ) -> CredentialResponse {
     let host = format!("api.{scope}.example.test");
     let session = Some(member.session.as_str());
-    let recipient = client(service, &host, session)
+    let api = client(service, &host, session);
+    api.call("handle_reserve", json!({"handle":handle}))
+        .await
+        .unwrap();
+    let recipient = api
         .call(
             "community_creation_recipient",
-            json!({"id":null,"expires_at":NOW + 300}),
+            json!({"id":null,"expires_at":NOW + 300,"purpose":"root"}),
         )
         .await
         .unwrap();
@@ -64,19 +68,20 @@ async fn found(
     {
         Ok(value) => value,
         Err(error) => {
-            // Test-side diagnosis only: which Reconcile site fired for this founding.
-            eprintln!(
-                "founding {scope} refused: {error:?}; clocks global={} community={}",
-                wallet.clock.0.load(std::sync::atomic::Ordering::SeqCst),
-                service.clock.0.load(std::sync::atomic::Ordering::SeqCst),
-            );
+            // Test-side diagnosis only: the real HTTP-level refusal for this founding.
+            eprintln!("founding {scope} refused: {error:?}");
             panic!("founding refused");
         }
     };
     let pseudonym = holder
         .pseudonym(&cpsd::CommunityId::new(scope).unwrap())
         .to_hex();
-    gates(service, &host, member, &pseudonym, scope, handle).await;
+    api.call(
+        "gate_voucher",
+        voucher(scope, &pseudonym, handle, NOW + 172800),
+    )
+    .await
+    .unwrap();
     let presentation = proof(service, scope, holder, session).await;
     let admitted: CredentialResponse = serde_json::from_value(
         client(service, &host, session)
