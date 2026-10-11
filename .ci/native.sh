@@ -25,7 +25,7 @@ cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 bash .ci/native-prover.sh
 fixture="${CARGO_TARGET_DIR:-tests/fixture/target}/debug/cmsg-foyer-fixture"
-python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --all-targets
+python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --all-targets --no-fail-fast
 
 # Qualify the actual maintained Tor transport separately from inert record tests.
 # Existing provisioned original tools are required; this route never installs them.
