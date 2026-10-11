@@ -241,6 +241,7 @@ async fn drain(label: &str, owner: Native) {
         .unwrap();
     // Direct fixture output survives the test harness capture and is retained
     // by the original private-network driver's contract receipt. No IDs appear.
+    #[allow(clippy::explicit_write)]
     writeln!(
         std::io::stdout(),
         "original Tor {label} drained in {} ms",
