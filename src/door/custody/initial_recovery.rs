@@ -3,21 +3,33 @@ use super::initial::SharedClock;
 use super::*;
 
 /// Dedicated current same-key authority for the one authenticated initial ACK.
-/// Construction is restricted to original recovery composition; no signer,
-/// creation or general restored-certificate authority is implemented.
+/// Construction is restricted to original recovery composition. Fixed account
+/// device authorization additionally requires a separately enabled exact intent;
+/// no general root signer, creation or arbitrary certificate adoption exists.
 pub struct InitialRecoveryAuthority<'a, 'p, C, N: cdht::Network> {
     pub(super) candidate: &'a cvlt::AcknowledgedInitialCandidate,
     pub(super) initial: cfyr::membership::InitialCreationLease<'p, Transport>,
     pub(super) clock: C,
     pub(super) records: Option<cvlt::LineageRecords<cvlt::TorLineageRecord<'a, N>>>,
     pub(super) closed: bool,
+    pub(super) account_intent: Option<ckmg::IntentVerifier>,
+    pub(super) account_signing: Option<(Vec<u8>, u64)>,
 }
 impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
     fn current(&mut self, request: &Authorization<'_>) -> Result<u64, Error> {
-        if !matches!(request.action, Action::ReadLineage | Action::Use)
-            || request.target.is_some()
-            || request.signing.is_some()
-            || (!(request.action == Action::Use
+        let signing = match request.action {
+            Action::AuthorizeAccountDevice
+                if self.account_intent.is_some()
+                    && request.statement.is_none()
+                    && request.evidence.is_empty() =>
+            {
+                Some(request.signing.ok_or(Error::Unauthorized)?)
+            }
+            Action::ReadLineage | Action::Use if request.signing.is_none() => None,
+            _ => return Err(Error::Unauthorized),
+        };
+        if request.target.is_some()
+            || (!(matches!(request.action, Action::Use | Action::AuthorizeAccountDevice)
                 && request.evidence.is_empty()
                 && request.statement.is_none())
                 && request.evidence
@@ -39,6 +51,9 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         let now = self.clock.now()?;
         if now < request.now {
             return Err(Error::Clock);
+        }
+        if signing.is_some_and(|signing| now >= signing.expires) {
+            return Err(Error::Expired);
         }
         let observation = self
             .initial
@@ -77,6 +92,9 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                     let verified = candidate
                         .reauthorize(current, &certificate, request.binding.member(), now)
                         .map_err(|_| Error::Unauthorized)?;
+                    if signing.is_some_and(|signing| signing.expires > verified.valid_until()) {
+                        return Err(Error::Expired);
+                    }
                     let lineage = verified.lineage(now).map_err(|_| Error::Unauthorized)?;
                     if &lineage.binding != request.binding
                         || Some(lineage.root) != request.root
@@ -104,6 +122,13 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         if completed < now {
             return Err(Error::Clock);
         }
+        if let Some(signing) = signing {
+            if completed >= signing.expires
+                || signing.expires > self.initial.expires().map_err(|_| Error::Unauthorized)?
+            {
+                return Err(Error::Expired);
+            }
+        }
         Ok(completed)
     }
     async fn refresh(&mut self) -> Result<(), Error> {
@@ -130,11 +155,12 @@ impl<C: Clock, N: cdht::Network> ckmg::Authority for InitialRecoveryAuthority<'_
             return Err(Error::Unauthorized);
         }
         self.closed = true;
+        self.account_signing = None;
         self.refresh().await?;
         self.current(&request)?;
         match request.action {
             Action::ReadLineage if self.records.is_none() => {}
-            Action::Use => {
+            Action::Use | Action::AuthorizeAccountDevice => {
                 let read = self
                     .records
                     .as_mut()
@@ -159,8 +185,37 @@ impl<C: Clock, N: cdht::Network> ckmg::Authority for InitialRecoveryAuthority<'_
             }
             _ => return Err(Error::Unauthorized),
         }
+        if request.action == Action::AuthorizeAccountDevice {
+            let mut current_request = request;
+            current_request.now = self.clock.now()?;
+            self.current(&current_request)?;
+            self.account_intent
+                .as_mut()
+                .ok_or(Error::Unauthorized)?
+                .consume(
+                    &current_request,
+                    self.initial.origin().map_err(|_| Error::Unauthorized)?,
+                )?;
+            let signing = current_request.signing.ok_or(Error::Unauthorized)?;
+            self.account_signing = Some((signing.transcript.to_vec(), signing.expires));
+        }
         self.closed = false;
         Ok(())
+    }
+    fn check_account_device_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
+        if self.closed || self.records.is_none() || request.action != Action::AuthorizeAccountDevice
+        {
+            return Err(Error::Unauthorized);
+        }
+        self.closed = true;
+        let (transcript, expires) = self.account_signing.take().ok_or(Error::Unauthorized)?;
+        let signing = request.signing.ok_or(Error::Unauthorized)?;
+        if signing.transcript != transcript || signing.expires != expires {
+            return Err(Error::Unauthorized);
+        }
+        let now = self.current(&request)?;
+        self.closed = false;
+        Ok(now)
     }
     fn check_checkpoint_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
         if self.closed || self.records.is_none() || request.action != Action::Use {
@@ -197,6 +252,8 @@ pub async fn complete_initial_recovery<B: cwst::backend::Backend, N: cdht::Netwo
         clock: clock.clone(),
         records: None,
         closed: false,
+        account_intent: None,
+        account_signing: None,
     };
     let reader = candidate.read_lineage(&mut clock, &mut authority).await?;
     let backend = cvlt::TorLineageRecord::provisional_lineage(network.clone(), reader)

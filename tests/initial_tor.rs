@@ -398,15 +398,52 @@ async fn acknowledged_open(
         .unwrap();
     // The actual transport owner verifies nonaliasing with this retained session.
     let network = native.initial_records(&initial).unwrap();
+    let origin = initial.origin().unwrap().to_owned();
+    let expires = initial.expires().unwrap().min(now() + 60);
     let owners = custody::prepare_initial_recovery(&candidate, initial, network.clone())
         .await
         .unwrap();
+    let (owners, mut admission) = owners.with_account_device_intent().unwrap();
     let mut vault = owners.open_root(network, backend).await.unwrap();
     assert!(matches!(
         vault.restore_lookup(&locator).await,
         cvlt::RestoreLookup::Present(_)
     ));
     vault.keys().lineage().await.unwrap();
+    let plan = vault.keys().prepare_account_device(expires).await.unwrap();
+    let root = plan.root();
+    let original = plan.signing_bytes().to_vec();
+    let intent = admission
+        .admit(
+            ckmg::AdmittedCommand {
+                binding: plan.binding().clone(),
+                origin,
+                action: ckmg::Action::AuthorizeAccountDevice,
+                device: plan.device(),
+                root: Some(root),
+                epoch: plan.epoch(),
+                target: None,
+                statement: None,
+                transcript: Some(original.clone()),
+                expires,
+            },
+            now(),
+        )
+        .unwrap();
+    let signed = vault.keys().authorize_account_device(plan).await.unwrap();
+    assert_eq!(signed.signing_bytes().unwrap(), original);
+    let wire: Value = serde_json::from_slice(&signed.to_bytes().unwrap()).unwrap();
+    let signature: [u8; 64] = data_encoding::BASE64URL_NOPAD
+        .decode(wire["signature"].as_str().unwrap().as_bytes())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    ckmg::verify_ed25519(root.value(), &original, &signature).unwrap();
+    // A valid ACK and the previous explicit operation never admit another one.
+    drop(intent);
+    let replay = vault.keys().prepare_account_device(expires).await.unwrap();
+    assert!(vault.keys().authorize_account_device(replay).await.is_err());
+    assert_eq!(vault.keys().state(), ckmg::State::Locked);
     vault.lock().await;
 }
 

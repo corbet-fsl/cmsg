@@ -53,6 +53,8 @@ pub async fn prepare_initial_recovery<'a, 'p, N: cdht::Network + Clone>(
         clock: SystemClock,
         records: None,
         closed: false,
+        account_intent: None,
+        account_signing: None,
     };
     let reader = candidate
         .read_lineage(&mut SystemClock, &mut authority)
@@ -75,6 +77,26 @@ pub async fn prepare_initial_recovery<'a, 'p, N: cdht::Network + Clone>(
 }
 
 impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
+    /// Enable only fixed account-device authorization after normal recovery.
+    /// The trusted Door retains the returned admission channel and must admit
+    /// the exact Keys-prepared transcript at this owner's authenticated origin.
+    /// It is not an INITIAL ACK signing grant; every attempt still performs fresh
+    /// HTTPS, forced lineage, same-key certificate and final live-owner checks.
+    pub fn with_account_device_intent(
+        mut self,
+    ) -> super::super::Result<(Self, ckmg::IntentAdmission)> {
+        if self.authority.closed || self.authority.account_intent.is_some() {
+            return Err(ErrorCode::Unauthorized);
+        }
+        self.authority
+            .initial
+            .origin()
+            .map_err(|_| ErrorCode::Unauthorized)?;
+        let (admission, verifier) = ckmg::intent_channel();
+        self.authority.account_intent = Some(verifier);
+        Ok((self, admission))
+    }
+
     /// Open only the actual authenticated local winner, or restore the selected
     /// original network checkpoint to an empty destination. Durable read floors
     /// are installed before passkey/compound reads; the exact inner ACK carrier
