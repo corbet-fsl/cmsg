@@ -1486,7 +1486,7 @@ dependencies = [
 [[package]]
 name = "cmty"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#7ae6d1d3614956adca87d1df892cde9a6c6058cb"
+source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#53ac7ca0372543cb4a6fe978e39fac78618c4ff8"
 dependencies = [
  "cgts",
  "chrono",
