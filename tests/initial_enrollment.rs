@@ -1,14 +1,18 @@
 #![cfg(not(target_arch = "wasm32"))]
 //! Actual HTTPS enrollment, original Passkeys custody and real encrypted CAS.
 use cmsg::door::custody::{
-    activate_initial, prepare_initial_publication, reopen_initial_enrollment,
-    reopen_initial_publication, retain_initial_enrollment, retain_initial_publication,
+    acknowledge_initial_publication, activate_initial, prepare_initial_publication,
+    reopen_initial_enrollment, reopen_initial_publication, retain_initial_enrollment,
+    retain_initial_publication,
 };
 use cpky::{
     Context,
     software::{SoftwareAuthenticator, TestConfiguration},
 };
 use serde_json::{Value, json};
+
+#[path = "support/initial_network.rs"]
+mod initial_network;
 
 struct Clock(u64);
 impl ckmg::Clock for Clock {
@@ -218,7 +222,84 @@ async fn original_registration_tuple_activates_only_after_durable_candidate_and_
             .unwrap();
         assert_eq!(creation.phase().unwrap(), cvlt::InitialPhase::Retained);
         assert_eq!(creation.publication_commitment().unwrap(), publication);
-        // Retaining original signed outputs is not publication, ACK or normal Use.
+        let network = initial_network::Nodes::new();
+        let publication = creation
+            .stage(cdht::NetworkBackend::new(
+                network.clone(),
+                initial_network::Verifier,
+            ))
+            .await
+            .unwrap();
+        let (creation, report) = publication.flush().await.unwrap();
+        assert_eq!(report.written, 1);
+        let read = creation
+            .read_first_lineage(network.clone(), &mut clock)
+            .await
+            .unwrap();
+        let initial = api
+            .live_membership()
+            .observe_lease(|| now)
+            .await
+            .unwrap()
+            .passkey_certificate(&mut policy, || now)
+            .await
+            .unwrap()
+            .initial_creation(|| now)
+            .await
+            .unwrap();
+        let (read, initial) = if before_finish {
+            let durable = cwst::backend::Backend::read(&backend).await.unwrap();
+            // A retained first-read witness cannot replace the fresh network
+            // read required by normal Keys Use. Failure consumes only the live
+            // attempt; the exact staged operation remains durable for restart.
+            assert!(
+                acknowledge_initial_publication(
+                    read,
+                    initial,
+                    initial_network::Nodes::new(),
+                    &mut clock,
+                    &mut entropy,
+                )
+                .await
+                .is_err()
+            );
+            assert_eq!(
+                cwst::backend::Backend::read(&backend).await.unwrap(),
+                durable
+            );
+            let challenge = api.begin_browser_login().await.unwrap();
+            let authentication = keys.sign_in(challenge.options).await.unwrap();
+            let initial = api
+                .live_membership()
+                .observe_lease(|| now)
+                .await
+                .unwrap()
+                .passkey_certificate(&mut policy, || now)
+                .await
+                .unwrap()
+                .initial_creation(|| now)
+                .await
+                .unwrap();
+            let (creation, initial) =
+                reopen_initial_publication(authentication, initial, backend.clone(), &mut clock)
+                    .await
+                    .unwrap();
+            assert_eq!(creation.phase().unwrap(), cvlt::InitialPhase::Staged);
+            let read = creation
+                .read_first_lineage(network.clone(), &mut clock)
+                .await
+                .unwrap();
+            (read, initial)
+        } else {
+            (read, initial)
+        };
+        let creation =
+            acknowledge_initial_publication(read, initial, network, &mut clock, &mut entropy)
+                .await
+                .unwrap();
+        assert_eq!(creation.phase().unwrap(), cvlt::InitialPhase::Acknowledged);
+        // The original ACK is durable, but no recovery publication, retirement
+        // or usable Vault is inferred from these native owner/consensus cases.
         drop(creation);
     }
 }

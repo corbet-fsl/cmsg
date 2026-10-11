@@ -7,8 +7,8 @@ use std::{cell::Cell, rc::Rc};
 mod genesis;
 mod initial;
 pub use genesis::{
-    InitialPublicationError, prepare_initial_publication, reopen_initial_publication,
-    retain_initial_publication,
+    InitialPublicationError, acknowledge_initial_publication, prepare_initial_publication,
+    reopen_initial_publication, retain_initial_publication,
 };
 mod recovery;
 pub use initial::{

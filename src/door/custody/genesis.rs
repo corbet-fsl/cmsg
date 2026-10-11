@@ -369,3 +369,202 @@ pub async fn retain_initial_publication<B: cwst::backend::Backend>(
     };
     creation.retain(&mut clock, &mut authority).await
 }
+
+// This private composition exists only for the actual first-lineage witness and
+// original Keys acknowledgment. Each ordinary Use performs original HTTPS reads
+// before and after a fresh authenticated network read; no earlier result grants it.
+struct AcknowledgmentAuthority<'p, C, R: cdht::runtime::Backend> {
+    completion: Completion<'p, C>,
+    records: cvlt::LineageRecords<R>,
+    closed: bool,
+}
+impl<C: Clock, R: cdht::runtime::Backend> ckmg::Authority for AcknowledgmentAuthority<'_, C, R> {
+    async fn check(&mut self, request: Authorization<'_>) -> Result<(), Error> {
+        if self.closed {
+            return Err(Error::Unauthorized);
+        }
+        self.closed = true;
+        let (lineage, author) = self.completion.receipt.attested_lineage()?;
+        if request.action != Action::Use
+            || request.binding != &lineage.binding
+            || request.root != Some(lineage.root)
+            || request.device != author
+            || request.epoch != lineage.epoch
+            || request.target.is_some()
+            || request.signing.is_some()
+            || request
+                .statement
+                .is_some_and(|digest| lineage.digest().ok() != Some(digest))
+        {
+            return Err(Error::Unauthorized);
+        }
+        let mut failed = false;
+        let clock = &mut self.completion.clock;
+        let initial = &mut self.completion.initial;
+        initial
+            .refresh(|| {
+                clock.now().unwrap_or_else(|_| {
+                    failed = true;
+                    u64::MAX
+                })
+            })
+            .await
+            .map_err(|_| Error::Unauthorized)?;
+        if failed {
+            return Err(Error::Clock);
+        }
+        let read = self.records.read().await.map_err(|_| Error::Unavailable)?;
+        initial
+            .refresh(|| {
+                clock.now().unwrap_or_else(|_| {
+                    failed = true;
+                    u64::MAX
+                })
+            })
+            .await
+            .map_err(|_| Error::Unauthorized)?;
+        if failed {
+            return Err(Error::Clock);
+        }
+        let now = clock.now()?;
+        if now < request.now || now >= self.completion.intent.expires {
+            return Err(Error::Clock);
+        }
+        let observation = initial.observation().map_err(|_| Error::Unauthorized)?;
+        if observation.member != lineage.binding.member()
+            || !observation.device_keys.contains(author.value())
+            || initial.publication().map_err(|_| Error::Unauthorized)?
+                != Some(self.completion.publication)
+        {
+            return Err(Error::Unauthorized);
+        }
+        let original = cvlt::LineageEvidence::from_packed(&self.completion.intent.packed_evidence)
+            .map_err(|_| Error::Unauthorized)?
+            .to_bytes()
+            .map_err(|_| Error::Unauthorized)?;
+        let credential = initial
+            .credential_id()
+            .map_err(|_| Error::Unauthorized)?
+            .to_vec();
+        initial
+            .with_current(
+                || {
+                    clock.now().unwrap_or_else(|_| {
+                        failed = true;
+                        u64::MAX
+                    })
+                },
+                |current| {
+                    if current.revocations().device_revoked(author.value())
+                        || read.evidence().len() != 1
+                    {
+                        return Err(Error::Unauthorized);
+                    }
+                    let evidence = &read.evidence()[0];
+                    if evidence.to_bytes().map_err(|_| Error::Unauthorized)? != original {
+                        return Err(Error::Unauthorized);
+                    }
+                    let actual = evidence
+                        .verify(current, lineage.binding.member(), now)
+                        .map_err(|_| Error::Unauthorized)?;
+                    if actual.lineage(now).map_err(|_| Error::Unauthorized)? != lineage
+                        || actual.author(now).map_err(|_| Error::Unauthorized)? != author
+                        || actual.credential_id(now).map_err(|_| Error::Unauthorized)? != credential
+                    {
+                        return Err(Error::Unauthorized);
+                    }
+                    Ok(())
+                },
+            )
+            .map_err(|_| Error::Unauthorized)??;
+        if failed {
+            return Err(Error::Clock);
+        }
+        if initial.checked_at().map_err(|_| Error::Unauthorized)? >= self.completion.intent.expires
+        {
+            return Err(Error::Expired);
+        }
+        self.closed = false;
+        Ok(())
+    }
+    async fn check_completion(
+        &mut self,
+        request: ckmg::CompletionAuthorization<'_>,
+    ) -> Result<u64, Error> {
+        if self.closed {
+            return Err(Error::Unauthorized);
+        }
+        self.completion.current(request)
+    }
+    fn check_completion_current(
+        &mut self,
+        request: ckmg::CompletionAuthorization<'_>,
+    ) -> Result<u64, Error> {
+        if self.closed {
+            return Err(Error::Unauthorized);
+        }
+        self.completion.current(request)
+    }
+}
+
+/// Acknowledge only the original first-lineage consensus witness and exact
+/// server-bound creation. Dedicated completion and every normal Keys Use retain
+/// their separate real checks. The result is still an outer pending lifecycle;
+/// recovery publication, forced selection and ordinary reopening remain required.
+pub async fn acknowledge_initial_publication<B: cwst::backend::Backend, N: cdht::Network>(
+    read: cvlt::InitialLineageRead<B>,
+    mut initial: cfyr::membership::InitialCreationLease<'_, Transport>,
+    network: N,
+    clock: &mut impl Clock,
+    entropy: &mut impl ckmg::Entropy,
+) -> Result<cvlt::InitialCreation<B>, cvlt::InitialError> {
+    if read.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+        return Err(refused());
+    }
+    let publication = read.publication_commitment()?;
+    if initial.publication().map_err(|_| refused())? != Some(publication) {
+        return Err(refused());
+    }
+    let mut clock = SharedClock::new(clock);
+    let mut failed = false;
+    initial
+        .refresh(|| {
+            clock.now().unwrap_or_else(|_| {
+                failed = true;
+                u64::MAX
+            })
+        })
+        .await
+        .map_err(|_| refused())?;
+    if failed {
+        return Err(cvlt::InitialError::Keys(Error::Clock));
+    }
+    let (intent, location, sealed_digest) = read.completion_binding()?;
+    let mut completion = Completion {
+        initial,
+        clock: clock.clone(),
+        receipt: read.receipt().clone(),
+        intent,
+        location,
+        sealed_digest,
+        publication,
+        closed: false,
+    };
+    let acknowledgment = read
+        .prepare_acknowledgment(&mut clock, &mut completion)
+        .await?;
+    let reader = acknowledgment.lineage_reader()?;
+    let backend = cvlt::TorLineageRecord::initial_lineage(network, reader)
+        .await
+        .map_err(cvlt::InitialError::Publication)?;
+    let record = cdht::runtime::Record::new(backend).map_err(cvlt::InitialError::Publication)?;
+    let records = cvlt::LineageRecords::new(vec![record]).map_err(cvlt::InitialError::Records)?;
+    let mut authority = AcknowledgmentAuthority {
+        completion,
+        records,
+        closed: false,
+    };
+    acknowledgment
+        .acknowledge(&mut clock, entropy, &mut authority)
+        .await
+}
