@@ -217,6 +217,29 @@ impl<C: Clock, N: cdht::Network> ckmg::Authority for InitialRecoveryAuthority<'_
         self.closed = false;
         Ok(now)
     }
+    fn check_record_recipient_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
+        if self.closed {
+            return Err(Error::Unauthorized);
+        }
+        self.closed = true;
+        if self.records.is_none()
+            || request.action != Action::Use
+            || request.binding.community() == "wallet"
+            || request.target.is_some()
+            || request.statement.is_some()
+            || request.signing.is_some()
+            || !request.evidence.is_empty()
+        {
+            return Err(Error::Unauthorized);
+        }
+        // The preceding original Use check forced the exact ACK lineage and
+        // refreshed the held HTTPS owner. Reborrow that same genuine session,
+        // current Charter/certificate and clock after Keys' final Store await;
+        // an INITIAL ACK or cached observation is never enough by itself.
+        let checked = self.current(&request)?;
+        self.closed = false;
+        Ok(checked)
+    }
     fn check_checkpoint_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
         if self.closed || self.records.is_none() || request.action != Action::Use {
             return Err(Error::Unauthorized);

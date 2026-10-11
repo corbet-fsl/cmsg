@@ -16,6 +16,9 @@ mod initial_network;
 mod wallet;
 use wallet::*;
 
+#[path = "support/common_record.rs"]
+mod common_record;
+
 fn fixture() -> Value {
     let path = std::env::var("CMSG_FOYER_FIXTURE").expect("original owner fixture required");
     let fixture: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
@@ -405,41 +408,15 @@ async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community(
             })
             .await
             .unwrap();
-        let pending = community_api
-            .begin_member_registration(Some(json!({
-                "challenge":request["challenge"], "proof":proof
-            })))
-            .await
-            .unwrap();
-        let mut community_keys = passkeys(&f["community"]);
-        let (credential, unlock) = community_keys
-            .register_member(pending.options().clone())
-            .await
-            .unwrap()
-            .into_parts();
-        drop(unlock);
-        let registered = community_api
-            .finish_member_registration(pending, credential)
-            .await
-            .unwrap();
-        login(&mut community_api, &mut community_keys).await;
-        registered
-            .continue_after_login(&community_api, now)
-            .await
-            .unwrap()
-            .consume_checked(&community_api, now)
-            .await
-            .unwrap();
-        let member = community_api
-            .live_membership()
-            .observe_lease(now)
-            .await
-            .unwrap();
-        assert_eq!(
-            member.observation().member,
-            data_encoding::HEXLOWER.encode(&original_pseudonym)
-        );
-        assert_ne!(member.observation().member, user);
+        let member = data_encoding::HEXLOWER.encode(&original_pseudonym);
+        assert_ne!(member, user);
+        common_record::exercise(
+            &f["community"],
+            community_api,
+            json!({"challenge":request["challenge"], "proof":proof}),
+            &member,
+        )
+        .await;
         // Accounting is explicitly unconfigured: original membership enrollment
         // and a real holder proof do not imply a native initialized account.
         assert_eq!(

@@ -20,6 +20,7 @@ pub mod network_browser;
 #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
 pub mod network_native;
 pub mod passport;
+pub mod record;
 mod registry;
 #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
 pub mod scenario;

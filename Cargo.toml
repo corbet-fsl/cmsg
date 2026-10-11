@@ -29,6 +29,8 @@ refresh = ["cfyr"]
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+crbk = { git = "https://git.corbet.ch/corbet-foss/crbk", branch = "main", default-features = false }
+cblc = { git = "https://git.corbet.ch/corbet-libs/cblc", branch = "main", features = ["publication"] }
 cwlt = { git = "https://git.corbet.ch/corbet-foss/cwlt", branch = "main", default-features = false, features = ["passport"] }
 ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh", branch = "main", default-features = false }
 cchr = { git = "https://git.corbet.ch/corbet-foss/cchr.git", branch = "v01" }
