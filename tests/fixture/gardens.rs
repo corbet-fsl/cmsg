@@ -200,7 +200,16 @@ async fn proof(
         {
             Ok(value) => value,
             Err(error) => {
-                eprintln!("presentation_challenge on {host} refused: {error:?}");
+                let status = match session {
+                    Some(token) => {
+                        call_status(service, &host, Some(token), "presentation_challenge", json!({})).await
+                    }
+                    None => 0,
+                };
+                eprintln!(
+                    "presentation_challenge on {host} refused: {error:?}; session {}; http {status}",
+                    session.is_some()
+                );
                 panic!("presentation challenge refused");
             }
         },
