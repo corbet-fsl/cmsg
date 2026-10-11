@@ -1065,7 +1065,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#4a7ca6d0519f2b7ae6b41efc9152199c6336230e"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#03e5c7b47f589b46f257f96c577d4237a65d64c7"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1179,7 +1179,7 @@ dependencies = [
 [[package]]
 name = "cgts"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cgts?branch=main#b57d7a9761b54e60463a444ba03e165125ea2df7"
+source = "git+https://git.corbet.ch/corbet-libs/cgts?branch=main#56a5969d8f2dde957c8b8c52661a081252a23151"
 dependencies = [
  "cblc",
  "cgrd",
@@ -1401,7 +1401,7 @@ dependencies = [
 [[package]]
 name = "cmbr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmbr?branch=main#58c75ca4116e6d4207688c3c1813a5bfa2415ebb"
+source = "git+https://git.corbet.ch/corbet-libs/cmbr?branch=main#0ae838c3bc6dd972b95f08e9e336cbed6693cd0f"
 dependencies = [
  "cgrd",
  "cgts",
@@ -1414,6 +1414,7 @@ dependencies = [
  "crbk",
  "crgs",
  "crlt",
+ "cvch",
  "ed25519-dalek 2.2.0",
  "serde",
  "serde_json",
@@ -1485,7 +1486,7 @@ dependencies = [
 [[package]]
 name = "cmty"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#574f81b2c43d76b560fd06cbde6d5a12b6898555"
+source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#96b9983439b787b1cb766803766357e932b71378"
 dependencies = [
  "cgts",
  "chrono",
@@ -1672,7 +1673,7 @@ dependencies = [
 [[package]]
 name = "cplc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cplc?branch=main#8b3a075ac6a35ba37a7d52b42a33e618db80609e"
+source = "git+https://git.corbet.ch/corbet-libs/cplc?branch=main#bc5e86a189be3da9f65985a2d74a5b839746bc21"
 dependencies = [
  "cbcn",
  "cblc",
@@ -1768,7 +1769,7 @@ dependencies = [
 [[package]]
 name = "crbk"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#671d31f14376aa7a64dc15ab754f71f28e394b90"
+source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#b9dba4d1f867bc1a3439f4ede6b4fdb2290cd692"
 dependencies = [
  "crlt",
  "semver 1.0.28",
@@ -2028,7 +2029,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#b00db7b6d42f491cc21def8a1e58e1712540e3d7"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#57d42ff13bf170cfec6d885feccd808197302a25"
 dependencies = [
  "axum",
  "cblc",

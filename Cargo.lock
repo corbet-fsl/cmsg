@@ -1043,6 +1043,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cblc"
+version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#03e5c7b47f589b46f257f96c577d4237a65d64c7"
+dependencies = [
+ "cbcn",
+ "cmbl",
+ "csgn",
+ "czkp",
+ "data-encoding",
+ "ed25519-dalek 2.2.0",
+ "p256 0.13.2",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "cbrd"
 version = "0.1.0"
 source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#fe79c8c219009dc76e504ee98ea598cd19cee092"
@@ -1186,7 +1203,7 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#fd13065464be65856431b8d6cddc3b9ec8e68c96"
+source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#836425b9bc49541f43038ce6dd6113514f4132bc"
 dependencies = [
  "cnvy",
  "cpky",
@@ -1347,7 +1364,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#8dbb39c7b142637b14a142e534c31ca17830f9a3"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#c7ef7553ef15286e11ab050c3760f01ecce76de9"
 dependencies = [
  "arti-client",
  "blake3",
@@ -1460,6 +1477,7 @@ dependencies = [
  "arti-client",
  "axum",
  "browser-coverage-runtime",
+ "cblc",
  "cbrd",
  "cchr",
  "cdht",
@@ -1471,6 +1489,7 @@ dependencies = [
  "cnbx",
  "cpfl",
  "cpky",
+ "crbk",
  "csgn",
  "cshm",
  "ctrn",
@@ -1843,7 +1862,7 @@ dependencies = [
 [[package]]
 name = "crbk"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#671d31f14376aa7a64dc15ab754f71f28e394b90"
+source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#b9dba4d1f867bc1a3439f4ede6b4fdb2290cd692"
 dependencies = [
  "semver",
  "serde",
@@ -2173,7 +2192,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#b00db7b6d42f491cc21def8a1e58e1712540e3d7"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#57d42ff13bf170cfec6d885feccd808197302a25"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -2192,7 +2211,7 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#8ed5a72cc76420f9746295b7086a3561ef297d35"
+source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#550fcfceb8e30de13cc6aa5058d04123aa1c96b6"
 dependencies = [
  "blake3",
  "cchr",
@@ -2213,7 +2232,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#716ea997e6d5b20932f4060f39611bc1cfa444b0"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#1112d172af98d948db8c59f64f0fcb81e9767277"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2228,7 +2247,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#716ea997e6d5b20932f4060f39611bc1cfa444b0"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#1112d172af98d948db8c59f64f0fcb81e9767277"
 dependencies = [
  "chacha20poly1305 0.11.0",
  "czkp",
