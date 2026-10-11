@@ -110,7 +110,7 @@ impl Door {
         let (authority, lifetime) =
             self.transport_authority(origin, binding.clone(), device, custody::SystemClock)?;
         let member = self.member_authority_builder(origin, &authority)?;
-        let foyer = self.current_policy(origin)?;
+        let foyer = self.custody_current_policy(origin)?;
         let session = prepared
             .transport(binding, custody::SystemClock, authority)
             .map_err(|_| ErrorCode::Unavailable)?;

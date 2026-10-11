@@ -8,6 +8,13 @@ use std::cell::RefCell;
 pub struct InitialEnrollment<B: cwst::backend::Backend> {
     candidate: cvlt::UnenrolledInitial<B>,
     device: PublicKey,
+    finish: FinishScope,
+}
+
+#[derive(Clone, Copy)]
+enum FinishScope {
+    Community,
+    Wallet,
 }
 
 /// Original owner refusal; a failed or uncertain step never retries creation.
@@ -34,12 +41,24 @@ impl<B: cwst::backend::Backend> InitialEnrollment<B> {
             .candidate
             .finish_continuation()
             .map_err(EnrollmentError::Vault)?;
-        let finish = cfyr::registration::FinishContinuation::from_bytes(bytes)
-            .map_err(EnrollmentError::Foyer)?;
-        foyer
-            .resume_initial_registration(finish, clock)
-            .await
-            .map_err(EnrollmentError::Foyer)
+        match self.finish {
+            FinishScope::Community => {
+                let finish = cfyr::registration::FinishContinuation::from_bytes(bytes)
+                    .map_err(EnrollmentError::Foyer)?;
+                foyer
+                    .resume_initial_registration(finish, clock)
+                    .await
+                    .map_err(EnrollmentError::Foyer)
+            }
+            FinishScope::Wallet => {
+                let finish = cfyr::registration::GlobalFinishContinuation::from_bytes(bytes)
+                    .map_err(EnrollmentError::Foyer)?;
+                foyer
+                    .resume_global_initial_registration(finish, clock)
+                    .await
+                    .map_err(EnrollmentError::Foyer)
+            }
+        }
     }
 }
 
@@ -67,6 +86,9 @@ pub async fn retain_initial_enrollment<B: cwst::backend::Backend>(
         return Err(EnrollmentError::Vault(cvlt::InitialError::Invalid));
     }
     let scope = pending.community().to_owned();
+    if scope == "wallet" {
+        return Err(EnrollmentError::Vault(cvlt::InitialError::Invalid));
+    }
     let (credential, unlock) = registration.into_parts();
     let id = credential
         .credential_id()
@@ -99,7 +121,74 @@ pub async fn retain_initial_enrollment<B: cwst::backend::Backend>(
         .retain_enrollment(backend, seed, info, &bytes, clock, entropy)
         .await
         .map_err(EnrollmentError::Vault)?;
-    Ok(InitialEnrollment { candidate, device })
+    Ok(InitialEnrollment {
+        candidate,
+        device,
+        finish: FinishScope::Community,
+    })
+}
+
+/// Retain the genuine first Wallet registration tuple under its already frozen
+/// UUID/seed binding before the original server finish can be sent. The same
+/// encrypted candidate CAS holds its original global finish continuation; this
+/// grants neither a session nor certified Create/Use or passport custody.
+#[allow(clippy::too_many_arguments)]
+pub async fn retain_global_initial_enrollment<B: cwst::backend::Backend>(
+    foyer: &cfyr::Foyer<Transport>,
+    pending: cfyr::registration::PendingGlobalInitialRegistration<Transport>,
+    registration: cfyr::passkeys::Registration,
+    seed: ckmg::EnrollmentSeed,
+    backend: B,
+    name: &str,
+    clock: &mut impl Clock,
+    entropy: &mut impl ckmg::Entropy,
+) -> Result<InitialEnrollment<B>, EnrollmentError> {
+    if seed.binding().community() != "wallet"
+        || seed.binding().member() != pending.account()
+        || seed
+            .commitment()
+            .map_err(|e| EnrollmentError::Vault(cvlt::InitialError::Keys(e)))?
+            != pending.seed()
+    {
+        return Err(EnrollmentError::Vault(cvlt::InitialError::Invalid));
+    }
+    let (credential, unlock) = registration.into_parts();
+    let id = credential
+        .credential_id()
+        .map_err(EnrollmentError::Passkey)?;
+    let info = ckmg::DeviceInfo::new(name, &id)
+        .map_err(|e| EnrollmentError::Vault(cvlt::InitialError::Keys(e)))?;
+    let mut failed_clock = false;
+    let finish = pending
+        .prepare_finish(foyer, credential, || match clock.now() {
+            Ok(now) => now,
+            Err(_) => {
+                failed_clock = true;
+                u64::MAX
+            }
+        })
+        .await
+        .map_err(EnrollmentError::Foyer)?;
+    if failed_clock {
+        return Err(EnrollmentError::Vault(cvlt::InitialError::Keys(
+            Error::Clock,
+        )));
+    }
+    let bytes = finish.to_bytes().map_err(EnrollmentError::Foyer)?;
+    let opening = cvlt::PreparedOpen::new(unlock, "wallet")
+        .map_err(|e| EnrollmentError::Vault(cvlt::InitialError::Open(e)))?;
+    let device = opening
+        .device()
+        .map_err(|e| EnrollmentError::Vault(cvlt::InitialError::Open(e)))?;
+    let candidate = opening
+        .retain_enrollment(backend, seed, info, &bytes, clock, entropy)
+        .await
+        .map_err(EnrollmentError::Vault)?;
+    Ok(InitialEnrollment {
+        candidate,
+        device,
+        finish: FinishScope::Wallet,
+    })
 }
 
 /// Reopen the same encrypted candidate using one original Passkeys assertion
@@ -129,18 +218,32 @@ pub async fn reopen_initial_enrollment<B: cwst::backend::Backend>(
         .reopen_enrollment(backend)
         .await
         .map_err(EnrollmentError::Vault)?;
-    let finish = cfyr::registration::FinishContinuation::from_bytes(
-        candidate
-            .finish_continuation()
-            .map_err(EnrollmentError::Vault)?,
-    )
-    .map_err(EnrollmentError::Foyer)?;
-    if finish.original_credential_id() != id
-        || finish.seed() != candidate.commitment().map_err(EnrollmentError::Vault)?
-    {
-        return Err(EnrollmentError::Vault(cvlt::InitialError::Invalid));
-    }
-    Ok(InitialEnrollment { candidate, device })
+    let bytes = candidate
+        .finish_continuation()
+        .map_err(EnrollmentError::Vault)?;
+    let commitment = candidate.commitment().map_err(EnrollmentError::Vault)?;
+    // Select by the exact scope used to authenticate the original encrypted
+    // Store. Never try another codec after one parser refuses.
+    let finish = if scope == "wallet" {
+        let finish = cfyr::registration::GlobalFinishContinuation::from_bytes(bytes)
+            .map_err(EnrollmentError::Foyer)?;
+        if finish.original_credential_id() != id || finish.seed() != commitment {
+            return Err(EnrollmentError::Vault(cvlt::InitialError::Invalid));
+        }
+        FinishScope::Wallet
+    } else {
+        let finish = cfyr::registration::FinishContinuation::from_bytes(bytes)
+            .map_err(EnrollmentError::Foyer)?;
+        if finish.original_credential_id() != id || finish.seed() != commitment {
+            return Err(EnrollmentError::Vault(cvlt::InitialError::Invalid));
+        }
+        FinishScope::Community
+    };
+    Ok(InitialEnrollment {
+        candidate,
+        device,
+        finish,
+    })
 }
 
 pub(super) struct SharedClock<'a, C>(Rc<RefCell<ClockState<'a, C>>>);

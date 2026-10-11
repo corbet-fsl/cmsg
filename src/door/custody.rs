@@ -18,8 +18,8 @@ pub use genesis::{
 };
 mod recovery;
 pub use initial::{
-    activate_initial, reopen_initial_enrollment, retain_initial_enrollment, EnrollmentError,
-    InitialEnrollment,
+    activate_initial, reopen_initial_enrollment, retain_global_initial_enrollment,
+    retain_initial_enrollment, EnrollmentError, InitialEnrollment,
 };
 pub use recovery::{RecoveredVault, RecoveryAuthority, RecoveryOwners, RestoredVault};
 
@@ -379,7 +379,7 @@ impl Door {
             lifetime: transport.lifetime.clone(),
             membership: transport.membership.clone(),
             origin: origin.into(),
-            policy: self.current_policy(origin)?,
+            policy: self.custody_current_policy(origin)?,
             last_time: transport.last_time,
         })
     }
@@ -418,7 +418,7 @@ impl Door {
         };
         let authority = TransportAuthority {
             lifetime: lifetime.clone(),
-            membership: Rc::new(Mutex::new(self.live_membership(origin)?)),
+            membership: Rc::new(Mutex::new(self.custody_membership(origin)?)),
             origin: origin.into(),
             clock,
             last_time: 0,

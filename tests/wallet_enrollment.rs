@@ -1,0 +1,589 @@
+#![cfg(not(target_arch = "wasm32"))]
+//! Current original Wallet owners, encrypted ACK custody and actual blind issuance.
+//! The validating record transport is inert; this is no Tor or account-proof claim.
+use cmsg::door::{
+    custody::{self, SystemClock},
+    foyer::{Scope, Sessions},
+    Configuration, Door, Role,
+};
+use cpky::{
+    software::{SoftwareAuthenticator, TestConfiguration},
+    Context,
+};
+use serde_json::{json, Value};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
+
+#[path = "support/initial_network.rs"]
+mod initial_network;
+
+fn now() -> u64 {
+    ckmg::Clock::now(&mut SystemClock).unwrap()
+}
+fn fixture() -> Value {
+    let path = std::env::var("CMSG_FOYER_FIXTURE").expect("original owner fixture required");
+    let fixture: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let actual = fixture["certified_wallet"].clone();
+    assert_eq!(actual["clock"], "SystemClock");
+    assert_eq!(actual["wallet"]["scope"], "wallet");
+    actual
+}
+fn passkeys(world: &Value) -> cpky::Client<SoftwareAuthenticator> {
+    let origin = world["passkey_origin"].as_str().unwrap();
+    cpky::Client::new(
+        Context::new(origin, world["rp_id"].as_str().unwrap()).unwrap(),
+        SoftwareAuthenticator::new(
+            origin,
+            TestConfiguration {
+                user_verified: true,
+                prf: true,
+                evaluate_at_create: false,
+            },
+        )
+        .unwrap(),
+    )
+}
+async fn foyer(world: &Value, wallet: bool) -> cfyr::Foyer<cfyr::HttpClient> {
+    let roots = [include_bytes!("support/current-tls/ca.der").to_vec()];
+    let origin = world["base"].as_str().unwrap().to_owned();
+    let configuration = cfyr::trust::Configuration {
+        origin: origin.clone(),
+        community: world["scope"].as_str().unwrap().into(),
+        key_ring: serde_json::from_value(world["trust_key_ring"].clone()).unwrap(),
+        minimum_revision: 1,
+        ring_revision: 0,
+    };
+    let following = cfyr::trust::Config {
+        retry_entropy: 27,
+        refresh_seconds: 30,
+        poll_seconds: 1,
+        request_seconds: 30,
+        initial_backoff_seconds: 1,
+        maximum_backoff_seconds: 10,
+        maximum_staleness_seconds: 900,
+    };
+    let mut trust = if wallet {
+        cfyr::trust::Trust::wallet_native(configuration, following, &roots)
+    } else {
+        cfyr::trust::Trust::native(configuration, following, &roots)
+    }
+    .unwrap();
+    trust.start(now).await.unwrap();
+    cfyr::Foyer::with_trust(
+        cfyr::HttpClient::with_roots(origin, "127.0.0.1".into(), None, &roots).unwrap(),
+        trust,
+    )
+}
+async fn login(
+    api: &mut cfyr::Foyer<cfyr::HttpClient>,
+    keys: &mut cpky::Client<SoftwareAuthenticator>,
+) {
+    let challenge = api.begin_browser_login().await.unwrap();
+    let (credential, unlock) = keys.sign_in(challenge.options).await.unwrap().into_parts();
+    drop(unlock);
+    api.finish_browser_login(challenge.ceremony, credential)
+        .await
+        .unwrap();
+}
+async fn initial<'p>(
+    door: &Door,
+    origin: &str,
+    policy: &'p mut cfyr::policy::CurrentPolicy<cfyr::HttpClient>,
+) -> cfyr::membership::InitialCreationLease<'p, cfyr::HttpClient> {
+    door.live_wallet_membership(origin)
+        .unwrap()
+        .observe_lease(now)
+        .await
+        .unwrap()
+        .passkey_certificate(policy, now)
+        .await
+        .unwrap()
+        .initial_creation(now)
+        .await
+        .unwrap()
+}
+fn bound(
+    community: &str,
+    origin: &str,
+    role: Role,
+    scope: Scope,
+    api: cfyr::Foyer<cfyr::HttpClient>,
+) -> Door {
+    let mut door = Door::new(
+        Configuration::new(
+            community.into(),
+            BTreeMap::from([(role, BTreeSet::from([origin.to_owned()]))]),
+        )
+        .unwrap(),
+    );
+    door.bind_foyer(origin, role, Sessions::new(scope, api))
+        .unwrap();
+    door
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community() {
+    tokio::time::timeout(Duration::from_secs(180), async {
+        let f = fixture();
+        let wallet_world = &f["wallet"];
+        let origin = wallet_world["passkey_origin"].as_str().unwrap();
+        let mut api = foyer(wallet_world, true).await;
+        let mut reservation = api
+            .begin_global_initial_registration(wallet_world["base"].as_str().unwrap(), now)
+            .await
+            .unwrap();
+        let user = reservation.account().to_owned();
+        let mut entropy = ckmg::SystemEntropy;
+        let mut clock = SystemClock;
+        let seed =
+            ckmg::EnrollmentSeed::new(ckmg::Binding::new("wallet", &user).unwrap(), &mut entropy)
+                .unwrap();
+        let commitment = seed.commitment().unwrap();
+        let pending = reservation
+            .continue_initial(&api, commitment, now)
+            .await
+            .unwrap();
+        let mut keys = passkeys(wallet_world);
+        let registration = keys
+            .register_member(pending.options().clone())
+            .await
+            .unwrap();
+        let backend = cwst::backend::Memory::new();
+        let candidate = custody::retain_global_initial_enrollment(
+            &api,
+            pending,
+            registration,
+            seed,
+            backend.clone(),
+            "original-wallet",
+            &mut clock,
+            &mut entropy,
+        )
+        .await
+        .unwrap();
+        assert!(cwst::backend::Backend::read(&backend)
+            .await
+            .unwrap()
+            .is_some());
+        let device = candidate.device();
+        // Before finish, only encrypted data exists. A genuine local PRF assertion
+        // reopens the SAME opaque finish request, never an authenticated session.
+        drop(candidate);
+        let challenge = api.begin_browser_login().await.unwrap();
+        let authentication = keys.sign_in(challenge.options).await.unwrap();
+        let candidate =
+            custody::reopen_initial_enrollment(authentication, "wallet", backend.clone())
+                .await
+                .unwrap();
+        assert_eq!(candidate.device(), device);
+        candidate.resume_finish(&mut api, now).await.unwrap();
+        login(&mut api, &mut keys).await;
+        api.call("wallet_device_authorize", json!({"key":device.value()}))
+            .await
+            .unwrap();
+        api.call("development_gate", json!({})).await.unwrap();
+        let door = bound("wallet", origin, Role::Member, Scope::Global, api);
+        let mut policy = door.wallet_current_policy(origin).unwrap();
+        let lease = initial(&door, origin, &mut policy).await;
+        assert_eq!(lease.observation().unwrap().member, user);
+        assert_eq!(lease.seed().unwrap(), commitment);
+        let creation = custody::activate_initial(candidate, lease, &mut clock, &mut entropy)
+            .await
+            .unwrap();
+        let lease = initial(&door, origin, &mut policy).await;
+        let (creation, lease) = custody::prepare_initial_publication(
+            creation,
+            lease,
+            &mut keys,
+            &mut clock,
+            &mut entropy,
+        )
+        .await
+        .unwrap();
+        let publication = creation.publication_commitment().unwrap();
+        let creation = custody::retain_initial_publication(creation, lease, &mut clock)
+            .await
+            .unwrap();
+        let network = initial_network::Nodes::new();
+        let publication_owner = creation
+            .stage(cdht::NetworkBackend::new(
+                network.clone(),
+                initial_network::Verifier,
+            ))
+            .await
+            .unwrap();
+        let (creation, report) = publication_owner.flush().await.unwrap();
+        assert_eq!(report.written, 1);
+        let read = creation
+            .read_first_lineage(network.clone(), &mut clock)
+            .await
+            .unwrap();
+        let lease = initial(&door, origin, &mut policy).await;
+        let creation = custody::acknowledge_initial_publication(
+            read,
+            lease,
+            network.clone(),
+            &mut clock,
+            &mut entropy,
+        )
+        .await
+        .unwrap();
+        assert_eq!(creation.phase().unwrap(), cvlt::InitialPhase::Acknowledged);
+        let lease = initial(&door, origin, &mut policy).await;
+        assert_eq!(lease.publication().unwrap(), Some(publication));
+        let retired = custody::complete_initial_recovery(
+            creation,
+            lease,
+            network.clone(),
+            &mut clock,
+            &mut entropy,
+        )
+        .await
+        .unwrap();
+        drop(retired);
+
+        // An actual new PRF assertion and original network checkpoint authenticate
+        // the cold ACK. The holder restores only after fresh certified normal Use.
+        let mut companion = foyer(wallet_world, true).await;
+        let challenge = companion.begin_browser_login().await.unwrap();
+        let authentication = keys.sign_in(challenge.options).await.unwrap();
+        let (credential, outcome) = authentication.into_parts();
+        let cpky::VaultOutcome::Ready(unlock) = outcome else {
+            panic!("original same-key PRF required");
+        };
+        let opening = cvlt::PreparedOpen::new(unlock, "wallet").unwrap();
+        companion
+            .finish_browser_login(challenge.ceremony, credential)
+            .await
+            .unwrap();
+        let locator = opening.locator();
+        let mut records = opening.tor_records(network.clone()).await.unwrap();
+        let checkpoint = records.checkpoint(&locator).await.unwrap();
+        drop(records);
+        let recovered = opening.prepare_initial_recovery(&checkpoint).unwrap();
+        let lease = initial(&door, origin, &mut policy).await;
+        let owners = custody::prepare_initial_recovery(&recovered, lease, network.clone())
+            .await
+            .unwrap();
+        let mut vault = owners
+            .open_root(network.clone(), backend.clone())
+            .await
+            .unwrap()
+            .restore_global_passport()
+            .await
+            .unwrap();
+        let community = cwlt::passport::CommunityId::new(b"omega").unwrap();
+        let original_pseudonym = vault
+            .with_global_passport(|holder| {
+                assert!(holder.attributes().is_none());
+                holder.pseudonym(&community).to_bytes()
+            })
+            .await
+            .unwrap();
+        // The held Wallet session excludes another lease before mutex acquisition.
+        assert!(tokio::time::timeout(
+            Duration::from_secs(1),
+            door.live_wallet_membership(origin)
+                .unwrap()
+                .observe_lease(now)
+        )
+        .await
+        .unwrap()
+        .is_err());
+        let mut lost = companion
+            .live_global_wallet(wallet_world["base"].as_str().unwrap().into())
+            .observe_lease(now)
+            .await
+            .unwrap()
+            .passport_challenge(now)
+            .await
+            .unwrap();
+        let (issuer, challenge) = lost
+            .with_current(now, |_, _, public, challenge, _| {
+                (
+                    cwlt::passport::IssuerPublicKey::from_bytes(public).unwrap(),
+                    cwlt::passport::IssuanceChallenge::from_bytes(challenge.try_into().unwrap()),
+                )
+            })
+            .unwrap();
+        let mut begin = [0; 32];
+        getrandom::fill(&mut begin).unwrap();
+        let request = vault
+            .begin_global_passport_issuance(
+                begin,
+                &mut cwlt::passport::rand::rngs::OsRng,
+                &issuer,
+                &challenge,
+            )
+            .await
+            .unwrap();
+        // The actual issuer commits its answer, but the client loses that answer
+        // before its original durable finish. No helper retries or cancels it.
+        drop(lost.issue(request.to_bytes(), now).await.unwrap());
+        drop(lost);
+        drop(vault);
+        let authentication_challenge = companion.begin_browser_login().await.unwrap();
+        let (credential, outcome) = keys
+            .sign_in(authentication_challenge.options)
+            .await
+            .unwrap()
+            .into_parts();
+        let cpky::VaultOutcome::Ready(unlock) = outcome else {
+            panic!("original same-key PRF required");
+        };
+        companion
+            .finish_browser_login(authentication_challenge.ceremony, credential)
+            .await
+            .unwrap();
+        let opening = cvlt::PreparedOpen::new(unlock, "wallet").unwrap();
+        let mut records = opening.tor_records(network.clone()).await.unwrap();
+        let checkpoint = records.checkpoint(&opening.locator()).await.unwrap();
+        drop(records);
+        let reopened = opening.prepare_initial_recovery(&checkpoint).unwrap();
+        let lease = initial(&door, origin, &mut policy).await;
+        let owners = custody::prepare_initial_recovery(&reopened, lease, network.clone())
+            .await
+            .unwrap();
+        let mut vault = owners
+            .open_root(network.clone(), backend.clone())
+            .await
+            .unwrap()
+            .restore_global_passport()
+            .await
+            .unwrap();
+        assert_eq!(
+            vault
+                .with_global_passport(|holder| {
+                    assert!(holder.attributes().is_none());
+                    holder.pseudonym(&community).to_bytes()
+                })
+                .await
+                .unwrap(),
+            original_pseudonym
+        );
+        let mut cancel = [0; 32];
+        getrandom::fill(&mut cancel).unwrap();
+        assert_ne!(begin, cancel);
+        vault
+            .cancel_global_passport_issuance(cancel, &mut cwlt::passport::rand::rngs::OsRng)
+            .await
+            .unwrap();
+        assert_eq!(
+            vault
+                .with_global_passport(|holder| holder.pseudonym(&community).to_bytes())
+                .await
+                .unwrap(),
+            original_pseudonym
+        );
+        let issuance = companion
+            .live_global_wallet(wallet_world["base"].as_str().unwrap().into())
+            .observe_lease(now)
+            .await
+            .unwrap()
+            .passport_challenge(now)
+            .await
+            .unwrap();
+        cmsg::door::passport::issue_global_passport(
+            issuance,
+            &mut vault,
+            &mut cwlt::passport::rand::rngs::OsRng,
+        )
+        .await
+        .unwrap();
+        let actual_pseudonym = vault
+            .with_global_passport(|holder| {
+                assert!(holder.attributes().is_some());
+                holder.pseudonym(&community).to_bytes()
+            })
+            .await
+            .unwrap();
+        assert_eq!(actual_pseudonym, original_pseudonym);
+        drop(vault);
+        let authentication_challenge = companion.begin_browser_login().await.unwrap();
+        let (credential, outcome) = keys
+            .sign_in(authentication_challenge.options)
+            .await
+            .unwrap()
+            .into_parts();
+        let cpky::VaultOutcome::Ready(unlock) = outcome else {
+            panic!("original same-key PRF required");
+        };
+        companion
+            .finish_browser_login(authentication_challenge.ceremony, credential)
+            .await
+            .unwrap();
+        let opening = cvlt::PreparedOpen::new(unlock, "wallet").unwrap();
+        let mut records = opening.tor_records(network.clone()).await.unwrap();
+        let checkpoint = records.checkpoint(&opening.locator()).await.unwrap();
+        drop(records);
+        let finished = opening.prepare_initial_recovery(&checkpoint).unwrap();
+        let lease = initial(&door, origin, &mut policy).await;
+        let owners = custody::prepare_initial_recovery(&finished, lease, network.clone())
+            .await
+            .unwrap();
+        let mut vault = owners
+            .open_root(network, backend)
+            .await
+            .unwrap()
+            .restore_global_passport()
+            .await
+            .unwrap();
+        assert_eq!(
+            vault
+                .with_global_passport(|holder| {
+                    assert!(holder.attributes().is_some());
+                    holder.pseudonym(&community).to_bytes()
+                })
+                .await
+                .unwrap(),
+            original_pseudonym
+        );
+
+        let mut community_api = foyer(&f["community"], false).await;
+        let request = community_api
+            .call("presentation_challenge", json!({}))
+            .await
+            .unwrap();
+        let signed: Vec<u8> = serde_json::from_value(request["request"].clone()).unwrap();
+        let mut community_policy = community_api.current_policy();
+        let expected = community_policy
+            .with_current(now(), |current| {
+                assert_eq!(current.community(), "omega");
+                cwlt::passport::AuthenticatedCommunity::from_authenticated_origin(
+                    community.clone(),
+                    current.key_ring().clone(),
+                )
+            })
+            .unwrap();
+        let proof = vault
+            .with_global_passport(|holder| {
+                holder
+                    .present(
+                        &mut cwlt::passport::rand::rngs::OsRng,
+                        &expected,
+                        &signed,
+                        now(),
+                    )
+                    .unwrap()
+                    .to_bytes()
+            })
+            .await
+            .unwrap();
+        let pending = community_api
+            .begin_member_registration(Some(json!({
+                "challenge":request["challenge"], "proof":proof
+            })))
+            .await
+            .unwrap();
+        let mut community_keys = passkeys(&f["community"]);
+        let (credential, unlock) = community_keys
+            .register_member(pending.options().clone())
+            .await
+            .unwrap()
+            .into_parts();
+        drop(unlock);
+        let registered = community_api
+            .finish_member_registration(pending, credential)
+            .await
+            .unwrap();
+        login(&mut community_api, &mut community_keys).await;
+        registered
+            .continue_after_login(&community_api, now)
+            .await
+            .unwrap()
+            .consume_checked(&community_api, now)
+            .await
+            .unwrap();
+        let member = community_api
+            .live_membership()
+            .observe_lease(now)
+            .await
+            .unwrap();
+        assert_eq!(
+            member.observation().member,
+            data_encoding::HEXLOWER.encode(&original_pseudonym)
+        );
+        assert_ne!(member.observation().member, user);
+        // Accounting is explicitly unconfigured: original membership enrollment
+        // and a real holder proof do not imply a native initialized account.
+        assert_eq!(
+            f["accounting"],
+            "unconfigured; no accepted account or proof claim"
+        );
+    })
+    .await
+    .expect("bounded original Wallet lifecycle");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn wallet_factory_refuses_community_scope_or_operator_bindings() {
+    let f = fixture();
+    let origin = f["wallet"]["passkey_origin"].as_str().unwrap();
+    for (community, role, scope) in [
+        ("omega", Role::Member, Scope::Global),
+        ("wallet", Role::Member, Scope::Community),
+        ("wallet", Role::Admin, Scope::Global),
+    ] {
+        let door = bound(
+            community,
+            origin,
+            role,
+            scope,
+            foyer(&f["wallet"], true).await,
+        );
+        assert!(door.live_wallet_membership(origin).is_err());
+        assert!(door.wallet_current_policy(origin).is_err());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn another_real_reserved_uuid_cannot_label_the_original_registration_tuple() {
+    let f = fixture();
+    let world = &f["wallet"];
+    let trusted = world["base"].as_str().unwrap();
+    let mut original = foyer(world, true).await;
+    let mut foreign = foyer(world, true).await;
+    let mut first = original
+        .begin_global_initial_registration(trusted, now)
+        .await
+        .unwrap();
+    let second = foreign
+        .begin_global_initial_registration(trusted, now)
+        .await
+        .unwrap();
+    assert_ne!(first.account(), second.account());
+    let mut entropy = ckmg::SystemEntropy;
+    let seed = ckmg::EnrollmentSeed::new(
+        ckmg::Binding::new("wallet", second.account()).unwrap(),
+        &mut entropy,
+    )
+    .unwrap();
+    let pending = first
+        .continue_initial(&original, seed.commitment().unwrap(), now)
+        .await
+        .unwrap();
+    let mut keys = passkeys(world);
+    let registration = keys
+        .register_member(pending.options().clone())
+        .await
+        .unwrap();
+    let backend = cwst::backend::Memory::new();
+    assert!(custody::retain_global_initial_enrollment(
+        &original,
+        pending,
+        registration,
+        seed,
+        backend.clone(),
+        "wrong-uuid",
+        &mut SystemClock,
+        &mut entropy
+    )
+    .await
+    .is_err());
+    assert!(cwst::backend::Backend::read(&backend)
+        .await
+        .unwrap()
+        .is_none());
+}

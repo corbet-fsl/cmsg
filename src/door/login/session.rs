@@ -258,7 +258,8 @@ impl Door {
             return Err(ErrorCode::Unauthorized);
         }
         let owner = self.foyers.get(origin).ok_or(ErrorCode::Unavailable)?;
-        if owner.role != Role::Member || owner.sessions.primary != foyer::Scope::Community {
+        let expected_scope = self.custody_scope();
+        if owner.role != Role::Member || owner.sessions.primary != expected_scope {
             return Err(ErrorCode::Unauthorized);
         }
         if owner.uncertain {
@@ -274,7 +275,7 @@ impl Door {
         else {
             return Err(ErrorCode::Refused);
         };
-        if *scope != foyer::Scope::Community || now >= session.expires {
+        if *scope != expected_scope || now >= session.expires {
             // An expired or mismatched login can never keep a usable secret.
             *state = State::Refused(ErrorCode::Unauthorized);
             return Err(ErrorCode::Unauthorized);
@@ -309,7 +310,8 @@ impl Door {
             return Err(ErrorCode::Unauthorized);
         }
         let owner = self.foyers.get(origin).ok_or(ErrorCode::Unavailable)?;
-        if owner.role != Role::Member || owner.sessions.primary != foyer::Scope::Community {
+        let expected_scope = self.custody_scope();
+        if owner.role != Role::Member || owner.sessions.primary != expected_scope {
             return Err(ErrorCode::Unauthorized);
         }
         if owner.uncertain {
@@ -324,7 +326,7 @@ impl Door {
         else {
             return Err(ErrorCode::Refused);
         };
-        if *scope != foyer::Scope::Community || now >= session.expires {
+        if *scope != expected_scope || now >= session.expires {
             return Err(ErrorCode::Unauthorized);
         }
         binding
@@ -351,7 +353,7 @@ impl Door {
     ) -> Result<Status> {
         use ckmg::Clock as _;
         self.recovery_session(origin, token, now)?;
-        let mut membership = self.live_membership(origin)?;
+        let mut membership = self.custody_membership(origin)?;
         let mut clock = super::super::custody::SystemClock;
         let mut floor = now;
         let mut clock_failed = false;

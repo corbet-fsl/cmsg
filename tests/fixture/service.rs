@@ -3,6 +3,7 @@ mod gardens;
 mod https;
 #[path = "owner/mod.rs"]
 mod owner;
+mod wallet;
 use owner::*;
 use serde_json::json;
 use std::sync::{
@@ -199,6 +200,19 @@ async fn main() {
         Some(_) => panic!("expected --https CERTIFICATE_CHAIN_PEM PRIVATE_KEY_PEM"),
     };
     assert!(args.next().is_none(), "unexpected fixture argument");
+    let certified_wallet = if let Some((chain, key)) = &tls_paths {
+        Some(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                wallet::Fixture::start(chain.as_ref(), key.as_ref()),
+            )
+            .await
+            .expect("current Wallet startup deadline")
+            .expect("original current Wallet fixture"),
+        )
+    } else {
+        None
+    };
     let wallet = global(1000).await;
     let (mut global_member, passport, public) = wallet_passport(&wallet).await;
     let service = community_with_burst("alpha", &public, 1000).await;
@@ -384,6 +398,9 @@ async fn main() {
         "global_root": {"base": wallet.base, "host": ROOT, "session": global_root.session},
         "faults": faults.iter().map(|fault| json!({"base":proxy_base,"host":WALLET,"session":fault.session})).collect::<Vec<_>>(),
     });
+    if let Some(wallet) = &certified_wallet {
+        data["certified_wallet"] = wallet.data.clone();
+    }
     // Retain the exact owner's HTTP lifecycle behind the optional TLS listener.
     // Existing component URLs and their private fixture data remain explicit HTTP.
     let https = if let Some((cert, key)) = tls_paths {
@@ -420,6 +437,12 @@ async fn main() {
     tokio::signal::ctrl_c().await.unwrap();
     if let Some(https) = https {
         https.shutdown().await.expect("drain HTTPS fixture");
+    }
+    if let Some(wallet) = certified_wallet {
+        wallet
+            .shutdown()
+            .await
+            .expect("drain current Wallet fixture");
     }
     proxy_task.abort();
     login_fault_task.abort();

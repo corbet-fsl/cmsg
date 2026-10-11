@@ -187,6 +187,19 @@ impl Configuration {
             return Err(ErrorCode::Unauthorized);
         }
         let community = self.community.clone();
+        let wallet = community == "wallet";
+        if wallet
+            && (self.role != Role::Member
+                || self.root_board
+                || self.primary != foyer::Scope::Global)
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let trust_scope = if wallet {
+            foyer::Scope::Global
+        } else {
+            foyer::Scope::Community
+        };
         let configuration = if self.root_board {
             if self.community != "root"
                 || self.role != Role::Root
@@ -218,7 +231,7 @@ impl Configuration {
             #[cfg(target_arch = "wasm32")]
             let transport = foyer::Transport::new(service.base, service.host, None)
                 .map_err(|_| ErrorCode::InvalidRequest)?;
-            let trust = if service.scope == foyer::Scope::Community {
+            let trust = if service.scope == trust_scope {
                 self.trust.take()
             } else {
                 None
@@ -234,9 +247,17 @@ impl Configuration {
                 getrandom::fill(&mut entropy).map_err(|_| ErrorCode::Unavailable)?;
                 trust.following.retry_entropy = u64::from_le_bytes(entropy);
                 #[cfg(not(target_arch = "wasm32"))]
-                let trust = cfyr::trust::Trust::native(trust.publishing, trust.following, roots);
+                let trust = if wallet {
+                    cfyr::trust::Trust::wallet_native(trust.publishing, trust.following, roots)
+                } else {
+                    cfyr::trust::Trust::native(trust.publishing, trust.following, roots)
+                };
                 #[cfg(target_arch = "wasm32")]
-                let trust = cfyr::trust::Trust::browser(trust.publishing, trust.following);
+                let trust = if wallet {
+                    cfyr::trust::Trust::wallet_browser(trust.publishing, trust.following)
+                } else {
+                    cfyr::trust::Trust::browser(trust.publishing, trust.following)
+                };
                 foyer::Foyer::with_trust(transport, trust.map_err(|_| ErrorCode::InvalidRequest)?)
             } else {
                 foyer::Foyer::new(transport)

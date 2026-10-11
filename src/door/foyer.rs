@@ -229,6 +229,68 @@ impl Binding {
 }
 
 impl Door {
+    fn wallet_foyer(&self, origin: &str) -> Result<&Foyer<Transport>> {
+        self.member_origin(origin)?;
+        let binding = self.foyers.get(origin).ok_or(ErrorCode::Unavailable)?;
+        if self.config.community != "wallet"
+            || binding.role != Role::Member
+            || binding.uncertain
+            || binding.sessions.primary != Scope::Global
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        binding
+            .sessions
+            .clients
+            .get(&Scope::Global)
+            .ok_or(ErrorCode::Unavailable)
+    }
+
+    /// Lend only the explicitly configured literal Wallet's genuine global
+    /// Foyer observation port. UUID/current-key/device reads remain original
+    /// owner calls; this is not certified lineage or creation permission.
+    pub fn live_wallet_membership(
+        &self,
+        origin: &str,
+    ) -> Result<cfyr::membership::LiveMembership<Transport>> {
+        Ok(self.wallet_foyer(origin)?.live_wallet_membership())
+    }
+
+    /// Reborrow only the original Wallet Charter beside that same global Foyer.
+    /// A global passport feed or caller-supplied policy cannot construct it.
+    pub fn wallet_current_policy(
+        &self,
+        origin: &str,
+    ) -> Result<cfyr::policy::CurrentPolicy<Transport>> {
+        Ok(self.wallet_foyer(origin)?.current_policy())
+    }
+
+    pub(super) fn custody_scope(&self) -> Scope {
+        if self.config.community == "wallet" {
+            Scope::Global
+        } else {
+            Scope::Community
+        }
+    }
+    pub(super) fn custody_membership(
+        &self,
+        origin: &str,
+    ) -> Result<cfyr::membership::LiveMembership<Transport>> {
+        match self.custody_scope() {
+            Scope::Global => self.live_wallet_membership(origin),
+            Scope::Community => self.live_membership(origin),
+        }
+    }
+    pub(super) fn custody_current_policy(
+        &self,
+        origin: &str,
+    ) -> Result<cfyr::policy::CurrentPolicy<Transport>> {
+        match self.custody_scope() {
+            Scope::Global => self.wallet_current_policy(origin),
+            Scope::Community => self.current_policy(origin),
+        }
+    }
+
     /// Lend only the configured community Foyer's weak live-membership read
     /// port to the trusted custody composer. This is not a public action or a
     /// session, G3, signing or runtime-readiness grant.
