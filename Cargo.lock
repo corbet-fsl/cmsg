@@ -1332,7 +1332,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cfrm"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=v01#dc0a66f7ee7869102259cd2637e9491ee28b43f9"
+source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=v01#3f4dc97caac3667157694fab67e45805852de38e"
 dependencies = [
  "crbk",
  "gloo-timers 0.3.0",
@@ -1366,7 +1366,7 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#aef5b2ffb00afe7d651fd300bbe3bc51081764d8"
+source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#e1ada052881a3a4de323dcceeca32a3804357ce9"
 dependencies = [
  "cnvy",
  "cpky",
@@ -1527,7 +1527,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#ff8f924a41b174cb3ea97a552d43d6eee5313256"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#1a7ca7ca4e304ff9f7f3165073e37c8e447c7800"
 dependencies = [
  "arti-client",
  "blake3",
@@ -1561,11 +1561,11 @@ dependencies = [
 [[package]]
 name = "ckyh"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckyh?branch=main#e68d4a10989b2f3e5196297aba29ceafa6094810"
+source = "git+https://git.corbet.ch/corbet-foss/ckyh?branch=main#39a0c854e45c6b4055e6df5103013a024e248a70"
 dependencies = [
  "ciborium",
  "csgn",
- "p256",
+ "p256 0.13.2",
  "passkey-types",
  "pkcs1 0.7.5",
  "ring",
@@ -1612,7 +1612,7 @@ dependencies = [
 [[package]]
 name = "cmbl"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#0631ff176c8092c0b7452cfc7d5daeeaee67aa40"
+source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#6b099d520f377c98fa07d8f5afe7c4fadba6b28c"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
@@ -2006,7 +2006,7 @@ source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=v01#f95c9aee5108
 [[package]]
 name = "cpsd"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpsd?branch=main#260f7541f0bfcd4970214ade9516bb28d3d53873"
+source = "git+https://git.corbet.ch/corbet-foss/cpsd?branch=main#ad78fe44a5e023f50e421305cd164107ad0cda53"
 dependencies = [
  "ark-bls12-381",
  "ark-ec 0.4.2",
@@ -2232,9 +2232,12 @@ checksum = "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271"
 dependencies = [
  "cpubits",
  "ctutils",
+ "getrandom 0.4.3",
+ "hybrid-array",
  "num-traits",
  "rand_core 0.10.1",
  "serdect 0.4.3",
+ "subtle",
  "zeroize",
 ]
 
@@ -2433,6 +2436,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03bb0e1cc970d482d121d9a1744999169b69a07470b3d644a7894e53fcaf4574"
 dependencies = [
  "cmov",
+ "subtle",
 ]
 
 [[package]]
@@ -2481,7 +2485,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#82d8c05d16bff0ac42a4173801a6ac5233a87dc8"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#3156ac8f80a220e4e9c24f97108d6e729ea05153"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -2500,7 +2504,7 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#80c91585a09bf84b660a9e0da3ca6b68b63af205"
+source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#8bc014908d5b1169b9f6a0faed1bd6217d37f939"
 dependencies = [
  "blake3",
  "cchr",
@@ -2521,7 +2525,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#bc5bad616678aae7952061308f6807393b30949c"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#8e09674ba8eae49caa73fd11bfe22ef1e34efcfe"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2536,13 +2540,14 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#bc5bad616678aae7952061308f6807393b30949c"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#8e09674ba8eae49caa73fd11bfe22ef1e34efcfe"
 dependencies = [
  "chacha20poly1305 0.11.0",
  "czkp",
  "ed25519-dalek 3.0.0",
  "getrandom 0.4.3",
  "hpke",
+ "p256 0.14.0",
  "rs_merkle",
  "serde",
  "serde_json",
@@ -3090,10 +3095,25 @@ checksum = "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca"
 dependencies = [
  "der 0.7.10",
  "digest 0.10.7",
- "elliptic-curve",
- "rfc6979",
+ "elliptic-curve 0.13.8",
+ "rfc6979 0.4.0",
  "signature 2.2.0",
  "spki 0.7.3",
+]
+
+[[package]]
+name = "ecdsa"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0681a4fc24c767085329728d8dfba959af91228aa4610cca4f8ce317ba46ae0"
+dependencies = [
+ "der 0.8.2",
+ "digest 0.11.3",
+ "elliptic-curve 0.14.1",
+ "rfc6979 0.6.0",
+ "signature 3.0.0",
+ "spki 0.8.1",
+ "zeroize",
 ]
 
 [[package]]
@@ -3185,16 +3205,36 @@ dependencies = [
  "base64ct",
  "crypto-bigint 0.5.5",
  "digest 0.10.7",
- "ff",
+ "ff 0.13.1",
  "generic-array",
- "group",
+ "group 0.13.0",
  "hkdf 0.12.4",
  "pem-rfc7468 0.7.0",
  "pkcs8 0.10.2",
  "rand_core 0.6.4",
- "sec1",
+ "sec1 0.7.3",
  "serde_json",
  "serdect 0.2.0",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "elliptic-curve"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d65aa39b3a5c1c9c1b745c9a019234bb7a21b77abcb4f4d266d706e2d577d65"
+dependencies = [
+ "base16ct 1.0.0",
+ "crypto-bigint 0.7.5",
+ "crypto-common 0.2.2",
+ "digest 0.11.3",
+ "ff 0.14.0",
+ "group 0.14.0",
+ "hybrid-array",
+ "pkcs8 0.11.0",
+ "rand_core 0.10.1",
+ "sec1 0.8.1",
  "subtle",
  "zeroize",
 ]
@@ -3388,6 +3428,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393"
 dependencies = [
  "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
+name = "ff"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1f686ab92a9fb0eaf188f6c6c87b89490baa6fdb0db4544ba4dc47f7942489f"
+dependencies = [
+ "rand_core 0.10.1",
  "subtle",
 ]
 
@@ -3864,8 +3914,19 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
 dependencies = [
- "ff",
+ "ff 0.13.1",
  "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
+name = "group"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fd1a1c7a5206c5b7a3f5a0d7ccd3ff85d0c8f5133d62a02680255b0004af5f4"
+dependencies = [
+ "ff 0.14.0",
+ "rand_core 0.10.1",
  "subtle",
 ]
 
@@ -4146,7 +4207,7 @@ dependencies = [
  "hpke-rs-crypto",
  "k256",
  "ml-kem",
- "p256",
+ "p256 0.13.2",
  "p384",
  "rand 0.10.3",
  "rand_chacha 0.10.0",
@@ -4226,6 +4287,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27f864f10dfb56725ce5ce5472bc52252c8f93a4ab86327122cebf62c5f59a17"
 dependencies = [
  "ctutils",
+ "subtle",
  "typenum",
  "zeroize",
 ]
@@ -4796,7 +4858,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6e3919bbaa2945715f0bb6d3934a173d1e9a59ac23767fbaaef277265a7411b"
 dependencies = [
  "cfg-if",
- "elliptic-curve",
+ "elliptic-curve 0.13.8",
 ]
 
 [[package]]
@@ -5882,7 +5944,7 @@ dependencies = [
  "ml-dsa",
  "openmls_memory_storage",
  "openmls_traits",
- "p256",
+ "p256 0.13.2",
  "p384",
  "rand_chacha 0.3.1",
  "rand_core 0.10.1",
@@ -5950,10 +6012,23 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
 dependencies = [
- "ecdsa",
- "elliptic-curve",
- "primeorder",
+ "ecdsa 0.16.9",
+ "elliptic-curve 0.13.8",
+ "primeorder 0.13.6",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "p256"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2c9239b2dbc807adbbe147e8cf72ea7450c3a0aabe62cb8e75ff4ec22e1f72a"
+dependencies = [
+ "ecdsa 0.17.0",
+ "elliptic-curve 0.14.1",
+ "primefield",
+ "primeorder 0.14.0",
+ "sha2 0.11.0",
 ]
 
 [[package]]
@@ -5962,9 +6037,9 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe42f1670a52a47d448f14b6a5c61dd78fce51856e68edaa38f7ae3a46b8d6b6"
 dependencies = [
- "ecdsa",
- "elliptic-curve",
- "primeorder",
+ "ecdsa 0.16.9",
+ "elliptic-curve 0.13.8",
+ "primeorder 0.13.6",
  "sha2 0.10.9",
 ]
 
@@ -5975,9 +6050,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fc9e2161f1f215afdfce23677034ae137bbd45016a880c2eb3ba8eb95f085b2"
 dependencies = [
  "base16ct 0.2.0",
- "ecdsa",
- "elliptic-curve",
- "primeorder",
+ "ecdsa 0.16.9",
+ "elliptic-curve 0.13.8",
+ "primeorder 0.13.6",
  "rand_core 0.6.4",
  "sha2 0.10.9",
 ]
@@ -6032,7 +6107,7 @@ dependencies = [
  "async-trait",
  "coset 0.3.8",
  "log",
- "p256",
+ "p256 0.13.2",
  "passkey-types",
  "rand 0.8.8",
 ]
@@ -6394,12 +6469,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "primefield"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c555a6e4eb7d4e158fcb028c835c3b8642206ddc279b5c6b202ef9a8bdb592f4"
+dependencies = [
+ "crypto-bigint 0.7.5",
+ "crypto-common 0.2.2",
+ "ff 0.14.0",
+ "rand_core 0.10.1",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "primeorder"
 version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
 dependencies = [
- "elliptic-curve",
+ "elliptic-curve 0.13.8",
+]
+
+[[package]]
+name = "primeorder"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c9f42978c78a00e3d68f69fc03e57a234debae69da4020a4fb588fcdcd07b06"
+dependencies = [
+ "elliptic-curve 0.14.1",
+ "once_cell",
+ "primefield",
+ "serdect 0.4.3",
+ "wnaf",
 ]
 
 [[package]]
@@ -7025,6 +7127,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rfc6979"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4a459cddafb3fe76b31fd8f1108007566c40301feb64dc7b54656eb7388172b"
+dependencies = [
+ "crypto-bigint 0.7.5",
+ "hmac 0.13.0",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7426,6 +7538,20 @@ dependencies = [
  "generic-array",
  "pkcs8 0.10.2",
  "serdect 0.2.0",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "sec1"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d56d437c2f19203ce5f7122e507831de96f3d2d4d3be5af44a0b0a09d8a80e4d"
+dependencies = [
+ "base16ct 1.0.0",
+ "ctutils",
+ "der 0.8.2",
+ "hybrid-array",
  "subtle",
  "zeroize",
 ]
@@ -8030,12 +8156,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "433782176b73ea7907763dc314c4a17438a231864d4aa683ba47c07c1cf0a388"
 dependencies = [
  "num-bigint-dig",
- "p256",
+ "p256 0.13.2",
  "p384",
  "p521",
  "rand_core 0.6.4",
  "rsa 0.9.10",
- "sec1",
+ "sec1 0.7.3",
  "sha2 0.10.9",
  "signature 2.2.0",
  "ssh-cipher-fork-arti",
@@ -10815,6 +10941,18 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "wnaf"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "795ca18b3fdb5e62bf982199278341ddcf7ebf7d32e25e212ad05d496e95f6fa"
+dependencies = [
+ "ff 0.14.0",
+ "group 0.14.0",
+ "hybrid-array",
+ "primefield",
+]
 
 [[package]]
 name = "writeable"
