@@ -5,8 +5,8 @@ mod owner;
 use owner::*;
 use serde_json::json;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 struct Fault {
@@ -187,6 +187,21 @@ async fn main() {
             .unwrap();
         custody_registrations.insert(target.into(), registration);
     }
+    // Actual holder proof for each independent initial-custody journey. The
+    // client chooses its private seed before submitting the original proof.
+    let mut initial_enrollments = serde_json::Map::new();
+    for target in ["durable", "before-finish", "wrong-key"] {
+        let (_, passport, _) = wallet_passport(&wallet).await;
+        let member = passport
+            .pseudonym(&cpsd::CommunityId::new("alpha").unwrap())
+            .to_hex();
+        let proof = presentation(&service, member_host, None, &passport).await;
+        initial_enrollments.insert(target.into(), json!({"member":member,"passport":proof}));
+    }
+    let trust_feed = client(&service, member_host, None)
+        .call("trust_feed", json!({}))
+        .await
+        .unwrap();
     let admin_host = "api.admin.alpha.example.test";
     let mut member = enrol_community(&service, member_host, &passport).await;
     let vault_session = login(
@@ -326,6 +341,8 @@ async fn main() {
         "now": NOW + 1,
         "browser_registration": browser_registration,
         "custody_registrations": custody_registrations,
+        "initial_enrollments": initial_enrollments,
+        "trust_key_ring": trust_feed["key_ring"],
         "login_faults": login_faults,
         "global": {"base": wallet.base, "host": WALLET, "session": global_member.session},
         "member": {"base": service.base, "host": member_host, "session": member.session},
@@ -339,7 +356,17 @@ async fn main() {
     // Retain the exact owner's HTTP lifecycle behind the optional TLS listener.
     // Existing component URLs and their private fixture data remain explicit HTTP.
     let https = if let Some((cert, key)) = tls_paths {
-        let router = cvld::api::router(service.door.clone());
+        // This fixed loopback ingress selects the original fixture community;
+        // bearer, body and original server checks remain unchanged.
+        let router = cvld::api::router(service.door.clone()).layer(axum::middleware::from_fn(
+            |mut request: axum::extract::Request, next: axum::middleware::Next| async move {
+                request.headers_mut().insert(
+                    axum::http::header::HOST,
+                    axum::http::HeaderValue::from_static("api.alpha.example.test"),
+                );
+                next.run(request).await
+            },
+        ));
         let https = https::HttpsFixture::start(router, service, cert.as_ref(), key.as_ref())
             .await
             .expect("start HTTPS fixture");

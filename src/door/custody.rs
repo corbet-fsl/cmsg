@@ -1,10 +1,15 @@
 //! Separate fresh transport and member checks over the original Foyer/Records.
-use super::{foyer::Transport, Door, ErrorCode};
+use super::{Door, ErrorCode, foyer::Transport};
 use ckmg::{Action, Authorization, Binding, Clock, Error, PublicKey};
 use futures_util::lock::Mutex;
 use std::{cell::Cell, rc::Rc};
 
+mod initial;
 mod recovery;
+pub use initial::{
+    EnrollmentError, InitialEnrollment, activate_initial, reopen_initial_enrollment,
+    retain_initial_enrollment,
+};
 pub use recovery::{RecoveredVault, RecoveryAuthority, RecoveryOwners, RestoredVault};
 
 /// Shared negative state for one unlocked custody session. Observed removal,

@@ -11,7 +11,10 @@ if len(sys.argv) < 3:
     raise SystemExit("Usage: with-foyer-fixture.py fixture-binary command [args...]")
 with tempfile.TemporaryDirectory(prefix="cmsg-foyer-") as directory:
     fixture_path = Path(directory) / "fixture.json"
-    process = subprocess.Popen([sys.argv[1], str(fixture_path)], stdout=subprocess.DEVNULL)
+    tls = Path(__file__).resolve().parent.parent / "tests/support/current-tls"
+    process = subprocess.Popen([sys.argv[1], str(fixture_path), "--https",
+                                str(tls / "certificate.pem"), str(tls / "key.pem")],
+                               stdout=subprocess.DEVNULL)
     try:
         deadline = time.monotonic() + 120
         while not fixture_path.exists():
