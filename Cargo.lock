@@ -2057,7 +2057,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#a1026a05dacca6645484ff5057e6a52e9be52721"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#254fede6297598c629c2bf15851cfa6cecaa6199"
 dependencies = [
  "cchr",
  "cgrp",
@@ -2235,7 +2235,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#140c23a0d57910d238a41e51eba2c287c1554561"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#16fe970ca4917f87943e62e90041343064772045"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2250,7 +2250,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#140c23a0d57910d238a41e51eba2c287c1554561"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#16fe970ca4917f87943e62e90041343064772045"
 dependencies = [
  "chacha20poly1305 0.11.0",
  "czkp",
