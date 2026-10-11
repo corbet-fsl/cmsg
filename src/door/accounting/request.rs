@@ -27,6 +27,42 @@ pub struct ProvenGenesis {
     pub proof: Vec<u8>,
 }
 
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+impl ProvenGenesis {
+    /// Convert the lower owner's borrowed public proof material into the original
+    /// Balance statement. The economic policy is the verified current policy and
+    /// is never taken from the proof owner; `statement_bytes` then checks that its
+    /// digest, horizon and shape match what the proof committed to.
+    pub fn from_material(
+        material: &cwlt::account_owner::GenesisRequestMaterial<'_>,
+        policy: &acct::AccountPolicy,
+    ) -> Result<Self> {
+        let public = &material.statement;
+        let statement = AccountStatement {
+            protocol_version: public.protocol_version,
+            community: public.community,
+            owner: public.owner,
+            policy_digest: public.policy_digest,
+            enrollment_root: public.enrollment_root,
+            now: public.now,
+            valid_until: public.valid_until,
+            genesis: public.genesis,
+            previous_version: public.previous_version,
+            next_version: public.next_version,
+            previous_state: public.previous_state,
+            next_state: public.next_state,
+            settlement_marker: public.settlement_marker,
+            policy: policy.clone(),
+        };
+        acct::statement_bytes(&statement).map_err(|_| ErrorCode::Unauthorized)?;
+        Ok(Self {
+            statement,
+            scope: material.scope.clone(),
+            proof: material.proof.to_vec(),
+        })
+    }
+}
+
 /// The exact signed ApplyExtended wire, ready for state A. Its bytes are the
 /// outbox; everything else is derived data for response checks.
 #[derive(Clone, PartialEq, Eq)]
