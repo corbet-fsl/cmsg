@@ -247,14 +247,33 @@ async fn root_member(
     member
 }
 
-pub async fn roots(
+/// The community's first registration and Root: nothing else may register before it.
+pub async fn found_source(
     wallet: &Running,
     operator: &Member,
     source: &Running,
+) -> (cpsd::OpaqueHolder, Member) {
+    let holder = holder(wallet).await;
+    let member = root_member(
+        wallet,
+        operator,
+        source,
+        "alpha",
+        &holder,
+        "fixture_source_root",
+    )
+    .await;
+    (holder, member)
+}
+
+pub async fn roots(
+    wallet: &Running,
+    operator: &Member,
+    mut holder: cpsd::OpaqueHolder,
+    source_member: Member,
+    source: &Running,
     board: &Running,
 ) -> (Member, Member) {
-    let mut holder = holder(wallet).await;
-    let source_member = root_member(wallet, operator, source, "alpha", &holder, "fixture_source_root").await;
     let garden = client(
         source,
         "api.admin.alpha.example.test",

@@ -235,6 +235,15 @@ async fn entry() {
     let wallet = global(1000).await;
     let (mut global_member, passport, public) = wallet_passport(&wallet).await;
     let service = community_with_burst("alpha", &public, 1000).await;
+    let global_root = enrol(
+        &wallet,
+        ROOT,
+        Some("synthetic-operator-enrolment-capability"),
+    )
+    .await;
+    // The community's FIRST registration is its real founding Root; every other
+    // registration below happens only after the Root has redeemed its invitation.
+    let (source_holder, source_root) = gardens::found_source(&wallet, &global_root, &service).await;
     let member_host = "api.alpha.example.test";
     // Public challenge for a real browser fixture credential. Membership still
     // requires the original passport and Keyhole finish; no session is seeded.
@@ -282,16 +291,18 @@ async fn entry() {
         &member.credential,
     )
     .await;
-    let global_root = enrol(
-        &wallet,
-        ROOT,
-        Some("synthetic-operator-enrolment-capability"),
-    )
-    .await;
     let board = root_board(&public, &service).await;
     // Real founding: the community and the root board start Uninitialized and each
     // first Root is created through the Global Root operator's public actions.
-    let (root, board_root) = gardens::roots(&wallet, &global_root, &service, &board).await;
+    let (root, board_root) = gardens::roots(
+        &wallet,
+        &global_root,
+        source_holder,
+        source_root,
+        &service,
+        &board,
+    )
+    .await;
     let admin = gardens::admin(&wallet, &service, &root).await;
     service.clock.set(NOW + 1);
     board.clock.set(NOW + 1);
