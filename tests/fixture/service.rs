@@ -1,4 +1,5 @@
 //! Reuse the exact owner's real database, passkey, passport and policy fixtures.
+mod gardens;
 mod https;
 #[path = "owner/mod.rs"]
 mod owner;
@@ -16,7 +17,7 @@ struct Fault {
 }
 
 // The exact production root-board constructor, with a fictional public issuer.
-async fn root_board(public: &cvld::api::GlobalPublic) -> Running {
+async fn root_board(public: &cvld::api::GlobalPublic, source: &Running) -> Running {
     let dir = tempfile::tempdir().unwrap();
     let config = community_config(dir.path(), "root", public, 1000);
     let issuer = cpsd::IssuerKey::generate(
@@ -38,6 +39,12 @@ async fn root_board(public: &cvld::api::GlobalPublic) -> Running {
         cvld::config::RootCommunityConfig::new(config, path.to_str().unwrap().into()).unwrap();
     let clock = Arc::new(TestClock(std::sync::atomic::AtomicU64::new(NOW)));
     let door = cvld::service::Door::root_board(config, clock.clone())
+        .await
+        .unwrap();
+    let purpose = door.root_board_purpose(issuer).await.unwrap();
+    source
+        .door
+        .attach_root_board_purpose(purpose)
         .await
         .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -242,21 +249,15 @@ async fn main() {
         &member.credential,
     )
     .await;
-    let admin = enrol(
-        &service,
-        admin_host,
-        Some("synthetic-admin-enrolment-capability"),
-    )
-    .await;
-    let root = enrol(&service, ROOT, Some("synthetic-root-enrolment-capability")).await;
+    let admin = gardens::admin(&wallet, &service).await;
     let global_root = enrol(
         &wallet,
         ROOT,
         Some("synthetic-operator-enrolment-capability"),
     )
     .await;
-    let board = root_board(&public).await;
-    let board_root = enrol(&board, ROOT, Some("synthetic-root-enrolment-capability")).await;
+    let board = root_board(&public, &service).await;
+    let (root, board_root) = gardens::roots(&wallet, &service, &board).await;
     service.clock.set(NOW + 1);
     board.clock.set(NOW + 1);
     let mut faults = Vec::new();
@@ -378,7 +379,7 @@ async fn main() {
         "member": {"base": service.base, "host": member_host, "session": member.session},
         "vault": {"base": service.base, "host": member_host, "session": vault_session},
         "admin": {"base": service.base, "host": admin_host, "session": admin.session},
-        "root": {"base": service.base, "host": ROOT, "session": root.session},
+        "root": {"base": service.base, "host": admin_host, "session": root.session},
         "root_board": {"base": board.base, "host": ROOT, "session": board_root.session},
         "global_root": {"base": wallet.base, "host": ROOT, "session": global_root.session},
         "faults": faults.iter().map(|fault| json!({"base":proxy_base,"host":WALLET,"session":fault.session})).collect::<Vec<_>>(),

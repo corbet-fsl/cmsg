@@ -10,6 +10,8 @@ publish = false
 resolver = "3"
 
 [dependencies]
+crlt = { git = "https://git.corbet.ch/corbet-foss/crlt", branch = "main" }
+crgs = { git = "https://git.corbet.ch/corbet-foss/crgs", branch = "main" }
 cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "main", default-features = false, features = ["development-gate", "client-http"] }
 cmty = { git = "https://git.corbet.ch/corbet-libs/cmty", branch = "main" }
 cpsd = { git = "https://git.corbet.ch/corbet-foss/cpsd", branch = "main", default-features = false, features = ["storage"] }
