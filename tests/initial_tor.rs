@@ -372,6 +372,44 @@ async fn ordinary_open(
     vault.lock().await;
 }
 
+async fn acknowledged_open(
+    native: &Native,
+    api: &cfyr::Foyer<cfyr::HttpClient>,
+    opening: cvlt::PreparedOpen,
+    backend: cwst::backend::Memory,
+) {
+    let locator = opening.locator();
+    let network = native.records().unwrap().network();
+    let mut records = opening.tor_records(network.clone()).await.unwrap();
+    let checkpoint = records.checkpoint(&locator).await.unwrap();
+    drop(records);
+    let candidate = opening.prepare_initial_recovery(&checkpoint).unwrap();
+    let mut policy = api.current_policy();
+    let initial = api
+        .live_membership()
+        .observe_lease(now)
+        .await
+        .unwrap()
+        .passkey_certificate(&mut policy, now)
+        .await
+        .unwrap()
+        .initial_creation(now)
+        .await
+        .unwrap();
+    // The actual transport owner verifies nonaliasing with this retained session.
+    let network = native.initial_records(&initial).unwrap();
+    let owners = custody::prepare_initial_recovery(&candidate, initial, network.clone())
+        .await
+        .unwrap();
+    let mut vault = owners.open_root(network, backend).await.unwrap();
+    assert!(matches!(
+        vault.restore_lookup(&locator).await,
+        cvlt::RestoreLookup::Present(_)
+    ));
+    vault.keys().lineage().await.unwrap();
+    vault.lock().await;
+}
+
 async fn journey() {
     let tor: Value = serde_json::from_slice(
         &std::fs::read(
@@ -610,6 +648,8 @@ async fn journey() {
     )
     .await;
     drop(retired);
+    let cold = login(&mut api, &mut keys).await;
+    acknowledged_open(&native, &api, cold, backend.clone()).await;
     drain("target", native).await;
     drop(transport_door);
     drop(policy);

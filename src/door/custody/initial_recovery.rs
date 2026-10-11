@@ -2,24 +2,30 @@
 use super::initial::SharedClock;
 use super::*;
 
-struct InitialRecoveryAuthority<'a, 'p, C, N: cdht::Network> {
-    candidate: &'a cvlt::AcknowledgedInitialCandidate,
-    initial: cfyr::membership::InitialCreationLease<'p, Transport>,
-    clock: C,
-    records: Option<cvlt::LineageRecords<cvlt::TorLineageRecord<'a, N>>>,
-    closed: bool,
+/// Dedicated current same-key authority for the one authenticated initial ACK.
+/// Construction is restricted to original recovery composition; no signer,
+/// creation or general restored-certificate authority is implemented.
+pub struct InitialRecoveryAuthority<'a, 'p, C, N: cdht::Network> {
+    pub(super) candidate: &'a cvlt::AcknowledgedInitialCandidate,
+    pub(super) initial: cfyr::membership::InitialCreationLease<'p, Transport>,
+    pub(super) clock: C,
+    pub(super) records: Option<cvlt::LineageRecords<cvlt::TorLineageRecord<'a, N>>>,
+    pub(super) closed: bool,
 }
 impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
     fn current(&mut self, request: &Authorization<'_>) -> Result<u64, Error> {
         if !matches!(request.action, Action::ReadLineage | Action::Use)
             || request.target.is_some()
             || request.signing.is_some()
-            || request.evidence
-                != self
-                    .candidate
-                    .evidence()
-                    .to_bytes()
-                    .map_err(|_| Error::Unauthorized)?
+            || (!(request.action == Action::Use
+                && request.evidence.is_empty()
+                && request.statement.is_none())
+                && request.evidence
+                    != self
+                        .candidate
+                        .evidence()
+                        .to_bytes()
+                        .map_err(|_| Error::Unauthorized)?)
             || self.initial.seed().map_err(|_| Error::Unauthorized)?
                 != self.candidate.enrollment_commitment()
             || self
@@ -80,7 +86,10 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                             .credential_id(now)
                             .map_err(|_| Error::Unauthorized)?
                             != credential
-                        || request.statement != Some(lineage.digest()?)
+                        || request
+                            .statement
+                            .is_some_and(|digest| lineage.digest().ok() != Some(digest))
+                        || (request.action == Action::ReadLineage && request.statement.is_none())
                     {
                         return Err(Error::Unauthorized);
                     }
@@ -115,7 +124,7 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         Ok(())
     }
 }
-impl<C: Clock, N: cdht::Network> Authority for InitialRecoveryAuthority<'_, '_, C, N> {
+impl<C: Clock, N: cdht::Network> ckmg::Authority for InitialRecoveryAuthority<'_, '_, C, N> {
     async fn check(&mut self, request: Authorization<'_>) -> Result<(), Error> {
         if self.closed {
             return Err(Error::Unauthorized);
