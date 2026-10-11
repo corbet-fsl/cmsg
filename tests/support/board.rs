@@ -32,6 +32,7 @@ fn configured() -> (Door, ClientToken) {
         "board.search".into(),
         "board.watch".into(),
         "board.discovery".into(),
+        "board.groups".into(),
     ]);
     let token = door
         .pair_client(ORIGIN, Role::Member, actions, 1, 100)
@@ -48,6 +49,7 @@ async fn original_board_without_committed_owner_refuses_every_new_action() {
         ("board.search", json!({"cursor":null,"page_size":10})),
         ("board.watch", json!({"cursor":[1]})),
         ("board.discovery", json!({})),
+        ("board.groups", json!({})),
     ] {
         let request = serde_json::to_vec(&Invocation {
             action: action.into(),
@@ -85,6 +87,7 @@ async fn public_board_actions_cannot_inject_owner_inputs_or_duplicate_paging_fie
         br#"{"action":"board.watch","version":1,"body":{"cursor":[1],"possession":{}}}"#.as_slice(),
         br#"{"action":"board.watch","version":1,"body":{"cursor":[1],"maximum_wait":100}}"#.as_slice(),
         br#"{"action":"board.discovery","version":1,"body":{"admission_action":"accept"}}"#.as_slice(),
+        br#"{"action":"board.groups","version":1,"body":{"policy":{}}}"#.as_slice(),
     ] {
         let result = door.dispatch(ORIGIN, token.expose_for_transport(), request, 2).await;
         assert!(matches!(result, Output::Error { error: ErrorCode::InvalidRequest }));
