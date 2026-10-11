@@ -55,13 +55,34 @@ async fn found(
         )
         .await
         .unwrap();
-    let invitation = client(wallet, ROOT, Some(&operator.session))
+    let invitation = match client(wallet, ROOT, Some(&operator.session))
         .call(
             "community_creation_initialize",
             json!({"community":scope,"recipient":recipient["recipient"]}),
         )
         .await
-        .unwrap();
+    {
+        Ok(value) => value,
+        Err(error) => {
+            // Test-side diagnosis only: which Reconcile site fired for this founding.
+            let phase = service
+                .door
+                .community_backend()
+                .unwrap()
+                .lock()
+                .await
+                .facade
+                .membership()
+                .community_phase()
+                .await;
+            eprintln!(
+                "founding {scope} refused: {error:?}; phase {phase:?}; clocks global={} community={}",
+                wallet.clock.0.load(std::sync::atomic::Ordering::SeqCst),
+                service.clock.0.load(std::sync::atomic::Ordering::SeqCst),
+            );
+            panic!("founding refused");
+        }
+    };
     let pseudonym = holder
         .pseudonym(&cpsd::CommunityId::new(scope).unwrap())
         .to_hex();
