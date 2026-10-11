@@ -1401,7 +1401,7 @@ dependencies = [
 [[package]]
 name = "cmbr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmbr?branch=main#99bf1c520ffcbd4aa10134e2c47e772caf25bfc0"
+source = "git+https://git.corbet.ch/corbet-libs/cmbr?branch=main#f7da86baebac6228e2142fc13b88b2993284406f"
 dependencies = [
  "cgrd",
  "cgts",
@@ -1486,7 +1486,7 @@ dependencies = [
 [[package]]
 name = "cmty"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#268a37ee67af828fc939f568ea34dcb7c6e62cc1"
+source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#8d3b3cf34fcf3a0958bdd314e00e97d13b0b7a98"
 dependencies = [
  "cgts",
  "chrono",
@@ -1673,7 +1673,7 @@ dependencies = [
 [[package]]
 name = "cplc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cplc?branch=main#93af1b08505ce57cc52f9b114843cd243105ed26"
+source = "git+https://git.corbet.ch/corbet-libs/cplc?branch=main#3b7ed380e3636a8265fb8f5c5346ac3589f35c82"
 dependencies = [
  "cbcn",
  "cblc",
@@ -1922,7 +1922,7 @@ dependencies = [
 [[package]]
 name = "cssr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cssr?branch=main#d519df2e9538a3c5ce50f8727eb56ed98395cabb"
+source = "git+https://git.corbet.ch/corbet-foss/cssr?branch=main#248daf5a40a0e6525ebe3d7b7d7b24ce4da01ab4"
 dependencies = [
  "crlt",
  "czkp",
@@ -2030,7 +2030,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#defec3bfc9fc1870313790188ec37f846c50a269"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#e3858a8d9f53cb0d31d0a1271d461c6c7b164d42"
 dependencies = [
  "axum",
  "cblc",
@@ -2074,12 +2074,13 @@ dependencies = [
 [[package]]
 name = "czkp"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#d0b0169671ecc09e9dc1979f762b9a917e10cfaa"
+source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#20a60821a96d46d0f57b9f5de6f5e7c8b5a73a3c"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
  "data-encoding",
  "ed25519-dalek 3.0.0",
+ "p256",
  "pso-poseidon",
  "rs_merkle",
  "schemars 1.2.2",

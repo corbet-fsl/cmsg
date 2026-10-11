@@ -2572,7 +2572,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#defec3bfc9fc1870313790188ec37f846c50a269"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#e3858a8d9f53cb0d31d0a1271d461c6c7b164d42"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -2612,7 +2612,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#176ff5210eaf033548d2754931d5ad835918b9ce"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#ce8af0a4a645338a8181ce83beafac18eb9d6131"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2627,7 +2627,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#176ff5210eaf033548d2754931d5ad835918b9ce"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#ce8af0a4a645338a8181ce83beafac18eb9d6131"
 dependencies = [
  "acvm",
  "barretenberg-rs",
@@ -2690,12 +2690,13 @@ dependencies = [
 [[package]]
 name = "czkp"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#d0b0169671ecc09e9dc1979f762b9a917e10cfaa"
+source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#20a60821a96d46d0f57b9f5de6f5e7c8b5a73a3c"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
  "data-encoding",
  "ed25519-dalek 3.0.0",
+ "p256 0.13.2",
  "pso-poseidon",
  "rs_merkle",
  "serde",
