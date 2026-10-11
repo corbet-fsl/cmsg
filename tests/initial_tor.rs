@@ -18,6 +18,7 @@ use cpky::{
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    io::Write,
     num::NonZeroUsize,
     path::Path,
     process::{Child, Command, Stdio},
@@ -220,6 +221,21 @@ impl cmsh::tor_discovery::TorWatcher for NoWatch {
     }
 }
 type Native = network::Network<NoWatch>;
+async fn drain(label: &str, owner: Native) {
+    let begun = std::time::Instant::now();
+    tokio::time::timeout(Duration::from_secs(30), owner.shutdown())
+        .await
+        .unwrap()
+        .unwrap();
+    // Direct fixture output survives the test harness capture and is retained
+    // by the original private-network driver's contract receipt. No IDs appear.
+    writeln!(
+        std::io::stdout(),
+        "original Tor {label} drained in {} ms",
+        begun.elapsed().as_millis()
+    )
+    .unwrap();
+}
 fn configuration(
     tor: &Value,
     base: &Path,
@@ -594,7 +610,7 @@ async fn journey() {
     )
     .await;
     drop(retired);
-    native.shutdown().await.unwrap();
+    drain("target", native).await;
     drop(transport_door);
     drop(policy);
     drop(api);
@@ -621,10 +637,10 @@ async fn journey() {
         backend,
     )
     .await;
-    restarted.shutdown().await.unwrap();
+    drain("restarted target", restarted).await;
     drop(restarted_door);
     for peer in peers {
-        peer.shutdown().await.unwrap();
+        drain("storage peer", peer).await;
     }
     drop(peer_doors);
     fixture.shutdown().await;

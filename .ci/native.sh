@@ -25,3 +25,10 @@ cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 fixture="${CARGO_TARGET_DIR:-tests/fixture/target}/debug/cmsg-foyer-fixture"
 python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --all-targets
+
+# Qualify the actual maintained Tor transport separately from inert record tests.
+# Existing provisioned original tools are required; this route never installs them.
+python3 .ci/test-private-tor-journey.py
+cargo metadata --locked --features native-tor --format-version 1 > evidence/native/tor-metadata.json
+cargo test --locked --features native-tor --test initial_tor --no-run --message-format=json > evidence/native/tor-build.jsonl
+python3 .ci/private-tor-journey.py
