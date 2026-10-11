@@ -147,6 +147,36 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
         Ok(vault)
     }
 
+    /// Restore the existing global holder and retain its genuine recovery origin.
+    /// No caller endpoint or generic Vault can construct this sealed pairing.
+    pub async fn open_global_passport<B: cwst::backend::Backend>(
+        self,
+        network: N,
+        backend: B,
+    ) -> super::super::Result<
+        super::super::passport::GlobalPassport<
+            B,
+            SystemClock,
+            ckmg::SystemEntropy,
+            InitialRecoveryAuthority<'a, 'p, SystemClock, N>,
+            cvlt::PasskeyRecords<cvlt::TorPasskeyRecord<'static, N>>,
+        >,
+    > {
+        let origin = self
+            .authority
+            .initial
+            .origin()
+            .map_err(|_| ErrorCode::Unauthorized)?
+            .to_owned();
+        let vault = self
+            .open_root(network, backend)
+            .await?
+            .restore_global_passport()
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?;
+        super::super::passport::GlobalPassport::recovered(origin, vault).await
+    }
+
     /// Restore both original existing Wallet owners after the complete root
     /// recovery join. Missing accounting or passport custody refuses unchanged.
     pub async fn open<B: cwst::backend::Backend>(

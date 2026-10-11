@@ -88,6 +88,7 @@ async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community(
         let door = bound("wallet", origin, Role::Member, Scope::Global, api);
         let mut policy = door.wallet_current_policy(origin).unwrap();
         let lease = initial(&door, origin, &mut policy).await;
+        let original_key = lease.credential_id().unwrap().to_vec();
         assert_eq!(lease.observation().unwrap().member, user);
         assert_eq!(lease.seed().unwrap(), commitment);
         let creation = custody::activate_initial(candidate, lease, &mut clock, &mut entropy)
@@ -169,10 +170,7 @@ async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community(
             .await
             .unwrap();
         let mut vault = owners
-            .open_root(network.clone(), backend.clone())
-            .await
-            .unwrap()
-            .restore_global_passport()
+            .open_global_passport(network.clone(), backend.clone())
             .await
             .unwrap();
         let community = cwlt::passport::CommunityId::new(b"omega").unwrap();
@@ -193,6 +191,66 @@ async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community(
         .await
         .unwrap()
         .is_err());
+        let alternate_world = &f["wallet_alternate"];
+        assert_ne!(wallet_world["base"], alternate_world["base"]);
+        let mut alternate = foyer(alternate_world, true).await;
+        login(&mut alternate, &mut keys).await;
+        let mut wrong_origin = alternate
+            .live_global_wallet(alternate_world["base"].as_str().unwrap().into())
+            .observe_lease(now)
+            .await
+            .unwrap()
+            .passport_challenge(now)
+            .await
+            .unwrap();
+        wrong_origin
+            .with_current(now, |account, key, _, _, _| {
+                assert_eq!(account, user);
+                assert_eq!(key, original_key);
+            })
+            .unwrap();
+        let before = cwst::backend::Backend::read(&backend).await.unwrap();
+        assert!(cmsg::door::passport::issue_global_passport(
+            wrong_origin,
+            &mut vault,
+            &mut cwlt::passport::rand::rngs::OsRng
+        )
+        .await
+        .is_err());
+        assert_eq!(
+            cwst::backend::Backend::read(&backend).await.unwrap(),
+            before
+        );
+        drop(alternate);
+
+        let mut late = companion
+            .live_global_wallet(wallet_world["base"].as_str().unwrap().into())
+            .observe_lease(now)
+            .await
+            .unwrap()
+            .passport_challenge(now)
+            .await
+            .unwrap();
+        let pending = vault
+            .prepare_global_passport_issuance(&mut late, &mut cwlt::passport::rand::rngs::OsRng)
+            .await
+            .unwrap();
+        // The original private opening is now durable. Closing only the issuer
+        // Foyer must withhold sending/accepting its answer, without regenerating
+        // the holder or automatically abandoning that pending operation.
+        drop(companion);
+        assert!(late.issue(pending.to_bytes(), now).await.is_err());
+        assert!(late.with_current(now, |_, _, _, _, _| ()).is_err());
+        drop(late);
+        let mut cancel = [0; 32];
+        getrandom::fill(&mut cancel).unwrap();
+        vault
+            .cancel_global_passport_issuance(cancel, &mut cwlt::passport::rand::rngs::OsRng)
+            .await
+            .unwrap();
+        companion = foyer(wallet_world, true).await;
+        login(&mut companion, &mut keys).await;
+
         let mut lost = companion
             .live_global_wallet(wallet_world["base"].as_str().unwrap().into())
             .observe_lease(now)
@@ -201,23 +259,8 @@ async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community(
             .passport_challenge(now)
             .await
             .unwrap();
-        let (issuer, challenge) = lost
-            .with_current(now, |_, _, public, challenge, _| {
-                (
-                    cwlt::passport::IssuerPublicKey::from_bytes(public).unwrap(),
-                    cwlt::passport::IssuanceChallenge::from_bytes(challenge.try_into().unwrap()),
-                )
-            })
-            .unwrap();
-        let mut begin = [0; 32];
-        getrandom::fill(&mut begin).unwrap();
         let request = vault
-            .begin_global_passport_issuance(
-                begin,
-                &mut cwlt::passport::rand::rngs::OsRng,
-                &issuer,
-                &challenge,
-            )
+            .prepare_global_passport_issuance(&mut lost, &mut cwlt::passport::rand::rngs::OsRng)
             .await
             .unwrap();
         // The actual issuer commits its answer, but the client loses that answer
@@ -248,10 +291,7 @@ async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community(
             .await
             .unwrap();
         let mut vault = owners
-            .open_root(network.clone(), backend.clone())
-            .await
-            .unwrap()
-            .restore_global_passport()
+            .open_global_passport(network.clone(), backend.clone())
             .await
             .unwrap();
         assert_eq!(
@@ -266,7 +306,6 @@ async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community(
         );
         let mut cancel = [0; 32];
         getrandom::fill(&mut cancel).unwrap();
-        assert_ne!(begin, cancel);
         vault
             .cancel_global_passport_issuance(cancel, &mut cwlt::passport::rand::rngs::OsRng)
             .await
@@ -324,13 +363,7 @@ async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community(
         let owners = custody::prepare_initial_recovery(&finished, lease, network.clone())
             .await
             .unwrap();
-        let mut vault = owners
-            .open_root(network, backend)
-            .await
-            .unwrap()
-            .restore_global_passport()
-            .await
-            .unwrap();
+        let mut vault = owners.open_global_passport(network, backend).await.unwrap();
         assert_eq!(
             vault
                 .with_global_passport(|holder| {

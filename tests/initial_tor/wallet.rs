@@ -231,10 +231,7 @@ pub(super) async fn journey() {
         .await
         .unwrap();
     let mut vault = owners
-        .open_root(selected, backend.clone())
-        .await
-        .unwrap()
-        .restore_global_passport()
+        .open_global_passport(selected, backend.clone())
         .await
         .unwrap();
     let community = cwlt::passport::CommunityId::new(b"omega").unwrap();
@@ -269,10 +266,7 @@ pub(super) async fn journey() {
         .await
         .unwrap();
     let mut vault = owners
-        .open_root(selected, backend)
-        .await
-        .unwrap()
-        .restore_global_passport()
+        .open_global_passport(selected, backend)
         .await
         .unwrap();
     assert_eq!(
@@ -286,7 +280,6 @@ pub(super) async fn journey() {
         pseudonym
     );
     vault.lock().await;
-    drop(vault);
     drain("Wallet target", target).await;
     drop(transport_door);
     for peer in peers {
