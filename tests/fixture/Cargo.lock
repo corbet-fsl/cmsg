@@ -1134,7 +1134,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cgbl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cgbl.git?branch=main#92dc6063a01bd52a0d7c061f353ff6b9d094aa96"
+source = "git+https://git.corbet.ch/corbet-libs/cgbl.git?branch=main#95093102d1672a6aa02c4e78bf6ceb27f1c44f98"
 dependencies = [
  "cbcn",
  "ckyh",
@@ -1381,7 +1381,7 @@ dependencies = [
 [[package]]
 name = "cmbl"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#6b099d520f377c98fa07d8f5afe7c4fadba6b28c"
+source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#98a33ea9b95f96e872f577820a6047be902a1a44"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
@@ -1401,7 +1401,7 @@ dependencies = [
 [[package]]
 name = "cmbr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmbr?branch=main#d85cc93b7daa96adff7596f2c3708653f880e82e"
+source = "git+https://git.corbet.ch/corbet-libs/cmbr?branch=main#f7da86baebac6228e2142fc13b88b2993284406f"
 dependencies = [
  "cgrd",
  "cgts",
@@ -1486,7 +1486,7 @@ dependencies = [
 [[package]]
 name = "cmty"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#53ac7ca0372543cb4a6fe978e39fac78618c4ff8"
+source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#8d3b3cf34fcf3a0958bdd314e00e97d13b0b7a98"
 dependencies = [
  "cgts",
  "chrono",
@@ -1673,7 +1673,7 @@ dependencies = [
 [[package]]
 name = "cplc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cplc?branch=main#93af1b08505ce57cc52f9b114843cd243105ed26"
+source = "git+https://git.corbet.ch/corbet-libs/cplc?branch=main#3b7ed380e3636a8265fb8f5c5346ac3589f35c82"
 dependencies = [
  "cbcn",
  "cblc",
@@ -2074,7 +2074,7 @@ dependencies = [
 [[package]]
 name = "czkp"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#d0b0169671ecc09e9dc1979f762b9a917e10cfaa"
+source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#20a60821a96d46d0f57b9f5de6f5e7c8b5a73a3c"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
