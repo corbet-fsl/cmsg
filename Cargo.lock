@@ -1215,7 +1215,7 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 [[package]]
 name = "cbcn"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cbcn?branch=main#4a82e1faaefbb5e44c540fa2928c3e34385eee20"
+source = "git+https://git.corbet.ch/corbet-foss/cbcn?branch=main#3ff7de1ccd1744440049bc63f502a3e0e4be2a8e"
 dependencies = [
  "csgn",
  "serde",
@@ -2481,7 +2481,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#f09ad2d611d39ec7cef25ef8757008753d4e104b"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#82d8c05d16bff0ac42a4173801a6ac5233a87dc8"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -2521,7 +2521,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#dccca50d9774cd376aaebe0bfb419b91900d7c68"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#bc5bad616678aae7952061308f6807393b30949c"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2536,7 +2536,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#dccca50d9774cd376aaebe0bfb419b91900d7c68"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#bc5bad616678aae7952061308f6807393b30949c"
 dependencies = [
  "chacha20poly1305 0.11.0",
  "czkp",

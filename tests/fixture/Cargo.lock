@@ -1209,7 +1209,7 @@ dependencies = [
 [[package]]
 name = "cbcn"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cbcn?branch=main#4a82e1faaefbb5e44c540fa2928c3e34385eee20"
+source = "git+https://git.corbet.ch/corbet-foss/cbcn?branch=main#3ff7de1ccd1744440049bc63f502a3e0e4be2a8e"
 dependencies = [
  "csgn",
  "serde",
@@ -1219,7 +1219,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#d6014acbef63f4cd0929b20091884dd422421fc3"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#5fb42f94a8062d0cecc9be64dcaa48775f39b81f"
 dependencies = [
  "cbcn",
  "cpns",
@@ -2293,7 +2293,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#f09ad2d611d39ec7cef25ef8757008753d4e104b"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#82d8c05d16bff0ac42a4173801a6ac5233a87dc8"
 dependencies = [
  "axum",
  "cblc",
