@@ -1381,7 +1381,7 @@ dependencies = [
 [[package]]
 name = "ckyh"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckyh?branch=main#ba6bea7c7100bdf0d6dbc07f87ce092dd52a73c1"
+source = "git+https://git.corbet.ch/corbet-foss/ckyh?branch=main#6523836f1ff384f915aa972eb503c07680e86e23"
 dependencies = [
  "ciborium",
  "csgn",
@@ -1408,7 +1408,7 @@ dependencies = [
 [[package]]
 name = "clnk"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/clnk.git?branch=v01#b8f528f1d3210251de209c78b497b25053b1cfce"
+source = "git+https://git.corbet.ch/corbet-foss/clnk.git?branch=v01#5cf85b73ef3d2742c88d42bd0d9cf99568a01b52"
 dependencies = [
  "cfrm",
  "cmbl",
@@ -1553,7 +1553,7 @@ dependencies = [
 [[package]]
 name = "cnvy"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cnvy.git?branch=v01#8baf81f7d09b877e2db06d1a318504d42af6c224"
+source = "git+https://git.corbet.ch/corbet-foss/cnvy.git?branch=v01#628c690a5ac123fd58cd74b9e6f7188f6a7d315b"
 dependencies = [
  "cchr",
  "futures-util",
@@ -1842,7 +1842,7 @@ dependencies = [
 [[package]]
 name = "crbk"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#7ee51084460fc818f77c8a20cda8d0dfd230b909"
+source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#671d31f14376aa7a64dc15ab754f71f28e394b90"
 dependencies = [
  "semver",
  "serde",
@@ -2037,7 +2037,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#712db2536fd699f2ff329da0736556f52d6fa881"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#a9ff78aab8f43c6eeaab72c9167c53de6b72ed43"
 dependencies = [
  "cgrp",
  "ckmg",
@@ -2172,7 +2172,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#3060609387af0be81774db8490315d94b52933de"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#31fd0d966aca540eb067f93f71e6df528fa28cb0"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -2191,7 +2191,7 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#d3a762ee76d1b8a57d7bab3a3b3698bae66930a1"
+source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#aaa73f04e50da8d223e9a5153f6b21108a5731b2"
 dependencies = [
  "blake3",
  "cchr",
@@ -2212,7 +2212,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#69cfe3512aa65661488d675a49a600023c89b390"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#abfea364102609acf9fd1d0605c39b953b81806f"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2227,7 +2227,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#69cfe3512aa65661488d675a49a600023c89b390"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#abfea364102609acf9fd1d0605c39b953b81806f"
 dependencies = [
  "chacha20poly1305 0.11.0",
  "czkp",
