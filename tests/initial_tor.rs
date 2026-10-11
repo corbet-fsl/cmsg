@@ -248,6 +248,17 @@ async fn drain(label: &str, owner: Native) {
     )
     .unwrap();
 }
+/// Peer advertisements are opaque and not `Clone`; copy the exact wire bytes.
+fn owned(advertisement: &cdht::rpc::UnverifiedPeerInfoBytes) -> cdht::rpc::UnverifiedPeerInfoBytes {
+    cdht::rpc::UnverifiedPeerInfoBytes::from_bytes(advertisement.as_bytes().to_vec()).unwrap()
+}
+
+fn copied(
+    advertisements: &[cdht::rpc::UnverifiedPeerInfoBytes],
+) -> Vec<cdht::rpc::UnverifiedPeerInfoBytes> {
+    advertisements.iter().map(owned).collect()
+}
+
 fn configuration(
     tor: &Value,
     base: &Path,
@@ -528,7 +539,7 @@ async fn journey() {
     }
     let advertisements: Vec<_> = peers
         .iter()
-        .map(|peer| peer.advertisement().unwrap().clone())
+        .map(|peer| owned(peer.advertisement().unwrap()))
         .collect();
     assert_eq!(peers.len(), 5);
 
@@ -586,7 +597,7 @@ async fn journey() {
         fixture.origin(),
         &transport_opening,
         member,
-        configuration(&tor, &base, 5, advertisements.clone(), false),
+        configuration(&tor, &base, 5, copied(&advertisements), false),
     )
     .await;
     let mut alias_policy = transport_door.current_policy(fixture.origin()).unwrap();

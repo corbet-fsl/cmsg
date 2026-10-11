@@ -102,7 +102,7 @@ pub(super) async fn journey() {
     }
     let advertisements: Vec<_> = peers
         .iter()
-        .map(|peer| peer.advertisement().unwrap().clone())
+        .map(|peer| super::owned(peer.advertisement().unwrap()))
         .collect();
     assert_eq!(advertisements.len(), 5);
 
@@ -165,7 +165,7 @@ pub(super) async fn journey() {
         origin,
         &transport_opening,
         &user,
-        config(&tor, &base, 5, advertisements.clone(), false),
+        config(&tor, &base, 5, super::copied(&advertisements), false),
     )
     .await;
     let mut alias_policy = transport_door.wallet_current_policy(origin).unwrap();
