@@ -1,9 +1,9 @@
 #![cfg(not(target_arch = "wasm32"))]
 //! Actual HTTPS enrollment, original Passkeys custody and real encrypted CAS.
 use cmsg::door::custody::{
-    acknowledge_initial_publication, activate_initial, prepare_initial_publication,
-    reopen_initial_enrollment, reopen_initial_publication, retain_initial_enrollment,
-    retain_initial_publication,
+    acknowledge_initial_publication, activate_initial, complete_initial_recovery,
+    prepare_initial_publication, reopen_initial_enrollment, reopen_initial_publication,
+    retain_initial_enrollment, retain_initial_publication,
 };
 use cpky::{
     Context,
@@ -221,6 +221,7 @@ async fn original_registration_tuple_activates_only_after_durable_candidate_and_
             .await
             .unwrap();
         assert_eq!(creation.phase().unwrap(), cvlt::InitialPhase::Retained);
+        assert!(creation.acknowledged_candidate().is_err());
         assert_eq!(creation.publication_commitment().unwrap(), publication);
         let network = initial_network::Nodes::new();
         let publication = creation
@@ -293,14 +294,59 @@ async fn original_registration_tuple_activates_only_after_durable_candidate_and_
         } else {
             (read, initial)
         };
-        let creation =
-            acknowledge_initial_publication(read, initial, network, &mut clock, &mut entropy)
+        let creation = acknowledge_initial_publication(
+            read,
+            initial,
+            network.clone(),
+            &mut clock,
+            &mut entropy,
+        )
+        .await
+        .unwrap();
+        assert_eq!(creation.phase().unwrap(), cvlt::InitialPhase::Acknowledged);
+        let candidate = creation.acknowledged_candidate().unwrap();
+        assert_eq!(candidate.enrollment_commitment(), commitment);
+        assert_eq!(
+            candidate.publication_commitment(),
+            creation.publication_commitment().unwrap()
+        );
+        drop(candidate);
+        let initial = api
+            .live_membership()
+            .observe_lease(|| now)
+            .await
+            .unwrap()
+            .passkey_certificate(&mut policy, || now)
+            .await
+            .unwrap()
+            .initial_creation(|| now)
+            .await
+            .unwrap();
+        let retired =
+            complete_initial_recovery(creation, initial, network, &mut clock, &mut entropy)
                 .await
                 .unwrap();
-        assert_eq!(creation.phase().unwrap(), cvlt::InitialPhase::Acknowledged);
-        // The original ACK is durable, but no recovery publication, retirement
-        // or usable Vault is inferred from these native owner/consensus cases.
-        drop(creation);
+        let mut initial = api
+            .live_membership()
+            .observe_lease(|| now)
+            .await
+            .unwrap()
+            .passkey_certificate(&mut policy, || now)
+            .await
+            .unwrap()
+            .initial_creation(|| now)
+            .await
+            .unwrap();
+        let candidate = initial
+            .with_current(
+                || now,
+                |current| retired.prepare_recovery(current, input["member"].as_str().unwrap(), now),
+            )
+            .unwrap()
+            .unwrap();
+        // Actual recovery publication, winner selection and retirement have run;
+        // the ordinary nonpending candidate still grants no usable Vault itself.
+        drop(candidate);
     }
 }
 
