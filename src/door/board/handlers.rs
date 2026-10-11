@@ -454,6 +454,22 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
     ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
         Box::pin(self.page(prepared, signature, expires, PageKind::Watch))
     }
+    fn groups(&mut self, expires: u64) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
+        Box::pin(async move {
+            self.idle()?;
+            let community = self.inner.board.community().to_owned();
+            let board = &self.inner.board;
+            let current = &mut self.current;
+            let policy = &self.policy;
+            self.owner
+                .with_current(|read| {
+                    with_context(current, policy, &community, expires, read, |context, _| {
+                        board.read_groups_committed(context).map_err(board_error)
+                    })
+                })
+                .await
+        })
+    }
     fn discovery(&mut self, expires: u64) -> OwnedFuture<'_, Vec<cbrd::Discovery>> {
         Box::pin(async move {
             self.idle()?;

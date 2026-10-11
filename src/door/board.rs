@@ -8,9 +8,11 @@ use clnk::BrowserTransport as Transport;
 #[cfg(not(target_arch = "wasm32"))]
 use clnk::HttpTransport as Transport;
 
+mod groups;
 mod handlers;
-pub(super) use handlers::{attend, discovery, search, watch};
+pub(super) use groups::groups;
 pub use handlers::{CommittedOwner, CommittedRead, OwnerFuture, ReadPolicy, SignedAttendance};
+pub(super) use handlers::{attend, discovery, search, watch};
 
 /// Only the user's paging choice crosses the public boundary. Link supplies
 /// the live session/nonce and Vault signs its exact prepared transcript.

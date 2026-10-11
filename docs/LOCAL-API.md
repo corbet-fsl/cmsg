@@ -213,6 +213,11 @@ the opaque `cursor` returned in the preceding page's `watch` field. Watch update
 that exact held search window through Board's original delta operation. Both
 return the owner's `DiscoveryPage`, including the next watch cursor.
 `board.discovery` rechecks the held view before returning display entries.
+`board.groups` takes an empty body and returns one `GroupView` per group in the
+committed Groups checkpoint, under the policy projected from the current signed
+Rulebook settings (`groups.*`, `seats.*`, `waves.*`). It is local and read-only:
+no Forum request, consent or membership decision. It refuses unless the retained
+Vault owner and the current Foyer Charter are available.
 
 Search and watch retain the original signed request through the network wait.
 Before disclosure, they reload the committed Profile under the same Vault and
