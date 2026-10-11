@@ -189,10 +189,16 @@ async fn proof(
 ) -> PresentationInput {
     let host = format!("api.{scope}.example.test");
     let challenge: PresentationChallenge = serde_json::from_value(
-        client(service, &host, session)
+        match client(service, &host, session)
             .call("presentation_challenge", json!({}))
             .await
-            .unwrap(),
+        {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("presentation_challenge on {host} refused: {error:?}");
+                panic!("presentation challenge refused");
+            }
+        },
     )
     .unwrap();
     let anchor = anchor(service, &host, scope).await;
