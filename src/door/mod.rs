@@ -280,6 +280,16 @@ impl Door {
         self.preload = Readiness::Ready;
     }
 
+    /// Trusted embedding control for a real network bind: only a completed bind
+    /// (Tor bootstrap and onion publication done) releases preload; a failed or
+    /// cancelled one leaves it untouched. The bind result is returned unchanged.
+    pub fn network_bound(&mut self, bound: Result<()>) -> Result<()> {
+        if bound.is_ok() {
+            self.set_preload_ready();
+        }
+        bound
+    }
+
     /// Install actual Foyer sessions for an already configured local portal.
     /// This trusted embedding control is absent from every callable projection.
     /// The scope/session set cannot be supplied or changed by a local client.

@@ -75,7 +75,8 @@ impl Door {
         node.start().await.map_err(|_| ErrorCode::Unavailable)?;
         // bind_mesh_owned waits for actual onion publication and retains the
         // actual bounded receiver. A failed/dropped await drops the stop guard.
-        self.bind_mesh_owned(origin, mesh, Some(lifetime)).await
+        let bound = self.bind_mesh_owned(origin, mesh, Some(lifetime)).await;
+        self.network_bound(bound)
     }
 }
 

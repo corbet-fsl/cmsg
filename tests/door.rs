@@ -59,6 +59,26 @@ fn error(code: ErrorCode) -> Value {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn only_a_completed_network_bind_releases_preload() {
+    let (mut door, token) = paired();
+    let failed = door.network_bound(Err(ErrorCode::Unavailable));
+    assert_eq!(failed, Err(ErrorCode::Unavailable));
+    let before = call(&mut door, &token, "runtime.status", 11).await;
+    assert_eq!(before["result"]["preload"], "unavailable");
+    assert_eq!(door.network_bound(Ok(())), Ok(()));
+    let after = call(&mut door, &token, "runtime.status", 12).await;
+    assert_eq!(after["result"]["preload"], "ready");
+    // A later failed bind does not take the report back, and nothing callable can.
+    assert_eq!(
+        door.network_bound(Err(ErrorCode::Unavailable)),
+        Err(ErrorCode::Unavailable)
+    );
+    let still = call(&mut door, &token, "runtime.status", 13).await;
+    assert_eq!(still["result"]["preload"], "ready");
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
 async fn unavailable_owners_never_release_preload() {
     let (mut door, token) = paired();
     let response = call(&mut door, &token, "runtime.status", 11).await;
