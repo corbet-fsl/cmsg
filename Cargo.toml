@@ -41,7 +41,7 @@ cdht = { git = "https://git.corbet.ch/corbet-foss/cdht.git", branch = "v01" }
 cmsh = { git = "https://git.corbet.ch/corbet-libs/cmsh.git", branch = "v01" }
 cvlt = { git = "https://git.corbet.ch/corbet-libs/cvlt.git", branch = "v01", features = ["wallet"] }
 cnbx = { git = "https://git.corbet.ch/corbet-libs/cnbx.git", branch = "v01" }
-ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "lineage-read-capability" }
+ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "v01" }
 cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "v01" }
 schemars = "1"
 url = "2"
@@ -120,3 +120,7 @@ path = "tests/support/client-server.rs"
 required-features = ["conformance"]
 
 # v01 integration: first-party dependencies point directly at v01 branches; no [patch] tables.
+
+# PROBE ONLY, removed before landing: build every consumer against the unlanded ckmg branch.
+[patch."https://git.corbet.ch/corbet-foss/ckmg.git"]
+ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "lineage-read-capability" }
