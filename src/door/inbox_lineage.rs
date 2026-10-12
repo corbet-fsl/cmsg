@@ -16,7 +16,10 @@ use ckmg::{Binding, Lineage};
 #[allow(async_fn_in_trait)]
 pub trait PeerRecords {
     /// A fresh network read. An unreadable record is an error, never a stale value.
-    async fn read(&mut self, binding: &Binding) -> Result<cvlt::LineageRead, PeerUnavailable>;
+    async fn read(
+        &mut self,
+        binding: &Binding,
+    ) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable>;
 }
 
 /// The forced read could not complete.
@@ -67,8 +70,12 @@ pub struct StoredHandleRecords<O> {
 /// Opens the read-only lineage records named by one retained handle.
 #[allow(async_fn_in_trait)]
 pub trait HandleOpener {
-    /// Perform the forced read for `handle`; any failure is `PeerUnavailable`.
-    async fn read(&mut self, handle: &[u8]) -> Result<cvlt::LineageRead, PeerUnavailable>;
+    /// Perform the forced read for `handle` of `binding`; any failure is `PeerUnavailable`.
+    async fn read(
+        &mut self,
+        binding: &Binding,
+        handle: &[u8],
+    ) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable>;
 }
 
 impl<O: HandleOpener> StoredHandleRecords<O> {
@@ -80,14 +87,50 @@ impl<O: HandleOpener> StoredHandleRecords<O> {
 }
 
 impl<O: HandleOpener> PeerRecords for StoredHandleRecords<O> {
-    async fn read(&mut self, binding: &Binding) -> Result<cvlt::LineageRead, PeerUnavailable> {
+    async fn read(
+        &mut self,
+        binding: &Binding,
+    ) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable> {
         // No retained handle: nothing is looked up elsewhere.
         let handle = self
             .handles
             .get(binding.member())
             .ok_or(PeerUnavailable)?
             .clone();
-        self.opener.read(&handle).await
+        self.opener.read(binding, &handle).await
+    }
+}
+
+/// Copy evidence out of a completed forced read (the type has no public Clone).
+fn copy_evidence(read: &cvlt::LineageRead) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable> {
+    read.evidence()
+        .iter()
+        .map(|item| {
+            item.to_bytes()
+                .and_then(|bytes| cvlt::LineageEvidence::from_bytes(&bytes))
+                .map_err(|_| PeerUnavailable)
+        })
+        .collect()
+}
+
+/// The production opener: the peer's handle carries the read capability of its
+/// own lineage record. Every call opens the record anew and reads it FORCED.
+pub struct TorHandleOpener<N>(pub N);
+impl<N: cdht::Network + Clone> HandleOpener for TorHandleOpener<N> {
+    async fn read(
+        &mut self,
+        binding: &Binding,
+        handle: &[u8],
+    ) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable> {
+        let custody = ckmg::LineageReadCustody::from_capability(handle, binding)
+            .map_err(|_| PeerUnavailable)?;
+        let backend = cvlt::TorLineageRecord::member_lineage(self.0.clone(), custody)
+            .await
+            .map_err(|_| PeerUnavailable)?;
+        let record = cdht::runtime::Record::new(backend).map_err(|_| PeerUnavailable)?;
+        let mut records = cvlt::LineageRecords::new(vec![record]).map_err(|_| PeerUnavailable)?;
+        let read = records.read().await.map_err(|_| PeerUnavailable)?;
+        copy_evidence(&read)
     }
 }
 
@@ -134,7 +177,7 @@ where
             return Err(cnbx::ContactError::Unavailable);
         }
         self.view.with_current(binding.community(), now, |charter| {
-            select(read.evidence(), charter, binding, now)
+            select(&read, charter, binding, now)
         })
     }
 }
@@ -196,7 +239,10 @@ mod tests {
 
     struct Failing;
     impl PeerRecords for Failing {
-        async fn read(&mut self, _: &Binding) -> Result<cvlt::LineageRead, PeerUnavailable> {
+        async fn read(
+            &mut self,
+            _: &Binding,
+        ) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable> {
             Err(PeerUnavailable)
         }
     }
@@ -250,7 +296,11 @@ mod tests {
 
     struct NoOpen;
     impl HandleOpener for NoOpen {
-        async fn read(&mut self, _: &[u8]) -> Result<cvlt::LineageRead, PeerUnavailable> {
+        async fn read(
+            &mut self,
+            _: &Binding,
+            _: &[u8],
+        ) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable> {
             panic!("no handle may be opened without a retained handle")
         }
     }

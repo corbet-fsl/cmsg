@@ -41,7 +41,7 @@ cdht = { git = "https://git.corbet.ch/corbet-foss/cdht.git", branch = "v01" }
 cmsh = { git = "https://git.corbet.ch/corbet-libs/cmsh.git", branch = "v01" }
 cvlt = { git = "https://git.corbet.ch/corbet-libs/cvlt.git", branch = "v01", features = ["wallet"] }
 cnbx = { git = "https://git.corbet.ch/corbet-libs/cnbx.git", branch = "v01" }
-ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "v01" }
+ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "lineage-read-capability" }
 cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "v01" }
 schemars = "1"
 url = "2"
@@ -97,7 +97,10 @@ csgn = { git = "https://git.corbet.ch/corbet-foss/csgn", branch = "main", defaul
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-tokio = { version = "1", features = ["test-util"] }
+tokio = { version = "1", features = ["test-util", "rt-multi-thread"] }
+ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh", branch = "main", default-features = false, features = ["server"] }
+crlt = { git = "https://git.corbet.ch/corbet-foss/crlt", branch = "main" }
+futures-executor = "0.3"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 
