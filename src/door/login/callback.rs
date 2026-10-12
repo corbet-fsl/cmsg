@@ -63,7 +63,7 @@ impl CliLogin {
     /// crosses to JavaScript; the callback bytes remain inside the owner.
     pub fn begin(&self) -> js_sys::Promise {
         let Some(prepared) = self.prepared.borrow_mut().take() else {
-            return js_sys::Promise::resolve(&json(self.state.get()).into());
+            return js_sys::Promise::resolve::<wasm_bindgen::JsValue>(&json(self.state.get()).into());
         };
         let state = self.state.clone();
         state.set(CallbackStatus::Running);

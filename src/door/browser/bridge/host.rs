@@ -301,8 +301,10 @@ impl VaultHost {
                     }),
                 );
             }
+            // Disposal carries no value; a rejection stays a Reconcile error.
             let disposed = JsFuture::from(runtime.dispose())
                 .await
+                .map(|_| ())
                 .map_err(|_| ErrorCode::Reconcile);
             owner.reply(Reply::Closed {
                 id: owner.close_id.get(),
