@@ -26,7 +26,7 @@ actions remain available so the client can refresh, lock or close its owners.
 `mesh.disconnect` closes the retained actual Mesh listener before emitting
 MeshDisconnected. The embedding still owns backend node shutdown. These actions
 do not fabricate attendance, delivery acceptance or network health. Missing
-facades refuse; runtime preload remains unavailable while live end-to-end
+facades refuse; runtime preload is `unavailable` until the embedder reports the network up (`Door::set_preload_ready`: Tor bootstrap and onion publication done, then `ready`) while live end-to-end
 bindings are incomplete. Groups types come from cbrd, without a copied DTO.
 
 Create one `Door` per community with exact permitted origins for each role.

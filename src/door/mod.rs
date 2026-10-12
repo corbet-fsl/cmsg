@@ -213,6 +213,9 @@ pub struct Empty {}
 #[serde(rename_all = "snake_case")]
 pub enum Readiness {
     Unavailable,
+    /// The network connection is established: Tor bootstrap and onion
+    /// publication are done.
+    Ready,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -235,6 +238,7 @@ pub struct Door {
     config: Configuration,
     grants: BTreeMap<[u8; 32], Grant>,
     clock_floor: u64,
+    preload: Readiness,
     foyers: BTreeMap<String, foyer::Binding>,
     boards: BTreeMap<String, Box<dyn facades::BoundBoard>>,
     meshes: BTreeMap<String, facades::BoundMesh>,
@@ -254,6 +258,7 @@ impl Door {
             config,
             grants: BTreeMap::new(),
             clock_floor: 0,
+            preload: Readiness::Unavailable,
             foyers: BTreeMap::new(),
             boards: BTreeMap::new(),
             meshes: BTreeMap::new(),
@@ -266,6 +271,13 @@ impl Door {
             #[cfg(target_arch = "wasm32")]
             browser_gesture: None,
         }
+    }
+
+    /// Trusted embedding control: the runtime reports the network connection
+    /// established (Tor bootstrap and onion publication done). Absent from every
+    /// callable projection; it is never cleared by a local client.
+    pub fn set_preload_ready(&mut self) {
+        self.preload = Readiness::Ready;
     }
 
     /// Install actual Foyer sessions for an already configured local portal.
@@ -473,7 +485,7 @@ impl Door {
     fn status(&self) -> RuntimeStatus {
         RuntimeStatus {
             community: self.config.community.clone(),
-            preload: Readiness::Unavailable,
+            preload: self.preload.clone(),
             owners: [
                 Family::Vault,
                 Family::Mesh,
