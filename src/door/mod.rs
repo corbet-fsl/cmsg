@@ -14,6 +14,8 @@ pub use composition::VaultComposer;
 pub mod custody;
 pub mod facades;
 pub mod foyer;
+#[cfg(feature = "ohttp")]
+pub mod ohttp;
 mod inbox;
 pub mod inbox_lineage;
 mod json;

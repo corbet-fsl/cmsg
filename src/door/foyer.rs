@@ -4,9 +4,11 @@ use super::*;
 pub use cfyr::Foyer;
 use std::sync::LazyLock;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "ohttp")]
+pub type Transport = cfyr::OhttpClient<super::ohttp::Wire>;
+#[cfg(all(not(feature = "ohttp"), target_arch = "wasm32"))]
 pub use cfyr::BrowserClient as Transport;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(feature = "ohttp"), not(target_arch = "wasm32")))]
 pub use cfyr::HttpClient as Transport;
 
 /// A service scope selected by the trusted embedding, never by request JSON.

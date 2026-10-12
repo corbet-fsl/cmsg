@@ -3,9 +3,11 @@ use super::current::check_version;
 use super::*;
 use cbrd::{cfrm, clnk};
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "ohttp")]
+type Transport = clnk::OhttpTransport<super::ohttp::Wire>;
+#[cfg(all(not(feature = "ohttp"), target_arch = "wasm32"))]
 use clnk::BrowserTransport as Transport;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(feature = "ohttp"), not(target_arch = "wasm32")))]
 use clnk::HttpTransport as Transport;
 
 mod handlers;
@@ -38,6 +40,9 @@ pub struct Configuration {
     pub search_candidates: usize,
     pub search_publication_bytes: usize,
     pub read_policy: ReadPolicy,
+    /// Relay and gateway keys for the forum calls.
+    #[cfg(feature = "ohttp")]
+    pub ohttp: super::ohttp::OhttpEndpoint,
 }
 
 /// Validated original Board retained until the restoring host has real custody.
@@ -145,6 +150,24 @@ fn construct_board(
     config: Configuration,
     clock: impl clnk::Clock + 'static,
 ) -> Result<cbrd::Board<Transport>> {
+    #[cfg(feature = "ohttp")]
+    let transport = {
+        let forum = url::Url::parse(&config.forum_origin).map_err(|_| ErrorCode::InvalidRequest)?;
+        let authority = forum.host_str().ok_or(ErrorCode::InvalidRequest)?;
+        let authority = match forum.port() {
+            Some(port) => format!("{authority}:{port}"),
+            None => authority.to_owned(),
+        };
+        Transport::new(
+            config.ohttp.wire(&authority)?,
+            config.forum_origin,
+            origin.into(),
+            config.maximum_response_bytes,
+            std::time::Duration::from_millis(config.timeout_millis.into()),
+        )
+        .map_err(before_send)?
+    };
+    #[cfg(not(feature = "ohttp"))]
     let transport = Transport::new(
         config.forum_origin,
         origin.into(),

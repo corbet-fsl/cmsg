@@ -9,6 +9,9 @@ pub struct Service {
     pub scope: foyer::Scope,
     pub base: String,
     pub host: String,
+    /// Relay and gateway keys for this service's calls.
+    #[cfg(feature = "ohttp")]
+    pub ohttp: super::ohttp::OhttpEndpoint,
 }
 
 /// Compose original public deployment values without copying their fields.
@@ -225,10 +228,14 @@ impl Configuration {
                 .map_err(|_| ErrorCode::InvalidRequest)?
                 .origin()
                 .ascii_serialization();
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(feature = "ohttp")]
+            let transport =
+                foyer::Transport::new(service.ohttp.wire(&service.host)?, service.host, None)
+                    .map_err(|_| ErrorCode::InvalidRequest)?;
+            #[cfg(all(not(feature = "ohttp"), not(target_arch = "wasm32")))]
             let transport = foyer::Transport::with_roots(service.base, service.host, None, roots)
                 .map_err(|_| ErrorCode::InvalidRequest)?;
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(all(not(feature = "ohttp"), target_arch = "wasm32"))]
             let transport = foyer::Transport::new(service.base, service.host, None)
                 .map_err(|_| ErrorCode::InvalidRequest)?;
             let trust = if service.scope == trust_scope {
