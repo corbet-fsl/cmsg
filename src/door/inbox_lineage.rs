@@ -101,6 +101,47 @@ impl<O: HandleOpener> PeerRecords for StoredHandleRecords<O> {
     }
 }
 
+/// Production opener: a retained handle is the peer's lineage read capability
+/// (exported by the peer's `ckmg::Keys` under current authority). It conveys
+/// decryption of that one record only; every read is a forced network read and
+/// the evidence is copied out, so nothing from the read is retained.
+pub struct TorHandleOpener<N: cdht::Network> {
+    network: N,
+}
+
+impl<N: cdht::Network> TorHandleOpener<N> {
+    /// `network` is the door's Tor network handle.
+    pub fn new(network: N) -> Self {
+        Self { network }
+    }
+}
+
+impl<N: cdht::Network + Clone> HandleOpener for TorHandleOpener<N> {
+    async fn read(
+        &mut self,
+        binding: &Binding,
+        handle: &[u8],
+    ) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable> {
+        // Strict: domain, exact length, and the binding must be the asked peer's.
+        let reader = ckmg::LineageReadCustody::from_capability(handle, binding)
+            .map_err(|_| PeerUnavailable)?;
+        let backend = cvlt::TorLineageRecord::member_lineage(self.network.clone(), reader)
+            .await
+            .map_err(|_| PeerUnavailable)?;
+        let record = cdht::runtime::Record::new(backend).map_err(|_| PeerUnavailable)?;
+        let mut records = cvlt::LineageRecords::new(vec![record]).map_err(|_| PeerUnavailable)?;
+        let read = records.read().await.map_err(|_| PeerUnavailable)?;
+        read.evidence()
+            .iter()
+            .map(|item| {
+                item.to_bytes()
+                    .and_then(|bytes| cvlt::LineageEvidence::from_bytes(&bytes))
+                    .map_err(|_| PeerUnavailable)
+            })
+            .collect()
+    }
+}
+
 /// Fills `cnbx::DeviceAuthority` for peers; `ContactAuthority` and release use it.
 pub struct PeerLineage<R, V, C> {
     records: R,
@@ -291,6 +332,75 @@ mod tests {
         }
         for negative in [Receipt, Scope, Assertion, Policy(cchr::Error::Signature)] {
             assert_eq!(classify(negative), cnbx::ContactError::Authority);
+        }
+    }
+
+    /// A network with no reachable node: any use of it is `Unavailable`.
+    #[derive(Clone)]
+    struct Dead;
+    impl cdht::Network for Dead {
+        fn now_ms(&self) -> u64 {
+            0
+        }
+        async fn closest(&self, _: &cdht::RecordKey) -> Result<Vec<cdht::NodeId>, cdht::Error> {
+            Err(cdht::Error::Unavailable)
+        }
+        async fn descriptor(
+            &self,
+            _: &cdht::NodeId,
+            _: &cdht::RecordKey,
+        ) -> Result<Option<cdht::Descriptor>, cdht::Error> {
+            Err(cdht::Error::Unavailable)
+        }
+        async fn get(
+            &self,
+            _: &cdht::NodeId,
+            _: &cdht::RecordKey,
+            _: u32,
+        ) -> Result<Option<cdht::SignedValue>, cdht::Error> {
+            Err(cdht::Error::Unavailable)
+        }
+        async fn set(
+            &self,
+            _: &cdht::NodeId,
+            _: &cdht::Descriptor,
+            _: u32,
+            _: &cdht::SignedValue,
+        ) -> Result<cdht::SetOutcome, cdht::Error> {
+            Err(cdht::Error::Unavailable)
+        }
+        async fn watch(
+            &self,
+            _: &cdht::NodeId,
+            _: &cdht::RecordKey,
+        ) -> Result<cdht::WatchId, cdht::Error> {
+            Err(cdht::Error::Unavailable)
+        }
+        async fn cancel_watch(
+            &self,
+            _: &cdht::NodeId,
+            _: cdht::WatchId,
+        ) -> Result<(), cdht::Error> {
+            Err(cdht::Error::Unavailable)
+        }
+        async fn changes(
+            &self,
+            _: &cdht::NodeId,
+            _: cdht::WatchId,
+        ) -> Result<Vec<cdht::Change>, cdht::Error> {
+            Err(cdht::Error::Unavailable)
+        }
+    }
+
+    #[test]
+    fn tor_opener_refuses_anything_that_is_not_a_capability_for_the_binding() {
+        let binding = Binding::new("c", &"a".repeat(96)).unwrap();
+        let mut opener = TorHandleOpener::new(Dead);
+        for handle in [&b""[..], b"not a capability", &[0u8; 300][..]] {
+            assert_eq!(
+                block_on(opener.read(&binding, handle)).err(),
+                Some(PeerUnavailable)
+            );
         }
     }
 }
