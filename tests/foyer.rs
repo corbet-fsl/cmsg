@@ -365,7 +365,7 @@ async fn explicit_root_board_routes_admin_actions_but_other_root_surfaces_stay_d
                     "foyer.platform_set",
                     1,
                     json!({"setting":{"key":"quota", "value":6, "inherit":false,
-                        "effective_at":now + 86_400}, "force":true}),
+                        "effective_at":now + 2 * 86_400}, "force":true}),
                     now,
                 )
                 .await,
