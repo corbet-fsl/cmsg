@@ -68,7 +68,7 @@ dependencies = [
  "keccak 0.2.2",
  "log",
  "p256 0.14.0",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
 ]
 
@@ -1397,7 +1397,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#a3a329b92bc8243295552c949ae5c7bd51bd2580"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#f249f9b11295b6db13d1bd227defb194755d77c5"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1724,7 +1724,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#ca1423d1d29466fdadd5f54dbf9b9afe17d02dd1"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#e9383f85bdf1bdf7406ce19956e7b68431fca438"
 dependencies = [
  "arti-client",
  "blake3",
@@ -1746,7 +1746,7 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tor-hscrypto",
  "tor-llcrypto",
  "tor-rtcompat",
@@ -1973,7 +1973,7 @@ dependencies = [
  "cwvs",
  "schemars 1.2.2",
  "serde",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -2239,7 +2239,7 @@ version = "0.0.0"
 source = "git+https://git.corbet.ch/corbet-foss/cpns?branch=main#6f6954b70b8d4e39d47c2a73325eabc6ee59fe7d"
 dependencies = [
  "getrandom 0.4.3",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "subtle",
  "zeroize",
 ]
@@ -2471,7 +2471,7 @@ dependencies = [
  "coset 0.4.2",
  "ed25519-dalek 3.0.0",
  "rand_core 0.10.1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "zeroize",
 ]
 
@@ -2513,7 +2513,7 @@ dependencies = [
  "ed25519-dalek 3.0.0",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "url",
 ]
 
@@ -2695,7 +2695,7 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#298ee7ecbda8a6ce0a39d1fc7c440faf779a7769"
+source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#634229fd8c0a63d01ceacc48b12481a64cebd68c"
 dependencies = [
  "blake3",
  "cchr",
@@ -2795,7 +2795,7 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -2826,7 +2826,7 @@ dependencies = [
  "rs_merkle",
  "schemars 1.2.2",
  "serde",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "utoipa",
 ]
 
@@ -3397,7 +3397,7 @@ checksum = "6ebaa1a2bf1290ab3bfe5a7b771d050ebffab2711c19a81691c683a5144a25de"
 dependencies = [
  "curve25519-dalek 5.0.0",
  "ed25519 3.0.0",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "signature 3.0.0",
  "subtle",
  "zeroize",
@@ -4383,7 +4383,7 @@ dependencies = [
  "hkdf 0.13.0",
  "hybrid-array",
  "rand_core 0.10.1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "subtle",
  "x25519-dalek 3.0.0",
  "zeroize",
@@ -4451,7 +4451,7 @@ dependencies = [
  "rand 0.10.3",
  "rand_chacha 0.10.0",
  "rand_core 0.10.1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "subtle",
  "x-wing",
  "x25519-dalek 2.0.1",
@@ -5177,7 +5177,7 @@ dependencies = [
  "ecdsa 0.17.0",
  "elliptic-curve 0.14.1",
  "primeorder 0.14.0",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "signature 3.0.0",
  "wnaf",
 ]
@@ -6449,7 +6449,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rand_core 0.10.1",
  "rand_core 0.6.4",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "tls_codec",
 ]
@@ -6571,7 +6571,7 @@ dependencies = [
  "elliptic-curve 0.14.1",
  "primefield",
  "primeorder 0.14.0",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -7833,7 +7833,7 @@ version = "8.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d84e8ba78bd384263e5922f084cbe1b081c3b7e69add59c8fb097b879ba968a"
 dependencies = [
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "walkdir",
 ]
 
@@ -8516,9 +8516,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",

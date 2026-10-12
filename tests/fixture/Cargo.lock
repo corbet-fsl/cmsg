@@ -1065,7 +1065,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#a3a329b92bc8243295552c949ae5c7bd51bd2580"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#f249f9b11295b6db13d1bd227defb194755d77c5"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1150,7 +1150,7 @@ dependencies = [
  "hmac 0.13.0",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "tokio",
  "zeroize",
@@ -1434,7 +1434,7 @@ dependencies = [
  "http",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "url",
  "zeroize",
@@ -1486,7 +1486,7 @@ dependencies = [
 [[package]]
 name = "cmty"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#062970a6491c70923ee3b8aa98649da732b3d16d"
+source = "git+https://git.corbet.ch/corbet-libs/cmty?branch=main#8725a5f1048d8f06c5c96a441b43cf9e728d8a43"
 dependencies = [
  "cgts",
  "chrono",
@@ -1664,7 +1664,7 @@ dependencies = [
  "phonenumber",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "url",
  "zeroize",
@@ -1701,7 +1701,7 @@ dependencies = [
  "hmac 0.13.0",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "zeroize",
 ]
@@ -1713,7 +1713,7 @@ source = "git+https://git.corbet.ch/corbet-foss/cpns?branch=main#6f6954b70b8d4e3
 dependencies = [
  "crlt",
  "getrandom 0.4.3",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "subtle",
  "zeroize",
 ]
@@ -1903,7 +1903,7 @@ dependencies = [
  "crlt",
  "ed25519-dalek 3.0.0",
  "rand_core 0.10.1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "zeroize",
 ]
 
@@ -2001,7 +2001,7 @@ dependencies = [
 [[package]]
 name = "cvch"
 version = "0.2.1"
-source = "git+https://git.corbet.ch/corbet-foss/cvch?branch=main#6e9eafab4eb2c4528b0523009d5b3ac2a07563bb"
+source = "git+https://git.corbet.ch/corbet-foss/cvch?branch=main#ac292fe9e2eb54e19d592b8926aa12c077d0f2e2"
 dependencies = [
  "cfbk",
  "csgn",
@@ -2010,7 +2010,7 @@ dependencies = [
  "hmac 0.13.0",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "zeroize",
 ]
@@ -2024,7 +2024,7 @@ dependencies = [
  "data-encoding",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
 ]
 
 [[package]]
@@ -2086,7 +2086,7 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "utoipa",
 ]
 
@@ -2462,7 +2462,7 @@ dependencies = [
  "curve25519-dalek 5.0.0",
  "ed25519 3.0.0",
  "serde",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "subtle",
  "zeroize",
 ]
@@ -3102,7 +3102,7 @@ dependencies = [
  "hkdf 0.13.0",
  "hybrid-array",
  "rand_core 0.10.1",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "subtle",
  "x25519-dalek",
  "zeroize",
@@ -5733,9 +5733,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
