@@ -26,6 +26,8 @@ base="$CARGO_HOME/ccid-artifacts/cmsg-browser"
 mkdir -p "$base"
 dir=$(mktemp -d "$base/$CI_COMMIT_SHA.XXXXXXXX")
 export CMSG_BROWSER_OUT="$dir/build"
+# The milestone script needs the locked generator dependencies; install exactly the lockfile.
+(cd tools && npm ci --no-audit --no-fund)
 for mode in ports service assemble; do
   bash .ci/v01-browser-package.sh "$mode"
 done
