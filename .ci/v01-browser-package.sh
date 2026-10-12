@@ -69,7 +69,7 @@ cargo run --locked --example registry > "$out/registry.json"
 node tools/generate.mjs "$out/registry.json" "$out/generated"
 node tools/check.mjs "$out/registry.json"
 node tools/node_modules/typescript/bin/tsc --outDir "$out/public/cmsg" \
-  --strict --declaration --target es2022 --module nodenext --moduleResolution nodenext \
+  --strict --declaration --target es2022 --lib es2022,dom,esnext.disposable --module nodenext --moduleResolution nodenext \
   "$out/generated/client.ts" "$out/generated/browser.ts"
 cmp Cargo.lock "$out/Cargo.lock"
 cmp Cargo.toml "$out/Cargo.toml"
