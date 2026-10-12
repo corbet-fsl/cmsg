@@ -45,7 +45,11 @@ if [[ "${CMSG_SKIP_TOR:-0}" != 1 ]]; then
 fi
 printf 'modes: %s\n' "${modes[*]}"
 for mode in "${modes[@]}"; do
-  bash -x .ci/v01-browser-package.sh "$mode"
+  if [[ "$mode" == service ]]; then
+    wasm_dev_size_env bash -x .ci/v01-browser-package.sh "$mode"
+  else
+    bash -x .ci/v01-browser-package.sh "$mode"
+  fi
 done
 # Ship one copy: no source maps and no base64-inlined TorJS entry points (the file entry stays).
 find "$CMSG_BROWSER_OUT/public/cmsg" -name '*.map' -delete
