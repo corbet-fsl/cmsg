@@ -5,7 +5,9 @@
 //! Charter of the community scope, which is the Envoy-followed trust feed and
 //! carries the passkey revocation list. Concurrent valid lineages resolve by
 //! greater epoch, then smaller digest. Anything missing, stale, unreadable or
-//! beyond validity is refused: this port never answers permissively.
+//! beyond validity is refused: this port never answers permissively. Missing or
+//! stale evidence is `Unavailable`; `Authority` only for present, negative
+//! evidence (invalid, revoked, wrong binding).
 use super::foyer;
 use cchr::VerifiedCharter;
 use ckmg::{Binding, Lineage};
@@ -49,8 +51,43 @@ impl CharterView for foyer::Binding {
         });
         match (outer, inner) {
             (Ok(()), Some(result)) => result,
-            _ => Err(cnbx::ContactError::Authority),
+            _ => Err(cnbx::ContactError::Unavailable),
         }
+    }
+}
+
+/// Reads a peer's lineage records through the handle retained in Contacts for
+/// that peer (decided: handles travel signed, nothing is looked up by pseudonym).
+/// `opener` turns the retained opaque handle into the read-only records.
+pub struct StoredHandleRecords<O> {
+    handles: std::collections::BTreeMap<String, Vec<u8>>,
+    opener: O,
+}
+
+/// Opens the read-only lineage records named by one retained handle.
+#[allow(async_fn_in_trait)]
+pub trait HandleOpener {
+    /// Perform the forced read for `handle`; any failure is `PeerUnavailable`.
+    async fn read(&mut self, handle: &[u8]) -> Result<cvlt::LineageRead, PeerUnavailable>;
+}
+
+impl<O: HandleOpener> StoredHandleRecords<O> {
+    /// `handles` are the Contacts-retained handles of the peers in use, as read
+    /// from the same committed journal snapshot as the relation.
+    pub fn new(handles: std::collections::BTreeMap<String, Vec<u8>>, opener: O) -> Self {
+        Self { handles, opener }
+    }
+}
+
+impl<O: HandleOpener> PeerRecords for StoredHandleRecords<O> {
+    async fn read(&mut self, binding: &Binding) -> Result<cvlt::LineageRead, PeerUnavailable> {
+        // No retained handle: nothing is looked up elsewhere.
+        let handle = self
+            .handles
+            .get(binding.member())
+            .ok_or(PeerUnavailable)?
+            .clone();
+        self.opener.read(&handle).await
     }
 }
 
@@ -84,17 +121,17 @@ where
     C: FnMut() -> Option<u64>,
 {
     async fn current(&mut self, binding: &Binding) -> Result<Lineage, cnbx::ContactError> {
-        let started = (self.clock)().ok_or(cnbx::ContactError::Authority)?;
+        let started = (self.clock)().ok_or(cnbx::ContactError::Unavailable)?;
         let read = self
             .records
             .read(binding)
             .await
-            .map_err(|_| cnbx::ContactError::Authority)?;
+            .map_err(|_| cnbx::ContactError::Unavailable)?;
         // Time is taken again after the await; a clock that went backwards
         // cannot extend any validity.
-        let now = (self.clock)().ok_or(cnbx::ContactError::Authority)?;
+        let now = (self.clock)().ok_or(cnbx::ContactError::Unavailable)?;
         if now < started {
-            return Err(cnbx::ContactError::Authority);
+            return Err(cnbx::ContactError::Unavailable);
         }
         self.view.with_current(binding.community(), now, |charter| {
             select(read.evidence(), charter, binding, now)
@@ -103,6 +140,17 @@ where
 }
 
 /// Choose the winning valid lineage for `binding`, or refuse.
+/// Stale or not-yet-fresh evidence is `Unavailable`; invalid or revoked is `Authority`.
+fn classify(error: cvlt::LineageError) -> cnbx::ContactError {
+    match error {
+        cvlt::LineageError::Clock
+        | cvlt::LineageError::Policy(
+            cchr::Error::Expired | cchr::Error::Unavailable | cchr::Error::ClockRegression,
+        ) => cnbx::ContactError::Unavailable,
+        _ => cnbx::ContactError::Authority,
+    }
+}
+
 fn select(
     evidence: &[cvlt::LineageEvidence],
     charter: &VerifiedCharter,
@@ -117,26 +165,24 @@ fn select(
         // One invalid item refuses the whole read: nothing partial is trusted.
         let candidate = item
             .verify(charter, binding.member(), now)
-            .map_err(|_| cnbx::ContactError::Authority)?;
+            .map_err(classify)?;
         let wins = match &selected {
             None => true,
             Some(previous) => candidate
                 .compare_conflict(previous, now)
-                .map_err(|_| cnbx::ContactError::Authority)?
+                .map_err(classify)?
                 .is_gt(),
         };
         if wins {
             selected = Some(candidate);
         }
     }
-    let selected = selected.ok_or(cnbx::ContactError::Authority)?;
-    // Beyond the exclusive validity bound of the evidence or the Charter: refuse.
+    let selected = selected.ok_or(cnbx::ContactError::Unavailable)?;
+    // Beyond the exclusive validity bound of the evidence or the Charter: stale.
     if now >= selected.valid_until().min(charter.valid_until()) {
-        return Err(cnbx::ContactError::Authority);
+        return Err(cnbx::ContactError::Unavailable);
     }
-    let lineage = selected
-        .lineage(now)
-        .map_err(|_| cnbx::ContactError::Authority)?;
+    let lineage = selected.lineage(now).map_err(classify)?;
     if &lineage.binding != binding {
         return Err(cnbx::ContactError::Authority);
     }
@@ -182,7 +228,7 @@ mod tests {
         let mut port = PeerLineage::new(Failing, NoTrust, || Some(10));
         assert_eq!(
             block_on(port.current(&binding)).err(),
-            Some(cnbx::ContactError::Authority)
+            Some(cnbx::ContactError::Unavailable)
         );
     }
 
@@ -192,13 +238,42 @@ mod tests {
         let mut none = PeerLineage::new(Failing, NoTrust, || None);
         assert_eq!(
             block_on(none.current(&binding)).err(),
-            Some(cnbx::ContactError::Authority)
+            Some(cnbx::ContactError::Unavailable)
         );
         let mut times = [10u64, 9].into_iter();
         let mut back = PeerLineage::new(Failing, NoTrust, move || times.next());
         assert_eq!(
             block_on(back.current(&binding)).err(),
-            Some(cnbx::ContactError::Authority)
+            Some(cnbx::ContactError::Unavailable)
         );
+    }
+
+    struct NoOpen;
+    impl HandleOpener for NoOpen {
+        async fn read(&mut self, _: &[u8]) -> Result<cvlt::LineageRead, PeerUnavailable> {
+            panic!("no handle may be opened without a retained handle")
+        }
+    }
+
+    #[test]
+    fn a_peer_without_a_retained_handle_is_never_looked_up() {
+        let binding = Binding::new("c", &"a".repeat(96)).unwrap();
+        let mut records = StoredHandleRecords::new(Default::default(), NoOpen);
+        assert!(block_on(records.read(&binding)).is_err());
+    }
+
+    #[test]
+    fn stale_is_unavailable_and_negative_evidence_is_authority() {
+        use cvlt::LineageError::*;
+        for stale in [
+            Clock,
+            Policy(cchr::Error::Expired),
+            Policy(cchr::Error::Unavailable),
+        ] {
+            assert_eq!(classify(stale), cnbx::ContactError::Unavailable);
+        }
+        for negative in [Receipt, Scope, Assertion, Policy(cchr::Error::Signature)] {
+            assert_eq!(classify(negative), cnbx::ContactError::Authority);
+        }
     }
 }

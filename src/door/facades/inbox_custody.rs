@@ -61,6 +61,7 @@ fn contact_error(error: cnbx::Error) -> ErrorCode {
         cnbx::Error::Contacts(cnbx::ContactError::Storage | cnbx::ContactError::Conflict) => {
             ErrorCode::Reconcile
         }
+        cnbx::Error::Contacts(cnbx::ContactError::Unavailable) => ErrorCode::Unavailable,
         cnbx::Error::Contacts(cnbx::ContactError::Limit) => ErrorCode::Capacity,
         cnbx::Error::Contacts(cnbx::ContactError::Encoding | cnbx::ContactError::Scope) => {
             ErrorCode::InvalidRequest
