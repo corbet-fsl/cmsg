@@ -187,6 +187,17 @@ async fn custody_is_lent_with_credential_and_block_list_of_the_same_snapshot() {
         .unwrap();
     assert_eq!(owner.is_blocked("peer-one").await, Ok(true));
     assert_eq!(owner.is_blocked("peer-two").await, Ok(false));
+    // A read of any peer refuses a blocked sender before it opens anything.
+    let refused = owner
+        .with_current(|read| {
+            Ok((
+                read.refuse_blocked("peer-one"),
+                read.refuse_blocked("peer-two"),
+            ))
+        })
+        .await
+        .unwrap();
+    assert_eq!(refused, (Err(ErrorCode::Refused), Ok(())));
     // A second lend needs a second admission, which the owner makes itself.
     let second = owner
         .with_profile(|parts| Ok((parts.credential.clone(), parts.blocked.clone())))

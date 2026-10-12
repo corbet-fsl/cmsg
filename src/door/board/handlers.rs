@@ -15,6 +15,21 @@ pub struct CommittedRead<'a, B: cwst::backend::Backend> {
     pub store: &'a cwst::Store<B>,
     pub binding: &'a ckmg::Binding,
     pub contact: &'a dyn Fn(&str) -> cshm::ContactCheck,
+    /// Members the Contacts journal blocks, read in this same snapshot.
+    pub blocked: &'a [String],
+}
+
+impl<B: cwst::backend::Backend> CommittedRead<'_, B> {
+    /// Call this with the sender's member id BEFORE opening, decrypting or
+    /// caching anything that sender produced (profile, key transfer, reply).
+    /// A blocked sender is refused and nothing of theirs is read.
+    pub fn refuse_blocked(&self, sender: &str) -> Result<()> {
+        if self.blocked.iter().any(|blocked| blocked == sender) {
+            Err(ErrorCode::Refused)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Explicit trusted deployment policy. No default action or snapshot age exists;

@@ -74,7 +74,14 @@ where
             // This is a text detector, NOT the ctcs relationship journal. Its
             // unavailable result cannot approve a no-contact-details field.
             let contact = |_: &str| cshm::ContactCheck::Unavailable;
+            // Same snapshot, same Use: the block list travels with the read.
+            let blocked = custody
+                .inbox
+                .contacts(&store)
+                .and_then(|contacts| contacts.blocking_rules())
+                .map_err(|_| ErrorCode::Refused)?;
             read(board::CommittedRead {
+                blocked: &blocked,
                 store: &store,
                 binding: &lineage.binding,
                 contact: &contact,

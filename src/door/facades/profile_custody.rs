@@ -84,6 +84,7 @@ where
             .map_err(keys_error)?;
         let binding = lineage.binding;
         let contact = |_: &str| cshm::ContactCheck::Unavailable;
+        let blocked_view = blocked.clone();
         let lent = self
             .vault
             .keys()
@@ -93,6 +94,7 @@ where
                         store: &store,
                         binding: &binding,
                         contact: &contact,
+                        blocked: &blocked_view,
                     },
                     signer,
                     custody,
