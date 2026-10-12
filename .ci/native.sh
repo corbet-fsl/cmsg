@@ -23,11 +23,27 @@ bash .ci/prepare-foyer-fixture.sh
 cp fixture-owner.json evidence/native/fixture-owner.json
 cargo fmt --all -- --check
 # The Keyhole test server links openssl through webauthn-rs-core.
-env NIX_BUILD_SHELL=bash nix-shell .ci/check-shell.nix --run 'cargo clippy --locked --all-targets -- -D warnings'
-bash .ci/native-prover.sh
+nix-shell tests/fixture/owner/check-shell.nix --run 'cargo clippy --locked --all-targets -- -D warnings'
+nix-shell tests/fixture/owner/check-shell.nix --run 'bash .ci/native-prover.sh'
+# Pending passkey ceremonies expire after 300 s of wall time; build every test binary BEFORE the fixture starts.
+nix-shell tests/fixture/owner/check-shell.nix --run 'cargo test --locked --all-targets --no-run'
 fixture="${CARGO_TARGET_DIR:-tests/fixture/target}/debug/cmsg-foyer-fixture"
 export fixture
-env NIX_BUILD_SHELL=bash nix-shell .ci/check-shell.nix --run 'python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --all-targets --no-fail-fast'
+# The foyer test edits the live policy, which invalidates every passport minted by the same fixture;
+# the initial-enrollment and Wallet tests each fill the fixture's bounded pending challenges.
+# Each of these gets its own fixture instance.
+own="foyer initial_enrollment wallet_enrollment"
+others=$(for t in tests/*.rs; do n=$(basename "$t" .rs); case " $own " in *" $n "*) ;; *) printf -- '--test %s ' "$n";; esac; done)
+export others
+status=0
+# Debug builds of the Wallet flows hold large futures on the test thread.
+export RUST_MIN_STACK=67108864
+nix-shell tests/fixture/owner/check-shell.nix --run 'python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --lib --bins --examples $others --no-fail-fast' || status=1
+for t in $own; do
+    export t
+    nix-shell tests/fixture/owner/check-shell.nix --run 'python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --test "$t" --no-fail-fast -- --test-threads=1' || status=1
+done
+[ "$status" = 0 ]
 
 # Qualify the actual maintained Tor transport separately from inert record tests.
 # Existing provisioned original tools are required; this route never installs them.

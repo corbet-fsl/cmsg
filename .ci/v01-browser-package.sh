@@ -51,7 +51,7 @@ cargo metadata --locked --format-version 1 --features browser-tor \
 node "$helper" select "$out" "$PWD"
 node "$helper" bindgen "$out" "$(wasm-bindgen --version)"
 
-cargo build --locked --target wasm32-unknown-unknown --lib \
+cargo build --release --locked --target wasm32-unknown-unknown --lib \
   --features cmsg/browser-tor -p cmsg -p ctrn -p cfry \
   --message-format=json > "$out/wasm-build.jsonl"
 for port in cmsg ctrn cfry; do
@@ -60,7 +60,11 @@ for port in cmsg ctrn cfry; do
     cmsg) destination="$out/generated/wasm" ;;
     *) destination="$out/public/cmsg/vendor/$port/browser/pkg" ;;
   esac
-  wasm-bindgen --target web --out-dir "$destination" --out-name "$port" "$wasm"
+  wasm-bindgen --target web --remove-name-section --remove-producers-section \
+    --out-dir "$destination" --out-name "$port" "$wasm"
+  if command -v wasm-opt >/dev/null; then
+    wasm-opt -Oz --all-features "$destination/${port}_bg.wasm" -o "$destination/${port}_bg.wasm"
+  fi
 done
 
 # Original registry and generator, unchanged. The native schema exporter does
@@ -69,7 +73,7 @@ cargo run --locked --example registry > "$out/registry.json"
 node tools/generate.mjs "$out/registry.json" "$out/generated"
 node tools/check.mjs "$out/registry.json"
 node tools/node_modules/typescript/bin/tsc --outDir "$out/public/cmsg" \
-  --strict --declaration --target es2022 --module nodenext --moduleResolution nodenext \
+  --strict --declaration --target es2022 --lib es2022,dom,esnext.disposable --module nodenext --moduleResolution nodenext \
   "$out/generated/client.ts" "$out/generated/browser.ts"
 cmp Cargo.lock "$out/Cargo.lock"
 cmp Cargo.toml "$out/Cargo.toml"

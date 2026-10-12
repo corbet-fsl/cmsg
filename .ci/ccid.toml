@@ -77,7 +77,7 @@ environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-v01/target", CARGO_PROFIL
 # shell drivers are removed; this job is the only v01 gate.
 [checks.v01-push]
 kind = "commands"
-commands = [["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "cargo check --offline --locked --all-targets --features native-tor,test-authenticator"], ["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "cargo clippy --offline --locked --all-targets --features native-tor,test-authenticator -- -D warnings"], ["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "cargo test --offline --locked --lib --features native-tor,test-authenticator -- --skip 'door::login::native::tests::unknown_session_result_and_cancelled_reply_fence_original_foyer' --skip 'door::login::session::custody_tests::actual_login_custody_is_consumed_once_with_local_and_original_session_refusals'"]]
+commands = [["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "cargo check --offline --locked --all-targets --features native-tor,test-authenticator"], ["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "cargo clippy --offline --locked --all-targets --features native-tor,test-authenticator -- -D warnings"], ["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "cargo test --offline --locked --lib --features native-tor,test-authenticator -- --skip 'door::login::native::tests::unknown_session_result_and_cancelled_reply_fence_original_foyer' --skip 'door::login::session::custody_tests::actual_login_custody_is_consumed_once_with_local_and_original_session_refusals'"], ["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "bash .ci/wasm-check.sh --offline --locked --target wasm32-unknown-unknown --lib --features cmsg/browser-tor -p cmsg"]]
 
 [jobs.v01-push]
 scheduler = "crow"
@@ -102,4 +102,4 @@ scheduler = "crow"
 checks = ["browser-package"]
 workflow = "repository-jobs"
 command = ["ccid:run-declared-checks"]
-environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-v01/target", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_TEST_DEBUG = "0", CARGO_NET_GIT_FETCH_WITH_CLI = "true", CARGO_NET_RETRY = "0", CI_JOBS = "2", CI_TEST_THREADS = "2" }
+environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-browser/target", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_TEST_DEBUG = "0", CARGO_NET_GIT_FETCH_WITH_CLI = "true", CARGO_NET_RETRY = "0", CI_JOBS = "2", CI_TEST_THREADS = "2" }

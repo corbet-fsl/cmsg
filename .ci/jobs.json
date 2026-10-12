@@ -2,7 +2,7 @@
   "schema": 1,
   "generator": "ccid render v1",
   "tool_revision": "53c129c2efa3b9279d2ecbc237d15acdfb656d8c",
-  "manifest_sha256": "e802c233a639da8fb588a01a9149dde021f2d596f7a920f8457c82fcbe1ee9d1",
+  "manifest_sha256": "8dc8e28aecab703108db5afa67a334af7bd78260c96f64580c0c6f9b9673b056",
   "jobs": {
     "browser-package": {
       "job": "browser-package",
@@ -19,7 +19,7 @@
         "CARGO_NET_RETRY": "0",
         "CARGO_PROFILE_DEV_DEBUG": "0",
         "CARGO_PROFILE_TEST_DEBUG": "0",
-        "CARGO_TARGET_DIR": "/caches/cargo/cmsg-v01/target",
+        "CARGO_TARGET_DIR": "/caches/cargo/cmsg-browser/target",
         "CI_JOBS": "2",
         "CI_TEST_THREADS": "2"
       }

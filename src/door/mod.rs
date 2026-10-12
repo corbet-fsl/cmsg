@@ -3,7 +3,9 @@
 //! Client grants are local capabilities, never remote member/admin/root authority.
 //! Pairing belongs to the trusted embedding runtime; it is not an API action.
 //! Unavailable domain owners cannot be replaced by caller-provided success values.
+pub mod account;
 pub mod accounting;
+mod actor;
 pub mod board;
 pub mod browser;
 mod composition;
@@ -211,6 +213,9 @@ pub struct Empty {}
 #[serde(rename_all = "snake_case")]
 pub enum Readiness {
     Unavailable,
+    /// The network connection is established: Tor bootstrap and onion
+    /// publication are done.
+    Ready,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -233,10 +238,12 @@ pub struct Door {
     config: Configuration,
     grants: BTreeMap<[u8; 32], Grant>,
     clock_floor: u64,
+    preload: Readiness,
     foyers: BTreeMap<String, foyer::Binding>,
     boards: BTreeMap<String, Box<dyn facades::BoundBoard>>,
     meshes: BTreeMap<String, facades::BoundMesh>,
     vaults: BTreeMap<String, Box<dyn facades::BoundVault>>,
+    accounts: BTreeMap<String, account::AccountActor>,
     login_configuration: BTreeMap<String, login::Configuration>,
     logins: BTreeMap<[u8; 32], login::session::State>,
     #[cfg(all(feature = "test-authenticator", not(target_arch = "wasm32")))]
@@ -251,10 +258,12 @@ impl Door {
             config,
             grants: BTreeMap::new(),
             clock_floor: 0,
+            preload: Readiness::Unavailable,
             foyers: BTreeMap::new(),
             boards: BTreeMap::new(),
             meshes: BTreeMap::new(),
             vaults: BTreeMap::new(),
+            accounts: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
             logins: BTreeMap::new(),
             #[cfg(all(feature = "test-authenticator", not(target_arch = "wasm32")))]
@@ -262,6 +271,23 @@ impl Door {
             #[cfg(target_arch = "wasm32")]
             browser_gesture: None,
         }
+    }
+
+    /// Trusted embedding control: the runtime reports the network connection
+    /// established (Tor bootstrap and onion publication done). Absent from every
+    /// callable projection; it is never cleared by a local client.
+    pub fn set_preload_ready(&mut self) {
+        self.preload = Readiness::Ready;
+    }
+
+    /// Trusted embedding control for a real network bind: only a completed bind
+    /// (Tor bootstrap and onion publication done) releases preload; a failed or
+    /// cancelled one leaves it untouched. The bind result is returned unchanged.
+    pub fn network_bound(&mut self, bound: Result<()>) -> Result<()> {
+        if bound.is_ok() {
+            self.set_preload_ready();
+        }
+        bound
     }
 
     /// Install actual Foyer sessions for an already configured local portal.
@@ -293,6 +319,23 @@ impl Door {
                 uncertain: false,
             },
         );
+        Ok(())
+    }
+
+    /// Install the account actor of an already configured member origin. This
+    /// trusted embedding control is absent from every callable projection; the
+    /// actor ends at `expires`, on Vault lock or when the Door is dropped.
+    pub fn bind_account(&mut self, origin: &str, actor: account::AccountActor) -> Result<()> {
+        if !self
+            .config
+            .origins
+            .get(&Role::Member)
+            .is_some_and(|set| set.contains(origin))
+            || self.accounts.contains_key(origin)
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        self.accounts.insert(origin.into(), actor);
         Ok(())
     }
 
@@ -452,7 +495,7 @@ impl Door {
     fn status(&self) -> RuntimeStatus {
         RuntimeStatus {
             community: self.config.community.clone(),
-            preload: Readiness::Unavailable,
+            preload: self.preload.clone(),
             owners: [
                 Family::Vault,
                 Family::Mesh,

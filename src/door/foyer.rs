@@ -73,7 +73,20 @@ enum ServiceScope {
 /// Raw owner operations that cmsg's account lifecycle performs itself through the
 /// held lease: no frontend builds or signs the delegation or acquires the
 /// checkpoint, so they are not republished (`account_enroll` is cmsg's own action).
-const OWNED_BY_ACCOUNT_LIFECYCLE: [&str; 2] = ["account_enroll", "account_checkpoint"];
+/// The step-up, passkey and device operations need a user-verified assertion from
+/// the local Keyhole ceremony, so cmsg's own member actions will perform them.
+const OWNED_BY_ACCOUNT_LIFECYCLE: [&str; 8] = [
+    // The development gate exists only so test fixtures can open a development
+    // window; no production door may ever forward it.
+    "development_gate",
+    "account",
+    "account_enroll",
+    "account_checkpoint",
+    "step_up_begin",
+    "passkey_add",
+    "passkey_revoke",
+    "device_authorize",
+];
 
 static OPERATIONS: LazyLock<Vec<Operation>> = LazyLock::new(|| operations(cfyr::contract()));
 

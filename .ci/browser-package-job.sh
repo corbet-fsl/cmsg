@@ -16,8 +16,14 @@ for candidate in "$CARGO_HOME"/wasm-pack/wasm-bindgen-*/wasm-bindgen; do
   fi
 done
 for candidate in "$CARGO_HOME"/../bun/esbuild@*/bin/esbuild; do
-  if [[ -x "$candidate" ]]; then PATH="$(dirname "$candidate"):$PATH"; break; fi
+  if [[ -x "$candidate" ]] && "$candidate" --version >/dev/null 2>&1; then PATH="$(dirname "$candidate"):$PATH"; break; fi
 done
+if ! command -v esbuild >/dev/null 2>&1; then
+  # No usable esbuild in the worker cache: install one exact version into a scratch prefix.
+  esbuild_prefix=$(mktemp -d)
+  npm install --no-audit --no-fund --no-save --prefix "$esbuild_prefix" esbuild@0.23.1 >/dev/null
+  PATH="$esbuild_prefix/node_modules/.bin:$PATH"
+fi
 source .ci/wasm-tools.sh
 export PATH
 printf 'tools: wasm-bindgen want=%s have=%s esbuild=%s\n' "$want" "$(command -v wasm-bindgen || echo none)" "$(command -v esbuild || echo none)"
@@ -30,11 +36,36 @@ dir=$(mktemp -d "$base/$CI_COMMIT_SHA.XXXXXXXX")
 export CMSG_BROWSER_OUT="$dir/build"
 # The milestone script needs the locked generator dependencies; install exactly the lockfile.
 (cd tools && npm ci --no-audit --no-fund)
-for mode in ports service assemble; do
-  bash -x .ci/v01-browser-package.sh "$mode"
+# The Tor service stage needs the pinned TorJS and Arti sources (prepared here from their
+# pinned revisions); set CMSG_SKIP_TOR=1 to package the ports only.
+modes=(ports)
+if [[ "${CMSG_SKIP_TOR:-0}" != 1 ]]; then
+  source .ci/tor-sources.sh "$dir/tor"
+  modes=(ports service assemble)
+fi
+printf 'modes: %s\n' "${modes[*]}"
+for mode in "${modes[@]}"; do
+  if [[ "$mode" == service ]]; then
+    wasm_dev_size_env bash -x .ci/v01-browser-package.sh "$mode"
+  else
+    bash -x .ci/v01-browser-package.sh "$mode"
+  fi
 done
+# Ship one copy: no source maps and no base64-inlined TorJS entry points (the file entry stays).
+find "$CMSG_BROWSER_OUT/public/cmsg" -name '*.map' -delete
+rm -rf "$CMSG_BROWSER_OUT/public/cmsg/vendor/torjs/entryPoints/wasm-base64" \
+       "$CMSG_BROWSER_OUT/public/cmsg/vendor/torjs/entryPoints/wasm-cdn"
+# Not used by the PWA: the schema exports (they stay in the native and CLI artefacts) and the TorJS
+# anonymous-RPC worker, which nothing references and which inlines a second copy of the Tor wasm.
+rm -f "$CMSG_BROWSER_OUT/public/cmsg"/{registry,openapi,mcp,cli}.json \
+      "$CMSG_BROWSER_OUT/public/cmsg/vendor/torjs/anon-rpc-worker.js"
+printf 'SIZES (raw, gzip -9) of the larger files:\n'
+find "$CMSG_BROWSER_OUT/public/cmsg" -type f -size +100k | sort | while read -r f; do
+  printf '  %10d %10d %s\n' "$(stat -c %s "$f")" "$(gzip -9 -c "$f" | wc -c)" "${f#"$CMSG_BROWSER_OUT/public/cmsg/"}"
+done
+printf 'TOTAL raw bytes: %s gzip bytes: %s\n' "$(du -sb "$CMSG_BROWSER_OUT/public/cmsg" | cut -f1)" "$(find "$CMSG_BROWSER_OUT/public/cmsg" -type f -exec gzip -9 -c {} + | wc -c)"
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-  -cf "$dir/cmsg-browser.tar" -C "$CMSG_BROWSER_OUT" public/cmsg receipt.json
+  -cf "$dir/cmsg-browser.tar" -C "$CMSG_BROWSER_OUT" public/cmsg Cargo.lock
 digest=$(sha256sum "$dir/cmsg-browser.tar" | cut -d' ' -f1)
 printf '%s  cmsg-browser.tar\n' "$digest" > "$dir/cmsg-browser.tar.sha256"
 printf '%s\n' "$CI_COMMIT_SHA" > "$dir/commit"

@@ -128,6 +128,11 @@ fn final_cut(
 }
 
 impl<'p> SubmittedEnrollment<'p> {
+    /// The retained admission owner of this registered delegation.
+    pub fn admission_mut(&mut self) -> &mut AccountAdmission<'p> {
+        &mut self.prepared.admission
+    }
+
     /// Fetch and verify the complete current publication, through the fixed
     /// original registry action. This never requests a caller-selected old slot.
     pub async fn current_checkpoint(mut self) -> Result<CheckpointAcquisition<'p>> {
@@ -178,7 +183,7 @@ impl<'p> CurrentEnrollment<'p> {
     }
 
     /// The retained admission owner; every use re-authenticates around awaits.
-    pub(super) fn admission_mut(&mut self) -> &mut AccountAdmission<'p> {
+    pub fn admission_mut(&mut self) -> &mut AccountAdmission<'p> {
         &mut self.enrolled.prepared.admission
     }
 }

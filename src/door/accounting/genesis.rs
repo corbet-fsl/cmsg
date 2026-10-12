@@ -234,3 +234,205 @@ impl Drop for Attempt<'_> {
         }
     }
 }
+
+/// Operation identifiers for Store commits; random, non-zero, never reused.
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub(super) fn operation() -> Result<[u8; 32]> {
+    let mut id = [0u8; 32];
+    getrandom::fill(&mut id).map_err(|_| ErrorCode::Unavailable)?;
+    if id == [0; 32] {
+        return Err(ErrorCode::Unavailable);
+    }
+    Ok(id)
+}
+
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub use proven::{ProvenAccount, StagedRequest};
+
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+mod proven {
+    //! The proven candidate, the signed request and the durable pending state A/B.
+    use super::*;
+    use ckmg::wallet_engine::{account as engine, native_prover::NativeProver};
+    use cwlt::account_owner::AccountGenesisProof;
+
+    /// The original private candidate after the bounded native proof, still bound
+    /// to the same current enrollment owner. Neither a request nor custody yet.
+    pub struct ProvenAccount<'p> {
+        enrollment: CurrentEnrollment<'p>,
+        proof: AccountGenesisProof,
+        context: GenesisContext,
+        material: cblc::publication::PublicVerifierMaterial,
+        material_digest: [u8; 32],
+        origin: String,
+    }
+
+    /// The exact signed request that state A committed. Sending it again is safe.
+    pub struct StagedRequest {
+        pub(super) signed: SignedApplyExtended,
+    }
+
+    impl<'p> PreparedAccount<'p> {
+        /// Prove the candidate with the bounded original native prover under the
+        /// account's Keys authority. Consumes the preparation: a refusal or a
+        /// cancellation ends it for good. Both owners are rechecked afterwards.
+        pub async fn prove<B, C, E, A, R>(
+            mut self,
+            account: &mut CommunityAccount<B, C, E, A, R>,
+            prover: &NativeProver,
+        ) -> Result<ProvenAccount<'p>>
+        where
+            B: cwst::backend::Backend,
+            C: Clock,
+            E: Entropy,
+            A: Authority,
+            R: Records,
+        {
+            self.refresh(account).await?;
+            let Self {
+                enrollment,
+                candidate,
+                context,
+                material,
+                material_digest,
+                origin,
+                ..
+            } = self;
+            let proof = account
+                .vault
+                .prove_community_genesis(candidate, &context, prover, || Ok(now()))
+                .await
+                .map_err(|_| ErrorCode::Unauthorized)?;
+            let mut proven = ProvenAccount {
+                enrollment,
+                proof,
+                context,
+                material,
+                material_digest,
+                origin,
+            };
+            proven.refresh(account).await?;
+            Ok(proven)
+        }
+    }
+
+    impl ProvenAccount<'_> {
+        /// Reobserve the same HTTPS enrollment, publication, policy and origin and
+        /// the local Keys; any difference from what the proof was made under refuses.
+        pub async fn refresh<B, C, E, A, R>(
+            &mut self,
+            account: &mut CommunityAccount<B, C, E, A, R>,
+        ) -> Result<u64>
+        where
+            B: cwst::backend::Backend,
+            C: Clock,
+            E: Entropy,
+            A: Authority,
+            R: Records,
+        {
+            self.enrollment.refresh().await?;
+            let checked =
+                self.enrollment
+                    .with_verified(|publication, tree, index, current| {
+                        let observed = context(
+                            publication,
+                            tree,
+                            index,
+                            current,
+                            Some(self.context.checked_at),
+                        )?;
+                        if observed != self.context
+                            || current.material != self.material
+                            || current.material_digest != self.material_digest
+                            || current.origin != self.origin
+                        {
+                            return Err(ErrorCode::Unauthorized);
+                        }
+                        Ok::<_, ErrorCode>(current.now)
+                    })??;
+            account.check(&self.origin).await?;
+            Ok(checked)
+        }
+
+        /// Sign the account request once, bind it to this exact account and commit
+        /// state A with the outbox in ONE Store commit. After this returns, a crash
+        /// is recovered by `account_reopen`, never by signing or proving again.
+        pub async fn stage<B, C, E, A, R>(
+            &mut self,
+            account: &mut CommunityAccount<B, C, E, A, R>,
+            intent: &mut ckmg::IntentAdmission,
+        ) -> Result<StagedRequest>
+        where
+            B: cwst::backend::Backend,
+            C: Clock,
+            E: Entropy,
+            A: Authority,
+            R: Records,
+        {
+            let checked = self.refresh(account).await?;
+            let policy = self.material.policy.account.clone();
+            let genesis = {
+                let material = account
+                    .vault
+                    .community_genesis_material(&self.proof, &self.context, checked)
+                    .await
+                    .map_err(|_| ErrorCode::Unauthorized)?;
+                ProvenGenesis::from_material(&material, &policy)?
+            };
+            let signed = self
+                .enrollment
+                .sign_genesis_request(account, &genesis, intent)
+                .await?;
+            let pending = account
+                .pending_binding(self.material_digest, signed.outbox())
+                .await?;
+            let binding = engine::PendingGenesisBinding {
+                acceptance: signed.acceptance_binding(self.material.account_response_key),
+                extended_acceptance_digest: None,
+                response: None,
+                upper: pending.encode()?,
+            };
+            account
+                .vault
+                .stage_pending_genesis(
+                    &self.proof,
+                    &binding,
+                    signed.outbox().to_vec(),
+                    operation()?,
+                    now(),
+                )
+                .await
+                .map_err(|_| ErrorCode::Reconcile)?;
+            Ok(StagedRequest { signed })
+        }
+
+        /// Send the staged outbox, verify the actual response and advance the
+        /// durable companion to state B. Any failure is uncertain (Reconcile);
+        /// state A stays and `account_reopen` re-sends the identical bytes.
+        pub async fn send<B, C, E, A, R>(
+            &mut self,
+            account: &mut CommunityAccount<B, C, E, A, R>,
+            staged: &StagedRequest,
+        ) -> Result<u64>
+        where
+            B: cwst::backend::Backend,
+            C: Clock,
+            E: Entropy,
+            A: Authority,
+            R: Records,
+        {
+            let response = self.enrollment.send_genesis_request(&staged.signed).await?;
+            let trust = self
+                .enrollment
+                .with_verified(|_, _, _, current| response_trust(&current.material))
+                .map_err(|_| ErrorCode::Reconcile)?
+                .map_err(|_| ErrorCode::Reconcile)?;
+            account
+                .vault
+                .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
+                .await
+                .map_err(|_| ErrorCode::Reconcile)?;
+            Ok(response.acceptance().accepted_at)
+        }
+    }
+}
