@@ -24,7 +24,7 @@ cp fixture-owner.json evidence/native/fixture-owner.json
 cargo fmt --all -- --check
 # The Keyhole test server links openssl through webauthn-rs-core.
 nix-shell tests/fixture/owner/check-shell.nix --run 'cargo clippy --locked --all-targets -- -D warnings'
-bash .ci/native-prover.sh
+nix-shell tests/fixture/owner/check-shell.nix --run 'bash .ci/native-prover.sh'
 fixture="${CARGO_TARGET_DIR:-tests/fixture/target}/debug/cmsg-foyer-fixture"
 export fixture
 nix-shell tests/fixture/owner/check-shell.nix --run 'python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --all-targets --no-fail-fast'
