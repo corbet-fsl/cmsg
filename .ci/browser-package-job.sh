@@ -45,7 +45,7 @@ for mode in "${modes[@]}"; do
   bash -x .ci/v01-browser-package.sh "$mode"
 done
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-  -cf "$dir/cmsg-browser.tar" -C "$CMSG_BROWSER_OUT" public/cmsg receipt.json
+  -cf "$dir/cmsg-browser.tar" -C "$CMSG_BROWSER_OUT" public/cmsg Cargo.lock
 digest=$(sha256sum "$dir/cmsg-browser.tar" | cut -d' ' -f1)
 printf '%s  cmsg-browser.tar\n' "$digest" > "$dir/cmsg-browser.tar.sha256"
 printf '%s\n' "$CI_COMMIT_SHA" > "$dir/commit"
