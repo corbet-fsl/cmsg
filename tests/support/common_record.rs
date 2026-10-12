@@ -63,9 +63,14 @@ pub(super) async fn enrolled(
     let device = candidate.device();
     candidate.resume_finish(&mut api, now).await.unwrap();
     login(&mut api, &mut keys).await;
-    api.call("device_authorize", json!({"key":device.value()}))
-        .await
-        .unwrap();
+    let body = proven(
+        &mut api,
+        &mut keys,
+        json!({"kind":"device_authorize","key":device.value()}),
+        json!({"key":device.value()}),
+    )
+    .await;
+    api.call("device_authorize", body).await.unwrap();
     let door = bound("omega", origin, Role::Member, Scope::Community, api);
     let mut policy = door.current_policy(origin).unwrap();
     let lease = initial(&door, origin, &mut policy).await;
@@ -356,10 +361,14 @@ pub(super) async fn exercise(
         .find(|key| key["current"] == true)
         .map(|key| serde_json::from_value(key["credential"].clone()).unwrap())
         .unwrap();
-    let begin = administrator
-        .call("passkey_add", json!({"step":"begin"}))
-        .await
-        .unwrap();
+    let body = proven(
+        &mut administrator,
+        &mut keys,
+        json!({"kind":"passkey_add"}),
+        json!({"step":"begin"}),
+    )
+    .await;
+    let begin = administrator.call("passkey_add", body).await.unwrap();
     let mut added = passkeys(world);
     let (credential, unlock) = added
         .register_member(begin["options"].clone())
@@ -380,14 +389,22 @@ pub(super) async fn exercise(
         .await
         .unwrap();
     login(&mut administrator, &mut added).await;
-    administrator
-        .call("device_authorize", json!({"key":added_device.value()}))
-        .await
-        .unwrap();
-    administrator
-        .call("passkey_revoke", json!({"credential":old_id}))
-        .await
-        .unwrap();
+    let body = proven(
+        &mut administrator,
+        &mut added,
+        json!({"kind":"device_authorize","key":added_device.value()}),
+        json!({"key":added_device.value()}),
+    )
+    .await;
+    administrator.call("device_authorize", body).await.unwrap();
+    let body = proven(
+        &mut administrator,
+        &mut added,
+        json!({"kind":"passkey_revoke","credential":old_id}),
+        json!({"credential":old_id}),
+    )
+    .await;
+    administrator.call("passkey_revoke", body).await.unwrap();
     let observed = administrator
         .live_membership()
         .observe_lease(now)

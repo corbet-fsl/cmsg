@@ -2,7 +2,7 @@
 use super::*;
 #[path = "../support/wallet.rs"]
 mod owned;
-use owned::{bound, foyer, initial, now, passkeys};
+use owned::{bound, foyer, initial, now, passkeys, proven};
 
 async fn opening(
     api: &mut cfyr::Foyer<cfyr::HttpClient>,
@@ -75,12 +75,15 @@ pub(super) async fn journey() {
             .await
             .unwrap();
         let prepared = opening(&mut api, &mut keys).await;
-        api.call(
-            "wallet_device_authorize",
-            json!({"key":prepared.device().unwrap().value()}),
+        let key = prepared.device().unwrap().value();
+        let body = proven(
+            &mut api,
+            &mut keys,
+            json!({"kind":"device_authorize","key":key}),
+            json!({"key":key}),
         )
-        .await
-        .unwrap();
+        .await;
+        api.call("wallet_device_authorize", body).await.unwrap();
         let member = api
             .live_wallet_membership()
             .observe_lease(now)
@@ -142,12 +145,15 @@ pub(super) async fn journey() {
     .unwrap();
     candidate.resume_finish(&mut api, now).await.unwrap();
     let prepared = opening(&mut api, &mut keys).await;
-    api.call(
-        "wallet_device_authorize",
-        json!({"key":candidate.device().value()}),
+    let key = candidate.device().value();
+    let body = proven(
+        &mut api,
+        &mut keys,
+        json!({"kind":"device_authorize","key":key}),
+        json!({"key":key}),
     )
-    .await
-    .unwrap();
+    .await;
+    api.call("wallet_device_authorize", body).await.unwrap();
     api.call("development_gate", json!({})).await.unwrap();
     let door = bound("wallet", origin, Role::Member, Scope::Global, api);
 

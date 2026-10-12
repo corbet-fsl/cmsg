@@ -69,6 +69,26 @@ async fn foyer(f: &Value) -> cfyr::Foyer<cfyr::HttpClient> {
         trust,
     )
 }
+/// A fresh user-verifying assertion for exactly one action, added to `body` as
+/// its `step_up` proof (passkey add/revoke and device authorization need one).
+async fn proven(
+    api: &mut cfyr::Foyer<cfyr::HttpClient>,
+    keys: &mut cpky::Client<SoftwareAuthenticator>,
+    action: Value,
+    mut body: Value,
+) -> Value {
+    let begin = api
+        .call("step_up_begin", json!({"action": action}))
+        .await
+        .unwrap();
+    let (credential, _) = keys
+        .sign_in(begin["options"].clone())
+        .await
+        .unwrap()
+        .into_parts();
+    body["step_up"] = json!({"ceremony": begin["ceremony"], "credential": credential.into_json()});
+    body
+}
 async fn login(
     api: &mut cfyr::Foyer<cfyr::HttpClient>,
     keys: &mut cpky::Client<SoftwareAuthenticator>,
@@ -136,9 +156,14 @@ async fn original_registration_tuple_activates_only_after_durable_candidate_and_
         assert_eq!(candidate.device(), device);
         candidate.resume_finish(&mut api, || now).await.unwrap();
         login(&mut api, &mut keys).await;
-        api.call("device_authorize", json!({"key":device.value()}))
-            .await
-            .unwrap();
+        let body = proven(
+            &mut api,
+            &mut keys,
+            json!({"kind":"device_authorize","key":device.value()}),
+            json!({"key":device.value()}),
+        )
+        .await;
+        api.call("device_authorize", body).await.unwrap();
         let mut policy = api.current_policy();
         let initial = api
             .live_membership()
@@ -411,9 +436,14 @@ async fn another_keys_prf_cannot_be_labeled_with_the_accepted_original_credentia
     login(&mut api, &mut b).await;
     // Even genuine B's authorization of A's device cannot attest that B supplied
     // A's PRF. A certificate/authorized-device equality alone is insufficient.
-    api.call("device_authorize", json!({"key":device_a.value()}))
-        .await
-        .unwrap();
+    let body = proven(
+        &mut api,
+        &mut b,
+        json!({"kind":"device_authorize","key":device_a.value()}),
+        json!({"key":device_a.value()}),
+    )
+    .await;
+    api.call("device_authorize", body).await.unwrap();
     let mut policy = api.current_policy();
     let initial = api
         .live_membership()

@@ -188,6 +188,26 @@ fn passkeys() -> cpky::Client<SoftwareAuthenticator> {
         .unwrap(),
     )
 }
+/// A fresh user-verifying assertion for exactly one action, added to `body` as
+/// its `step_up` proof (passkey add/revoke and device authorization need one).
+async fn proven(
+    api: &mut cfyr::Foyer<cfyr::HttpClient>,
+    keys: &mut cpky::Client<SoftwareAuthenticator>,
+    action: Value,
+    mut body: Value,
+) -> Value {
+    let begin = api
+        .call("step_up_begin", json!({"action": action}))
+        .await
+        .unwrap();
+    let (credential, _) = keys
+        .sign_in(begin["options"].clone())
+        .await
+        .unwrap()
+        .into_parts();
+    body["step_up"] = json!({"ceremony": begin["ceremony"], "credential": credential.into_json()});
+    body
+}
 async fn login(
     api: &mut cfyr::Foyer<cfyr::HttpClient>,
     keys: &mut cpky::Client<SoftwareAuthenticator>,
@@ -511,12 +531,15 @@ async fn journey() {
             .unwrap();
         let opening = login(&mut api, &mut keys).await;
         drop(registered);
-        api.call(
-            "device_authorize",
-            json!({"key":opening.device().unwrap().value()}),
+        let key = opening.device().unwrap().value();
+        let body = proven(
+            &mut api,
+            &mut keys,
+            json!({"kind":"device_authorize","key":key}),
+            json!({"key":key}),
         )
-        .await
-        .unwrap();
+        .await;
+        api.call("device_authorize", body).await.unwrap();
         let door = door(fixture.origin(), api);
         let config = configuration(&tor, &base, index, vec![], true);
         peer_doors.push((
@@ -573,12 +596,15 @@ async fn journey() {
     .unwrap();
     candidate.resume_finish(&mut api, now).await.unwrap();
     let opening = login(&mut api, &mut keys).await;
-    api.call(
-        "device_authorize",
-        json!({"key":candidate.device().value()}),
+    let key = candidate.device().value();
+    let body = proven(
+        &mut api,
+        &mut keys,
+        json!({"kind":"device_authorize","key":key}),
+        json!({"key":key}),
     )
-    .await
-    .unwrap();
+    .await;
+    api.call("device_authorize", body).await.unwrap();
 
     // Production Tor signatures use a separately, actually authenticated session
     // of this same original passkey. Its guard can never alias the initial lease.
