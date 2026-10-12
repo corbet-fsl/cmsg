@@ -7,7 +7,8 @@ use std::cell::RefCell;
 struct Clock;
 impl ckmg::Clock for Clock {
     fn now(&mut self) -> std::result::Result<u64, ckmg::Error> {
-        Ok(11)
+        // The owner admits custody against the system clock; Keys must agree.
+        ckmg::Clock::now(&mut crate::door::custody::SystemClock)
     }
 }
 struct Missing;
@@ -34,7 +35,6 @@ impl ckmg::Authority for IntentAuthority {
     ) -> std::result::Result<(), ckmg::Error> {
         if request.binding != &self.binding
             || request.device != self.device
-            || request.now != 11
             || request.target.is_some()
             || request.statement.is_some()
             || request.signing.is_some()
