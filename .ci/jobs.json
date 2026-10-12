@@ -2,7 +2,7 @@
   "schema": 1,
   "generator": "ccid render v1",
   "tool_revision": "53c129c2efa3b9279d2ecbc237d15acdfb656d8c",
-  "manifest_sha256": "675a6d1fa368593c86fed298dc3126ae8f8287970d03e172227780ffc606026d",
+  "manifest_sha256": "e802c233a639da8fb588a01a9149dde021f2d596f7a920f8457c82fcbe1ee9d1",
   "jobs": {
     "browser-package": {
       "job": "browser-package",
@@ -12,8 +12,7 @@
       ],
       "workflow": "repository-jobs",
       "command": [
-        "bash",
-        ".ci/browser-package-job.sh"
+        "ccid:run-declared-checks"
       ],
       "environment": {
         "CARGO_NET_GIT_FETCH_WITH_CLI": "true",

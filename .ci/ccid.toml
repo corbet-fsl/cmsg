@@ -19,7 +19,7 @@ cache_outputs = ["coverage.json", "coverage.lcov", "coverage.txt", "wasm-coverag
 
 [checks.browser-package]
 kind = "commands"
-commands = [["bash", ".ci/browser-package-job.sh"]]
+commands = [["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "bash .ci/browser-package-job.sh"]]
 
 [render]
 tool_revision = "53c129c2efa3b9279d2ecbc237d15acdfb656d8c"
@@ -101,5 +101,5 @@ environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-v01/target", CARGO_PROFIL
 scheduler = "crow"
 checks = ["browser-package"]
 workflow = "repository-jobs"
-command = ["bash", ".ci/browser-package-job.sh"]
+command = ["ccid:run-declared-checks"]
 environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-v01/target", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_TEST_DEBUG = "0", CARGO_NET_GIT_FETCH_WITH_CLI = "true", CARGO_NET_RETRY = "0", CI_JOBS = "2", CI_TEST_THREADS = "2" }
