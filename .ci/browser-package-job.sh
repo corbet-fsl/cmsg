@@ -2,6 +2,7 @@
 # Manual job: build the browser package with the existing milestone script and
 # retain it as a deterministic tar. Nothing is uploaded and no secret is used.
 set -euo pipefail
+export CARGO_BUILD_JOBS=2
 export CI="${CI:-true}"
 export CI_COMMIT_SHA="${CI_COMMIT_SHA:-$(git rev-parse HEAD)}"
 export CARGO_HOME="${CARGO_HOME:-/caches/cargo}"
