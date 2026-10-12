@@ -47,6 +47,15 @@ printf 'modes: %s\n' "${modes[*]}"
 for mode in "${modes[@]}"; do
   bash -x .ci/v01-browser-package.sh "$mode"
 done
+# Ship one copy: no source maps and no base64-inlined TorJS entry points (the file entry stays).
+find "$CMSG_BROWSER_OUT/public/cmsg" -name '*.map' -delete
+rm -rf "$CMSG_BROWSER_OUT/public/cmsg/vendor/torjs/entryPoints/wasm-base64" \
+       "$CMSG_BROWSER_OUT/public/cmsg/vendor/torjs/entryPoints/wasm-cdn"
+printf 'SIZES (raw, gzip -9) of the larger files:\n'
+find "$CMSG_BROWSER_OUT/public/cmsg" -type f -size +100k | sort | while read -r f; do
+  printf '  %10d %10d %s\n' "$(stat -c %s "$f")" "$(gzip -9 -c "$f" | wc -c)" "${f#"$CMSG_BROWSER_OUT/public/cmsg/"}"
+done
+printf 'TOTAL raw bytes: %s\n' "$(du -sb "$CMSG_BROWSER_OUT/public/cmsg" | cut -f1)"
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
   -cf "$dir/cmsg-browser.tar" -C "$CMSG_BROWSER_OUT" public/cmsg Cargo.lock
 digest=$(sha256sum "$dir/cmsg-browser.tar" | cut -d' ' -f1)

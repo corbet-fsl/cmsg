@@ -28,7 +28,19 @@ base="https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${bindgen_v
   printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --strict
   tar -xzf "$archive" --strip-components=1
 )
-export TORJS_BINDGEN="$bindgen_dir/wasm-bindgen"
+# Wrapper: run the real CLI without name/producer sections, then size-optimise the output.
+cat > "$bindgen_dir/bindgen-optimised" <<WRAP
+#!/usr/bin/env bash
+set -euo pipefail
+"$bindgen_dir/wasm-bindgen" "\$@" --remove-name-section --remove-producers-section
+out=""
+while [[ \$# -gt 0 ]]; do if [[ "\$1" == --out-dir ]]; then out="\$2"; fi; shift; done
+if [[ -n "\$out" ]] && command -v wasm-opt >/dev/null; then
+  for f in "\$out"/*_bg.wasm; do wasm-opt -Oz --all-features "\$f" -o "\$f"; done
+fi
+WRAP
+chmod +x "$bindgen_dir/bindgen-optimised"
+export TORJS_BINDGEN="$bindgen_dir/bindgen-optimised"
 export TORJS_SOURCE="$tor_root/tor-js" ARTI_SOURCE="$tor_root/arti"
 export TORJS_TARGET_DIR="${TORJS_TARGET_DIR:-${CARGO_HOME:-/caches/cargo}/torjs-target}"
-printf 'tor sources: tor-js %s arti %s bindgen %s\n' "$torjs_revision" "$arti_revision" "$("$TORJS_BINDGEN" --version)"
+printf 'tor sources: tor-js %s arti %s bindgen %s\n' "$torjs_revision" "$arti_revision" "$("$bindgen_dir/wasm-bindgen" --version)"
