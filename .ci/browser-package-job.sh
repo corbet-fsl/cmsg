@@ -55,11 +55,15 @@ done
 find "$CMSG_BROWSER_OUT/public/cmsg" -name '*.map' -delete
 rm -rf "$CMSG_BROWSER_OUT/public/cmsg/vendor/torjs/entryPoints/wasm-base64" \
        "$CMSG_BROWSER_OUT/public/cmsg/vendor/torjs/entryPoints/wasm-cdn"
+# Not used by the PWA: the schema exports (they stay in the native and CLI artefacts) and the TorJS
+# anonymous-RPC worker, which nothing references and which inlines a second copy of the Tor wasm.
+rm -f "$CMSG_BROWSER_OUT/public/cmsg"/{registry,openapi,mcp,cli}.json \
+      "$CMSG_BROWSER_OUT/public/cmsg/vendor/torjs/anon-rpc-worker.js"
 printf 'SIZES (raw, gzip -9) of the larger files:\n'
 find "$CMSG_BROWSER_OUT/public/cmsg" -type f -size +100k | sort | while read -r f; do
   printf '  %10d %10d %s\n' "$(stat -c %s "$f")" "$(gzip -9 -c "$f" | wc -c)" "${f#"$CMSG_BROWSER_OUT/public/cmsg/"}"
 done
-printf 'TOTAL raw bytes: %s\n' "$(du -sb "$CMSG_BROWSER_OUT/public/cmsg" | cut -f1)"
+printf 'TOTAL raw bytes: %s gzip bytes: %s\n' "$(du -sb "$CMSG_BROWSER_OUT/public/cmsg" | cut -f1)" "$(find "$CMSG_BROWSER_OUT/public/cmsg" -type f -exec gzip -9 -c {} + | wc -c)"
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
   -cf "$dir/cmsg-browser.tar" -C "$CMSG_BROWSER_OUT" public/cmsg Cargo.lock
 digest=$(sha256sum "$dir/cmsg-browser.tar" | cut -d' ' -f1)
