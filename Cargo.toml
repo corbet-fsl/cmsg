@@ -120,3 +120,6 @@ path = "tests/support/client-server.rs"
 required-features = ["conformance"]
 
 # v01 integration: first-party dependencies point directly at v01 branches; no [patch] tables.
+
+[patch."https://git.corbet.ch/corbet-foss/ckmg.git"]
+ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", rev = "fc70740081b81361706b9b99b6dec134b19fb6b1" }
