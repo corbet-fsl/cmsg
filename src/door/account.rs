@@ -58,6 +58,7 @@ pub(super) enum Command {
 }
 
 /// Typed answer of one command.
+#[cfg_attr(not(all(feature = "native-prover", not(target_arch = "wasm32"))), allow(dead_code))]
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Answer {
     Enrolled(Enrolled),
@@ -472,7 +473,7 @@ mod tests {
         let live = AccountActor {
             actor: Actor::new(|mailbox: Mailbox<Command, Reply>| async move {
                 loop {
-                    drop(mailbox.next().await);
+                    let _ = mailbox.next().await;
                 }
             }),
             expires: 100,
