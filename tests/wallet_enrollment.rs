@@ -84,9 +84,14 @@ async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community(
         assert_eq!(candidate.device(), device);
         candidate.resume_finish(&mut api, now).await.unwrap();
         login(&mut api, &mut keys).await;
-        api.call("wallet_device_authorize", json!({"key":device.value()}))
-            .await
-            .unwrap();
+        let body = wallet::proven(
+            &mut api,
+            &mut keys,
+            json!({"kind":"device_authorize","key":device.value()}),
+            json!({"key":device.value()}),
+        )
+        .await;
+        api.call("wallet_device_authorize", body).await.unwrap();
         api.call("development_gate", json!({})).await.unwrap();
         let door = bound("wallet", origin, Role::Member, Scope::Global, api);
         let mut policy = door.wallet_current_policy(origin).unwrap();

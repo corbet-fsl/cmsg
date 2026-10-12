@@ -8,7 +8,7 @@ use cpky::{
     software::{SoftwareAuthenticator, TestConfiguration},
     Context,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn now() -> u64 {
@@ -70,6 +70,26 @@ pub(super) async fn login(
     api.finish_browser_login(challenge.ceremony, credential)
         .await
         .unwrap();
+}
+/// A fresh user-verifying assertion for exactly one action, added to `body` as
+/// its `step_up` proof (passkey add/revoke and device authorization need one).
+pub(super) async fn proven(
+    api: &mut cfyr::Foyer<cfyr::HttpClient>,
+    keys: &mut cpky::Client<SoftwareAuthenticator>,
+    action: Value,
+    mut body: Value,
+) -> Value {
+    let begin = api
+        .call("step_up_begin", json!({"action": action}))
+        .await
+        .unwrap();
+    let (credential, _) = keys
+        .sign_in(begin["options"].clone())
+        .await
+        .unwrap()
+        .into_parts();
+    body["step_up"] = json!({"ceremony": begin["ceremony"], "credential": credential.into_json()});
+    body
 }
 pub(super) async fn initial<'p>(
     door: &Door,
