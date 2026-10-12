@@ -44,6 +44,14 @@ pub(super) trait BoundBoard {
     ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    fn group_act(
+        &mut self,
+        _intent: cbrd::GroupIntent,
+        _visible: bool,
+        _expires: u64,
+    ) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn discovery(&mut self, _expires: u64) -> OwnedFuture<'_, Vec<cbrd::Discovery>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }

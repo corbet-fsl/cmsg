@@ -218,6 +218,15 @@ committed Groups checkpoint, under the policy projected from the current signed
 Rulebook settings (`groups.*`, `seats.*`, `waves.*`). It is local and read-only:
 no Forum request, consent or membership decision. It refuses unless the retained
 Vault owner and the current Foyer Charter are available.
+`board.group_act` takes `{"intent": {...}, "accept_profile_visibility": bool}` where
+`intent` is one of `create`, `fork`, `join`, `leave` or `describe` (tagged by
+`"intent"`), and returns the group views after the change. The caller never names
+the acting member and never supplies a signature, command or policy: the retained
+owner supplies the local member and signs consents with the device key, Groups
+decides, and nothing changes unless the whole transaction publishes. Joining or
+opening a room requires `accept_profile_visibility: true` (members of the group
+may see your private profile); without it Groups refuses. The action refuses with
+`unavailable` until the retained owner provides the group integration.
 
 Search and watch retain the original signed request through the network wait.
 Before disclosure, they reload the committed Profile under the same Vault and

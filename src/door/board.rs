@@ -8,8 +8,11 @@ use clnk::BrowserTransport as Transport;
 #[cfg(not(target_arch = "wasm32"))]
 use clnk::HttpTransport as Transport;
 
+mod group_act;
 mod groups;
 mod handlers;
+pub(super) use group_act::group_act;
+pub use group_act::GroupAct;
 pub(super) use groups::groups;
 pub use handlers::{CommittedOwner, CommittedRead, OwnerFuture, ReadPolicy, SignedAttendance};
 pub(super) use handlers::{attend, discovery, search, watch};
