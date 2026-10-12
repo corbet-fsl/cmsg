@@ -187,8 +187,11 @@ mod tests {
 
     #[test]
     fn finishing_without_a_reply_is_ended_not_a_hang() {
-        let mut actor =
-            Actor::new(|mailbox: Mailbox<u8, u8>| async move { { let _ = mailbox.next().await; } });
+        let mut actor = Actor::new(|mailbox: Mailbox<u8, u8>| async move {
+            {
+                let _ = mailbox.next().await;
+            }
+        });
         assert_eq!(run(actor.call(1)), Err(Ended));
         assert!(!actor.is_live());
     }

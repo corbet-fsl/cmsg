@@ -58,7 +58,10 @@ pub(super) enum Command {
 }
 
 /// Typed answer of one command.
-#[cfg_attr(not(all(feature = "native-prover", not(target_arch = "wasm32"))), allow(dead_code))]
+#[cfg_attr(
+    not(all(feature = "native-prover", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Answer {
     Enrolled(Enrolled),
