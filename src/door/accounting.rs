@@ -9,12 +9,20 @@ use sha2::{Digest, Sha256};
 mod checkpoint;
 mod custody;
 mod genesis;
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+mod lifecycle;
 mod pending;
 mod request;
 pub use checkpoint::{CheckpointAcquisition, CurrentEnrollment, SubmittedEnrollment};
 pub use custody::CommunityAccount;
 pub use genesis::PreparedAccount;
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub use genesis::{ProvenAccount, StagedRequest};
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub use lifecycle::Activated;
 pub use pending::PendingBinding;
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub use request::response_trust;
 pub use request::{AcceptedResponse, ProvenGenesis, SignedApplyExtended};
 
 /// Distinct local intentions reserved by the trusted recovery composer. No

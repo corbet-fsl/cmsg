@@ -93,13 +93,13 @@ where
     }
 
     /// Bind this exact recovered account (origin, Lineage, device, credential),
-    /// the pinned Balance payload digest and the original signed ApplyExtended
-    /// outbox into the data sealed with the pending companion. Fresh original
-    /// Keys authority is rechecked first; nothing is cached or regenerated.
+    /// the pinned Balance payload digest and the digest of the original signed
+    /// ApplyExtended outbox into the data sealed with the pending companion. Fresh
+    /// original Keys authority is rechecked first; nothing is cached or regenerated.
     pub async fn pending_binding(
         &mut self,
         balance_payload: [u8; 32],
-        outbox: Vec<u8>,
+        outbox: &[u8],
     ) -> Result<PendingBinding> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
@@ -114,15 +114,15 @@ where
     }
 
     /// Require that a reopened companion belongs to this exact account, origin
-    /// and unchanged outbox. Any difference refuses; the companion is not edited.
+    /// and that the Store's outbox is the unchanged one it was sealed with. Any
+    /// difference refuses; the companion is not edited.
     pub async fn check_pending(
         &mut self,
         pending: &PendingBinding,
         balance_payload: [u8; 32],
+        outbox: &[u8],
     ) -> Result<()> {
-        let fresh = self
-            .pending_binding(balance_payload, pending.outbox().to_vec())
-            .await?;
+        let fresh = self.pending_binding(balance_payload, outbox).await?;
         if &fresh != pending {
             return Err(ErrorCode::Unauthorized);
         }

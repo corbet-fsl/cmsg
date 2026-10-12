@@ -180,9 +180,86 @@ pub(super) async fn inbox_read<T: 'static>(
 }
 async fn vault_lock(door: &mut Door, key: &[u8; 32], _: Empty) -> Result<(Empty, Vec<Event>)> {
     let origin = origin(door, key)?.to_owned();
+    // The account actor holds custody borrowed from this Vault's owners.
+    door.accounts.remove(&origin);
     let vault = door.vaults.remove(&origin).ok_or(ErrorCode::Unavailable)?;
     vault.lock().await;
     Ok((Empty {}, vec![Event::VaultLocked]))
+}
+
+/// Serve one account action through the origin's actor. An actor past its
+/// grant, finished or fenced is dropped here, never reused.
+async fn account_call(
+    door: &mut Door,
+    key: &[u8; 32],
+    command: account::Command,
+) -> Result<account::Answer> {
+    let origin = origin(door, key)?.to_owned();
+    let actor = door
+        .accounts
+        .get_mut(&origin)
+        .ok_or(ErrorCode::Unavailable)?;
+    if actor.expired(door.clock_floor) {
+        door.accounts.remove(&origin);
+        return Err(ErrorCode::Unavailable);
+    }
+    let answer = actor.call(command).await;
+    if door
+        .accounts
+        .get(&origin)
+        .is_some_and(|actor| actor.expired(0))
+    {
+        door.accounts.remove(&origin);
+    }
+    answer
+}
+async fn account_enroll(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(account::Enrolled, Vec<Event>)> {
+    Ok((
+        account_call(door, key, account::Command::Enroll)
+            .await?
+            .enrolled()?,
+        vec![],
+    ))
+}
+async fn account_open(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(account::Opened, Vec<Event>)> {
+    Ok((
+        account_call(door, key, account::Command::Open)
+            .await?
+            .opened()?,
+        vec![],
+    ))
+}
+async fn account_reopen(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(account::Opened, Vec<Event>)> {
+    Ok((
+        account_call(door, key, account::Command::Reopen)
+            .await?
+            .reopened()?,
+        vec![],
+    ))
+}
+async fn account_activate(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(account::Activation, Vec<Event>)> {
+    Ok((
+        account_call(door, key, account::Command::Activate)
+            .await?
+            .activated()?,
+        vec![],
+    ))
 }
 
 async fn mesh_status(
@@ -253,6 +330,10 @@ actions! {
     "mesh.status" => mesh_status(Empty) -> Vec<cmsh::BackendView>, Read, Mesh;
     "mesh.disconnect" => mesh_disconnect(Empty) -> Empty, LocalLifecycle, Mesh;
     "vault.lock" => vault_lock(Empty) -> Empty, LocalLifecycle, Vault;
+    "account.enroll" => account_enroll(Empty) -> account::Enrolled, VaultAccess, Vault;
+    "account.open" => account_open(Empty) -> account::Opened, VaultAccess, Vault;
+    "account.reopen" => account_reopen(Empty) -> account::Opened, VaultAccess, Vault;
+    "account.activate" => account_activate(Empty) -> account::Activation, VaultAccess, Vault;
     "login.start" => login_start(super::login::Start) -> super::login::Status, LocalBootstrap, Foyer;
     "login.poll" => login_poll(super::login::Poll) -> super::login::Status, LocalBootstrap, Foyer;
     "login.cancel" => login_cancel(super::login::Cancel) -> super::login::Status, LocalBootstrap, Foyer;
