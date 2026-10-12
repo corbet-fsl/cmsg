@@ -136,7 +136,8 @@ async fn cancelled_final_store_read_discards_the_genuine_ordinary_member_lease()
         .unwrap();
         let fixture = &fixture["certified_wallet"];
         let world = &fixture["community"];
-        let origin = world["passkey_origin"].as_str().unwrap();
+        // One origin for the Door key and the authenticated HTTPS lease: the server base.
+        let origin = world["base"].as_str().unwrap();
         let (api, proof, member) = genuine_holder_presentation(fixture).await;
         let common_record::Community {
             door,

@@ -115,8 +115,9 @@ pub use run::AccountParts;
 mod run {
     use super::super::{
         accounting::{
-            issue_account_admission, AccountAdmission, AccountingIntents, CheckpointAcquisition,
-            CommunityAccount, CurrentEnrollment, SubmittedEnrollment,
+            existing_active, has_pending, issue_account_admission, AccountAdmission,
+            AccountingIntents, CheckpointAcquisition, CommunityAccount, CurrentEnrollment,
+            SubmittedEnrollment,
         },
         actor::Mailbox,
         custody::SystemClock,
@@ -322,6 +323,42 @@ mod run {
         A: Authority,
         R: Records,
     {
+        // Idempotent setup: a returning member repeats every action. An active
+        // account answers all four with its existing state and changes nothing.
+        if let Some(active) = existing_active(account).await {
+            let reply = match command {
+                Command::Enroll => Answer::Enrolled(Enrolled {
+                    checkpoint: Checkpoint::Ready,
+                }),
+                Command::Open => Answer::Opened(Opened {
+                    accepted_at: active.accepted_at,
+                }),
+                Command::Reopen => Answer::Reopened(Opened {
+                    accepted_at: active.accepted_at,
+                }),
+                Command::Activate => Answer::Activated(Activation {
+                    version: active.version,
+                    accepted_at: active.accepted_at,
+                    outbox_settled: active.outbox_settled,
+                }),
+            };
+            return (Ok(reply), Next::Stay);
+        }
+        // A durable pending request means this member already enrolled and
+        // opened: enrolling reports the checkpoint as ready and opening resumes
+        // the stored request (byte-identical resend) instead of building another.
+        let command = match command {
+            Command::Open if has_pending(account).await => Command::Reopen,
+            other => other,
+        };
+        if command == Command::Enroll && has_pending(account).await {
+            return (
+                Ok(Answer::Enrolled(Enrolled {
+                    checkpoint: Checkpoint::Ready,
+                })),
+                Next::Stay,
+            );
+        }
         match command {
             Command::Enroll => match std::mem::replace(stage, Stage::Spent) {
                 Stage::Admitted(admission) => {

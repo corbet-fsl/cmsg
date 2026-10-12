@@ -18,6 +18,34 @@ pub struct Activated {
     pub outbox_settled: bool,
 }
 
+/// The accepted account when one is already active (idempotent setup: a
+/// returning member repeats the actions and receives the existing account).
+pub async fn existing_active<B, C, E, A, R>(
+    account: &mut CommunityAccount<B, C, E, A, R>,
+) -> Option<Activated>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+{
+    AccountAdmission::already_active(account).await.ok()
+}
+
+/// Whether a durable pending request already exists (the member enrolled and
+/// opened before; a repeat resumes it instead of preparing a new request).
+pub async fn has_pending<B, C, E, A, R>(account: &mut CommunityAccount<B, C, E, A, R>) -> bool
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+{
+    account.vault.reopen_pending_genesis(now()).await.is_ok()
+}
+
 impl AccountAdmission<'_> {
     /// Reopen the durable companion and require it to belong to this exact
     /// account, origin, pinned Balance payload and operator key.

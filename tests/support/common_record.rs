@@ -31,7 +31,8 @@ pub(super) async fn enrolled(
     passport: Value,
     member: &str,
 ) -> Community {
-    let origin = world["passkey_origin"].as_str().unwrap();
+    // The Door key is the authenticated server origin (the HTTPS base), not the passkey origin.
+    let origin = world["base"].as_str().unwrap();
     let mut clock = custody::SystemClock;
     let mut entropy = ckmg::SystemEntropy;
     let seed =
@@ -153,7 +154,7 @@ pub(super) async fn exercise(
         network,
         device,
     } = enrolled(world, api, passport, member).await;
-    let origin = world["passkey_origin"].as_str().unwrap();
+    let origin = world["base"].as_str().unwrap();
     let mut companion = foyer(world, false).await;
     let challenge = companion.begin_browser_login().await.unwrap();
     let (credential, outcome) = keys.sign_in(challenge.options).await.unwrap().into_parts();
