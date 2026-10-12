@@ -1655,7 +1655,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#7cbc7b7cfca7d6461c26b29251fa7e6c17615cf4"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=groups-write#7cbc7b7cfca7d6461c26b29251fa7e6c17615cf4"
 dependencies = [
  "cchr",
  "cgrp",

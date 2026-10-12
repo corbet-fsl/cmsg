@@ -1,7 +1,7 @@
 use super::*;
 use board::{
     attend as board_attend, depart as board_depart, discovery as board_discovery,
-    groups as board_groups, heartbeat as board_heartbeat, search as board_search,
+    group_act as board_group_act, groups as board_groups, heartbeat as board_heartbeat, search as board_search,
     watch as board_watch,
 };
 use foyer::refresh as foyer_refresh;
@@ -39,6 +39,7 @@ pub enum Effect {
     LocalLifecycle,
     VaultAccess,
     BoardRecord,
+    GroupRecord,
     InboxRecord,
 }
 
@@ -243,6 +244,7 @@ actions! {
     "board.watch" => board_watch(board::Watch) -> cbrd::DiscoveryPage, BoardRecord, Board;
     "board.discovery" => board_discovery(Empty) -> Vec<cbrd::Discovery>, VaultAccess, Board;
     "board.groups" => board_groups(Empty) -> Vec<cbrd::GroupView>, VaultAccess, Board;
+    "board.group_act" => board_group_act(board::GroupAct) -> Vec<cbrd::GroupView>, GroupRecord, Board;
     "board.heartbeat" => board_heartbeat(Empty) -> cbrd::cfrm::LiveOutput, BoardRecord, Board;
     "board.depart" => board_depart(Empty) -> cbrd::cfrm::EmptyOutput, BoardRecord, Board;
     "board.disconnect" => board_disconnect(Empty) -> cbrd::Status, LocalLifecycle, Board;
