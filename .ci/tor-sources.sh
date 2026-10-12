@@ -8,9 +8,9 @@ torjs_revision=65bb21d536a405ba706689ca384fad2ee25e60a7
 arti_revision=2be5b51e895a687d1e7fc3ce1c01896730bcb9d3
 bindgen_version=0.2.122
 mkdir -p "$tor_root"
-git clone --quiet https://github.com/privacy-ethereum/tor-js.git "$tor_root/tor-js"
+git clone --quiet https://git.corbet.ch/corbet-foss/tor-js.git "$tor_root/tor-js"
 git -C "$tor_root/tor-js" checkout --quiet "$torjs_revision"
-git clone --quiet https://github.com/voltrevo/arti.git "$tor_root/arti"
+git clone --quiet https://git.corbet.ch/corbet-foss/arti.git "$tor_root/arti"
 git -C "$tor_root/arti" checkout --quiet "$arti_revision"
 [[ "$(git -C "$tor_root/tor-js" rev-parse HEAD)" == "$torjs_revision" ]]
 [[ "$(git -C "$tor_root/arti" rev-parse HEAD)" == "$arti_revision" ]]
