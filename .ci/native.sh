@@ -29,7 +29,14 @@ nix-shell tests/fixture/owner/check-shell.nix --run 'bash .ci/native-prover.sh'
 nix-shell tests/fixture/owner/check-shell.nix --run 'cargo test --locked --all-targets --no-run'
 fixture="${CARGO_TARGET_DIR:-tests/fixture/target}/debug/cmsg-foyer-fixture"
 export fixture
-nix-shell tests/fixture/owner/check-shell.nix --run 'python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --all-targets --no-fail-fast'
+# The foyer test edits the live policy, which invalidates every passport minted by the same fixture;
+# it gets its own fixture instance and runs last.
+others=$(for t in tests/*.rs; do n=$(basename "$t" .rs); [ "$n" = foyer ] || printf -- '--test %s ' "$n"; done)
+export others
+status=0
+nix-shell tests/fixture/owner/check-shell.nix --run 'python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --lib --bins --examples $others --no-fail-fast' || status=1
+nix-shell tests/fixture/owner/check-shell.nix --run 'python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --test foyer --no-fail-fast' || status=1
+[ "$status" = 0 ]
 
 # Qualify the actual maintained Tor transport separately from inert record tests.
 # Existing provisioned original tools are required; this route never installs them.
