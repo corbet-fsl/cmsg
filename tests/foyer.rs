@@ -163,7 +163,7 @@ async fn local_http_routes_real_member_admin_root_and_rejects_foreign_authority(
     );
     let set = json!({"key":"quota","value":5,"inherit":false,"effective_at":now});
     let changed = invoke(&admin, "foyer.setting_set", set.clone()).await;
-    assert_eq!(changed["status"], "ok");
+    assert_eq!(changed["status"], "ok", "{changed}");
     assert!(changed["result"]["policy_epoch"].as_u64().unwrap() > 1);
     assert_eq!(
         invoke(
@@ -348,7 +348,7 @@ async fn explicit_root_board_routes_admin_actions_but_other_root_surfaces_stay_d
         )
         .await;
         let output = serde_json::to_value(output).unwrap();
-        assert_eq!(output["status"], expected);
+        assert_eq!(output["status"], expected, "{output}");
         if explicit {
             assert!(output["result"]["policy_epoch"].as_u64().unwrap() > 1);
             assert_eq!(
