@@ -25,7 +25,7 @@ else:
 source = Path(owner["manifest_path"]).parent.resolve()
 destination = Path("tests/fixture/owner")
 destination.mkdir(parents=True, exist_ok=True)
-names = ["mod.rs", "resident.rs", "client_faults.rs", "active.rs"]
+names = ["mod.rs", "resident.rs", "client_faults.rs", "active.rs", "self_ban.rs"]
 for name in names:
     fixture = (source / "tests/support" / name).resolve()
     if not fixture.is_relative_to(source):
