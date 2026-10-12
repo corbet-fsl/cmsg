@@ -44,7 +44,7 @@ where
         next.relation(&request.peer).map_err(contact_error)
     }
 
-    async fn check_scope(&mut self, store: &cwst::Store<B>) -> Result<()> {
+    pub(super) async fn check_scope(&mut self, store: &cwst::Store<B>) -> Result<()> {
         let lineage = self.vault.keys().lineage().await.map_err(keys_error)?;
         if lineage.binding != self.binding || !store.is_scope(self.binding.community()) {
             return Err(ErrorCode::Unauthorized);
@@ -55,7 +55,7 @@ where
 
 /// An uncertain or conflicting checkpoint must be reconciled by the owner, never
 /// retried as a new operation.
-fn contact_error(error: cnbx::Error) -> ErrorCode {
+pub(super) fn contact_error(error: cnbx::Error) -> ErrorCode {
     match error {
         cnbx::Error::Contacts(cnbx::ContactError::Authority) => ErrorCode::Unauthorized,
         cnbx::Error::Contacts(cnbx::ContactError::Storage | cnbx::ContactError::Conflict) => {

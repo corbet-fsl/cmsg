@@ -2,6 +2,7 @@
 //! no generic accepting domain driver or caller-supplied success is exposed.
 use super::*;
 mod inbox_custody;
+mod profile_custody;
 mod shared;
 use cbrd::clnk;
 pub use shared::VaultBoardOwner;

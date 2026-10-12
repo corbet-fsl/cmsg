@@ -82,6 +82,43 @@ where
             // Nothing awaits after disclosure under this actual Store guard.
         })
     }
+    fn with_profile<'a, T: 'a, F>(&'a mut self, prepare: F) -> board::OwnerFuture<'a, T>
+    where
+        F: for<'p> FnOnce(board::ProfileParts<'p, B>) -> Result<T> + 'a,
+    {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .with_profile_owned(&self.origin, prepare)
+                .await;
+            // A sibling lock during the wait drops the authorized candidate.
+            self.after_wait(result)
+        })
+    }
+    fn commit_profile(
+        &mut self,
+        authorized: cbrd::cpfl::Authorized,
+    ) -> board::OwnerFuture<'_, u64> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .commit_profile_owned(authorized)
+                .await;
+            self.after_wait(result)
+        })
+    }
     fn sign_attendance<'a>(
         &'a mut self,
         challenge: &'a clnk::Challenge,
@@ -111,6 +148,35 @@ where
     }
 }
 
+impl<B, C, E, A, R, W> VaultBoardOwner<B, C, E, A, R, W>
+where
+    B: cwst::backend::Backend,
+    C: ckmg::Clock,
+    E: ckmg::Entropy,
+    A: ckmg::Authority,
+    R: cvlt::Records,
+{
+    /// Trusted composition only: record the community credential the community
+    /// issued to this device when joining. `expected` is the credential believed
+    /// current (`None` the first time); a mismatch writes nothing.
+    pub async fn store_community_credential(
+        &mut self,
+        expected: Option<&[u8]>,
+        credential: &[u8],
+    ) -> Result<cvlt::CredentialWrite> {
+        if self.lifetime.is_closed() {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let mut retained = self.retained.lock().await;
+        self.require_open()?;
+        let result = retained
+            .as_mut()
+            .ok_or(ErrorCode::Unavailable)?
+            .store_credential_owned(expected, credential)
+            .await;
+        self.after_wait(result)
+    }
+}
 impl<B, C, E, A, R, W> BoundVault for VaultBoardOwner<B, C, E, A, R, W>
 where
     B: cwst::backend::Backend + 'static,
