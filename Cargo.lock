@@ -2797,7 +2797,7 @@ dependencies = [
 [[package]]
 name = "crbk"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#d3431a1bcf8f440be3f3ee0def7588ced2f752db"
+source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#6dfc391ba24c2894946a9e5424ce4ad3ed68f6fa"
 dependencies = [
  "crlt",
  "semver 1.0.28",
