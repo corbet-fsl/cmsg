@@ -75,7 +75,10 @@ enum ServiceScope {
 /// checkpoint, so they are not republished (`account_enroll` is cmsg's own action).
 /// The step-up, passkey and device operations need a user-verified assertion from
 /// the local Keyhole ceremony, so cmsg's own member actions will perform them.
-const OWNED_BY_ACCOUNT_LIFECYCLE: [&str; 7] = [
+const OWNED_BY_ACCOUNT_LIFECYCLE: [&str; 8] = [
+    // The development gate exists only so test fixtures can open a development
+    // window; no production door may ever forward it.
+    "development_gate",
     "account",
     "account_enroll",
     "account_checkpoint",
