@@ -14,21 +14,21 @@ use super::*;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "checkpoint", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Checkpoint {
-    /// The complete current roster contains this member; `account.open` can run.
+    /// The complete current roster contains this member; `account_open` can run.
     Ready,
     /// A frozen slot can legitimately precede this member's enrollment. Waiting
     /// does not extend the held lease or grant.
     Pending { eligible_at: u64 },
 }
 
-/// Result of `account.enroll`: the signed delegation is registered.
+/// Result of `account_enroll`: the signed delegation is registered.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Enrolled {
     pub checkpoint: Checkpoint,
 }
 
-/// Result of `account.open` and `account.reopen`: the operator accepted the
+/// Result of `account_open` and `account_reopen`: the operator accepted the
 /// request and the verified response is durable (state B). Not yet active.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -36,7 +36,7 @@ pub struct Opened {
     pub accepted_at: u64,
 }
 
-/// Result of `account.activate`: the account record is durable.
+/// Result of `account_activate`: the account record is durable.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Activation {
@@ -372,7 +372,7 @@ mod run {
                     }
                 };
                 // Whatever happens, the enrollment is consumed; recovery after a
-                // failure is `account.reopen` from the durable state.
+                // failure is `account_reopen` from the durable state.
                 let result = open(current, account, request_intent, prover).await;
                 (
                     result.map(|at| Answer::Opened(Opened { accepted_at: at })),

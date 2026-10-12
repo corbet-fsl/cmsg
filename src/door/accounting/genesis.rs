@@ -356,7 +356,7 @@ mod proven {
 
         /// Sign the account request once, bind it to this exact account and commit
         /// state A with the outbox in ONE Store commit. After this returns, a crash
-        /// is recovered by `account.reopen`, never by signing or proving again.
+        /// is recovered by `account_reopen`, never by signing or proving again.
         pub async fn stage<B, C, E, A, R>(
             &mut self,
             account: &mut CommunityAccount<B, C, E, A, R>,
@@ -408,7 +408,7 @@ mod proven {
 
         /// Send the staged outbox, verify the actual response and advance the
         /// durable companion to state B. Any failure is uncertain (Reconcile);
-        /// state A stays and `account.reopen` re-sends the identical bytes.
+        /// state A stays and `account_reopen` re-sends the identical bytes.
         pub async fn send<B, C, E, A, R>(
             &mut self,
             account: &mut CommunityAccount<B, C, E, A, R>,

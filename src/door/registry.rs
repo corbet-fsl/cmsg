@@ -330,10 +330,10 @@ actions! {
     "mesh.status" => mesh_status(Empty) -> Vec<cmsh::BackendView>, Read, Mesh;
     "mesh.disconnect" => mesh_disconnect(Empty) -> Empty, LocalLifecycle, Mesh;
     "vault.lock" => vault_lock(Empty) -> Empty, LocalLifecycle, Vault;
-    "account.enroll" => account_enroll(Empty) -> account::Enrolled, VaultAccess, Vault;
-    "account.open" => account_open(Empty) -> account::Opened, VaultAccess, Vault;
-    "account.reopen" => account_reopen(Empty) -> account::Opened, VaultAccess, Vault;
-    "account.activate" => account_activate(Empty) -> account::Activation, VaultAccess, Vault;
+    "account_enroll" => account_enroll(Empty) -> account::Enrolled, VaultAccess, Vault;
+    "account_open" => account_open(Empty) -> account::Opened, VaultAccess, Vault;
+    "account_reopen" => account_reopen(Empty) -> account::Opened, VaultAccess, Vault;
+    "account_activate" => account_activate(Empty) -> account::Activation, VaultAccess, Vault;
     "login.start" => login_start(super::login::Start) -> super::login::Status, LocalBootstrap, Foyer;
     "login.poll" => login_poll(super::login::Poll) -> super::login::Status, LocalBootstrap, Foyer;
     "login.cancel" => login_cancel(super::login::Cancel) -> super::login::Status, LocalBootstrap, Foyer;
