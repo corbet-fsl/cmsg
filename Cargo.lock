@@ -1718,7 +1718,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#15bb5691985a92402a1f8831933c0b80fd85dd53"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#ca1423d1d29466fdadd5f54dbf9b9afe17d02dd1"
 dependencies = [
  "arti-client",
  "blake3",
@@ -2669,7 +2669,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#004c2c993859878aabebab8f3195089dca71eaa0"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#699be0e16ac0ea2a3a18488330f50cb949aaa144"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -2709,7 +2709,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#f39a2f100ea19fc6590edd34e750957e07d18484"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#8e2d0620d56e89dfb0d96b4fa58e316c77d5baae"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2726,7 +2726,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#f39a2f100ea19fc6590edd34e750957e07d18484"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#8e2d0620d56e89dfb0d96b4fa58e316c77d5baae"
 dependencies = [
  "acvm",
  "barretenberg-rs",
@@ -10661,9 +10661,9 @@ checksum = "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.26"
+version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
+checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 
 [[package]]
 name = "unicode-normalization"
