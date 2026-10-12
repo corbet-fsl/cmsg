@@ -520,10 +520,16 @@ pub async fn acknowledge_initial_publication<B: cwst::backend::Backend, N: cdht:
     clock: &mut impl Clock,
     entropy: &mut impl ckmg::Entropy,
 ) -> Result<cvlt::InitialCreation<B>, cvlt::InitialError> {
-    if read.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+    if read
+        .enrollment_commitment()
+        .inspect_err(|e| eprintln!("ACK enrollment_commitment {e:?}"))?
+        != initial.seed().map_err(|_| refused())?
+    {
         return Err(refused());
     }
-    let publication = read.publication_commitment()?;
+    let publication = read
+        .publication_commitment()
+        .inspect_err(|e| eprintln!("ACK publication_commitment {e:?}"))?;
     if initial.publication().map_err(|_| refused())? != Some(publication) {
         return Err(refused());
     }
@@ -541,7 +547,9 @@ pub async fn acknowledge_initial_publication<B: cwst::backend::Backend, N: cdht:
     if failed {
         return Err(cvlt::InitialError::Keys(Error::Clock));
     }
-    let (intent, location, sealed_digest) = read.completion_binding()?;
+    let (intent, location, sealed_digest) = read
+        .completion_binding()
+        .inspect_err(|e| eprintln!("ACK completion_binding {e:?}"))?;
     let mut completion = Completion {
         initial,
         clock: clock.clone(),
@@ -554,7 +562,8 @@ pub async fn acknowledge_initial_publication<B: cwst::backend::Backend, N: cdht:
     };
     let acknowledgment = read
         .prepare_acknowledgment(&mut clock, &mut completion)
-        .await?;
+        .await
+        .inspect_err(|e| eprintln!("ACK prepare_acknowledgment {e:?}"))?;
     let reader = acknowledgment.lineage_reader()?;
     let backend = cvlt::TorLineageRecord::initial_lineage(network, reader)
         .await
@@ -569,4 +578,5 @@ pub async fn acknowledge_initial_publication<B: cwst::backend::Backend, N: cdht:
     acknowledgment
         .acknowledge(&mut clock, entropy, &mut authority)
         .await
+        .inspect_err(|e| eprintln!("ACK acknowledge {e:?}"))
 }

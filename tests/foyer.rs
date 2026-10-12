@@ -165,15 +165,13 @@ async fn local_http_routes_real_member_admin_root_and_rejects_foreign_authority(
     let changed = invoke(&admin, "foyer.setting_set", set.clone()).await;
     assert_eq!(changed["status"], "ok", "{changed}");
     assert!(changed["result"]["policy_epoch"].as_u64().unwrap() > 1);
-    assert_eq!(
-        invoke(
-            &root,
-            "foyer.platform_set",
-            json!({"setting":set,"force":true})
-        )
-        .await["status"],
-        "ok"
-    );
+    let forced = invoke(
+        &root,
+        "foyer.platform_set",
+        json!({"setting":set,"force":true}),
+    )
+    .await;
+    assert_eq!(forced["status"], "ok", "{forced}");
     for (client, action, body) in [
         (&member, "foyer.setting_set", set),
         (&admin, "foyer.platform_set", json!({})),

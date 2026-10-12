@@ -73,7 +73,7 @@ enum ServiceScope {
 /// Raw owner operations that cmsg's account lifecycle performs itself through the
 /// held lease: no frontend builds or signs the delegation or acquires the
 /// checkpoint, so they are not republished (`account_enroll` is cmsg's own action).
-const OWNED_BY_ACCOUNT_LIFECYCLE: [&str; 2] = ["account_enroll", "account_checkpoint"];
+const OWNED_BY_ACCOUNT_LIFECYCLE: [&str; 3] = ["account", "account_enroll", "account_checkpoint"];
 
 static OPERATIONS: LazyLock<Vec<Operation>> = LazyLock::new(|| operations(cfyr::contract()));
 
