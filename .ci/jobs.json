@@ -2,7 +2,7 @@
   "schema": 1,
   "generator": "ccid render v1",
   "tool_revision": "53c129c2efa3b9279d2ecbc237d15acdfb656d8c",
-  "manifest_sha256": "016e31878a77db7172bea9ceff612fa6f3a127c27996a05d4d1a578a169e01c7",
+  "manifest_sha256": "59486e24d48327fd12ca7f3c92c47d7b216f1993b3931e04302bd482aa1b9ecf",
   "jobs": {
     "native-owner": {
       "job": "native-owner",
