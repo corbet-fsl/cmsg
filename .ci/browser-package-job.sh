@@ -36,7 +36,12 @@ dir=$(mktemp -d "$base/$CI_COMMIT_SHA.XXXXXXXX")
 export CMSG_BROWSER_OUT="$dir/build"
 # The milestone script needs the locked generator dependencies; install exactly the lockfile.
 (cd tools && npm ci --no-audit --no-fund)
-for mode in ports service assemble; do
+# The Tor service stage (service, assemble) needs isolated TorJS and Arti checkouts
+# (TORJS_SOURCE, ARTI_SOURCE, TORJS_TARGET_DIR); without them only the ports are packaged.
+modes=(ports)
+if [[ -n "${TORJS_SOURCE:-}" && -n "${ARTI_SOURCE:-}" && -n "${TORJS_TARGET_DIR:-}" ]]; then modes=(ports service assemble); fi
+printf 'modes: %s\n' "${modes[*]}"
+for mode in "${modes[@]}"; do
   bash -x .ci/v01-browser-package.sh "$mode"
 done
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
