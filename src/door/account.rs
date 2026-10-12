@@ -47,14 +47,61 @@ pub struct Activation {
     pub outbox_settled: bool,
 }
 
-/// The four actions. A command carries no data: nothing about the account, the
-/// request or the policy is chosen by a caller.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Body of `community_join`. The voucher is the member's own `cvch1.` text; it is
+/// needed only while the community's lobby still asks for it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct JoinRequest {
+    #[serde(default)]
+    pub voucher: Option<String>,
+}
+
+/// One input the member can still supply to an enabled gate of the community.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GateStep {
+    pub gate: String,
+    pub provider: String,
+    /// Stable client dispatch key of the step.
+    pub id: String,
+}
+
+/// Where the community join stands. Every call resumes from the durable state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "stage", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Joined {
+    /// The community still wants something the member has not supplied (or no
+    /// admission policy is enabled yet). Supply one of the steps and call again.
+    NeedsSteps { steps: Vec<GateStep> },
+    /// Admitted and enrolled; the common checkpoint does not list the member yet.
+    /// Calling again later continues the setup.
+    CheckpointPending { eligible_at: u64 },
+    /// The account is active.
+    Active {
+        version: u64,
+        accepted_at: u64,
+        outbox_settled: bool,
+    },
+}
+
+/// The gate stage of a join: what the lobby still lacks.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Gate {
+    pub ready: bool,
+    pub steps: Vec<GateStep>,
+}
+
+/// The actions. Only `Join` carries data, and that is the member's own voucher
+/// text, which is bound to the member and useless to anyone else; nothing about
+/// the account, the request or the policy is chosen by a caller.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Command {
     Enroll,
     Open,
     Reopen,
     Activate,
+    /// Pass the community's gates (submitting the voucher when one is needed).
+    Join(Option<String>),
 }
 
 /// Typed answer of one command.
@@ -68,6 +115,7 @@ pub(super) enum Answer {
     Opened(Opened),
     Reopened(Opened),
     Activated(Activation),
+    Gate(Gate),
 }
 
 macro_rules! accessor {
@@ -85,6 +133,16 @@ impl Answer {
     accessor!(opened, Opened, Opened);
     accessor!(reopened, Reopened, Opened);
     accessor!(activated, Activated, Activation);
+    accessor!(gate, Gate, Gate);
+
+    /// The open step answers `Opened`, or `Reopened` when a pending request was
+    /// resumed; either way the request is accepted.
+    pub(super) fn opened_or_reopened(self) -> Result<Opened> {
+        match self {
+            Self::Opened(value) | Self::Reopened(value) => Ok(value),
+            _ => Err(ErrorCode::Unavailable),
+        }
+    }
 }
 
 /// What the account already holds, as far as repeating an action needs to know.
@@ -134,6 +192,10 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
                 accepted_at: active.accepted_at,
             }),
             Command::Activate => Answer::Activated(active),
+            Command::Join(_) => Answer::Gate(Gate {
+                ready: true,
+                steps: Vec::new(),
+            }),
         });
     }
     match command {
@@ -143,6 +205,56 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
         Command::Open if state.pending().await => Repeat::As(Command::Reopen),
         other => Repeat::As(other),
     }
+}
+
+/// Whether the lobby still lists an unsatisfied admission condition. A lobby
+/// without the field is never taken as satisfied.
+#[cfg_attr(
+    not(all(feature = "native-prover", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+pub(super) fn lacks(lobby: &Value) -> bool {
+    lobby
+        .get("missing")
+        .and_then(Value::as_array)
+        .is_none_or(|missing| !missing.is_empty())
+}
+
+/// The inputs the lobby offers, in the server's order. Unreadable entries are
+/// left out rather than guessed.
+#[cfg_attr(
+    not(all(feature = "native-prover", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+pub(super) fn lobby_steps(lobby: &Value) -> Vec<GateStep> {
+    let text = |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
+    let mut steps = Vec::new();
+    for descriptor in lobby
+        .get("steps")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let (Some(gate), Some(provider)) = (text(descriptor, "gate"), text(descriptor, "provider"))
+        else {
+            continue;
+        };
+        for step in descriptor
+            .get("steps")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(id) = text(step, "id") {
+                steps.push(GateStep {
+                    gate: gate.clone(),
+                    provider: provider.clone(),
+                    id,
+                });
+            }
+        }
+    }
+    steps
 }
 
 type Reply = Result<Answer>;
@@ -179,7 +291,7 @@ mod run {
         },
         actor::Mailbox,
         custody::SystemClock,
-        foyer::Transport,
+        foyer::{map_error, Transport},
         passport::GlobalPassport,
     };
     use super::*;
@@ -273,6 +385,30 @@ mod run {
         }
     }
 
+    /// Read the lobby through the held member lease and, when something is still
+    /// missing and the member brought a voucher, submit it once. The server alone
+    /// decides; a voucher the lobby no longer needs is not sent.
+    async fn gate(
+        membership: &mut cfyr::membership::LiveMembership<Transport>,
+        voucher: Option<&str>,
+    ) -> Result<Gate> {
+        let mut lease = membership
+            .observe_lease(clock)
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?;
+        let mut lobby = lease.lobby(clock).await.map_err(map_error)?;
+        if let (true, Some(code)) = (lacks(&lobby), voucher) {
+            lobby = lease
+                .submit_voucher(code, clock)
+                .await
+                .map_err(map_error)?;
+        }
+        Ok(Gate {
+            ready: !lacks(&lobby),
+            steps: lobby_steps(&lobby),
+        })
+    }
+
     async fn admit<'p, B, C, E, A, R, G>(
         membership: &mut cfyr::membership::LiveMembership<Transport>,
         policy: &'p mut cfyr::policy::CurrentPolicy<Transport>,
@@ -327,6 +463,18 @@ mod run {
                 Some(command) => command,
                 None => mailbox.next().await,
             };
+            if let Command::Join(voucher) = &first {
+                // The gates come before any admission: an active account is
+                // already through them, otherwise the lobby decides.
+                let reply = match repeat(first.clone(), &mut account).await {
+                    Repeat::Answer(answer) => Ok(answer),
+                    Repeat::As(_) => gate(&mut membership, voucher.as_deref())
+                        .await
+                        .map(Answer::Gate),
+                };
+                mailbox.reply(reply);
+                continue;
+            }
             let admission =
                 match admit(&mut membership, &mut policy, &mut global, device, &mut rng).await {
                     Ok(admission) => admission,
@@ -335,12 +483,21 @@ mod run {
                         continue;
                     }
                 };
+            // The credential issued with this admission is kept in the Vault
+            // before anything else uses the admission; the same one is a no-op.
+            if let Err(error) = account
+                .store_community_credential(admission.community_credential())
+                .await
+            {
+                mailbox.reply(Err(error));
+                continue;
+            }
             let mut stage = Stage::Admitted(admission);
             let mut command = first;
             loop {
                 let (reply, next) = serve(
                     &mut stage,
-                    command,
+                    command.clone(),
                     &mut account,
                     &mut intents,
                     &mut request_intent,
@@ -475,6 +632,7 @@ mod run {
                     Err(error) => (Err(error), Next::Restart),
                 }
             }
+            Command::Join(_) => (Err(ErrorCode::Unavailable), Next::Carry),
             Command::Activate => {
                 let Some(admission) = stage.admission() else {
                     return (Err(ErrorCode::Unavailable), Next::Carry);
@@ -608,12 +766,15 @@ mod tests {
     fn block<T>(future: impl std::future::Future<Output = T>) -> T {
         futures_executor::block_on(future)
     }
-    const ALL: [Command; 4] = [
-        Command::Enroll,
-        Command::Open,
-        Command::Reopen,
-        Command::Activate,
-    ];
+    fn all() -> [Command; 5] {
+        [
+            Command::Enroll,
+            Command::Open,
+            Command::Reopen,
+            Command::Activate,
+            Command::Join(Some("cvch1.x".into())),
+        ]
+    }
 
     #[test]
     fn every_action_repeated_on_an_active_account_returns_the_same_existing_state() {
@@ -622,8 +783,8 @@ mod tests {
             pending: true,
             probes: 0,
         };
-        for command in ALL {
-            let first = block(repeat(command, &mut state));
+        for command in all() {
+            let first = block(repeat(command.clone(), &mut state));
             let second = block(repeat(command, &mut state));
             assert_eq!(first, second);
             assert!(matches!(first, Repeat::Answer(_)));
@@ -682,9 +843,66 @@ mod tests {
             pending: false,
             probes: 0,
         };
-        for command in ALL {
-            assert_eq!(block(repeat(command, &mut state)), Repeat::As(command));
+        for command in all() {
+            assert_eq!(
+                block(repeat(command.clone(), &mut state)),
+                Repeat::As(command)
+            );
         }
         assert!(state.probes > 0);
+    }
+
+    #[test]
+    fn an_active_account_is_through_the_gates_and_a_first_run_asks_the_lobby() {
+        let mut active = Fake {
+            active: Some(done()),
+            pending: false,
+            probes: 0,
+        };
+        assert_eq!(
+            block(repeat(Command::Join(None), &mut active)),
+            Repeat::Answer(Answer::Gate(Gate {
+                ready: true,
+                steps: Vec::new()
+            }))
+        );
+        let mut fresh = Fake {
+            active: None,
+            pending: true,
+            probes: 0,
+        };
+        // A durable pending request does not skip the gates: only an active
+        // account does, because the lobby is the server's to answer.
+        assert_eq!(
+            block(repeat(Command::Join(None), &mut fresh)),
+            Repeat::As(Command::Join(None))
+        );
+    }
+
+    #[test]
+    fn the_lobby_is_read_strictly_and_steps_keep_the_servers_order() {
+        use serde_json::json;
+        assert!(lacks(&json!({})));
+        assert!(lacks(&json!({"missing": [{"kind": "gates"}]})));
+        assert!(!lacks(&json!({"missing": []})));
+        let lobby = json!({
+            "steps": [
+                {"gate": "voucher", "provider": "sponsor", "steps": [{"id": "code"}, {"id": 7}]},
+                {"provider": "no-gate", "steps": [{"id": "x"}]},
+                {"gate": "pow", "provider": "local", "steps": [{"id": "solve"}]}
+            ]
+        });
+        let ids: Vec<_> = lobby_steps(&lobby)
+            .into_iter()
+            .map(|step| (step.gate, step.provider, step.id))
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                ("voucher".into(), "sponsor".into(), "code".into()),
+                ("pow".into(), "local".into(), "solve".into())
+            ]
+        );
+        assert!(lobby_steps(&json!({"steps": "bad"})).is_empty());
     }
 }

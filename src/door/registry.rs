@@ -252,6 +252,49 @@ async fn account_reopen(
         vec![],
     ))
 }
+/// Join the community: pass the gates (voucher when the lobby asks for it), then
+/// run the four account steps. Each step is idempotent, so a call after any
+/// interruption resumes where the durable state stands and an active account
+/// answers `active` again. Stops, without error, at the first stage that needs
+/// the member or time: more gate steps, or the common checkpoint.
+async fn community_join(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: account::JoinRequest,
+) -> Result<(account::Joined, Vec<Event>)> {
+    if request.voucher.as_ref().is_some_and(|code| code.len() > 512) {
+        return Err(ErrorCode::InvalidRequest);
+    }
+    let gate = account_call(door, key, account::Command::Join(request.voucher))
+        .await?
+        .gate()?;
+    if !gate.ready {
+        return Ok((account::Joined::NeedsSteps { steps: gate.steps }, vec![]));
+    }
+    if let account::Checkpoint::Pending { eligible_at } =
+        account_call(door, key, account::Command::Enroll)
+            .await?
+            .enrolled()?
+            .checkpoint
+    {
+        return Ok((account::Joined::CheckpointPending { eligible_at }, vec![]));
+    }
+    account_call(door, key, account::Command::Open)
+        .await?
+        .opened_or_reopened()?;
+    let done = account_call(door, key, account::Command::Activate)
+        .await?
+        .activated()?;
+    Ok((
+        account::Joined::Active {
+            version: done.version,
+            accepted_at: done.accepted_at,
+            outbox_settled: done.outbox_settled,
+        },
+        vec![],
+    ))
+}
+
 async fn account_activate(
     door: &mut Door,
     key: &[u8; 32],
@@ -340,6 +383,7 @@ actions! {
     "account_open" => account_open(Empty) -> account::Opened, VaultAccess, Vault;
     "account_reopen" => account_reopen(Empty) -> account::Opened, VaultAccess, Vault;
     "account_activate" => account_activate(Empty) -> account::Activation, VaultAccess, Vault;
+    "community_join" => community_join(account::JoinRequest) -> account::Joined, VaultAccess, Vault;
     "login.start" => login_start(super::login::Start) -> super::login::Status, LocalBootstrap, Foyer;
     "login.poll" => login_poll(super::login::Poll) -> super::login::Status, LocalBootstrap, Foyer;
     "login.cancel" => login_cancel(super::login::Cancel) -> super::login::Status, LocalBootstrap, Foyer;

@@ -92,6 +92,30 @@ where
         Ok(())
     }
 
+    /// Keep the community credential the server just issued in the Vault, replacing
+    /// the stored one by compare-and-swap. The same credential again changes
+    /// nothing, so repeating a setup step is safe. Fresh original Keys authority
+    /// is rechecked first; the credential never leaves this owner in a reply.
+    pub async fn store_community_credential(&mut self, credential: &[u8]) -> Result<()> {
+        let origin = self.origin.clone();
+        self.check(&origin).await?;
+        let current = self
+            .vault
+            .community_credential()
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?;
+        match self
+            .vault
+            .replace_community_credential(current.as_ref().map(|c| c.as_slice()), credential)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
+            Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),
+            Err(_) => Err(ErrorCode::Unavailable),
+        }
+    }
+
     /// Bind this exact recovered account (origin, Lineage, device, credential),
     /// the pinned Balance payload digest and the digest of the original signed
     /// ApplyExtended outbox into the data sealed with the pending companion. Fresh
