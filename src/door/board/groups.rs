@@ -21,8 +21,8 @@ pub(in crate::door) async fn groups(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use cbrd::{cgrp, crbk};
-    use cgrp::{Band, DAY, Notification, Policy, PolicySource, SeatFormats};
-    use serde_json::{Value, json};
+    use cgrp::{Band, Notification, Policy, PolicySource, SeatFormats, DAY};
+    use serde_json::{json, Value};
 
     const COMMUNITY: &str = "alpha";
     const VALID_UNTIL: u64 = 1_000 * DAY;
