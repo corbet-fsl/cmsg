@@ -34,6 +34,7 @@ fn configured() -> (Door, ClientToken) {
         "board.discovery".into(),
         "board.groups".into(),
         "board.group_act".into(),
+        "board.profile_publish".into(),
     ]);
     let token = door
         .pair_client(ORIGIN, Role::Member, actions, 1, 100)
@@ -51,6 +52,10 @@ async fn original_board_without_committed_owner_refuses_every_new_action() {
         ("board.watch", json!({"cursor":[1]})),
         ("board.discovery", json!({})),
         ("board.groups", json!({})),
+        (
+            "board.profile_publish",
+            json!({"profile":{"community":"fixture","schema_version":1,"public":{},"private":{}},"rules":[],"reachability":[]}),
+        ),
         (
             "board.group_act",
             json!({"intent":{"intent":"leave","group":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"accept_profile_visibility":false}),

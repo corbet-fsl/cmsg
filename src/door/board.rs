@@ -11,11 +11,14 @@ use clnk::HttpTransport as Transport;
 mod group_act;
 mod groups;
 mod handlers;
+mod profile;
 pub(super) use group_act::group_act;
 pub use group_act::GroupAct;
 pub(super) use groups::groups;
 pub(super) use handlers::{attend, discovery, search, watch};
 pub use handlers::{CommittedOwner, CommittedRead, OwnerFuture, ReadPolicy, SignedAttendance};
+pub(super) use profile::profile_publish;
+pub use profile::{ProfileParts, ProfilePublish, ProfilePublished};
 
 /// Only the user's paging choice crosses the public boundary. Link supplies
 /// the live session/nonce and Vault signs its exact prepared transcript.

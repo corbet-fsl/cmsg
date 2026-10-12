@@ -70,13 +70,30 @@ pub trait CommittedOwner {
     fn groups(&mut self) -> Option<&mut dyn cbrd::GroupOwner> {
         None
     }
+
+    /// Profile publication. Lend the actual device signer and Envelope custody
+    /// together with the committed Store read, after fresh Keys authority, to a
+    /// synchronous callback; return its result unchanged. Owners without this
+    /// integration refuse.
+    fn with_profile<'a, T: 'a, F>(&'a mut self, _prepare: F) -> OwnerFuture<'a, T>
+    where
+        F: for<'p> FnOnce(super::ProfileParts<'p, Self::Backend>) -> Result<T> + 'a,
+    {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
+    /// Commit an authorized profile publication atomically in the Vault Store
+    /// (Store version fence), then return the new checkpoint version.
+    fn commit_profile(&mut self, _authorized: cbrd::cpfl::Authorized) -> OwnerFuture<'_, u64> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
 }
 
-struct OwnedBoard<T, R, O> {
-    inner: BoardBinding<T, R>,
-    owner: O,
-    policy: ReadPolicy,
-    current: cfyr::policy::CurrentPolicy<foyer::Transport>,
+pub(super) struct OwnedBoard<T, R, O> {
+    pub(super) inner: BoardBinding<T, R>,
+    pub(super) owner: O,
+    pub(super) policy: ReadPolicy,
+    pub(super) current: cfyr::policy::CurrentPolicy<foyer::Transport>,
     // Original Link does not expose Enter's request for replay. An interrupted
     // attendance attempt is fenced and requires owner reconciliation, not retry.
     attendance_pending: bool,
@@ -145,7 +162,7 @@ fn now(expires: u64) -> Result<u64> {
 
 /// No await is permitted inside this function. The actual Foyer weak port refuses
 /// after disposal, while refreshing, and on stale/invalid original trust state.
-fn with_context<B: cwst::backend::Backend, T>(
+pub(super) fn with_context<B: cwst::backend::Backend, T>(
     current: &mut cfyr::policy::CurrentPolicy<foyer::Transport>,
     policy: &ReadPolicy,
     community: &str,
@@ -229,7 +246,7 @@ fn group_error(error: cbrd::cgrp::Error) -> ErrorCode {
     }
 }
 
-fn board_error(error: cbrd::Error) -> ErrorCode {
+pub(super) fn board_error(error: cbrd::Error) -> ErrorCode {
     match error {
         cbrd::Error::Scope => ErrorCode::Unauthorized,
         cbrd::Error::Unavailable => ErrorCode::Unavailable,
@@ -238,7 +255,7 @@ fn board_error(error: cbrd::Error) -> ErrorCode {
 }
 
 impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
-    fn idle(&self) -> Result<()> {
+    pub(super) fn idle(&self) -> Result<()> {
         if self.attendance_pending || self.inner.pending.is_some() {
             Err(ErrorCode::Reconcile)
         } else {
@@ -528,6 +545,9 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
                     .map_err(group_error)?;
             Ok(views)
         })
+    }
+    fn profile_publish(&mut self, edit: cbrd::Edit, expires: u64) -> OwnedFuture<'_, u64> {
+        Box::pin(self.publish_profile(edit, expires))
     }
     fn discovery(&mut self, expires: u64) -> OwnedFuture<'_, Vec<cbrd::Discovery>> {
         Box::pin(async move {

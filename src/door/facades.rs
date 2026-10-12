@@ -52,6 +52,9 @@ pub(super) trait BoundBoard {
     ) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    fn profile_publish(&mut self, _edit: cbrd::Edit, _expires: u64) -> OwnedFuture<'_, u64> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn discovery(&mut self, _expires: u64) -> OwnedFuture<'_, Vec<cbrd::Discovery>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }

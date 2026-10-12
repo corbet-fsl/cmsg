@@ -228,6 +228,18 @@ opening a room requires `accept_profile_visibility: true` (members of the group
 may see your private profile); without it Groups refuses. The action refuses with
 `unavailable` until the retained owner provides the group integration.
 
+`board.profile_publish` takes `{"profile": {...}, "rules": [...], "reachability": [...]}`
+and publishes the member's own answers and rules as one signed bundle. The caller
+never supplies a revision, key, signature, credential or block rule: the next
+revision follows the committed publication, Envelope generates a fresh profile
+key, the credential-authorized device signs both projections, Guard admits them
+against the current Charter, and the Vault commits profile, key and publication
+in one atomic transaction. Block rules come from Contacts only. A restricted-field
+change needs a fresh credential and is refused until admission supplies one. The
+action releases no profile key to anyone and ends the current Forum presence, so
+the member attends again with the committed publication. It refuses with
+`unavailable` until the retained owner provides the profile integration.
+
 Search and watch retain the original signed request through the network wait.
 Before disclosure, they reload the committed Profile under the same Vault and
 rebuild verification from Foyer's current signed Charter, including the published
