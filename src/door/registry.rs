@@ -1,8 +1,8 @@
 use super::*;
 use board::{
     attend as board_attend, depart as board_depart, discovery as board_discovery,
-    group_act as board_group_act, groups as board_groups, heartbeat as board_heartbeat, search as board_search,
-    watch as board_watch,
+    group_act as board_group_act, groups as board_groups, heartbeat as board_heartbeat,
+    search as board_search, watch as board_watch,
 };
 use foyer::refresh as foyer_refresh;
 use inbox::{blocking_rules as inbox_blocking_rules, contact_act as inbox_contact_act};
