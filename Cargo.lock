@@ -1764,7 +1764,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cfrm"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=v01#9501210ef3303452adb69b7af195d4d0abbf4963"
+source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=v01#35b0c3f62db0976bd9fdb9d76f0a09aeae38f40b"
 dependencies = [
  "crbk",
  "gloo-timers 0.3.0",
@@ -2668,7 +2668,7 @@ dependencies = [
 [[package]]
 name = "cplc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cplc?branch=main#f7b3786a1afd2fa2b8f7220469642bdc8665ffda"
+source = "git+https://git.corbet.ch/corbet-libs/cplc?branch=main#3fe750097aeab5f6f31007ec2d3325acf016ce5f"
 dependencies = [
  "cbcn",
  "cblc",
@@ -3067,7 +3067,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#62591b7917941b73b7823d3d217fe892f305484b"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#6bf2c8b7a0a8b1c091122a5b562e95ae5d56f3fe"
 dependencies = [
  "cchr",
  "cgrp",
@@ -3401,7 +3401,7 @@ dependencies = [
 [[package]]
 name = "czkp"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#20a60821a96d46d0f57b9f5de6f5e7c8b5a73a3c"
+source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#9a66cc6f8985f09770b6a39c2d35408a593dc8e0"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
