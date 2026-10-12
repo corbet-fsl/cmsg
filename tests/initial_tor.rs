@@ -531,7 +531,8 @@ async fn journey() {
             .unwrap();
         let opening = login(&mut api, &mut keys).await;
         drop(registered);
-        let key = opening.device().unwrap().value();
+        let device = opening.device().unwrap();
+        let key = device.value();
         let body = proven(
             &mut api,
             &mut keys,
@@ -596,7 +597,8 @@ async fn journey() {
     .unwrap();
     candidate.resume_finish(&mut api, now).await.unwrap();
     let opening = login(&mut api, &mut keys).await;
-    let key = candidate.device().value();
+    let device = candidate.device();
+    let key = device.value();
     let body = proven(
         &mut api,
         &mut keys,

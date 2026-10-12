@@ -75,7 +75,8 @@ pub(super) async fn journey() {
             .await
             .unwrap();
         let prepared = opening(&mut api, &mut keys).await;
-        let key = prepared.device().unwrap().value();
+        let device = prepared.device().unwrap();
+        let key = device.value();
         let body = proven(
             &mut api,
             &mut keys,
@@ -145,7 +146,8 @@ pub(super) async fn journey() {
     .unwrap();
     candidate.resume_finish(&mut api, now).await.unwrap();
     let prepared = opening(&mut api, &mut keys).await;
-    let key = candidate.device().value();
+    let device = candidate.device();
+    let key = device.value();
     let body = proven(
         &mut api,
         &mut keys,
