@@ -346,7 +346,11 @@ async fn projections_share_typed_action_bodies_and_refusal_semantics() {
             action.body
         );
         assert_eq!(tool["inputSchema"], action.body);
-        assert_eq!(action.body["additionalProperties"], false, "{}", action.action);
+        assert_eq!(
+            action.body["additionalProperties"], false,
+            "{}",
+            action.action
+        );
     }
     assert_eq!(bundle["cli"]["commands"], bundle["actions"]);
     for (failure, exit) in [
