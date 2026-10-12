@@ -16,7 +16,7 @@ ORIGINAL = {
     'corbet-foss': frozenset({
         'cchr', 'cdht', 'cdlv', 'cfry', 'cgrp', 'ckmg', 'clnk',
         'cmbl', 'cmmr', 'cnvl', 'cnvy', 'cpfl', 'cpky', 'cprz', 'csrh',
-        'csrn', 'cswb', 'ctcs', 'cthr', 'ctnd', 'ctrn', 'cwst', 'cxch',
+        'csrn', 'cswb', 'ctcs', 'cthr', 'ctnd', 'ctrn', 'cwst', 'cwvs', 'cxch',
     }),
     'corbet-libs': frozenset({'cbrd', 'cfrm', 'cfyr', 'cgth', 'cmsh', 'cnbx', 'cvlt'}),
 }
