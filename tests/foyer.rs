@@ -171,8 +171,9 @@ async fn local_http_routes_real_member_admin_root_and_rejects_foreign_authority(
         json!({"setting":set,"force":true}),
     )
     .await;
-    // The owner closes platform settings to a community garden's Root: only the
-    // root board's own admin host may edit them (cvld `Access::Root` on garden hosts).
+    // Negative: a community garden's Root is refused platform settings; only the
+    // root board's admin host may edit them (cvld `Access::Root`). The positive path
+    // is `explicit_root_board_routes_admin_actions_but_other_root_surfaces_stay_denied`.
     assert_eq!(
         forced,
         json!({"status":"error","error":"unauthorized"}),
@@ -355,6 +356,22 @@ async fn explicit_root_board_routes_admin_actions_but_other_root_surfaces_stay_d
         assert_eq!(output["status"], expected, "{output}");
         if explicit {
             assert!(output["result"]["policy_epoch"].as_u64().unwrap() > 1);
+            // The global Root edits platform settings only through the root portal.
+            let forced = serde_json::to_value(
+                surface::invoke(
+                    &mut door,
+                    ROOT,
+                    token.expose_for_transport(),
+                    "foyer.platform_set",
+                    1,
+                    json!({"setting":{"key":"quota", "value":6, "inherit":false,
+                        "effective_at":now + 86_400}, "force":true}),
+                    now,
+                )
+                .await,
+            )
+            .unwrap();
+            assert_eq!(forced["status"], "ok", "{forced}");
             assert_eq!(
                 serde_json::to_value(
                     surface::invoke(
