@@ -15,10 +15,10 @@ for candidate in "$CARGO_HOME"/wasm-pack/wasm-bindgen-*/wasm-bindgen; do
   fi
 done
 for candidate in "$CARGO_HOME"/../bun/esbuild@*/bin/esbuild; do
-  [[ -x "$candidate" ]] && { PATH="$(dirname "$candidate"):$PATH"; break; }
+  if [[ -x "$candidate" ]]; then PATH="$(dirname "$candidate"):$PATH"; break; fi
 done
 export PATH
-printf 'tools: wasm-bindgen want=%s have=%s\n' "$want" "$(command -v wasm-bindgen || echo none)"
+printf 'tools: wasm-bindgen want=%s have=%s esbuild=%s\n' "$want" "$(command -v wasm-bindgen || echo none)" "$(command -v esbuild || echo none)"
 for tool in cargo rustc node wasm-bindgen esbuild; do
   command -v "$tool" >/dev/null || { printf 'worker is missing tool: %s\n' "$tool"; exit 3; }
 done
