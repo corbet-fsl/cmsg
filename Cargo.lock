@@ -1718,7 +1718,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#15bb5691985a92402a1f8831933c0b80fd85dd53"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#ca1423d1d29466fdadd5f54dbf9b9afe17d02dd1"
 dependencies = [
  "arti-client",
  "blake3",
