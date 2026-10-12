@@ -16,7 +16,7 @@ for candidate in "$CARGO_HOME"/wasm-pack/wasm-bindgen-*/wasm-bindgen; do
   fi
 done
 for candidate in "$CARGO_HOME"/../bun/esbuild@*/bin/esbuild; do
-  if [[ -x "$candidate" ]]; then PATH="$(dirname "$candidate"):$PATH"; break; fi
+  if [[ -x "$candidate" ]] && "$candidate" --version >/dev/null 2>&1; then PATH="$(dirname "$candidate"):$PATH"; break; fi
 done
 source .ci/wasm-tools.sh
 export PATH
