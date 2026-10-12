@@ -18,6 +18,12 @@ done
 for candidate in "$CARGO_HOME"/../bun/esbuild@*/bin/esbuild; do
   if [[ -x "$candidate" ]] && "$candidate" --version >/dev/null 2>&1; then PATH="$(dirname "$candidate"):$PATH"; break; fi
 done
+if ! command -v esbuild >/dev/null 2>&1; then
+  # No usable esbuild in the worker cache: install one exact version into a scratch prefix.
+  esbuild_prefix=$(mktemp -d)
+  npm install --no-audit --no-fund --no-save --prefix "$esbuild_prefix" esbuild@0.23.1 >/dev/null
+  PATH="$esbuild_prefix/node_modules/.bin:$PATH"
+fi
 source .ci/wasm-tools.sh
 export PATH
 printf 'tools: wasm-bindgen want=%s have=%s esbuild=%s\n' "$want" "$(command -v wasm-bindgen || echo none)" "$(command -v esbuild || echo none)"
