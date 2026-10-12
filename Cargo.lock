@@ -1418,7 +1418,7 @@ source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#7cbc7b7cfca7
 dependencies = [
  "cchr",
  "cgrp",
- "ckmg 0.0.0 (git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01)",
+ "ckmg",
  "clnk",
  "cnvl",
  "cpfl",
@@ -1485,7 +1485,7 @@ name = "cdlv"
 version = "0.1.0"
 source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=v01#13735ae68d7fa475c40b4342568edf8b9bf46e5e"
 dependencies = [
- "ckmg 0.0.0 (git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01)",
+ "ckmg",
  "ctcs",
  "cthr",
  "cwst",
@@ -1592,7 +1592,7 @@ name = "cgrp"
 version = "0.1.0"
 source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=v01#dc356a2f620371d9a22ea25580057a9e3d99491b"
 dependencies = [
- "ckmg 0.0.0 (git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01)",
+ "ckmg",
  "cwst",
  "postcard",
  "schemars 1.2.2",
@@ -1718,13 +1718,15 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=lineage-read-capability#fc70740081b81361706b9b99b6dec134b19fb6b1"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#15bb5691985a92402a1f8831933c0b80fd85dd53"
 dependencies = [
  "arti-client",
  "blake3",
  "cdht",
  "chacha20 0.10.2",
  "chacha20poly1305 0.11.0",
+ "cnvl",
+ "cpsd",
  "ctrn",
  "cwlt-engine",
  "data-encoding",
@@ -1743,33 +1745,6 @@ dependencies = [
  "tor-llcrypto",
  "tor-rtcompat",
  "wasm-bindgen",
- "x25519-dalek 3.0.0",
- "zeroize",
-]
-
-[[package]]
-name = "ckmg"
-version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#15bb5691985a92402a1f8831933c0b80fd85dd53"
-dependencies = [
- "blake3",
- "cdht",
- "chacha20 0.10.2",
- "chacha20poly1305 0.11.0",
- "cnvl",
- "cpsd",
- "cwlt-engine",
- "data-encoding",
- "ed25519-dalek 3.0.0",
- "getrandom 0.4.3",
- "hkdf 0.13.0",
- "hpke",
- "rand_chacha 0.10.0",
- "rand_core 0.10.1",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "sha2 0.11.0",
  "x25519-dalek 3.0.0",
  "zeroize",
 ]
@@ -1916,7 +1891,7 @@ dependencies = [
  "cchr",
  "cdht",
  "cfyr",
- "ckmg 0.0.0 (git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=lineage-read-capability)",
+ "ckmg",
  "ckyh",
  "cmmr",
  "cmsh",
@@ -1984,7 +1959,7 @@ source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=v01#2ad307bf83a2
 dependencies = [
  "cdlv",
  "cgrp",
- "ckmg 0.0.0 (git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01)",
+ "ckmg",
  "ctcs",
  "cthr",
  "cwst",
@@ -2201,7 +2176,7 @@ source = "git+https://git.corbet.ch/corbet-foss/cpfl.git?branch=v01#bfa57ff14395
 dependencies = [
  "blake3",
  "cgrd",
- "ckmg 0.0.0 (git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01)",
+ "ckmg",
  "cnvl",
  "cpns",
  "cprz",
@@ -2546,7 +2521,7 @@ name = "ctcs"
 version = "0.1.0"
 source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=v01#7832d71eafd209693373744a24c1103a8b5df618"
 dependencies = [
- "ckmg 0.0.0 (git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01)",
+ "ckmg",
  "cwst",
  "schemars 1.2.2",
  "serde",
@@ -2560,7 +2535,7 @@ source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#62591b791794
 dependencies = [
  "cchr",
  "cgrp",
- "ckmg 0.0.0 (git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01)",
+ "ckmg",
  "cpfl",
  "cshm",
  "ctcs",
@@ -2718,7 +2693,7 @@ dependencies = [
  "blake3",
  "cchr",
  "cdht",
- "ckmg 0.0.0 (git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01)",
+ "ckmg",
  "ckyh",
  "cpky",
  "cprz",
@@ -2737,7 +2712,7 @@ version = "0.0.0"
 source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#f39a2f100ea19fc6590edd34e750957e07d18484"
 dependencies = [
  "blake3",
- "ckmg 0.0.0 (git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01)",
+ "ckmg",
  "cpsd",
  "cwst",
  "czkp",
@@ -2782,7 +2757,7 @@ dependencies = [
  "atomicwrites",
  "blake3",
  "chacha20poly1305 0.11.0",
- "ckmg 0.0.0 (git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01)",
+ "ckmg",
  "fs2",
  "futures",
  "getrandom 0.4.3",
@@ -2803,7 +2778,7 @@ version = "0.1.0"
 source = "git+https://git.corbet.ch/corbet-foss/cwvs.git?branch=v01#f7d761b84028603254f47f5e1031af2771c55363"
 dependencies = [
  "cdlv",
- "ckmg 0.0.0 (git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01)",
+ "ckmg",
  "ctcs",
  "cthr",
  "cwlt",
