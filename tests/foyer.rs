@@ -171,7 +171,13 @@ async fn local_http_routes_real_member_admin_root_and_rejects_foreign_authority(
         json!({"setting":set,"force":true}),
     )
     .await;
-    assert_eq!(forced["status"], "ok", "{forced}");
+    // The owner closes platform settings to a community garden's Root: only the
+    // root board's own admin host may edit them (cvld `Access::Root` on garden hosts).
+    assert_eq!(
+        forced,
+        json!({"status":"error","error":"unauthorized"}),
+        "{forced}"
+    );
     for (client, action, body) in [
         (&member, "foyer.setting_set", set),
         (&admin, "foyer.platform_set", json!({})),

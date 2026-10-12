@@ -274,7 +274,7 @@ async fn cancelled_final_store_read_discards_the_genuine_ordinary_member_lease()
         let held = gate.lock().await;
         tokio::select! {
             reached = notice => reached.unwrap(),
-            _ = operation.as_mut() => panic!("final original Store read must remain blocked"),
+            finished = operation.as_mut() => panic!("final original Store read must remain blocked: {:?}", finished.err()),
         }
         assert_eq!(
             loads.get(),

@@ -30,12 +30,19 @@ nix-shell tests/fixture/owner/check-shell.nix --run 'cargo test --locked --all-t
 fixture="${CARGO_TARGET_DIR:-tests/fixture/target}/debug/cmsg-foyer-fixture"
 export fixture
 # The foyer test edits the live policy, which invalidates every passport minted by the same fixture;
-# it gets its own fixture instance and runs last.
-others=$(for t in tests/*.rs; do n=$(basename "$t" .rs); [ "$n" = foyer ] || printf -- '--test %s ' "$n"; done)
+# the initial-enrollment and Wallet tests each fill the fixture's bounded pending challenges.
+# Each of these gets its own fixture instance.
+own="foyer initial_enrollment wallet_enrollment"
+others=$(for t in tests/*.rs; do n=$(basename "$t" .rs); case " $own " in *" $n "*) ;; *) printf -- '--test %s ' "$n";; esac; done)
 export others
 status=0
+# Debug builds of the Wallet flows hold large futures on the test thread.
+export RUST_MIN_STACK=67108864
 nix-shell tests/fixture/owner/check-shell.nix --run 'python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --lib --bins --examples $others --no-fail-fast' || status=1
-nix-shell tests/fixture/owner/check-shell.nix --run 'python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --test foyer --no-fail-fast' || status=1
+for t in $own; do
+    export t
+    nix-shell tests/fixture/owner/check-shell.nix --run 'python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --test "$t" --no-fail-fast -- --test-threads=1' || status=1
+done
 [ "$status" = 0 ]
 
 # Qualify the actual maintained Tor transport separately from inert record tests.
