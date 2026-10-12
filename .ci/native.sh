@@ -25,6 +25,8 @@ cargo fmt --all -- --check
 # The Keyhole test server links openssl through webauthn-rs-core.
 nix-shell tests/fixture/owner/check-shell.nix --run 'cargo clippy --locked --all-targets -- -D warnings'
 nix-shell tests/fixture/owner/check-shell.nix --run 'bash .ci/native-prover.sh'
+# Pending passkey ceremonies expire after 300 s of wall time; build every test binary BEFORE the fixture starts.
+nix-shell tests/fixture/owner/check-shell.nix --run 'cargo test --locked --all-targets --no-run'
 fixture="${CARGO_TARGET_DIR:-tests/fixture/target}/debug/cmsg-foyer-fixture"
 export fixture
 nix-shell tests/fixture/owner/check-shell.nix --run 'python3 .ci/with-foyer-fixture.py "$fixture" cargo test --locked --all-targets --no-fail-fast'
