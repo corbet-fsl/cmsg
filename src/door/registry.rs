@@ -4,6 +4,7 @@ use board::{
     heartbeat as board_heartbeat, search as board_search, watch as board_watch,
 };
 use foyer::refresh as foyer_refresh;
+use inbox::{blocking_rules as inbox_blocking_rules, contact_act as inbox_contact_act};
 use login::{cancel as login_cancel, poll as login_poll, start as login_start};
 
 #[derive(
@@ -37,6 +38,7 @@ pub enum Effect {
     LocalLifecycle,
     VaultAccess,
     BoardRecord,
+    InboxRecord,
 }
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -152,7 +154,7 @@ async fn inbox_delivery(
     inbox_read(door, key, |vault| vault.delivery(request)).await
 }
 
-async fn inbox_read<T: 'static>(
+pub(super) async fn inbox_read<T: 'static>(
     door: &mut Door,
     key: &[u8; 32],
     read: impl for<'a> FnOnce(&'a mut dyn facades::BoundVault) -> facades::OwnedFuture<'a, T>,
@@ -246,6 +248,8 @@ actions! {
     "inbox.history" => inbox_history(facades::Conversation) -> Vec<cnbx::Message>, VaultAccess, Inbox;
     "inbox.relation" => inbox_relation(facades::Relation) -> cnbx::Relation, VaultAccess, Inbox;
     "inbox.delivery_status" => inbox_delivery(facades::Delivery) -> Option<cnbx::DeliveryStatus>, VaultAccess, Inbox;
+    "inbox.blocking_rules" => inbox_blocking_rules(Empty) -> Vec<String>, VaultAccess, Inbox;
+    "inbox.contact_act" => inbox_contact_act(inbox::ContactAct) -> cnbx::Relation, InboxRecord, Inbox;
     "mesh.status" => mesh_status(Empty) -> Vec<cmsh::BackendView>, Read, Mesh;
     "mesh.disconnect" => mesh_disconnect(Empty) -> Empty, LocalLifecycle, Mesh;
     "vault.lock" => vault_lock(Empty) -> Empty, LocalLifecycle, Vault;

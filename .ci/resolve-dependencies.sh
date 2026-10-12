@@ -13,6 +13,7 @@ fi
 mkdir -p "$resolution_artifacts"
 cargo update
 cargo update --manifest-path tests/fixture/Cargo.toml
+echo '---LOCK-BEGIN---'; cat Cargo.lock; echo '---LOCK-END---'
 cp Cargo.lock "$resolution_artifacts/resolve-dependencies-Cargo.lock"
 cp tests/fixture/Cargo.lock "$resolution_artifacts/resolve-dependencies-fixture-Cargo.lock"
 sha256sum "$resolution_artifacts/resolve-dependencies-Cargo.lock" "$resolution_artifacts/resolve-dependencies-fixture-Cargo.lock"

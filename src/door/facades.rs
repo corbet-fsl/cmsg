@@ -1,6 +1,7 @@
 //! Bound actual owner facades. Type erasure here preserves their own methods;
 //! no generic accepting domain driver or caller-supplied success is exposed.
 use super::*;
+mod inbox_custody;
 mod shared;
 use cbrd::clnk;
 pub use shared::VaultBoardOwner;
@@ -163,6 +164,12 @@ pub(super) trait BoundVault {
     fn history(&mut self, request: Conversation) -> OwnedFuture<'_, Vec<cnbx::Message>>;
     fn relation(&mut self, request: Relation) -> OwnedFuture<'_, cnbx::Relation>;
     fn delivery(&mut self, request: Delivery) -> OwnedFuture<'_, Option<cnbx::DeliveryStatus>>;
+    fn blocking_rules(&mut self) -> OwnedFuture<'_, Vec<String>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    fn contact_act(&mut self, _request: inbox::ContactAct) -> OwnedFuture<'_, cnbx::Relation> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn sign_board<'a>(
         &'a mut self,
         prepared: &'a cbrd::Prepared,
@@ -319,6 +326,12 @@ where
                 .await?
                 .delivery_status(&request.message))
         })
+    }
+    fn blocking_rules(&mut self) -> OwnedFuture<'_, Vec<String>> {
+        Box::pin(self.blocking_rules_owned())
+    }
+    fn contact_act(&mut self, request: inbox::ContactAct) -> OwnedFuture<'_, cnbx::Relation> {
+        Box::pin(self.contact_act_owned(request))
     }
     fn sign_board<'a>(
         &'a mut self,

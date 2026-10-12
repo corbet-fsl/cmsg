@@ -37,6 +37,18 @@ kind = "commands"
 commands = [["bash", ".ci/resolve-dependencies.sh"]]
 cache_outputs = ["Cargo.lock", "tests/fixture/Cargo.lock"]
 
+# The Keyhole test server links OpenSSL (webauthn-rs-core): run in a pinned shell.
+[checks.peer-lineage]
+kind = "commands"
+commands = [["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "cargo test --locked --features native-tor,test-authenticator --test peer_lineage"]]
+
+[jobs.peer-lineage]
+scheduler = "crow"
+checks = ["peer-lineage"]
+workflow = "repository-jobs"
+command = ["ccid:run-declared-checks"]
+environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-v01/target", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_TEST_DEBUG = "0", CARGO_NET_GIT_FETCH_WITH_CLI = "true", CARGO_NET_RETRY = "0", CI_JOBS = "2", CI_TEST_THREADS = "2" }
+
 [jobs.native-owner]
 scheduler = "crow"
 checks = ["native-owner"]
@@ -61,7 +73,7 @@ environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-v01/target", CARGO_PROFIL
 # shell drivers are removed; this job is the only v01 gate.
 [checks.v01-push]
 kind = "commands"
-commands = [["cargo", "check", "--offline", "--locked", "--all-targets", "--features", "native-tor,test-authenticator"], ["cargo", "clippy", "--offline", "--locked", "--all-targets", "--features", "native-tor,test-authenticator", "--", "-D", "warnings"], ["cargo", "test", "--offline", "--locked", "--lib", "--features", "native-tor,test-authenticator", "--", "--skip", "door::login::native::tests::unknown_session_result_and_cancelled_reply_fence_original_foyer", "--skip", "door::login::session::custody_tests::actual_login_custody_is_consumed_once_with_local_and_original_session_refusals"]]
+commands = [["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "cargo check --offline --locked --all-targets --features native-tor,test-authenticator"], ["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "cargo clippy --offline --locked --all-targets --features native-tor,test-authenticator -- -D warnings"], ["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "cargo test --offline --locked --lib --features native-tor,test-authenticator -- --skip 'door::login::native::tests::unknown_session_result_and_cancelled_reply_fence_original_foyer' --skip 'door::login::session::custody_tests::actual_login_custody_is_consumed_once_with_local_and_original_session_refusals'"]]
 
 [jobs.v01-push]
 scheduler = "crow"

@@ -18,7 +18,6 @@ use cpky::{
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::Write,
     num::NonZeroUsize,
     path::Path,
     process::{Child, Command, Stdio},
@@ -241,12 +240,10 @@ async fn drain(label: &str, owner: Native) {
         .unwrap();
     // Direct fixture output survives the test harness capture and is retained
     // by the original private-network driver's contract receipt. No IDs appear.
-    writeln!(
-        std::io::stdout(),
+    println!(
         "original Tor {label} drained in {} ms",
         begun.elapsed().as_millis()
-    )
-    .unwrap();
+    );
 }
 /// Peer advertisements are opaque and not `Clone`; copy the exact wire bytes.
 fn owned(advertisement: &cdht::rpc::UnverifiedPeerInfoBytes) -> cdht::rpc::UnverifiedPeerInfoBytes {

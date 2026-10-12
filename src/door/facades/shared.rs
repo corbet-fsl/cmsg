@@ -183,6 +183,36 @@ where
             self.after_wait(result)
         })
     }
+    fn blocking_rules(&mut self) -> OwnedFuture<'_, Vec<String>> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .blocking_rules()
+                .await;
+            self.after_wait(result)
+        })
+    }
+    fn contact_act(&mut self, request: inbox::ContactAct) -> OwnedFuture<'_, cnbx::Relation> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .contact_act(request)
+                .await;
+            self.after_wait(result)
+        })
+    }
     fn delivery(&mut self, request: Delivery) -> OwnedFuture<'_, Option<cnbx::DeliveryStatus>> {
         Box::pin(async move {
             if self.lifetime.is_closed() {
