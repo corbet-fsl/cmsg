@@ -101,8 +101,6 @@ tokio = { version = "1", features = ["test-util", "rt-multi-thread"] }
 ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh", branch = "main", default-features = false, features = ["server"] }
 crlt = { git = "https://git.corbet.ch/corbet-foss/crlt", branch = "main" }
 futures-executor = "0.3"
-# webauthn-rs-core (Keyhole test server) links OpenSSL; the CI shell has no system copy.
-openssl = { version = "0.10", features = ["vendored"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 

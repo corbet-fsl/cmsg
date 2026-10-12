@@ -37,6 +37,18 @@ kind = "commands"
 commands = [["bash", ".ci/resolve-dependencies.sh"]]
 cache_outputs = ["Cargo.lock", "tests/fixture/Cargo.lock"]
 
+# The Keyhole test server links OpenSSL (webauthn-rs-core): run in a pinned shell.
+[checks.peer-lineage]
+kind = "commands"
+commands = [["nix-shell", ".ci/check-shell.nix", "--run", "cargo test --locked --test peer_lineage"]]
+
+[jobs.peer-lineage]
+scheduler = "crow"
+checks = ["peer-lineage"]
+workflow = "repository-jobs"
+command = ["ccid:run-declared-checks"]
+environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-v01/target", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_TEST_DEBUG = "0", CARGO_NET_GIT_FETCH_WITH_CLI = "true", CARGO_NET_RETRY = "0", CI_JOBS = "2", CI_TEST_THREADS = "2" }
+
 [jobs.native-owner]
 scheduler = "crow"
 checks = ["native-owner"]
