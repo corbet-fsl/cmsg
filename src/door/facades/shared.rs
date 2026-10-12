@@ -156,6 +156,23 @@ where
     A: ckmg::Authority,
     R: cvlt::Records,
 {
+    /// Is `peer` blocked? Board consults this before it decrypts a Profile or
+    /// Exchange input from that sender; the answer is read from the Contacts
+    /// journal under fresh Use.
+    pub async fn is_blocked(&mut self, peer: &str) -> Result<bool> {
+        if self.lifetime.is_closed() {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let mut retained = self.retained.lock().await;
+        self.require_open()?;
+        let result = retained
+            .as_mut()
+            .ok_or(ErrorCode::Unavailable)?
+            .is_blocked_owned(peer)
+            .await;
+        self.after_wait(result)
+    }
+
     /// Trusted composition only: record the community credential the community
     /// issued to this device when joining. `expected` is the credential believed
     /// current (`None` the first time); a mismatch writes nothing.

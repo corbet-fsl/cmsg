@@ -52,7 +52,8 @@ impl ckmg::Authority for IntentAuthority {
             ckmg::Action::Use if request.root == root && request.epoch == 1 => Ok(()),
             ckmg::Action::LendProfileCustody if request.root == root && request.epoch == 1 => {
                 self.lends.set(self.lends.get() + 1);
-                self.verifier.consume(&request, "https://member.example.test")
+                self.verifier
+                    .consume(&request, "https://member.example.test")
             }
             _ => Err(ckmg::Error::Unauthorized),
         }
@@ -172,7 +173,9 @@ async fn custody_is_lent_with_credential_and_block_list_of_the_same_snapshot() {
         .await;
     assert_eq!(first, Ok(()));
     assert_eq!(
-        owner.store_community_credential(None, b"credential-one").await,
+        owner
+            .store_community_credential(None, b"credential-one")
+            .await,
         Ok(cvlt::CredentialWrite::Stored)
     );
     owner
@@ -182,6 +185,8 @@ async fn custody_is_lent_with_credential_and_block_list_of_the_same_snapshot() {
         })
         .await
         .unwrap();
+    assert_eq!(owner.is_blocked("peer-one").await, Ok(true));
+    assert_eq!(owner.is_blocked("peer-two").await, Ok(false));
     // A second lend needs a second admission, which the owner makes itself.
     let second = owner
         .with_profile(|parts| Ok((parts.credential.clone(), parts.blocked.clone())))
@@ -205,7 +210,13 @@ async fn custody_is_refused_without_the_admission_channel_or_a_closed_lifetime()
         Err(ErrorCode::Unauthorized)
     );
     assert_eq!(
-        owner.store_community_credential(None, b"credential-one").await,
+        owner
+            .store_community_credential(None, b"credential-one")
+            .await,
+        Err(ErrorCode::Unauthorized)
+    );
+    assert_eq!(
+        owner.is_blocked("peer-one").await,
         Err(ErrorCode::Unauthorized)
     );
     assert_eq!(lends.get(), 0);
@@ -214,13 +225,18 @@ async fn custody_is_refused_without_the_admission_channel_or_a_closed_lifetime()
 #[tokio::test]
 async fn credential_replacement_is_compare_and_swap_through_the_owner() {
     let (mut owner, _, _) = open(true).await;
-    owner.store_community_credential(None, b"one").await.unwrap();
+    owner
+        .store_community_credential(None, b"one")
+        .await
+        .unwrap();
     assert_eq!(
         owner.store_community_credential(None, b"one").await,
         Ok(cvlt::CredentialWrite::Unchanged)
     );
     assert_eq!(
-        owner.store_community_credential(Some(b"other"), b"two").await,
+        owner
+            .store_community_credential(Some(b"other"), b"two")
+            .await,
         Err(ErrorCode::Reconcile)
     );
     assert_eq!(

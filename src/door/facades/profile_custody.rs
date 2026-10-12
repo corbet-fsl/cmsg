@@ -133,4 +133,18 @@ where
             .await
             .map_err(credential_error)
     }
+
+    /// Is this peer blocked in the Contacts journal? Read under fresh Use in the
+    /// same Store snapshot, so a Profile or Exchange input from a blocked sender
+    /// can be refused before any decryption.
+    pub(super) async fn is_blocked_owned(&mut self, peer: &str) -> Result<bool> {
+        let storage = self.vault.storage().clone();
+        let store = storage.lock().await;
+        self.check_scope(&store).await?;
+        self.inbox
+            .contacts(&store)
+            .and_then(|contacts| contacts.blocking_rules())
+            .map(|blocked| blocked.iter().any(|blocked| blocked == peer))
+            .map_err(contact_error)
+    }
 }
