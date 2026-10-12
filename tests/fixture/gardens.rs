@@ -55,7 +55,7 @@ async fn found(
     let recipient = api
         .call(
             "community_creation_recipient",
-            json!({"id":null,"expires_at":NOW + 300}),
+            json!({"id":null,"expires_at":NOW + 300,"purpose":"root"}),
         )
         .await
         .unwrap();
