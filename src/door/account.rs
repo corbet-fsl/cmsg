@@ -87,6 +87,64 @@ impl Answer {
     accessor!(activated, Activated, Activation);
 }
 
+/// What the account already holds, as far as repeating an action needs to know.
+#[cfg_attr(
+    not(all(feature = "native-prover", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+pub(super) trait Standing {
+    /// The accepted, active account, if any.
+    async fn active(&mut self) -> Option<Activation>;
+    /// Whether a durable pending request exists.
+    async fn pending(&mut self) -> bool;
+}
+
+/// How a command is served when the member repeats setup (the PWA runs every
+/// action on each arrival).
+#[cfg_attr(
+    not(all(feature = "native-prover", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Repeat {
+    /// Fully answered from existing state; nothing new is written.
+    Answer(Answer),
+    /// Serve this command (possibly rewritten, `open` resumes as `reopen`).
+    As(Command),
+}
+
+/// An active account answers all four actions with its existing state. A durable
+/// pending request means the member enrolled and opened: enrolling reports the
+/// checkpoint ready and opening resumes the stored request instead of building
+/// another. Otherwise the command runs as asked.
+#[cfg_attr(
+    not(all(feature = "native-prover", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repeat {
+    if let Some(active) = state.active().await {
+        return Repeat::Answer(match command {
+            Command::Enroll => Answer::Enrolled(Enrolled {
+                checkpoint: Checkpoint::Ready,
+            }),
+            Command::Open => Answer::Opened(Opened {
+                accepted_at: active.accepted_at,
+            }),
+            Command::Reopen => Answer::Reopened(Opened {
+                accepted_at: active.accepted_at,
+            }),
+            Command::Activate => Answer::Activated(active),
+        });
+    }
+    match command {
+        Command::Enroll if state.pending().await => Repeat::Answer(Answer::Enrolled(Enrolled {
+            checkpoint: Checkpoint::Ready,
+        })),
+        Command::Open if state.pending().await => Repeat::As(Command::Reopen),
+        other => Repeat::As(other),
+    }
+}
+
 type Reply = Result<Answer>;
 
 /// The bound actor of one origin and the instant its authority ends.
@@ -174,6 +232,26 @@ mod run {
         Restart,
         /// Drop it and serve this same action from a fresh admission.
         Carry,
+    }
+
+    impl<B, C, E, A, R> Standing for CommunityAccount<B, C, E, A, R>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
+        async fn active(&mut self) -> Option<Activation> {
+            existing_active(self).await.map(|done| Activation {
+                version: done.version,
+                accepted_at: done.accepted_at,
+                outbox_settled: done.outbox_settled,
+            })
+        }
+        async fn pending(&mut self) -> bool {
+            has_pending(self).await
+        }
     }
 
     impl AccountActor {
@@ -323,42 +401,10 @@ mod run {
         A: Authority,
         R: Records,
     {
-        // Idempotent setup: a returning member repeats every action. An active
-        // account answers all four with its existing state and changes nothing.
-        if let Some(active) = existing_active(account).await {
-            let reply = match command {
-                Command::Enroll => Answer::Enrolled(Enrolled {
-                    checkpoint: Checkpoint::Ready,
-                }),
-                Command::Open => Answer::Opened(Opened {
-                    accepted_at: active.accepted_at,
-                }),
-                Command::Reopen => Answer::Reopened(Opened {
-                    accepted_at: active.accepted_at,
-                }),
-                Command::Activate => Answer::Activated(Activation {
-                    version: active.version,
-                    accepted_at: active.accepted_at,
-                    outbox_settled: active.outbox_settled,
-                }),
-            };
-            return (Ok(reply), Next::Stay);
-        }
-        // A durable pending request means this member already enrolled and
-        // opened: enrolling reports the checkpoint as ready and opening resumes
-        // the stored request (byte-identical resend) instead of building another.
-        let command = match command {
-            Command::Open if has_pending(account).await => Command::Reopen,
-            other => other,
+        let command = match repeat(command, account).await {
+            Repeat::Answer(answer) => return (Ok(answer), Next::Stay),
+            Repeat::As(command) => command,
         };
-        if command == Command::Enroll && has_pending(account).await {
-            return (
-                Ok(Answer::Enrolled(Enrolled {
-                    checkpoint: Checkpoint::Ready,
-                })),
-                Next::Stay,
-            );
-        }
         match command {
             Command::Enroll => match std::mem::replace(stage, Stage::Spent) {
                 Stage::Admitted(admission) => {
@@ -533,5 +579,112 @@ mod tests {
         );
         drop(call);
         assert!(ended.expired(0));
+    }
+
+    /// A standing double that counts every probe; it has no write at all, so a
+    /// repeated action provably cannot create state through this seam.
+    struct Fake {
+        active: Option<Activation>,
+        pending: bool,
+        probes: usize,
+    }
+    impl Standing for Fake {
+        async fn active(&mut self) -> Option<Activation> {
+            self.probes += 1;
+            self.active.clone()
+        }
+        async fn pending(&mut self) -> bool {
+            self.probes += 1;
+            self.pending
+        }
+    }
+    fn done() -> Activation {
+        Activation {
+            version: 0,
+            accepted_at: 7,
+            outbox_settled: true,
+        }
+    }
+    fn block<T>(future: impl std::future::Future<Output = T>) -> T {
+        futures_executor::block_on(future)
+    }
+    const ALL: [Command; 4] = [
+        Command::Enroll,
+        Command::Open,
+        Command::Reopen,
+        Command::Activate,
+    ];
+
+    #[test]
+    fn every_action_repeated_on_an_active_account_returns_the_same_existing_state() {
+        let mut state = Fake {
+            active: Some(done()),
+            pending: true,
+            probes: 0,
+        };
+        for command in ALL {
+            let first = block(repeat(command, &mut state));
+            let second = block(repeat(command, &mut state));
+            assert_eq!(first, second);
+            assert!(matches!(first, Repeat::Answer(_)));
+        }
+        assert_eq!(
+            block(repeat(Command::Activate, &mut state)),
+            Repeat::Answer(Answer::Activated(done()))
+        );
+        assert_eq!(
+            block(repeat(Command::Open, &mut state)),
+            Repeat::Answer(Answer::Opened(Opened { accepted_at: 7 }))
+        );
+        assert_eq!(
+            block(repeat(Command::Reopen, &mut state)),
+            Repeat::Answer(Answer::Reopened(Opened { accepted_at: 7 }))
+        );
+        assert_eq!(
+            block(repeat(Command::Enroll, &mut state)),
+            Repeat::Answer(Answer::Enrolled(Enrolled {
+                checkpoint: Checkpoint::Ready
+            }))
+        );
+    }
+
+    #[test]
+    fn a_durable_pending_request_makes_enroll_ready_and_open_resume_as_reopen() {
+        let mut state = Fake {
+            active: None,
+            pending: true,
+            probes: 0,
+        };
+        assert_eq!(
+            block(repeat(Command::Enroll, &mut state)),
+            Repeat::Answer(Answer::Enrolled(Enrolled {
+                checkpoint: Checkpoint::Ready
+            }))
+        );
+        assert_eq!(
+            block(repeat(Command::Open, &mut state)),
+            Repeat::As(Command::Reopen)
+        );
+        assert_eq!(
+            block(repeat(Command::Reopen, &mut state)),
+            Repeat::As(Command::Reopen)
+        );
+        assert_eq!(
+            block(repeat(Command::Activate, &mut state)),
+            Repeat::As(Command::Activate)
+        );
+    }
+
+    #[test]
+    fn a_first_run_without_state_serves_each_action_as_asked() {
+        let mut state = Fake {
+            active: None,
+            pending: false,
+            probes: 0,
+        };
+        for command in ALL {
+            assert_eq!(block(repeat(command, &mut state)), Repeat::As(command));
+        }
+        assert!(state.probes > 0);
     }
 }
