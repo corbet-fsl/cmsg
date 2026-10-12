@@ -40,7 +40,7 @@ cache_outputs = ["Cargo.lock", "tests/fixture/Cargo.lock"]
 # The Keyhole test server links OpenSSL (webauthn-rs-core): run in a pinned shell.
 [checks.peer-lineage]
 kind = "commands"
-commands = [["nix-shell", ".ci/check-shell.nix", "--run", "cargo test --locked --test peer_lineage"]]
+commands = [["nix-shell", ".ci/check-shell.nix", "--run", "cargo test --locked --features native-tor,test-authenticator --test peer_lineage"]]
 
 [jobs.peer-lineage]
 scheduler = "crow"
