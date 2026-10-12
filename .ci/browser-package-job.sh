@@ -18,6 +18,10 @@ done
 for candidate in "$CARGO_HOME"/../bun/esbuild@*/bin/esbuild; do
   if [[ -x "$candidate" ]]; then PATH="$(dirname "$candidate"):$PATH"; break; fi
 done
+# The wasm build links with a plain `lld`; use the worker's Nix-provided one.
+for candidate in /nix/store/*-lld-22.1.8/bin/lld; do
+  if [[ -x "$candidate" ]]; then PATH="$(dirname "$candidate"):$PATH"; break; fi
+done
 export PATH
 printf 'tools: wasm-bindgen want=%s have=%s esbuild=%s\n' "$want" "$(command -v wasm-bindgen || echo none)" "$(command -v esbuild || echo none)"
 for tool in cargo rustc node wasm-bindgen esbuild; do
