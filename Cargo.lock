@@ -1333,7 +1333,7 @@ dependencies = [
  "cbcn",
  "cmbl",
  "csgn",
- "czkp 0.0.0 (git+https://git.corbet.ch/corbet-foss/czkp?branch=main)",
+ "czkp",
  "data-encoding",
  "ed25519-dalek 2.2.0",
  "p256 0.13.2",
@@ -1414,7 +1414,7 @@ dependencies = [
 [[package]]
 name = "cdlv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=v01#14555ab1423059bb2100717f85862ff016ad455f"
+source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=v01#13735ae68d7fa475c40b4342568edf8b9bf46e5e"
 dependencies = [
  "ckmg",
  "ctcs",
@@ -1828,7 +1828,7 @@ dependencies = [
  "cshm",
  "ctrn",
  "cvlt",
- "cwlt 0.0.0 (git+https://git.corbet.ch/corbet-foss/cwlt?branch=main)",
+ "cwlt",
  "cwst",
  "data-encoding",
  "ed25519-dalek 2.2.0",
@@ -1878,7 +1878,7 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=v01#bac5e44fb97b38e69b249348505dc532ebe7ca9e"
+source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=v01#2ad307bf83a21b9450df12b57cdf5d6f11ef0d24"
 dependencies = [
  "cdlv",
  "cgrp",
@@ -1889,6 +1889,7 @@ dependencies = [
  "cwvs",
  "schemars 1.2.2",
  "serde",
+ "sha2 0.11.0",
 ]
 
 [[package]]
@@ -2242,7 +2243,7 @@ dependencies = [
 [[package]]
 name = "crbk"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#b9dba4d1f867bc1a3439f4ede6b4fdb2290cd692"
+source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#d3431a1bcf8f440be3f3ee0def7588ced2f752db"
 dependencies = [
  "semver",
  "serde",
@@ -2425,7 +2426,7 @@ checksum = "8fd9f3db6f2cfef61c10613071955154ffdc9e515daebff26de4b54e35038fdd"
 [[package]]
 name = "ctcs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=v01#42c8ebf1028febd52588dae78bd487868bfd8b13"
+source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=v01#7832d71eafd209693373744a24c1103a8b5df618"
 dependencies = [
  "ckmg",
  "cwst",
@@ -2437,7 +2438,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#254fede6297598c629c2bf15851cfa6cecaa6199"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#62591b7917941b73b7823d3d217fe892f305484b"
 dependencies = [
  "cchr",
  "cgrp",
@@ -2575,7 +2576,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#86ef415a18716d6fd1daee7b0c7c14a2da872b3a"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#004c2c993859878aabebab8f3195089dca71eaa0"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -2604,7 +2605,7 @@ dependencies = [
  "cpky",
  "cprz",
  "cprz-pad",
- "cwlt 0.0.0 (git+https://git.corbet.ch/corbet-foss/cwlt?branch=main)",
+ "cwlt",
  "cwst",
  "futures",
  "serde",
@@ -2615,25 +2616,13 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#ce8af0a4a645338a8181ce83beafac18eb9d6131"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#f39a2f100ea19fc6590edd34e750957e07d18484"
 dependencies = [
  "blake3",
  "ckmg",
  "cpsd",
  "cwst",
- "czkp 0.0.0 (git+https://git.corbet.ch/corbet-foss/czkp?branch=main)",
- "serde",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "cwlt"
-version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt.git?branch=v01#0ce76e9a44a5d1738a83be9f8dcd4839f4f3006c"
-dependencies = [
- "czkp 0.0.0 (git+https://git.corbet.ch/corbet-foss/czkp.git?branch=v01)",
- "data-encoding",
+ "czkp",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -2644,13 +2633,13 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#ce8af0a4a645338a8181ce83beafac18eb9d6131"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#f39a2f100ea19fc6590edd34e750957e07d18484"
 dependencies = [
  "acvm",
  "barretenberg-rs",
  "bn254_blackbox_solver",
  "chacha20poly1305 0.11.0",
- "czkp 0.0.0 (git+https://git.corbet.ch/corbet-foss/czkp?branch=main)",
+ "czkp",
  "data-encoding",
  "ed25519-dalek 3.0.0",
  "flate2",
@@ -2693,13 +2682,13 @@ dependencies = [
 [[package]]
 name = "cwvs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwvs.git?branch=v01#8807b49ffdc3c8a79433b1a7586aa61f4b15e175"
+source = "git+https://git.corbet.ch/corbet-foss/cwvs.git?branch=v01#f7d761b84028603254f47f5e1031af2771c55363"
 dependencies = [
  "cdlv",
  "ckmg",
  "ctcs",
  "cthr",
- "cwlt 0.0.0 (git+https://git.corbet.ch/corbet-foss/cwlt.git?branch=v01)",
+ "cwlt",
  "cwst",
  "schemars 1.2.2",
  "serde",
@@ -2731,21 +2720,6 @@ dependencies = [
  "data-encoding",
  "ed25519-dalek 3.0.0",
  "p256 0.13.2",
- "pso-poseidon",
- "rs_merkle",
- "serde",
- "sha2 0.11.0",
-]
-
-[[package]]
-name = "czkp"
-version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/czkp.git?branch=v01#1217e02ea7cfb99613cea50b3e87288efb392bb5"
-dependencies = [
- "ark-bn254",
- "ark-ff 0.6.0",
- "data-encoding",
- "ed25519-dalek 3.0.0",
  "pso-poseidon",
  "rs_merkle",
  "schemars 1.2.2",
