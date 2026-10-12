@@ -514,15 +514,18 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
                 .owner
                 .with_current(|read| {
                     with_context(current, policy, &community, expires, read, |context, _| {
-                        board.read_group_policy_committed(context).map_err(board_error)
+                        board
+                            .read_group_policy_committed(context)
+                            .map_err(board_error)
                     })
                 })
                 .await?;
             let source = cbrd::PolicyAt::new(&community, projected);
             let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
-            let (views, _) = cbrd::execute_group_intent(owner, &source, intent, visible, MAX_GROUPS)
-                .await
-                .map_err(group_error)?;
+            let (views, _) =
+                cbrd::execute_group_intent(owner, &source, intent, visible, MAX_GROUPS)
+                    .await
+                    .map_err(group_error)?;
             Ok(views)
         })
     }
