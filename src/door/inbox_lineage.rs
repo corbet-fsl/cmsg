@@ -101,39 +101,6 @@ impl<O: HandleOpener> PeerRecords for StoredHandleRecords<O> {
     }
 }
 
-/// Copy evidence out of a completed forced read (the type has no public Clone).
-fn copy_evidence(read: &cvlt::LineageRead) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable> {
-    read.evidence()
-        .iter()
-        .map(|item| {
-            item.to_bytes()
-                .and_then(|bytes| cvlt::LineageEvidence::from_bytes(&bytes))
-                .map_err(|_| PeerUnavailable)
-        })
-        .collect()
-}
-
-/// The production opener: the peer's handle carries the read capability of its
-/// own lineage record. Every call opens the record anew and reads it FORCED.
-pub struct TorHandleOpener<N>(pub N);
-impl<N: cdht::Network + Clone> HandleOpener for TorHandleOpener<N> {
-    async fn read(
-        &mut self,
-        binding: &Binding,
-        handle: &[u8],
-    ) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable> {
-        let custody = ckmg::LineageReadCustody::from_capability(handle, binding)
-            .map_err(|_| PeerUnavailable)?;
-        let backend = cvlt::TorLineageRecord::member_lineage(self.0.clone(), custody)
-            .await
-            .map_err(|_| PeerUnavailable)?;
-        let record = cdht::runtime::Record::new(backend).map_err(|_| PeerUnavailable)?;
-        let mut records = cvlt::LineageRecords::new(vec![record]).map_err(|_| PeerUnavailable)?;
-        let read = records.read().await.map_err(|_| PeerUnavailable)?;
-        copy_evidence(&read)
-    }
-}
-
 /// Fills `cnbx::DeviceAuthority` for peers; `ContactAuthority` and release use it.
 pub struct PeerLineage<R, V, C> {
     records: R,

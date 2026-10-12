@@ -120,7 +120,3 @@ path = "tests/support/client-server.rs"
 required-features = ["conformance"]
 
 # v01 integration: first-party dependencies point directly at v01 branches; no [patch] tables.
-
-# PROBE ONLY, removed before landing: build every consumer against the unlanded ckmg branch.
-[patch."https://git.corbet.ch/corbet-foss/ckmg.git"]
-ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "lineage-read-capability" }
