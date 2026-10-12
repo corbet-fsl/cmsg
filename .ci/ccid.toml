@@ -17,6 +17,10 @@ commands = [["bash", ".ci/verify.sh"]]
 cache_tools = [["rustc", "-vV"], ["cargo", "--version"], ["rustup", "run", "nightly", "rustc", "-vV"], ["rustup", "run", "nightly", "cargo", "llvm-cov", "--version"], ["node", "--version"], ["python3", "--version"], ["wasm-pack", "--version"], ["clang", "--version"], ["chromedriver", "--version"], ["chromium", "--version"]]
 cache_outputs = ["coverage.json", "coverage.lcov", "coverage.txt", "wasm-coverage.json", "wasm-coverage.lcov", "wasm-coverage.txt", "registry.json"]
 
+[checks.browser-package]
+kind = "commands"
+commands = [["bash", ".ci/browser-package-job.sh"]]
+
 [render]
 tool_revision = "53c129c2efa3b9279d2ecbc237d15acdfb656d8c"
 
@@ -90,4 +94,12 @@ refresh = { branch = "v01", sources = ["git.corbet.ch/corbet-libs", "git.corbet.
 # Declared warm worker environment for prepare/refresh/check (manual
 # sentinel route included): existing warm target, build parallelism, fetch
 # policy. Reserved identity/status keys cannot be set here (validated).
+environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-v01/target", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_TEST_DEBUG = "0", CARGO_NET_GIT_FETCH_WITH_CLI = "true", CARGO_NET_RETRY = "0", CI_JOBS = "2", CI_TEST_THREADS = "2" }
+
+# Manual only: builds the browser package and retains a deterministic tar on the worker.
+[jobs.browser-package]
+scheduler = "crow"
+checks = ["browser-package"]
+workflow = "repository-jobs"
+command = ["bash", ".ci/browser-package-job.sh"]
 environment = { CARGO_TARGET_DIR = "/caches/cargo/cmsg-v01/target", CARGO_PROFILE_DEV_DEBUG = "0", CARGO_PROFILE_TEST_DEBUG = "0", CARGO_NET_GIT_FETCH_WITH_CLI = "true", CARGO_NET_RETRY = "0", CI_JOBS = "2", CI_TEST_THREADS = "2" }

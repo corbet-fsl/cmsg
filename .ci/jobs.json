@@ -2,8 +2,29 @@
   "schema": 1,
   "generator": "ccid render v1",
   "tool_revision": "53c129c2efa3b9279d2ecbc237d15acdfb656d8c",
-  "manifest_sha256": "59486e24d48327fd12ca7f3c92c47d7b216f1993b3931e04302bd482aa1b9ecf",
+  "manifest_sha256": "675a6d1fa368593c86fed298dc3126ae8f8287970d03e172227780ffc606026d",
   "jobs": {
+    "browser-package": {
+      "job": "browser-package",
+      "scheduler": "crow",
+      "checks": [
+        "browser-package"
+      ],
+      "workflow": "repository-jobs",
+      "command": [
+        "bash",
+        ".ci/browser-package-job.sh"
+      ],
+      "environment": {
+        "CARGO_NET_GIT_FETCH_WITH_CLI": "true",
+        "CARGO_NET_RETRY": "0",
+        "CARGO_PROFILE_DEV_DEBUG": "0",
+        "CARGO_PROFILE_TEST_DEBUG": "0",
+        "CARGO_TARGET_DIR": "/caches/cargo/cmsg-v01/target",
+        "CI_JOBS": "2",
+        "CI_TEST_THREADS": "2"
+      }
+    },
     "native-owner": {
       "job": "native-owner",
       "scheduler": "crow",
