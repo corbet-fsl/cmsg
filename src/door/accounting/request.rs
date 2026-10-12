@@ -202,6 +202,74 @@ impl AcceptedResponse {
     }
 }
 
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+mod lower {
+    //! The holder engine verifies certificate and ancestry itself, from raw
+    //! signatures. These conversions only reshape the already decoded response
+    //! and the current verified material; nothing here grants trust.
+    use super::*;
+    use ckmg::wallet_engine::account as engine;
+
+    fn signature(bytes: &[u8]) -> Result<[u8; 64]> {
+        bytes.try_into().map_err(|_| ErrorCode::Unauthorized)
+    }
+
+    impl AcceptedResponse {
+        /// Lower-owner form: the operator signature, the issuer's state
+        /// certificate signature and the private ancestry packet, unchanged.
+        pub fn to_engine(&self) -> Result<engine::AcceptedResponse> {
+            if self.certificate.accepted_at != self.acceptance.accepted_at {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let ancestry = match self.ancestry.as_deref() {
+                None => None,
+                Some(ancestry) => Some(engine::AncestryResponse {
+                    epoch: ancestry.epoch,
+                    root: ancestry.root,
+                    frozen_leaf: ancestry.frozen_leaf,
+                    signature: signature(&ancestry.signature)?,
+                    record: serde_json::to_vec(&ancestry.record)
+                        .map_err(|_| ErrorCode::Unauthorized)?,
+                }),
+            };
+            Ok(engine::AcceptedResponse {
+                issuer: engine::IssuerAcceptance {
+                    accepted_at: self.acceptance.accepted_at,
+                    signature: signature(
+                        &B64.decode(self.acceptance.signature.as_bytes())
+                            .map_err(|_| ErrorCode::Unauthorized)?,
+                    )?,
+                },
+                certificate: signature(&self.certificate.signature)?,
+                ancestry,
+            })
+        }
+    }
+
+    /// The CURRENT verified issuer material a response is checked against. A
+    /// published frontier makes ancestry mandatory; its absence forbids it.
+    pub fn response_trust(
+        material: &cblc::publication::PublicVerifierMaterial,
+    ) -> Result<engine::ResponseTrust> {
+        Ok(engine::ResponseTrust {
+            certificate_key: material
+                .certificate_key
+                .as_slice()
+                .try_into()
+                .map_err(|_| ErrorCode::Unauthorized)?,
+            frontier: material
+                .record_epoch
+                .as_ref()
+                .map(|epoch| engine::Frontier {
+                    epoch: epoch.epoch,
+                    root: epoch.root,
+                }),
+        })
+    }
+}
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub use lower::response_trust;
+
 /// Digest of the signed acceptance, the same convention the Balance status
 /// response uses for an embedded acceptance (message bytes then signature).
 fn acceptance_digest(acceptance: &AccountAcceptance) -> Result<[u8; 32]> {
@@ -395,19 +463,26 @@ impl<'p> CurrentEnrollment<'p> {
     }
 
     /// Send the exact stored outbox once through the held HTTPS owner and verify
-    /// the actual response: the operator signature under the pinned key, and the
-    /// request identity, digest, statement and scope. Any failure after sending
-    /// is uncertain (Reconcile); retry re-sends the same bytes, never a rebuilt
-    /// request. A verified response is still not custody.
+    /// the actual response (see `AccountAdmission::send_signed`).
     pub async fn send_genesis_request(
         &mut self,
         signed: &SignedApplyExtended,
     ) -> Result<AcceptedResponse> {
-        let before = self.admission_mut().current()?;
+        self.admission_mut().send_signed(signed).await
+    }
+}
+
+impl AccountAdmission<'_> {
+    /// Send the exact stored outbox through the held HTTPS owner and verify the
+    /// actual response: the operator signature under the pinned key, and the
+    /// request identity, digest, statement and scope. Any failure after sending
+    /// is uncertain (Reconcile); retry re-sends the same bytes, never a rebuilt
+    /// request. A verified response is still not custody.
+    pub async fn send_signed(&mut self, signed: &SignedApplyExtended) -> Result<AcceptedResponse> {
+        let before = self.current()?;
         let wire: serde_json::Value =
             serde_json::from_slice(&signed.outbox).map_err(|_| ErrorCode::Unauthorized)?;
         let response = self
-            .admission_mut()
             .lease
             .apply_account(wire, now)
             .await
@@ -422,10 +497,7 @@ impl<'p> CurrentEnrollment<'p> {
         else {
             return Err(ErrorCode::Reconcile);
         };
-        let after = self
-            .admission_mut()
-            .current()
-            .map_err(|_| ErrorCode::Reconcile)?;
+        let after = self.current().map_err(|_| ErrorCode::Reconcile)?;
         if after.material != before.material
             || after.material_digest != before.material_digest
             || after.grant != before.grant

@@ -3,7 +3,9 @@
 //! Client grants are local capabilities, never remote member/admin/root authority.
 //! Pairing belongs to the trusted embedding runtime; it is not an API action.
 //! Unavailable domain owners cannot be replaced by caller-provided success values.
+pub mod account;
 pub mod accounting;
+mod actor;
 pub mod board;
 pub mod browser;
 mod composition;
@@ -237,6 +239,7 @@ pub struct Door {
     boards: BTreeMap<String, Box<dyn facades::BoundBoard>>,
     meshes: BTreeMap<String, facades::BoundMesh>,
     vaults: BTreeMap<String, Box<dyn facades::BoundVault>>,
+    accounts: BTreeMap<String, account::AccountActor>,
     login_configuration: BTreeMap<String, login::Configuration>,
     logins: BTreeMap<[u8; 32], login::session::State>,
     #[cfg(all(feature = "test-authenticator", not(target_arch = "wasm32")))]
@@ -255,6 +258,7 @@ impl Door {
             boards: BTreeMap::new(),
             meshes: BTreeMap::new(),
             vaults: BTreeMap::new(),
+            accounts: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
             logins: BTreeMap::new(),
             #[cfg(all(feature = "test-authenticator", not(target_arch = "wasm32")))]
@@ -293,6 +297,23 @@ impl Door {
                 uncertain: false,
             },
         );
+        Ok(())
+    }
+
+    /// Install the account actor of an already configured member origin. This
+    /// trusted embedding control is absent from every callable projection; the
+    /// actor ends at `expires`, on Vault lock or when the Door is dropped.
+    pub fn bind_account(&mut self, origin: &str, actor: account::AccountActor) -> Result<()> {
+        if !self
+            .config
+            .origins
+            .get(&Role::Member)
+            .is_some_and(|set| set.contains(origin))
+            || self.accounts.contains_key(origin)
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        self.accounts.insert(origin.into(), actor);
         Ok(())
     }
 
