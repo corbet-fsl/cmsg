@@ -90,7 +90,7 @@ browser-coverage-runtime = { path = ".ci/coverage-runtime" }
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "main", default-features = false, features = ["development-gate", "client-http"] }
+cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "main", default-features = false, features = ["client-http"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 tempfile = "3"
 ed25519-dalek = "2"
