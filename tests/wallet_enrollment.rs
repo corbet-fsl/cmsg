@@ -2,11 +2,11 @@
 //! Current original Wallet owners, encrypted ACK custody and actual blind issuance.
 //! The validating record transport is inert; this is no Tor or account-proof claim.
 use cmsg::door::{
-    Role,
     custody::{self, SystemClock},
     foyer::Scope,
+    Role,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::time::Duration;
 
 #[path = "support/initial_network.rs"]
@@ -66,12 +66,10 @@ async fn scenario() {
         )
         .await
         .unwrap();
-        assert!(
-            cwst::backend::Backend::read(&backend)
-                .await
-                .unwrap()
-                .is_some()
-        );
+        assert!(cwst::backend::Backend::read(&backend)
+            .await
+            .unwrap()
+            .is_some());
         let device = candidate.device();
         // Before finish, only encrypted data exists. A genuine local PRF assertion
         // reopens the SAME opaque finish request, never an authenticated session.
@@ -191,17 +189,15 @@ async fn scenario() {
             .await
             .unwrap();
         // The held Wallet session excludes another lease before mutex acquisition.
-        assert!(
-            tokio::time::timeout(
-                Duration::from_secs(1),
-                door.live_wallet_membership(origin)
-                    .unwrap()
-                    .observe_lease(now)
-            )
-            .await
-            .unwrap()
-            .is_err()
-        );
+        assert!(tokio::time::timeout(
+            Duration::from_secs(1),
+            door.live_wallet_membership(origin)
+                .unwrap()
+                .observe_lease(now)
+        )
+        .await
+        .unwrap()
+        .is_err());
         let alternate_world = &f["wallet_alternate"];
         assert_ne!(wallet_world["base"], alternate_world["base"]);
         let mut alternate = foyer(alternate_world, true).await;
@@ -221,15 +217,13 @@ async fn scenario() {
             })
             .unwrap();
         let before = cwst::backend::Backend::read(&backend).await.unwrap();
-        assert!(
-            cmsg::door::passport::issue_global_passport(
-                wrong_origin,
-                &mut vault,
-                &mut cwlt::passport::rand::rngs::OsRng
-            )
-            .await
-            .is_err()
-        );
+        assert!(cmsg::door::passport::issue_global_passport(
+            wrong_origin,
+            &mut vault,
+            &mut cwlt::passport::rand::rngs::OsRng
+        )
+        .await
+        .is_err());
         assert_eq!(
             cwst::backend::Backend::read(&backend).await.unwrap(),
             before
@@ -491,26 +485,22 @@ async fn another_real_reserved_uuid_cannot_label_the_original_registration_tuple
         .await
         .unwrap();
     let backend = cwst::backend::Memory::new();
-    assert!(
-        custody::retain_global_initial_enrollment(
-            &original,
-            pending,
-            registration,
-            seed,
-            backend.clone(),
-            "wrong-uuid",
-            &mut SystemClock,
-            &mut entropy
-        )
+    assert!(custody::retain_global_initial_enrollment(
+        &original,
+        pending,
+        registration,
+        seed,
+        backend.clone(),
+        "wrong-uuid",
+        &mut SystemClock,
+        &mut entropy
+    )
+    .await
+    .is_err());
+    assert!(cwst::backend::Backend::read(&backend)
         .await
-        .is_err()
-    );
-    assert!(
-        cwst::backend::Backend::read(&backend)
-            .await
-            .unwrap()
-            .is_none()
-    );
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]

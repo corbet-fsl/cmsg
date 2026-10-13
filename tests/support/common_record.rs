@@ -1,8 +1,8 @@
 //! Actual same-holder community ACK and recipient-owner cuts. The host has no
 //! configured record Epoch: no downloaded packet or initialized account is accepted.
 use super::{initial_network, wallet::*};
-use cmsg::door::{Role, custody, foyer::Scope, record};
-use serde_json::{Value, json};
+use cmsg::door::{custody, foyer::Scope, record, Role};
+use serde_json::{json, Value};
 
 #[path = "community_policy.rs"]
 mod policy_cases;
@@ -249,16 +249,14 @@ pub(super) async fn exercise(
     // Policy observations belong the exact original source Foyer instance.
     let foreign = foyer(world, false).await;
     let mut foreign_policy = foreign.current_policy();
-    assert!(
-        source_door
-            .live_membership(origin)
-            .unwrap()
-            .observe_lease(now)
-            .await
-            .unwrap()
-            .common_record(&mut foreign_policy, now)
-            .is_err()
-    );
+    assert!(source_door
+        .live_membership(origin)
+        .unwrap()
+        .observe_lease(now)
+        .await
+        .unwrap()
+        .common_record(&mut foreign_policy, now)
+        .is_err());
 
     // Each synthetic-clock scenario has a separately authenticated original
     // Foyer/Trust owner: a successful +1 sample must not poison a later real
@@ -292,24 +290,20 @@ pub(super) async fn exercise(
                 assert!(source.with_current(|| started, |_, _, _, _, _| ()).is_err());
             }
             1 => {
-                assert!(
-                    source
-                        .with_current_checked(
-                            || sample.get(),
-                            |_, observed, _, _, _| sample.set(observed.expires)
-                        )
-                        .is_err()
-                );
+                assert!(source
+                    .with_current_checked(
+                        || sample.get(),
+                        |_, observed, _, _, _| sample.set(observed.expires)
+                    )
+                    .is_err());
             }
             2 => {
                 let checked = source
                     .with_current(now, |_, _, _, _, checked| checked)
                     .unwrap();
-                assert!(
-                    source
-                        .with_current(|| checked - 1, |_, _, _, _, _| ())
-                        .is_err()
-                );
+                assert!(source
+                    .with_current(|| checked - 1, |_, _, _, _, _| ())
+                    .is_err());
             }
             3 => {
                 let expires = source
@@ -418,21 +412,17 @@ pub(super) async fn exercise(
         .await
         .unwrap();
     assert!(!observed.observation().device_keys.contains(device.value()));
-    assert!(
-        observed
-            .observation()
-            .device_keys
-            .contains(added_device.value())
-    );
+    assert!(observed
+        .observation()
+        .device_keys
+        .contains(added_device.value()));
     drop(observed);
     let called = std::cell::Cell::new(false);
-    assert!(
-        vault
-            .keys()
-            .with_record_recipient(|_| called.set(true))
-            .await
-            .is_err()
-    );
+    assert!(vault
+        .keys()
+        .with_record_recipient(|_| called.set(true))
+        .await
+        .is_err());
     assert!(!called.get());
     // This tests actual selected-device withdrawal and the original final owner
     // refusal; the missing Epoch still prevents a packet-acceptance claim.
