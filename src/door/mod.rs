@@ -3,9 +3,45 @@
 //! Client grants are local capabilities, never remote member/admin/root authority.
 //! Pairing belongs to the trusted embedding runtime; it is not an API action.
 //! Unavailable domain owners cannot be replaced by caller-provided success values.
+pub mod account;
+pub mod accounting;
+mod actor;
+pub mod board;
+pub mod browser;
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub mod composer;
+mod composition;
+mod creating;
+mod current;
+pub use composition::VaultComposer;
+pub mod custody;
+pub mod facades;
+pub mod foyer;
+pub mod identity;
+mod inbox;
+pub mod inbox_conversation;
+pub mod inbox_lineage;
+pub mod inbox_waves;
+mod json;
+pub mod login;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
+#[cfg(all(feature = "browser-tor", target_arch = "wasm32"))]
+pub mod network_browser;
+#[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
+pub mod network_native;
+#[cfg(feature = "ohttp")]
+pub mod ohttp;
+pub mod pairing;
+mod pairing_flow;
+pub mod passport;
+pub mod record;
 mod registry;
+mod vouching;
+pub(crate) mod rooms;
+pub use rooms::RoomLink;
+#[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
+pub mod scenario;
 pub mod surface;
 
 use data_encoding::BASE64URL_NOPAD;
@@ -34,6 +70,7 @@ pub enum ErrorCode {
     Capacity,
     Clock,
     Reconcile,
+    Refused,
 }
 
 impl ErrorCode {
@@ -43,7 +80,7 @@ impl ErrorCode {
     pub const fn exit_code(self) -> u8 {
         match self {
             Self::InvalidRequest | Self::UnsupportedAction | Self::UnsupportedVersion => 64,
-            Self::Unauthorized => 77,
+            Self::Unauthorized | Self::Refused => 77,
             Self::Unavailable => 69,
             Self::Capacity | Self::Clock | Self::Reconcile => 75,
         }
@@ -66,6 +103,7 @@ pub enum Role {
 pub struct Configuration {
     community: String,
     origins: BTreeMap<Role, BTreeSet<String>>,
+    root_board: bool,
 }
 
 impl Configuration {
@@ -87,7 +125,22 @@ impl Configuration {
                 }
             }
         }
-        Ok(Self { community, origins })
+        Ok(Self {
+            community,
+            origins,
+            root_board: false,
+        })
+    }
+
+    /// Explicit trusted root-board portal. This selects only a local command
+    /// surface; the original service must still authorize its real session.
+    pub fn root_board(origin: String) -> Result<Self> {
+        let mut configuration = Self::new(
+            "root".into(),
+            BTreeMap::from([(Role::Root, BTreeSet::from([origin]))]),
+        )?;
+        configuration.root_board = true;
+        Ok(configuration)
     }
 }
 
@@ -160,6 +213,9 @@ pub enum Output {
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
     ClientRevoked,
+    VaultLocked,
+    MeshDisconnected,
+    BoardDisconnected,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -170,6 +226,9 @@ pub struct Empty {}
 #[serde(rename_all = "snake_case")]
 pub enum Readiness {
     Unavailable,
+    /// The network connection is established: Tor bootstrap and onion
+    /// publication are done.
+    Ready,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -192,6 +251,23 @@ pub struct Door {
     config: Configuration,
     grants: BTreeMap<[u8; 32], Grant>,
     clock_floor: u64,
+    preload: Readiness,
+    foyers: BTreeMap<String, foyer::Binding>,
+    boards: BTreeMap<String, Box<dyn facades::BoundBoard>>,
+    meshes: BTreeMap<String, facades::BoundMesh>,
+    vaults: BTreeMap<String, Box<dyn facades::BoundVault>>,
+    accounts: BTreeMap<String, account::AccountActor>,
+    /// Vouchers the member may still spend, as last reported by the accounting
+    /// owner. `None` until one is known; links are then limited only by the
+    /// community's own (alpha) allowance.
+    voucher_allowance: Option<u32>,
+    wave_ports: BTreeMap<String, Box<dyn inbox_waves::WavePorts>>,
+    login_configuration: BTreeMap<String, login::Configuration>,
+    logins: BTreeMap<[u8; 32], login::session::State>,
+    #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
+    embedded_authenticators: BTreeMap<String, login::native::Embedded>,
+    #[cfg(target_arch = "wasm32")]
+    browser_gesture: Option<login::browser::Gesture>,
 }
 
 impl Door {
@@ -200,7 +276,95 @@ impl Door {
             config,
             grants: BTreeMap::new(),
             clock_floor: 0,
+            preload: Readiness::Unavailable,
+            foyers: BTreeMap::new(),
+            boards: BTreeMap::new(),
+            meshes: BTreeMap::new(),
+            vaults: BTreeMap::new(),
+            accounts: BTreeMap::new(),
+            voucher_allowance: None,
+            wave_ports: BTreeMap::new(),
+            login_configuration: BTreeMap::new(),
+            logins: BTreeMap::new(),
+            #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
+            embedded_authenticators: BTreeMap::new(),
+            #[cfg(target_arch = "wasm32")]
+            browser_gesture: None,
         }
+    }
+
+    /// Trusted embedding control: the accounting owner reports how many vouchers
+    /// the member may still spend. At zero every open link is stopped and no new
+    /// one is issued; a link may not offer more uses than remain. Absent from
+    /// every callable projection.
+    pub fn set_voucher_allowance(&mut self, remaining: Option<u32>) {
+        self.voucher_allowance = remaining;
+    }
+
+    /// Trusted embedding control: the runtime reports the network connection
+    /// established (Tor bootstrap and onion publication done). Absent from every
+    /// callable projection; it is never cleared by a local client.
+    pub fn set_preload_ready(&mut self) {
+        self.preload = Readiness::Ready;
+    }
+
+    /// Trusted embedding control for a real network bind: only a completed bind
+    /// (Tor bootstrap and onion publication done) releases preload; a failed or
+    /// cancelled one leaves it untouched. The bind result is returned unchanged.
+    pub fn network_bound(&mut self, bound: Result<()>) -> Result<()> {
+        if bound.is_ok() {
+            self.set_preload_ready();
+        }
+        bound
+    }
+
+    /// Install actual Foyer sessions for an already configured local portal.
+    /// This trusted embedding control is absent from every callable projection.
+    /// The scope/session set cannot be supplied or changed by a local client.
+    pub fn bind_foyer(
+        &mut self,
+        origin: &str,
+        role: Role,
+        sessions: foyer::Sessions,
+    ) -> Result<()> {
+        if !self
+            .config
+            .origins
+            .get(&role)
+            .is_some_and(|set| set.contains(origin))
+            || self.foyers.contains_key(origin)
+            || (self.config.root_board
+                && (role != Role::Root || sessions.primary != foyer::Scope::Community))
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        self.foyers.insert(
+            origin.into(),
+            foyer::Binding {
+                role,
+                root_board: self.config.root_board,
+                sessions,
+                uncertain: false,
+            },
+        );
+        Ok(())
+    }
+
+    /// Install the account actor of an already configured member origin. This
+    /// trusted embedding control is absent from every callable projection; the
+    /// actor ends at `expires`, on Vault lock or when the Door is dropped.
+    pub fn bind_account(&mut self, origin: &str, actor: account::AccountActor) -> Result<()> {
+        if !self
+            .config
+            .origins
+            .get(&Role::Member)
+            .is_some_and(|set| set.contains(origin))
+            || self.accounts.contains_key(origin)
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        self.accounts.insert(origin.into(), actor);
+        Ok(())
     }
 
     fn observe(&mut self, now: u64) -> Result<()> {
@@ -208,6 +372,14 @@ impl Door {
             return Err(ErrorCode::Clock);
         }
         self.clock_floor = now;
+        for key in self
+            .grants
+            .iter()
+            .filter_map(|(key, grant)| (now >= grant.expires).then_some(*key))
+            .collect::<Vec<_>>()
+        {
+            login::session::retire(self, &key);
+        }
         self.grants.retain(|_, grant| now < grant.expires);
         Ok(())
     }
@@ -230,8 +402,8 @@ impl Door {
             .get(&role)
             .is_some_and(|set| set.contains(origin))
             || actions.is_empty()
-            || actions.len() > registry::ACTIONS.len()
-            || actions.iter().any(|name| registry::action(name).is_none())
+            || actions.len() > catalog().len()
+            || actions.iter().any(|name| !registry::known(name))
             || expires <= now
             || expires - now > MAX_GRANT_SECONDS
         {
@@ -272,12 +444,13 @@ impl Door {
 
     /// Trusted embedding revocation (including termination of a paired client).
     pub fn revoke(&mut self, token: &ClientToken) {
+        login::session::retire(self, &token_hash(token.expose_for_transport()));
         self.grants
             .remove(&token_hash(token.expose_for_transport()));
     }
 
-    pub fn dispatch(&mut self, origin: &str, token: &str, bytes: &[u8], now: u64) -> Output {
-        let result = self.invoke(origin, token, bytes, now);
+    pub async fn dispatch(&mut self, origin: &str, token: &str, bytes: &[u8], now: u64) -> Output {
+        let result = self.invoke(origin, token, bytes, now).await;
         match result {
             Ok((result, events)) => Output::Ok { result, events },
             Err(error) => Output::Error { error },
@@ -297,7 +470,7 @@ impl Door {
         Ok(key)
     }
 
-    fn invoke(
+    async fn invoke(
         &mut self,
         origin: &str,
         token: &str,
@@ -321,25 +494,36 @@ impl Door {
         }
         let request: WireInvocation =
             serde_json::from_slice(bytes).map_err(|_| ErrorCode::InvalidRequest)?;
-        let action = registry::action(&request.action).ok_or(ErrorCode::UnsupportedAction)?;
-        // All current actions require LocalClient authority. Role-specific domain
-        // operations must introduce their actual authority check when registered.
+        let local = registry::action(&request.action);
+        let remote = foyer::action(&request.action);
+        let version = local
+            .map(|action| action.version)
+            .or_else(|| remote.map(|action| action.description.version))
+            .ok_or(ErrorCode::UnsupportedAction)?;
         if !grant.actions.contains(&request.action) {
             return Err(ErrorCode::Unauthorized);
         }
-        if request.version != action.version {
+        if request.version != version {
             return Err(ErrorCode::UnsupportedVersion);
         }
         // All projections converge here after the same scope/origin/capability check.
-        let result = (action.handler)(self, &key, request.body.get())?;
-        check_result_size(&result.0)?;
-        Ok(result)
+        if let Some(action) = local {
+            let result = (action.handler)(self, &key, request.body.get()).await?;
+            check_result_size(&result.0)?;
+            Ok(result)
+        } else {
+            let action = remote.expect("a registered operation was resolved");
+            let body = json::unique_value(request.body.get())?;
+            let foyer = self.foyers.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
+            let result = foyer.call(action, body).await?;
+            Ok((result, vec![]))
+        }
     }
 
     fn status(&self) -> RuntimeStatus {
         RuntimeStatus {
             community: self.config.community.clone(),
-            preload: Readiness::Unavailable,
+            preload: self.preload.clone(),
             owners: [
                 Family::Vault,
                 Family::Mesh,

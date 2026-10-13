@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Vault frame fixture</title>
+<body>
+<script type="module">
+import {startVaultHost} from '/browser.js';
+// Corrupt only the wire response of the real owner for hostile-peer vectors.
+// All requests still execute through the original generated Wasm runtime.
+if (location.pathname.startsWith('/__vault-close-')) {
+  const original = MessagePort.prototype.postMessage;
+  let injected = false;
+  MessagePort.prototype.postMessage = function (message, ...rest) {
+    if (!injected && typeof message === 'string') {
+      const reply = JSON.parse(message);
+      if (location.pathname === '/__vault-close-mismatch.html' && reply.kind === 'closed') {
+        injected = true;
+        message = JSON.stringify({...reply, id: null, error: null});
+      } else if (location.pathname === '/__vault-close-pending.html' && reply.kind === 'output') {
+        injected = true;
+        message = JSON.stringify({kind: 'closed', id: reply.id + 1, error: null});
+      }
+    }
+    return original.call(this, message, ...rest);
+  };
+}
+try {
+  const fixture = await (await fetch('/__fixture')).json();
+  const host = await startVaultHost({
+    member_origin: 'https://alpha.example.test',
+    runtime: {
+      community: 'alpha', origin: location.origin, role: 'member', primary: 'community',
+      services: [{scope: 'community', base: fixture.vault.base, host: fixture.vault.host}],
+    },
+  });
+  // Public test startup fact, never readiness or successful custody.
+  document.body.dataset.owner = 'constructed';
+  addEventListener('pagehide', () => { void host.dispose(); }, {once: true});
+} catch {
+  document.body.dataset.owner = 'refused';
+}
+</script>

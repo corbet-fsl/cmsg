@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 rust-version = "1.97"
 description = "Device-local Member door and generated client projections"
-repository = "https://github.com/corbet-libs/cmsg"
+repository = "https://git.corbet.ch/corbet-libs/cmsg.git"
 license-file = "LICENSE.md"
 readme = "README.md"
 publish = false
@@ -19,11 +19,34 @@ include = [
     "docs/*.md",
 ]
 
+# Only these changed library branches need resolution beyond the retained Crow
+# snapshot. Clear after promoting their resulting lock; this is not a second
+# dependency selection (direct v01 dependencies remain authoritative).
+[package.metadata.v01]
+refresh = ["cfyr"]
+
 [lib]
-crate-type = ["rlib"]
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-cbrd = { git = "https://github.com/corbet-libs/cbrd", branch = "main" }
+cblv = { git = "https://git.corbet.ch/corbet-foss/cblv", branch = "main", optional = true }
+crbk = { git = "https://git.corbet.ch/corbet-foss/crbk", branch = "main", default-features = false }
+cblc = { git = "https://git.corbet.ch/corbet-libs/cblc", branch = "main", default-features = false, features = ["publication"] }
+cwlt = { git = "https://git.corbet.ch/corbet-foss/cwlt", branch = "main", default-features = false, features = ["passport", "wave", "schema"] }
+ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh", branch = "main", default-features = false }
+cchr = { git = "https://git.corbet.ch/corbet-foss/cchr.git", branch = "v01" }
+cpfl = { git = "https://git.corbet.ch/corbet-foss/cpfl.git", branch = "v01" }
+cshm = { git = "https://git.corbet.ch/corbet-foss/cshm", branch = "main" }
+cmmr = { git = "https://git.corbet.ch/corbet-foss/cmmr.git", branch = "v01" }
+cdht = { git = "https://git.corbet.ch/corbet-foss/cdht.git", branch = "v01" }
+cmsh = { git = "https://git.corbet.ch/corbet-libs/cmsh.git", branch = "v01" }
+cvlt = { git = "https://git.corbet.ch/corbet-libs/cvlt.git", branch = "v01", features = ["wallet"] }
+cnbx = { git = "https://git.corbet.ch/corbet-libs/cnbx.git", branch = "v01" }
+ctcs = { git = "https://git.corbet.ch/corbet-foss/ctcs.git", branch = "v01" }
+cthr = { git = "https://git.corbet.ch/corbet-foss/cthr.git", branch = "v01" }
+ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "v01", features = ["profile-envelope"] }
+cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "v01" }
+ctnd = { git = "https://git.corbet.ch/corbet-foss/ctnd.git", branch = "v01" }
 schemars = "1"
 url = "2"
 getrandom = "0.3"
@@ -32,32 +55,83 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 sha2 = "0.10"
 data-encoding = "2.9"
+hpke = { version = "0.14", default-features = false, features = ["alloc", "x25519", "chacha", "getrandom"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "v01", optional = true, features = ["embedded-authenticator"] }
+ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "v01", optional = true }
+arti-client = { version = "0.46", default-features = false, optional = true }
+tor-rtcompat = { version = "0.46", default-features = false, features = ["tokio", "rustls"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+cbrd = { git = "https://git.corbet.ch/corbet-libs/cbrd.git", branch = "v01", default-features = false, features = ["http"] }
+cvch = { git = "https://git.corbet.ch/corbet-foss/cvch", branch = "main" }
+futures-util = "0.3"
+cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "v01", default-features = false, features = ["http"] }
 reqwest = { version = "0.13", default-features = false }
 axum = "0.8"
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+cblv = { git = "https://git.corbet.ch/corbet-foss/cblv", branch = "main", features = ["browser"], optional = true }
+ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "v01", default-features = false, optional = true }
+cbrd = { git = "https://git.corbet.ch/corbet-libs/cbrd.git", branch = "v01", default-features = false, features = ["browser"] }
+futures-channel = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
+futures-util = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Location", "Event", "EventTarget", "MessageEvent", "MessageChannel", "MessagePort"] }
+cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "v01", default-features = false, features = ["browser"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
+[dev-dependencies]
+cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "v01", features = ["test-authenticator"] }
+
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+futures-util = "0.3"
+gloo-net = "0.6"
+gloo-timers = { version = "0.3", features = ["futures"] }
+web-sys = { version = "0.3", features = ["Window", "Location"] }
 browser-coverage-runtime = { path = ".ci/coverage-runtime" }
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-futures-util = "0.3"
-tokio = { version = "1", features = ["test-util"] }
+cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "main", default-features = false, features = ["development-gate-client", "client-http"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+tempfile = "3"
+ed25519-dalek = "2"
+csgn = { git = "https://git.corbet.ch/corbet-foss/csgn", branch = "main", default-features = false, features = ["volatile-signer"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "service"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tokio = { version = "1", features = ["test-util", "rt-multi-thread"] }
+ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh", branch = "main", default-features = false, features = ["server"] }
+crlt = { git = "https://git.corbet.ch/corbet-foss/crlt", branch = "main" }
+futures-executor = "0.3"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+blind-rsa-signatures = { version = "0.18", default-features = false }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(owned_browser_coverage)"] }
 
 [features]
+# Member-to-server calls through Oblivious HTTP instead of direct HTTPS (streams excepted).
+ohttp = ["cfyr/ohttp", "cbrd/ohttp", "dep:cblv", "cblv/client", "reqwest/rustls"]
+embedded-authenticator = ["dep:cpky"]
 conformance = []
+native-prover = ["cwlt/native-prover", "cvlt/wallet-native-prover", "ckmg/wallet-native-prover"]
+native-tor = ["ckmg/native-tor", "cmsh/tor", "cmsh/tor-records", "dep:ctrn", "dep:arti-client", "dep:tor-rtcompat", "dep:rustls"]
+browser-tor = ["ckmg/browser-tor", "cmsh/tor-records", "dep:ctrn"]
 
 [[example]]
 name = "client-conformance"
 path = "tests/support/client-server.rs"
 required-features = ["conformance"]
+
+# v01 integration: first-party dependencies point directly at v01 branches; no [patch] tables.
+
+[[test]]
+name = "ohttp_keys"
+required-features = ["ohttp"]

@@ -3,8 +3,8 @@ use super::*;
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[cfg_attr(not(target_arch = "wasm32"), test)]
-fn duplicate_capability_cannot_replace_a_live_grant_and_outputs_are_bounded() {
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn duplicate_capability_cannot_replace_a_live_grant_and_outputs_are_bounded() {
     let origin = "https://member.example";
     let config = Configuration::new(
         "a".into(),
@@ -30,7 +30,8 @@ fn duplicate_capability_cannot_replace_a_live_grant_and_outputs_are_bounded() {
             token.expose_for_transport(),
             br#"{"action":"runtime.status","version":1,"body":{}}"#,
             11
-        ),
+        )
+        .await,
         Output::Ok { .. }
     ));
     assert!(check_result_size(&Value::String("x".repeat(MAX_RESULT_BYTES - 2))).is_ok());
