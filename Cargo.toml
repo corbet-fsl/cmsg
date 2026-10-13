@@ -124,6 +124,8 @@ embedded-authenticator = ["dep:cpky"]
 conformance = []
 native-prover = ["cwlt/native-prover", "cvlt/wallet-native-prover", "ckmg/wallet-native-prover"]
 native-tor = ["ckmg/native-tor", "cmsh/tor", "cmsh/tor-records", "dep:ctrn", "dep:arti-client", "dep:tor-rtcompat", "dep:rustls"]
+# Test/fixture only: a private Tor network supplied by embedding code. Production builds never enable it.
+private-tor-fixture = ["native-tor"]
 browser-tor = ["ckmg/browser-tor", "cmsh/tor-records", "dep:ctrn"]
 
 [[example]]
