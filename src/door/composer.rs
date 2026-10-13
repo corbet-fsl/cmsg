@@ -17,15 +17,15 @@
 //! where a half-registered device continues. A vault that holds a candidate whose
 //! progress marker was lost is treated as retained, never as fresh. No request
 //! reaches this module: it is called by the embedding process (CLI, E2E device).
+use super::identity;
 use super::{
+    Configuration, Door, Role,
     custody::{self, SystemClock},
     foyer::{Scope, Sessions, Transport},
-    Configuration, Door, Role,
 };
-use super::identity;
-use cfyr::{passkeys::Client, Foyer};
+use cfyr::{Foyer, passkeys::Client};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -576,7 +576,7 @@ where
     }
     let creation = match phase {
         cvlt::InitialPhase::Conflicted => {
-            return Err(ComposeError::Inconsistent("conflicted creation"))
+            return Err(ComposeError::Inconsistent("conflicted creation"));
         }
         cvlt::InitialPhase::Retained | cvlt::InitialPhase::Staged => {
             let publication = if phase == cvlt::InitialPhase::Retained {
@@ -682,8 +682,9 @@ where
                 .await
                 .map_err(step("register"))?;
             if let Some(fingerprint) = anchored(api) {
-                identity::guard_creation(pending.options(), &fingerprint)
-                    .map_err(|_| ComposeError::Inconsistent("registration user id of another community"))?;
+                identity::guard_creation(pending.options(), &fingerprint).map_err(|_| {
+                    ComposeError::Inconsistent("registration user id of another community")
+                })?;
             }
             let registration = keys
                 .register_member(pending.options().clone())
@@ -1123,6 +1124,95 @@ mod tests {
         std::fs::write(&path, b"not json").unwrap();
         assert!(ProgressFile::open(Some(path)).is_err());
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[cfg(feature = "native-tor")]
+    mod open {
+        use super::*;
+        use futures_util::FutureExt;
+        use std::sync::Arc;
+
+        struct Fixed;
+        impl crate::door::native::Clock for Fixed {
+            fn now(&self) -> u64 {
+                1
+            }
+        }
+
+        fn settings() -> DeviceSettings {
+            let service = |scope: &str, origin: &str| {
+                serde_json::json!({"origin":origin,"scope":scope,"passkey_origin":origin,
+                    "rp_id":"example.test","trust_key_ring":null,"connect_host":"example.test"})
+            };
+            serde_json::from_value(serde_json::json!({
+                "global": service("wallet", "https://wallet.example.test"),
+                "community": service("omega", "https://omega.example.test"),
+                "community_name": "omega",
+                "prover": {"worker_executable":"/w","circuit_file":"/c","keys_file":"/k",
+                    "srs_g1_file":"/1","srs_g2_file":"/2","timeout_seconds":1,"threads":1,
+                    "memory_megabytes":1}
+            }))
+            .unwrap()
+        }
+
+        fn deployment(origin: &str) -> crate::door::native::NativeDeployment {
+            serde_json::from_value(serde_json::json!({"runtime":{
+                "community":"omega","origin":origin,"role":"member",
+                "primary":"community","services":[]}}))
+            .unwrap()
+        }
+
+        fn marks(name: &str, global: Stage, community: Stage) -> PathBuf {
+            let directory =
+                std::env::temp_dir().join(format!("composer-open-{name}-{}", std::process::id()));
+            std::fs::create_dir_all(&directory).unwrap();
+            let path = directory.join("composer.json");
+            let mut file = ProgressFile::open(Some(path.clone())).unwrap();
+            file.advance(true, global).unwrap();
+            file.advance(false, community).unwrap();
+            path
+        }
+
+        fn open(path: &Path, origin: &str) -> Option<ComposeError> {
+            open_native_device(&settings(), path, deployment(origin), 60, Arc::new(Fixed))
+                .now_or_never()
+                .expect("a refusal never waits")
+                .err()
+        }
+
+        #[test]
+        fn an_unregistered_device_is_refused_before_anything_starts() {
+            let origin = "https://omega.example.test";
+            let missing = std::env::temp_dir().join("composer-open-missing/none.json");
+            for (name, global, community) in [
+                ("global", Stage::Authorized, Stage::Done),
+                ("community", Stage::Done, Stage::Fresh),
+            ] {
+                let path = marks(name, global, community);
+                assert!(matches!(open(&path, origin), Some(ComposeError::Config(_))));
+                let _ = std::fs::remove_dir_all(path.parent().unwrap());
+            }
+            assert!(matches!(
+                open(&missing, origin),
+                Some(ComposeError::Config(_))
+            ));
+        }
+
+        #[test]
+        fn a_deployment_for_another_origin_or_without_tor_is_refused() {
+            let path = marks("done", Stage::Done, Stage::Done);
+            // Registered, but the deployment names another origin ...
+            assert!(matches!(
+                open(&path, "https://other.example.test"),
+                Some(ComposeError::Config(_))
+            ));
+            // ... or carries no native Tor section: nothing may start.
+            assert!(matches!(
+                open(&path, "https://omega.example.test"),
+                Some(ComposeError::Config(_))
+            ));
+            let _ = std::fs::remove_dir_all(path.parent().unwrap());
+        }
     }
 
     #[test]
