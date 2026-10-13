@@ -532,6 +532,7 @@ mod tests {
             change_token_cost: 1,
             deposit_delay_seconds: 100,
             minimum_deposit_batch: 2,
+            standing_policy_digest: [7; 32],
         }
     }
 

@@ -64,7 +64,15 @@ fn context(
             change_cost: extension.change_token_cost,
             delay: extension.deposit_delay_seconds,
             batch: extension.minimum_deposit_batch,
+            standing: extension.standing_policy_digest,
         },
+        // The rulebook parameters the community's published digest names. The engine
+        // refuses the genesis unless their digest equals `extension.standing`, so a
+        // community that tuned them differently is refused, never silently accepted.
+        standing: czkp::standing::Params::default(),
+        // DEBT (asked of sonnet-vacct3): the sponsor bond is not handed in yet; the
+        // vouchee device holds the secret in custody but not the sponsor's member id.
+        bond: None,
         enrollment: Enrollment {
             member,
             key: hex(&row.account_key)?,
