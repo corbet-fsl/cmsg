@@ -348,7 +348,7 @@ mod tests {
             assert!(Link::parse(&bad).is_err(), "{bad}");
         }
         let mut raw = BASE64URL_NOPAD
-            .decode(text[PREFIX.len()..].as_bytes())
+            .decode(&text.as_bytes()[PREFIX.len()..])
             .unwrap();
         raw[0] = 2;
         let versioned = format!("{PREFIX}{}", BASE64URL_NOPAD.encode(&raw));
