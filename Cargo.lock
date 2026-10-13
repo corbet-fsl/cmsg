@@ -1526,21 +1526,7 @@ dependencies = [
 [[package]]
 name = "cdlv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=claim-send#ccb9662c2facd28015d6af357232c5945c30c76f"
-dependencies = [
- "ckmg",
- "ctcs",
- "cthr",
- "cwst",
- "schemars 1.2.2",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "cdlv"
-version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=v01#13735ae68d7fa475c40b4342568edf8b9bf46e5e"
+source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=v01#3f420442bc10d31dfd461216f2589b7ab3624168"
 dependencies = [
  "ckmg",
  "ctcs",
@@ -2022,9 +2008,9 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=claim-send#f8723db74ab08d507aa48dea366e1044b9f1a3f5"
+source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=v01#aad117bf59d76fa8e512f6f7af2c639127c59b0d"
 dependencies = [
- "cdlv 0.1.0 (git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=claim-send)",
+ "cdlv",
  "cgrp",
  "ckmg",
  "ctcs",
@@ -2864,7 +2850,7 @@ name = "cwvs"
 version = "0.1.0"
 source = "git+https://git.corbet.ch/corbet-foss/cwvs.git?branch=v01#9f8015d057bc95435188f3da56a83898b2b2579c"
 dependencies = [
- "cdlv 0.1.0 (git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=v01)",
+ "cdlv",
  "ckmg",
  "ctcs",
  "cthr",
