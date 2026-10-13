@@ -63,6 +63,21 @@ impl ProvenGenesis {
     }
 }
 
+/// Public proven update data from the wallet owner: the statement the proof
+/// computed, its circuit/key scope, the verified proof and the extended effect it
+/// was proven for (inbox frontier and effect). No witness, no opening, no authority:
+/// the signer re-checks everything against the verified current material.
+pub struct ProvenUpdate {
+    /// Exact public statement of the proven (non-genesis) update.
+    pub statement: AccountStatement,
+    /// Circuit and verification-key digests of the extension relation used.
+    pub scope: AccountProofScope,
+    /// Locally verified proof bytes.
+    pub proof: Vec<u8>,
+    /// Inbox frontier before and after, and the effect the proof binds.
+    pub update: ExtendedUpdate,
+}
+
 /// The exact signed ApplyExtended wire, ready for state A. Its bytes are the
 /// outbox; everything else is derived data for response checks.
 #[derive(Clone, PartialEq, Eq)]
@@ -73,6 +88,8 @@ pub struct SignedApplyExtended {
     request_digest: [u8; 32],
     /// The acceptance's request binding: effect, pinned extension policy and scope.
     extended_request_digest: [u8; 32],
+    /// The exact signed update (effect and inbox frontier) the acceptance is checked for.
+    update: ExtendedUpdate,
 }
 
 /// Operator response whose signature and bindings were verified; the extended
@@ -155,6 +172,18 @@ impl SignedApplyExtended {
     /// current pinned extension policy. Digests are recomputed; nothing is re-signed
     /// or regenerated.
     pub fn from_outbox(outbox: Vec<u8>, policy: &ExtensionPolicy) -> Result<Self> {
+        let signed = Self::from_update_outbox(outbox, policy)?;
+        if signed.update != genesis_update() || !signed.request.statement.genesis {
+            return Err(ErrorCode::Unauthorized);
+        }
+        Ok(signed)
+    }
+
+    /// Like `from_outbox` for a later (non-genesis) update: the stored bytes of a
+    /// signed ApplyExtended wire, re-checked under the current pinned policy. The
+    /// caller persists `outbox()` as its pending companion and re-sends it after a
+    /// restart; nothing is re-signed, reproved or rebuilt.
+    pub fn from_update_outbox(outbox: Vec<u8>, policy: &ExtensionPolicy) -> Result<Self> {
         if outbox.is_empty() || outbox.len() > pending::MAX_OUTBOX {
             return Err(ErrorCode::Unauthorized);
         }
@@ -166,17 +195,25 @@ impl SignedApplyExtended {
         else {
             return Err(ErrorCode::Unauthorized);
         };
-        if update != genesis_update() || !request.statement.genesis {
-            return Err(ErrorCode::Unauthorized);
-        }
         Ok(Self {
             request_digest: acct::account_request_digest(&request)
                 .map_err(|_| ErrorCode::Unauthorized)?,
             extended_request_digest: extensions::extended_request_digest(&request, &update, policy)
                 .map_err(|_| ErrorCode::Unauthorized)?,
             request: *request,
+            update,
             outbox,
         })
+    }
+
+    /// The signed statement (public values only).
+    pub fn statement(&self) -> &AccountStatement {
+        &self.request.statement
+    }
+
+    /// The signed update (effect and inbox frontier).
+    pub fn update(&self) -> &ExtendedUpdate {
+        &self.update
     }
 }
 
@@ -294,7 +331,7 @@ fn verify_acceptance(
     extensions::verify_extended_acceptance(
         acceptance,
         &expected.request,
-        &genesis_update(),
+        &expected.update,
         policy,
         operator_key,
     )
@@ -356,6 +393,54 @@ impl<'p> CurrentEnrollment<'p> {
                 extension_policy: current.material.extension_policy.clone(),
             })
         })??;
+        self.admission_mut()
+            .sign_core(
+                account,
+                authorization,
+                current,
+                statement,
+                &genesis.scope,
+                &genesis.proof,
+                genesis_update(),
+                intent,
+            )
+            .await
+    }
+
+    /// Send the exact stored outbox once through the held HTTPS owner and verify
+    /// the actual response (see `AccountAdmission::send_signed`).
+    pub async fn send_genesis_request(
+        &mut self,
+        signed: &SignedApplyExtended,
+    ) -> Result<AcceptedResponse> {
+        self.admission_mut().send_signed(signed).await
+    }
+}
+
+impl AccountAdmission<'_> {
+    /// Sign one account request exactly once and assemble the exact ApplyExtended
+    /// outbox. The device signature runs through the account's ordinary member
+    /// Keys authority with its own one-use intent; this owner and the local owner
+    /// are rechecked after every await. Nothing durable is written here.
+    #[allow(clippy::too_many_arguments)]
+    async fn sign_core<B, C, E, A, R>(
+        &mut self,
+        account: &mut CommunityAccount<B, C, E, A, R>,
+        authorization: admission::DeviceAuthorization,
+        current: Snapshot,
+        statement: &AccountStatement,
+        scope: &AccountProofScope,
+        proof: &[u8],
+        update: ExtendedUpdate,
+        intent: &mut ckmg::IntentAdmission,
+    ) -> Result<SignedApplyExtended>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
         let mut request_id = [0u8; 32];
         getrandom::fill(&mut request_id).map_err(|_| ErrorCode::Unavailable)?;
         if request_id == [0; 32] {
@@ -373,11 +458,11 @@ impl<'p> CurrentEnrollment<'p> {
         let mut request = AccountRequest {
             statement: statement.clone(),
             request_id,
-            proof_scope: genesis.scope.clone(),
+            proof_scope: scope.clone(),
             chat_public_key: current.grant.chat_public_key.clone(),
             issued_at: statement.now,
             expires_at,
-            proof: genesis.proof.clone(),
+            proof: proof.to_vec(),
             signature: String::new(),
         };
         let transcript =
@@ -395,9 +480,9 @@ impl<'p> CurrentEnrollment<'p> {
             .device_public_key()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
-        if lineage.binding.community() != self.admission_mut().cohort.scope
-            || lineage.binding.member() != self.admission_mut().cohort.member
-            || device.value() != &self.admission_mut().cohort.device
+        if lineage.binding.community() != self.cohort.scope
+            || lineage.binding.member() != self.cohort.member
+            || device.value() != &self.cohort.device
             || B64.encode(device.value()) != current.grant.chat_public_key
             || B64.encode(lineage.root.value()) != authorization.root_public_key
         {
@@ -430,7 +515,7 @@ impl<'p> CurrentEnrollment<'p> {
         request.signature = B64.encode(&signature);
         // Both owners must still be current after the signing awaits.
         account.check(&current.origin).await?;
-        let after = self.admission_mut().current()?;
+        let after = self.current()?;
         if after.grant != current.grant
             || after.origin != current.origin
             || after.now >= expires_at
@@ -440,7 +525,6 @@ impl<'p> CurrentEnrollment<'p> {
         }
         let request_digest =
             acct::account_request_digest(&request).map_err(|_| ErrorCode::Unauthorized)?;
-        let update = genesis_update();
         let extended_request_digest =
             extensions::extended_request_digest(&request, &update, &current.extension_policy)
                 .map_err(|_| ErrorCode::Unauthorized)?;
@@ -448,7 +532,7 @@ impl<'p> CurrentEnrollment<'p> {
             grant: current.grant,
             authorization,
             request: Box::new(request.clone()),
-            update,
+            update: update.clone(),
         };
         let outbox = serde_json::to_vec(&wire).map_err(|_| ErrorCode::Unauthorized)?;
         if outbox.len() > pending::MAX_OUTBOX {
@@ -459,16 +543,72 @@ impl<'p> CurrentEnrollment<'p> {
             request,
             request_digest,
             extended_request_digest,
+            update,
         })
     }
+}
 
-    /// Send the exact stored outbox once through the held HTTPS owner and verify
-    /// the actual response (see `AccountAdmission::send_signed`).
-    pub async fn send_genesis_request(
+impl AccountAdmission<'_> {
+    /// Sign a later account update (reservation, answer settlement, punishment,
+    /// voucher spend, obligation consumption) exactly once. The admission is
+    /// freshly issued for this community; the device authorization is signed by
+    /// the root under its own one-use intent, the request by the device under
+    /// another (`intents`). The statement must be this member's non-genesis step
+    /// under the verified current economic policy; the server verifies the proof,
+    /// the predecessor version, spent nullifiers, inbox consumption and the
+    /// rulebook parameters again. Nothing durable is written here: the caller
+    /// stores `outbox()` before sending and re-sends those exact bytes on retry.
+    pub async fn sign_update_request<B, C, E, A, R>(
         &mut self,
-        signed: &SignedApplyExtended,
-    ) -> Result<AcceptedResponse> {
-        self.admission_mut().send_signed(signed).await
+        account: &mut CommunityAccount<B, C, E, A, R>,
+        proven: &ProvenUpdate,
+        intents: &mut AccountingIntents,
+    ) -> Result<SignedApplyExtended>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
+        let statement = &proven.statement;
+        acct::statement_bytes(statement).map_err(|_| ErrorCode::Unauthorized)?;
+        if statement.genesis || proven.proof.is_empty() {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let (authorization, _root_guard, current, _) =
+            self.authorize_device(account, intents).await?;
+        let owner: [u8; 32] = B64
+            .decode(current.grant.member_id.as_bytes())
+            .map_err(|_| ErrorCode::Unauthorized)?
+            .try_into()
+            .map_err(|_| ErrorCode::Unauthorized)?;
+        if statement.owner != owner
+            || statement.policy != current.material.policy.account
+            || current.now < statement.now
+            || current.now >= statement.valid_until
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let snapshot = Snapshot {
+            grant: current.grant.clone(),
+            origin: current.origin.clone(),
+            expires: current.expires,
+            now: current.now,
+            max_authorization: current.material.policy.max_authorization_seconds,
+            extension_policy: current.material.extension_policy.clone(),
+        };
+        self.sign_core(
+            account,
+            authorization,
+            snapshot,
+            statement,
+            &proven.scope,
+            &proven.proof,
+            proven.update.clone(),
+            &mut intents.device,
+        )
+        .await
     }
 }
 
@@ -602,8 +742,71 @@ mod tests {
             )
             .unwrap(),
             request,
+            update: genesis_update(),
             outbox: vec![1],
         }
+    }
+
+    /// A later (non-genesis) step: version 4 -> 5, consuming one queued obligation.
+    fn later_wire() -> (Vec<u8>, ExtendedUpdate) {
+        let mut statement = statement();
+        statement.genesis = false;
+        statement.previous_version = 4;
+        statement.next_version = 5;
+        statement.previous_state = [3; 32];
+        let mut previous = Inbox::default();
+        previous.root[0] = 1;
+        let mut next = Inbox::default();
+        next.root[0] = 2;
+        let update = ExtendedUpdate {
+            previous_inbox: previous,
+            inbox: next,
+            effect: Effect::Update,
+        };
+        let request = AccountRequest {
+            statement,
+            request_id: [0xA2; 32],
+            proof_scope: AccountProofScope {
+                circuit_digest: [0xC3; 32],
+                verifying_key_digest: [0xD4; 32],
+            },
+            chat_public_key: B64.encode(&[7; 32]),
+            issued_at: 101,
+            expires_at: 150,
+            proof: vec![1, 2, 3],
+            signature: B64.encode(&[8; 64]),
+        };
+        let grant = admission::AdmissionGrant {
+            version: 1,
+            issuer_key_id: "k".into(),
+            community_id: "c".into(),
+            member_id: B64.encode(&[2; 32]),
+            pseudonym: "00".into(),
+            chat_public_key: B64.encode(&[7; 32]),
+            policy_digest: "p".into(),
+            policy_epoch: 1,
+            passport_policy_digest: "d".into(),
+            issued_at: 1,
+            expires_at: 1000,
+            signature: "s".into(),
+        };
+        let authorization = admission::DeviceAuthorization {
+            version: 1,
+            community_id: "c".into(),
+            member_id: B64.encode(&[2; 32]),
+            root_public_key: B64.encode(&[1; 32]),
+            device_public_key: B64.encode(&[7; 32]),
+            issued_at: 1,
+            expires_at: 1000,
+            signature: "s".into(),
+        };
+        let wire = AccountServiceRequest::ApplyExtended {
+            grant,
+            authorization,
+            request: Box::new(request),
+            update: update.clone(),
+        };
+        (serde_json::to_vec(&wire).unwrap(), update)
     }
 
     fn accept(request: &SignedApplyExtended, accepted_at: u64) -> AccountAcceptance {
@@ -689,5 +892,32 @@ mod tests {
         ] {
             assert!(SignedApplyExtended::from_outbox(bytes, &policy()).is_err());
         }
+    }
+
+    #[test]
+    fn a_later_update_outbox_is_refused_as_genesis_and_keeps_its_exact_update() {
+        let (bytes, update) = later_wire();
+        assert!(SignedApplyExtended::from_outbox(bytes.clone(), &policy()).is_err());
+        let signed = SignedApplyExtended::from_update_outbox(bytes.clone(), &policy()).unwrap();
+        assert_eq!(signed.update(), &update);
+        assert!(!signed.statement().genesis);
+        assert_eq!(signed.outbox(), bytes.as_slice());
+        for bytes in [
+            Vec::new(),
+            b"not json".to_vec(),
+            vec![b' '; pending::MAX_OUTBOX + 1],
+        ] {
+            assert!(SignedApplyExtended::from_update_outbox(bytes, &policy()).is_err());
+        }
+    }
+
+    #[test]
+    fn the_acceptance_is_checked_against_the_stored_update_not_the_genesis_one() {
+        let mut request = signed();
+        let (_, update) = later_wire();
+        request.update = update;
+        // The binding was computed for the genesis update, so it no longer matches.
+        let accepted = accept(&request, 150);
+        assert!(verify_acceptance(&accepted, &request, &policy(), &key()).is_err());
     }
 }
