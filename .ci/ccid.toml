@@ -22,7 +22,7 @@ kind = "commands"
 commands = [["env", "NIX_BUILD_SHELL=bash", "nix-shell", ".ci/check-shell.nix", "--run", "bash .ci/browser-package-job.sh"]]
 
 [render]
-tool_revision = "53c129c2efa3b9279d2ecbc237d15acdfb656d8c"
+tool_revision = "e38f347d6941aa105ac4b55a0d4b8fec2ef22433"
 
 [jobs.verify]
 scheduler = "crow"
@@ -39,6 +39,7 @@ cache_outputs = ["evidence/native/fixture-owner.json", "evidence/native/locks.sh
 [checks.resolve-dependencies]
 kind = "commands"
 commands = [["bash", ".ci/resolve-dependencies.sh"]]
+cache = false
 cache_outputs = ["Cargo.lock", "tests/fixture/Cargo.lock"]
 
 # The Keyhole test server links OpenSSL (webauthn-rs-core): run in a pinned shell.
