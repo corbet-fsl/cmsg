@@ -8,8 +8,10 @@ use cfyr::passkeys::VaultOutcome;
 use cfyr::passkeys::{CeremonyKind, CeremonyRequest};
 use futures_util::FutureExt;
 
-#[cfg(feature = "test-authenticator")]
-mod test_authenticator;
+#[cfg(feature = "embedded-authenticator")]
+mod embedded_authenticator;
+#[cfg(feature = "embedded-authenticator")]
+pub(in crate::door) use embedded_authenticator::Embedded;
 
 pub(super) async fn start(door: &mut Door, key: &[u8; 32]) -> Result<Status> {
     let origin = origin(door, key)?;
@@ -72,19 +74,21 @@ pub(super) async fn start(door: &mut Door, key: &[u8; 32]) -> Result<Status> {
         binding.uncertain = false;
         return Err(ErrorCode::Clock);
     };
-    // This trusted test owner is never selected by action/configuration JSON.
+    // This trusted embedded owner is never selected by action/configuration JSON.
     // Keep the original Foyer fence raised across its actual callback await.
     // Cancelling start drops the pending listener/custody and leaves that fence
     // raised, just like cancellation of the earlier owner awaits.
-    #[cfg(feature = "test-authenticator")]
-    let launched = if let Some(owner) = door.test_authenticators.get(&origin) {
-        pending
-            .complete_with_test_authenticator(owner.synced_test_device())
-            .await
+    #[cfg(feature = "embedded-authenticator")]
+    let launched = if let Some(owner) = door
+        .embedded_authenticators
+        .get_mut(&origin)
+        .filter(|owner| owner.role() == binding.role)
+    {
+        owner.complete(&pending).await
     } else {
         pending.open_browser()
     };
-    #[cfg(not(feature = "test-authenticator"))]
+    #[cfg(not(feature = "embedded-authenticator"))]
     let launched = pending.open_browser();
     if let Err(error) = launched {
         // Even if the local callback accepted a result before its response was

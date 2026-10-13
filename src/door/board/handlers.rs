@@ -15,6 +15,21 @@ pub struct CommittedRead<'a, B: cwst::backend::Backend> {
     pub store: &'a cwst::Store<B>,
     pub binding: &'a ckmg::Binding,
     pub contact: &'a dyn Fn(&str) -> cshm::ContactCheck,
+    /// Members the Contacts journal blocks, read in this same snapshot.
+    pub blocked: &'a [String],
+}
+
+impl<B: cwst::backend::Backend> CommittedRead<'_, B> {
+    /// Call this with the sender's member id BEFORE opening, decrypting or
+    /// caching anything that sender produced (profile, key transfer, reply).
+    /// A blocked sender is refused and nothing of theirs is read.
+    pub fn refuse_blocked(&self, sender: &str) -> Result<()> {
+        if self.blocked.iter().any(|blocked| blocked == sender) {
+            Err(ErrorCode::Refused)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Explicit trusted deployment policy. No default action or snapshot age exists;
@@ -63,13 +78,37 @@ pub trait CommittedOwner {
         origin: &'a str,
         expires: u64,
     ) -> OwnerFuture<'a, SignedAttendance>;
+
+    /// Group membership writes: the owner's encrypted checkpoint, device
+    /// signer for consents, current Guard/Contacts authority and the atomic
+    /// Threads publication. Owners without this integration refuse writes.
+    fn groups(&mut self) -> Option<&mut dyn cbrd::GroupOwner> {
+        None
+    }
+
+    /// Profile publication. Lend the actual device signer and Envelope custody
+    /// together with the committed Store read, after fresh Keys authority, to a
+    /// synchronous callback; return its result unchanged. Owners without this
+    /// integration refuse.
+    fn with_profile<'a, T: 'a, F>(&'a mut self, _prepare: F) -> OwnerFuture<'a, T>
+    where
+        F: for<'p> FnOnce(super::ProfileParts<'p, Self::Backend>) -> Result<T> + 'a,
+    {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
+    /// Commit an authorized profile publication atomically in the Vault Store
+    /// (Store version fence), then return the new checkpoint version.
+    fn commit_profile(&mut self, _authorized: cbrd::cpfl::Authorized) -> OwnerFuture<'_, u64> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
 }
 
-struct OwnedBoard<T, R, O> {
-    inner: BoardBinding<T, R>,
-    owner: O,
-    policy: ReadPolicy,
-    current: cfyr::policy::CurrentPolicy<foyer::Transport>,
+pub(super) struct OwnedBoard<T, R, O> {
+    pub(super) inner: BoardBinding<T, R>,
+    pub(super) owner: O,
+    pub(super) policy: ReadPolicy,
+    pub(super) current: cfyr::policy::CurrentPolicy<foyer::Transport>,
     // Original Link does not expose Enter's request for replay. An interrupted
     // attendance attempt is fenced and requires owner reconciliation, not retry.
     attendance_pending: bool,
@@ -138,7 +177,7 @@ fn now(expires: u64) -> Result<u64> {
 
 /// No await is permitted inside this function. The actual Foyer weak port refuses
 /// after disposal, while refreshing, and on stale/invalid original trust state.
-fn with_context<B: cwst::backend::Backend, T>(
+pub(super) fn with_context<B: cwst::backend::Backend, T>(
     current: &mut cfyr::policy::CurrentPolicy<foyer::Transport>,
     policy: &ReadPolicy,
     community: &str,
@@ -207,7 +246,22 @@ fn publication<B: cwst::backend::Backend>(
     // It is reloaded and compared after each wait, never accepted as an input.
     Ok(committed.bytes().to_vec())
 }
-fn board_error(error: cbrd::Error) -> ErrorCode {
+/// Upper bound on groups one device keeps (Groups refuses beyond it).
+const MAX_GROUPS: usize = 256;
+
+fn group_error(error: cbrd::cgrp::Error) -> ErrorCode {
+    use cbrd::cgrp::Error;
+    match error {
+        Error::Invalid => ErrorCode::InvalidRequest,
+        Error::Policy | Error::Unavailable => ErrorCode::Unavailable,
+        Error::Authority => ErrorCode::Unauthorized,
+        Error::Conflict | Error::Reconcile => ErrorCode::Reconcile,
+        Error::Capacity => ErrorCode::Capacity,
+        Error::Clock => ErrorCode::Clock,
+    }
+}
+
+pub(super) fn board_error(error: cbrd::Error) -> ErrorCode {
     match error {
         cbrd::Error::Scope => ErrorCode::Unauthorized,
         cbrd::Error::Unavailable => ErrorCode::Unavailable,
@@ -216,7 +270,7 @@ fn board_error(error: cbrd::Error) -> ErrorCode {
 }
 
 impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
-    fn idle(&self) -> Result<()> {
+    pub(super) fn idle(&self) -> Result<()> {
         if self.attendance_pending || self.inner.pending.is_some() {
             Err(ErrorCode::Reconcile)
         } else {
@@ -453,6 +507,62 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
         expires: u64,
     ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
         Box::pin(self.page(prepared, signature, expires, PageKind::Watch))
+    }
+    fn groups(&mut self, expires: u64) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
+        Box::pin(async move {
+            self.idle()?;
+            let community = self.inner.board.community().to_owned();
+            let board = &self.inner.board;
+            let current = &mut self.current;
+            let policy = &self.policy;
+            self.owner
+                .with_current(|read| {
+                    with_context(current, policy, &community, expires, read, |context, _| {
+                        board.read_groups_committed(context).map_err(board_error)
+                    })
+                })
+                .await
+        })
+    }
+    fn group_act(
+        &mut self,
+        intent: cbrd::GroupIntent,
+        visible: bool,
+        expires: u64,
+    ) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
+        Box::pin(async move {
+            self.idle()?;
+            if self.owner.groups().is_none() {
+                return Err(ErrorCode::Unavailable);
+            }
+            let community = self.inner.board.community().to_owned();
+            let board = &self.inner.board;
+            let current = &mut self.current;
+            let policy = &self.policy;
+            // The signed Rulebook is read synchronously; consent gathering and
+            // publication then run against that exact policy, which Groups
+            // re-validates against its own expiry at every step.
+            let projected = self
+                .owner
+                .with_current(|read| {
+                    with_context(current, policy, &community, expires, read, |context, _| {
+                        board
+                            .read_group_policy_committed(context)
+                            .map_err(board_error)
+                    })
+                })
+                .await?;
+            let source = cbrd::PolicyAt::new(&community, projected);
+            let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+            let (views, _) =
+                cbrd::execute_group_intent(owner, &source, intent, visible, MAX_GROUPS)
+                    .await
+                    .map_err(group_error)?;
+            Ok(views)
+        })
+    }
+    fn profile_publish(&mut self, edit: cbrd::Edit, expires: u64) -> OwnedFuture<'_, u64> {
+        Box::pin(self.publish_profile(edit, expires))
     }
     fn discovery(&mut self, expires: u64) -> OwnedFuture<'_, Vec<cbrd::Discovery>> {
         Box::pin(async move {

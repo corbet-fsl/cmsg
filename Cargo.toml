@@ -42,7 +42,7 @@ cdht = { git = "https://git.corbet.ch/corbet-foss/cdht.git", branch = "v01" }
 cmsh = { git = "https://git.corbet.ch/corbet-libs/cmsh.git", branch = "v01" }
 cvlt = { git = "https://git.corbet.ch/corbet-libs/cvlt.git", branch = "v01", features = ["wallet"] }
 cnbx = { git = "https://git.corbet.ch/corbet-libs/cnbx.git", branch = "v01" }
-ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "v01" }
+ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "v01", features = ["profile-envelope"] }
 cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "v01" }
 schemars = "1"
 url = "2"
@@ -54,14 +54,14 @@ sha2 = "0.10"
 data-encoding = "2.9"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "v01", optional = true, features = ["test-authenticator"] }
+cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "v01", optional = true, features = ["embedded-authenticator"] }
 ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "v01", optional = true }
 arti-client = { version = "0.46", default-features = false, optional = true }
 tor-rtcompat = { version = "0.46", default-features = false, features = ["tokio", "rustls"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
-cbrd = { git = "https://git.corbet.ch/corbet-libs/cbrd.git", branch = "ohttp", default-features = false, features = ["http"] }
+cbrd = { git = "https://git.corbet.ch/corbet-libs/cbrd.git", branch = "v01", default-features = false, features = ["http"] }
 futures-util = "0.3"
-cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "ohttp", default-features = false, features = ["http"] }
+cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "v01", default-features = false, features = ["http"] }
 reqwest = { version = "0.13", default-features = false }
 axum = "0.8"
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
@@ -69,7 +69,7 @@ tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "net", "io-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 cblv = { git = "https://git.corbet.ch/corbet-foss/cblv.git", branch = "main", features = ["browser"], optional = true }
 ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "v01", default-features = false, optional = true }
-cbrd = { git = "https://git.corbet.ch/corbet-libs/cbrd.git", branch = "ohttp", default-features = false, features = ["browser"] }
+cbrd = { git = "https://git.corbet.ch/corbet-libs/cbrd.git", branch = "v01", default-features = false, features = ["browser"] }
 futures-channel = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
 futures-util = "0.3"
@@ -77,7 +77,7 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Window", "Location", "Event", "EventTarget", "MessageEvent", "MessageChannel", "MessagePort"] }
-cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "ohttp", default-features = false, features = ["browser"] }
+cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "v01", default-features = false, features = ["browser"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
@@ -92,7 +92,7 @@ browser-coverage-runtime = { path = ".ci/coverage-runtime" }
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "ohttp", default-features = false, features = ["development-gate-client", "client-http"] }
+cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "main", default-features = false, features = ["development-gate-client", "client-http"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 tempfile = "3"
 ed25519-dalek = "2"
@@ -113,7 +113,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(owned_browser_coverage)"] 
 [features]
 # Member-to-server calls through Oblivious HTTP instead of direct HTTPS (streams excepted).
 ohttp = ["cfyr/ohttp", "cbrd/ohttp", "dep:cblv", "cblv/client", "reqwest/rustls"]
-test-authenticator = ["dep:cpky"]
+embedded-authenticator = ["dep:cpky"]
 conformance = []
 native-prover = ["cwlt/native-prover", "cvlt/wallet-native-prover", "ckmg/wallet-native-prover"]
 native-tor = ["ckmg/native-tor", "cmsh/tor", "cmsh/tor-records", "dep:ctrn", "dep:arti-client", "dep:tor-rtcompat", "dep:rustls"]

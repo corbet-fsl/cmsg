@@ -1134,7 +1134,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cgbl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cgbl.git?branch=main#e28064be791230d04cdc7176a623147ebe9e9b77"
+source = "git+https://git.corbet.ch/corbet-libs/cgbl.git?branch=main#1cbf0e1598c6c93b1c8ac777109dcf8fc7b8db9c"
 dependencies = [
  "cbcn",
  "ckyh",
@@ -1673,7 +1673,7 @@ dependencies = [
 [[package]]
 name = "cplc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cplc?branch=main#3fe750097aeab5f6f31007ec2d3325acf016ce5f"
+source = "git+https://git.corbet.ch/corbet-libs/cplc?branch=main#8958ee98d235938a2543393b53292ede9a33d6e8"
 dependencies = [
  "cbcn",
  "cblc",
@@ -1721,7 +1721,7 @@ dependencies = [
 [[package]]
 name = "cpsd"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpsd?branch=main#3a9c9c13715313620ec8c1a1b8a1f6c8084e56c4"
+source = "git+https://git.corbet.ch/corbet-foss/cpsd?branch=main#907b0a6264be4df6f31898cb89f31a68ad3ef04b"
 dependencies = [
  "ark-bls12-381",
  "ark-ec 0.4.2",
@@ -2030,7 +2030,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#9ff2738a6d7a760d09ce8ddf9cc53caf4021e719"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#5288e4cdcaf4abb1447281151777bb89fea91455"
 dependencies = [
  "axum",
  "cblc",
