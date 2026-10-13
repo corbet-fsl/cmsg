@@ -55,6 +55,8 @@ pub async fn prepare_initial_recovery<'a, 'p, N: cdht::Network + Clone>(
         closed: false,
         account_intent: None,
         delegation_intent: None,
+        request_intent: None,
+        delegation_spent: false,
         account_signing: None,
     };
     let reader = candidate
@@ -98,15 +100,21 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
         Ok((self, admission))
     }
 
-    /// Enable the fixed account enrollment composer with separate one-use
-    /// admission channels for root authorization and the complete delegation.
+    /// Enable the fixed account enrollment composer with three separate one-use
+    /// admission channels: root authorization, the complete delegation, and the
+    /// account request signature. One approval never authorizes two signatures.
     /// The returned owner exposes no arbitrary transcript-admission method.
     pub fn with_accounting_intents(
         mut self,
-    ) -> super::super::Result<(Self, super::super::accounting::AccountingIntents)> {
+    ) -> super::super::Result<(
+        Self,
+        super::super::accounting::AccountingIntents,
+        ckmg::IntentAdmission,
+    )> {
         if self.authority.closed
             || self.authority.account_intent.is_some()
             || self.authority.delegation_intent.is_some()
+            || self.authority.request_intent.is_some()
         {
             return Err(ErrorCode::Unauthorized);
         }
@@ -116,8 +124,10 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
             .map_err(|_| ErrorCode::Unauthorized)?;
         let (root, root_verifier) = ckmg::intent_channel();
         let (device, device_verifier) = ckmg::intent_channel();
+        let (request, request_verifier) = ckmg::intent_channel();
         self.authority.account_intent = Some(root_verifier);
         self.authority.delegation_intent = Some(device_verifier);
+        self.authority.request_intent = Some(request_verifier);
         let expires = self
             .authority
             .initial
@@ -130,6 +140,7 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
                 device,
                 expires,
             },
+            request,
         ))
     }
 

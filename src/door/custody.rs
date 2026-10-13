@@ -6,7 +6,7 @@ use std::{cell::Cell, rc::Rc};
 
 mod genesis;
 mod initial_recovery;
-pub use initial_recovery::complete_initial_recovery;
+pub use initial_recovery::{complete_initial_recovery, InitialRecoveryAuthority};
 mod initial_restore;
 pub use initial_restore::{
     prepare_initial_recovery, InitialRecoveredVault, InitialRecoveryOwners, InitialRootVault,

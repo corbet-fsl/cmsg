@@ -35,6 +35,14 @@ for name in names:
         raise SystemExit('Copied original candidate fixture differs')
 receipt = {"source": owner["source"], "files": names}
 if not candidate:
+    # The one reviewed assembler of the native accounting operator configuration (cvld owns
+    # its schema). Missing from the resolved revision means the account journey cannot run.
+    tool = (source / "tools/g5-account-config.py").resolve()
+    if not tool.is_relative_to(source) or not tool.is_file():
+        raise SystemExit("The resolved door owner has no G5 account configuration assembler")
+    shutil.copyfile(tool, destination / "g5-account-config.py")
+    receipt["g5_account_config"] = hashlib.sha256(tool.read_bytes()).hexdigest()
+if not candidate:
     # Reuse this exact server owner's existing native build environment.
     shell = (source / ".ci/check-shell.nix").resolve()
     if not shell.is_relative_to(source):

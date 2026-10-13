@@ -14,6 +14,13 @@ pub struct InitialRecoveryAuthority<'a, 'p, C, N: cdht::Network> {
     pub(super) closed: bool,
     pub(super) account_intent: Option<ckmg::IntentVerifier>,
     pub(super) delegation_intent: Option<ckmg::IntentVerifier>,
+    /// Third single-use channel: the account request signature. Both it and the
+    /// delegation are `SignDeviceEd25519`, so they are told apart by order: the
+    /// delegation is always signed first and its attempt (success or refusal)
+    /// is spent before this channel is consulted. One approval never covers
+    /// two signatures.
+    pub(super) request_intent: Option<ckmg::IntentVerifier>,
+    pub(super) delegation_spent: bool,
     pub(super) account_signing: Option<(Action, Vec<u8>, u64)>,
 }
 impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
@@ -220,16 +227,23 @@ impl<C: Clock, N: cdht::Network> ckmg::Authority for InitialRecoveryAuthority<'_
             let mut current_request = request;
             current_request.now = self.clock.now()?;
             self.current(&current_request)?;
-            (if current_request.action == Action::AuthorizeAccountDevice {
+            let origin = self
+                .initial
+                .origin()
+                .map_err(|_| Error::Unauthorized)?
+                .to_owned();
+            let verifier = if current_request.action == Action::AuthorizeAccountDevice {
                 self.account_intent.as_mut()
+            } else if self.delegation_spent {
+                self.request_intent.as_mut()
             } else {
+                // Spent by this attempt whatever its outcome.
+                self.delegation_spent = true;
                 self.delegation_intent.as_mut()
-            })
-            .ok_or(Error::Unauthorized)?
-            .consume(
-                &current_request,
-                self.initial.origin().map_err(|_| Error::Unauthorized)?,
-            )?;
+            };
+            verifier
+                .ok_or(Error::Unauthorized)?
+                .consume(&current_request, &origin)?;
             let signing = current_request.signing.ok_or(Error::Unauthorized)?;
             self.account_signing = Some((
                 current_request.action,
@@ -306,6 +320,8 @@ pub async fn complete_initial_recovery<B: cwst::backend::Backend, N: cdht::Netwo
         closed: false,
         account_intent: None,
         delegation_intent: None,
+        request_intent: None,
+        delegation_spent: false,
         account_signing: None,
     };
     let reader = candidate.read_lineage(&mut clock, &mut authority).await?;

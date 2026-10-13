@@ -70,12 +70,54 @@ impl Fixture {
         let mut config = owner::community_config(community_dir.path(), COMMUNITY, &public, 1000);
         config.root.bootstrap_file = None;
         config.admin.bootstrap_file = None;
+        // The native accounting operator exists only in a fixture instance started with the
+        // assembled G5 configuration (`.ci/g5-account-config.sh`); every other instance keeps
+        // `accounting: None`, so no existing journey changes.
+        let accounting = match std::env::var_os("CMSG_G5_ACCOUNT_CONFIG") {
+            None => None,
+            Some(path) => {
+                let account: cvld::accounting::AccountConfig =
+                    serde_json::from_slice(&std::fs::read(path)?)
+                        .map_err(|_| refused_stage("G5 account configuration"))?;
+                // The authenticated Rulebook carries the period and the daily quota the operator reads.
+                let mut rules: cmty::cplc::crbk::Rulebook =
+                    serde_json::from_slice(&std::fs::read(&config.rulebook_file)?)
+                        .map_err(|_| refused_stage("community Rulebook"))?;
+                cmty::cplc::crbk::RecordEpochSettings::define(&mut rules, &account.period_key)
+                    .map_err(|_| refused_stage("Rulebook period key"))?;
+                cmty::cplc::crbk::OutcomeQuotaSettings::define(
+                    &mut rules,
+                    &account.settlement.quota_key,
+                )
+                .map_err(|_| refused_stage("Rulebook quota key"))?;
+                rules
+                    .set_community(&account.period_key, Some(json!(86_400)))
+                    .map_err(|_| refused_stage("Rulebook period"))?;
+                rules
+                    .set_community(&account.settlement.quota_key, Some(json!(4)))
+                    .map_err(|_| refused_stage("Rulebook quota"))?;
+                std::fs::write(
+                    &config.rulebook_file,
+                    serde_json::to_vec(&rules).map_err(|_| refused_stage("Rulebook encoding"))?,
+                )?;
+                Some(account)
+            }
+        };
+        let accounting_state = if accounting.is_some() {
+            "configured; native operator from the assembled G5 account configuration"
+        } else {
+            "unconfigured; no accepted account or proof claim"
+        };
+        config.accounting = accounting;
         eprintln!("original wallet fixture entering community construction");
         let community_owner = Door::community(config, Arc::new(SystemClock))
             .await
             .map_err(|_| refused_stage("community construction"))?;
         let community = https::HttpsFixture::start(
-            fixed_host(cvld::api::router(community_owner.clone()), COMMUNITY_HOST),
+            lose_first_account_response(fixed_host(
+                cvld::api::router(community_owner.clone()),
+                COMMUNITY_HOST,
+            )),
             community_dir.clone(),
             chain,
             key,
@@ -98,7 +140,7 @@ impl Fixture {
                 "scope":COMMUNITY,"passkey_origin":"https://vault.omega.example.test",
                 "rp_id":"omega.example.test","trust_key_ring":community_feed.key_ring},
             "global_public":public,
-            "accounting":"unconfigured; no accepted account or proof claim",
+            "accounting":accounting_state,
         });
         Ok(Self {
             wallet,
@@ -139,6 +181,51 @@ impl Fixture {
     }
 }
 
+/// With `CMSG_G5_LOSE_FIRST_ACCOUNT_RESPONSE` set, the operator ACCEPTS the first account request but the
+/// client never sees the answer (a crash between send and state B). The retry must carry the identical
+/// bytes; any other body is refused, so only a faithful re-send can complete the lifecycle.
+fn lose_first_account_response(router: axum::Router) -> axum::Router {
+    if std::env::var_os("CMSG_G5_LOSE_FIRST_ACCOUNT_RESPONSE").is_none() {
+        return router;
+    }
+    let first: Arc<std::sync::Mutex<Option<Vec<u8>>>> = Arc::default();
+    router.layer(axum::middleware::from_fn(
+        move |request: axum::extract::Request, next: axum::middleware::Next| {
+            let first = first.clone();
+            async move {
+                use axum::response::IntoResponse;
+                if request.uri().path() != "/v1/account" {
+                    return next.run(request).await;
+                }
+                let (parts, body) = request.into_parts();
+                let Ok(bytes) = axum::body::to_bytes(body, 8 * 1024 * 1024).await else {
+                    return axum::http::StatusCode::PAYLOAD_TOO_LARGE.into_response();
+                };
+                let lose = {
+                    let mut seen = first.lock().unwrap();
+                    match seen.as_ref() {
+                        None => {
+                            *seen = Some(bytes.to_vec());
+                            true
+                        }
+                        Some(previous) if previous.as_slice() == bytes.as_ref() => false,
+                        Some(_) => return axum::http::StatusCode::CONFLICT.into_response(),
+                    }
+                };
+                let response = next
+                    .run(axum::extract::Request::from_parts(
+                        parts,
+                        axum::body::Body::from(bytes),
+                    ))
+                    .await;
+                if lose {
+                    return axum::http::StatusCode::BAD_GATEWAY.into_response();
+                }
+                response
+            }
+        },
+    ))
+}
 fn fixed_host(router: axum::Router, host: &'static str) -> axum::Router {
     router.layer(axum::middleware::from_fn(
         move |mut request: axum::extract::Request, next: axum::middleware::Next| async move {

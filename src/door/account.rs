@@ -283,7 +283,7 @@ impl AccountActor {
 }
 
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
-pub use run::AccountParts;
+pub use run::{bind_native_account, AccountParts};
 
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 mod run {
@@ -387,6 +387,55 @@ mod run {
                 expires,
             }
         }
+    }
+
+    /// Production composer of the native path: recover the community account
+    /// from the original recovery owners, reserve the THREE distinct single-use
+    /// intents (root, device delegation, account request; each admits exactly
+    /// one signature), start the account actor and bind it to the member origin.
+    /// `community_join` and the account actions work on a native device only
+    /// after this runs. The actor ends with the recovery lease (`intents.expires`).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn bind_native_account<B, N>(
+        door: &mut super::super::Door,
+        origin: &str,
+        owners: super::super::custody::InitialRecoveryOwners<'static, 'static, N>,
+        network: N,
+        backend: B,
+        global: GlobalPassport<
+            B,
+            SystemClock,
+            ckmg::SystemEntropy,
+            super::super::custody::InitialRecoveryAuthority<'static, 'static, SystemClock, N>,
+            cvlt::PasskeyRecords<cvlt::TorPasskeyRecord<'static, N>>,
+        >,
+        device: [u8; 32],
+        prover: ckmg::wallet_engine::native_prover::NativeProver,
+    ) -> super::super::Result<()>
+    where
+        B: cwst::backend::Backend + 'static,
+        N: cdht::Network + Clone + 'static,
+    {
+        let membership = door.live_membership(origin)?;
+        let policy = door.current_policy(origin)?;
+        let (owners, intents, request_intent) = owners.with_accounting_intents()?;
+        let account = owners.open_community_account(network, backend).await?;
+        let expires = intents.expires;
+        let actor = AccountActor::start(
+            AccountParts {
+                membership,
+                policy,
+                account,
+                global,
+                device,
+                intents,
+                request_intent,
+                rng: cwlt::passport::rand::rngs::OsRng,
+                prover,
+            },
+            expires,
+        );
+        door.bind_account(origin, actor)
     }
 
     /// Read the lobby through the held member lease and, when something is still
