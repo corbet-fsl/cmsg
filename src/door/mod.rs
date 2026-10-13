@@ -37,6 +37,8 @@ pub mod passport;
 pub mod record;
 mod registry;
 mod vouching;
+pub(crate) mod rooms;
+pub use rooms::RoomLink;
 #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
 pub mod scenario;
 pub mod surface;

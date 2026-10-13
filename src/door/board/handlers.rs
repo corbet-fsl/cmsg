@@ -199,7 +199,7 @@ impl Door {
     ) -> Result<()>
     where
         T: clnk::Transport + 'static,
-        R: 'static,
+        R: crate::door::RoomLink,
         O: CommittedOwner + 'static,
     {
         self.member_origin(origin)?;
@@ -653,7 +653,18 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
     }
 }
 
-impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O> {
+impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
+    for OwnedBoard<T, R, O>
+{
+    fn has_rooms(&self) -> bool {
+        self.inner.has_rooms()
+    }
+    fn execute_room(
+        &self,
+        command: cbrd::clnk::cmbl::Request,
+    ) -> crate::door::rooms::RoomFuture<'_, cbrd::clnk::cmbl::Outcome> {
+        self.inner.execute_room(command)
+    }
     fn require_committed(&self) -> Result<()> {
         self.idle()
     }
