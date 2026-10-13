@@ -871,6 +871,42 @@ impl Services for NativeServices<'_> {
     }
 }
 
+/// Every start of an already registered native device. Registration happens once through
+/// `compose_native_device`; afterwards each start calls this instead: it checks that both
+/// registration markers are `Done`, that the deployment belongs to these settings, and then
+/// starts the restoring composer (`scenario::restore::Composer`) through
+/// `Embedded::start_composed`. Custody opens only after the login action: login, then the
+/// login-recovery lease, then the Board, verified groups and the Mesh are bound.
+#[cfg(feature = "native-tor")]
+pub async fn open_native_device(
+    settings: &DeviceSettings,
+    progress: &Path,
+    deployment: super::native::NativeDeployment,
+    lifetime_seconds: u64,
+    clock: std::sync::Arc<dyn super::native::Clock>,
+) -> Result<super::native::Embedded, ComposeError> {
+    settings.validate()?;
+    let marker = ProgressFile::open(Some(progress.to_owned()))?;
+    if marker.stage(true) != Stage::Done || marker.stage(false) != Stage::Done {
+        return Err(ComposeError::Config(
+            "the device is not registered: run compose_native_device first".into(),
+        ));
+    }
+    let runtime = &deployment.runtime;
+    if runtime.origin != settings.community.origin
+        || runtime.community != settings.community_name
+        || runtime.role != Role::Member
+        || deployment.native_tor.is_none()
+    {
+        return Err(ComposeError::Config(
+            "deployment does not match the device settings".into(),
+        ));
+    }
+    super::native::Embedded::configured_restore(deployment, lifetime_seconds, clock)
+        .await
+        .map_err(step("open"))
+}
+
 /// From a device configuration to a bound, fully registered device: global registration,
 /// wallet enrollment, passport issue, community enrollment at the accounting operator and
 /// `bind_native_account`. Idempotent and resumable: a half-registered device continues where
