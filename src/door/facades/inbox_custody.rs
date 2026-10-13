@@ -44,6 +44,65 @@ where
         next.relation(&request.peer).map_err(contact_error)
     }
 
+    /// Run one wave action. The purpose keys are obtained BEFORE the Store lock:
+    /// creating a key checkpoints through that same Store.
+    pub(super) async fn waves_owned(
+        &mut self,
+        command: inbox_waves::Command,
+        ports: &dyn inbox_waves::WavePorts,
+    ) -> Result<inbox_waves::Answer> {
+        use inbox_waves::{engine::Env, Answer, Command};
+        let contacts = cnbx::Contacts::key(self.vault.keys())
+            .await
+            .map_err(contact_error)?;
+        let threads = self
+            .vault
+            .keys()
+            .key(cnbx::threads_purpose())
+            .await
+            .map_err(keys_error)?;
+        let storage = self.vault.storage().clone();
+        let mut store = storage.lock().await;
+        self.check_scope(&store).await?;
+        let mut env = Env {
+            inbox: &self.inbox,
+            binding: &self.binding,
+            keys: self.vault.keys(),
+            store: &mut store,
+            ports,
+            contacts: &contacts,
+            threads: &threads,
+        };
+        Ok(match command {
+            Command::Send(request) => Answer::Status(env.send(&request.peer).await?),
+            Command::Decide(request) => {
+                Answer::Status(env.decide(&request.nonce, request.decision).await?)
+            }
+            Command::Punish(request) => {
+                Answer::Relation(env.punish(&request.peer, request.nonce).await?)
+            }
+            Command::Receive(request) => {
+                Answer::Status(env.receive(&request.peer, request.message).await?)
+            }
+            Command::List => Answer::List(env.list()?),
+            Command::Outbox => Answer::Outbox(env.outbox()?),
+            Command::Delivered(request) => {
+                env.delivered(&request).await?;
+                Answer::Done
+            }
+            Command::NextJob => Answer::Job(Box::new(env.next_job().await?)),
+            Command::JobDone(request) => Answer::Status(env.job_done(request).await?),
+            Command::Retry(id) => {
+                env.retry_job(&id).await?;
+                Answer::Done
+            }
+            Command::Recover => {
+                env.recover_jobs().await?;
+                Answer::Done
+            }
+        })
+    }
+
     pub(super) async fn check_scope(&mut self, store: &cwst::Store<B>) -> Result<()> {
         let lineage = self.vault.keys().lineage().await.map_err(keys_error)?;
         if lineage.binding != self.binding || !store.is_scope(self.binding.community()) {

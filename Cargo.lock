@@ -1909,6 +1909,8 @@ dependencies = [
  "crlt",
  "csgn",
  "cshm",
+ "ctcs",
+ "cthr",
  "ctrn",
  "cvld",
  "cvlt",
@@ -1963,7 +1965,7 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=v01#2ad307bf83a21b9450df12b57cdf5d6f11ef0d24"
+source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=release-threads#86ff4b4e1b58f20b30f1854c10f8c481e009c02e"
 dependencies = [
  "cdlv",
  "cgrp",
@@ -2802,7 +2804,7 @@ dependencies = [
 [[package]]
 name = "cwvs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwvs.git?branch=v01#f7d761b84028603254f47f5e1031af2771c55363"
+source = "git+https://git.corbet.ch/corbet-foss/cwvs.git?branch=release-authority#259708f3ae2ba801f4ddb639e5848431c1f658b6"
 dependencies = [
  "cdlv",
  "ckmg",

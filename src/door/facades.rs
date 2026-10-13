@@ -186,6 +186,15 @@ pub(super) trait BoundVault {
     fn contact_act(&mut self, _request: inbox::ContactAct) -> OwnedFuture<'_, cnbx::Relation> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    /// One wave action over the member's Waves, Contacts and Threads. The ports
+    /// are the Door-held capabilities of this member origin.
+    fn waves<'a>(
+        &'a mut self,
+        _command: inbox_waves::Command,
+        _ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, inbox_waves::Answer> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn sign_board<'a>(
         &'a mut self,
         prepared: &'a cbrd::Prepared,
@@ -345,6 +354,13 @@ where
     }
     fn blocking_rules(&mut self) -> OwnedFuture<'_, Vec<String>> {
         Box::pin(self.blocking_rules_owned())
+    }
+    fn waves<'a>(
+        &'a mut self,
+        command: inbox_waves::Command,
+        ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, inbox_waves::Answer> {
+        Box::pin(self.waves_owned(command, ports))
     }
     fn contact_act(&mut self, request: inbox::ContactAct) -> OwnedFuture<'_, cnbx::Relation> {
         Box::pin(self.contact_act_owned(request))

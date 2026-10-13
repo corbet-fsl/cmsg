@@ -83,3 +83,21 @@ pub(super) async fn read_with_clock<T: 'static>(
     // Reborrow only after the real owner await; no current policy is cached.
     Ok((result, completed))
 }
+
+/// Like [`read`], for an action that also consumes a capability bundle held by
+/// the Door (not by the Vault). The bundle is shared; it cannot be replaced here.
+pub(super) async fn read_with<T: 'static, P: ?Sized>(
+    vault: &mut dyn facades::BoundVault,
+    ports: &P,
+    current: &mut cfyr::policy::CurrentPolicy<foyer::Transport>,
+    scope: Scope<'_>,
+    read: impl for<'a> FnOnce(&'a mut dyn facades::BoundVault, &'a P) -> facades::OwnedFuture<'a, T>,
+) -> Result<(T, u64)> {
+    let clock = board::SystemClock;
+    let started = time(&clock, scope.expires, scope.floor)?;
+    policy(current, &scope, started)?;
+    let result = read(vault, ports).await?;
+    let completed = time(&clock, scope.expires, started)?;
+    policy(current, &scope, completed)?;
+    Ok((result, completed))
+}
