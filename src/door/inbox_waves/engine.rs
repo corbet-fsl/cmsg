@@ -188,6 +188,33 @@ where
             .map_err(|_| ErrorCode::Reconcile)
     }
 
+    /// The claim that lets this member SEND in the still-Pending conversation
+    /// with `peer`: present only while this member's own Answer for exactly that
+    /// conversation is Claimed in the committed Waves journal (proof pending).
+    /// A reverted or settled claim yields `None` (settled means Established).
+    pub(crate) fn claim_for(
+        &self,
+        peer: &str,
+        conversation: &[u8; 32],
+    ) -> Result<Option<cnbx::Claim>> {
+        let desk = Desk::load(self.store)?;
+        let Some(receipt) = desk
+            .waves
+            .iter()
+            .find(|wave| {
+                wave.role == 1 && wave.peer == peer && wave.hello.conversation == *conversation
+            })
+            .and_then(|wave| wave.receipt_digest)
+        else {
+            return Ok(None);
+        };
+        let waves = self
+            .inbox
+            .waves(self.me()?, self.store)
+            .map_err(inbox_error)?;
+        Ok(waves.claim(conversation, peer, &receipt))
+    }
+
     /// The device refuses every wave exchange with a peer this member blocked,
     /// before anything is countersigned or sent. Blocks live in Contacts.
     pub(crate) fn refuse_blocked(&self, peer: &str) -> Result<()> {
