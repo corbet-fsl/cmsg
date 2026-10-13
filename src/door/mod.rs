@@ -261,8 +261,6 @@ pub struct Door {
     /// owner. `None` until one is known; links are then limited only by the
     /// community's own (alpha) allowance.
     voucher_allowance: Option<u32>,
-    /// A creation token obtained but not yet redeemed, per origin. Memory only.
-    creation_tokens: BTreeMap<String, cfyr::creation_token::Token>,
     wave_ports: BTreeMap<String, Box<dyn inbox_waves::WavePorts>>,
     login_configuration: BTreeMap<String, login::Configuration>,
     logins: BTreeMap<[u8; 32], login::session::State>,
@@ -285,7 +283,6 @@ impl Door {
             vaults: BTreeMap::new(),
             accounts: BTreeMap::new(),
             voucher_allowance: None,
-            creation_tokens: BTreeMap::new(),
             wave_ports: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
             logins: BTreeMap::new(),

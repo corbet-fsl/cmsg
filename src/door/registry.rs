@@ -19,7 +19,9 @@ use inbox_waves::{
     wave_outbox as inbox_wave_outbox, wave_punish as inbox_wave_punish,
     wave_receive as inbox_wave_receive, wave_send as inbox_wave_send, waves as inbox_waves_list,
 };
-use creating::{community_create, community_creation_claim};
+use creating::{
+    community_create, community_creation, community_creation_claim, community_creation_finish,
+};
 use vouching::{
     link_create as voucher_link_create, link_revoke as voucher_link_revoke, links as voucher_links,
     signoff_decide as voucher_signoff_decide, signoff_list as voucher_signoff_list,
@@ -287,6 +289,8 @@ async fn community_join(
     {
         return Err(ErrorCode::InvalidRequest);
     }
+    // A restarted device presents the creation id it kept for this community.
+    creating::rearm(door, key).await?;
     let gate = account_call(door, key, account::Command::Join(request))
         .await?
         .gate()?;
@@ -307,6 +311,7 @@ async fn community_join(
     let done = account_call(door, key, account::Command::Activate)
         .await?
         .activated()?;
+    creating::settle(door, key).await?;
     Ok((
         account::Joined::Active {
             version: done.version,
@@ -429,6 +434,8 @@ actions! {
     "account_activate" => account_activate(Empty) -> account::Activation, VaultAccess, Vault;
     "community_join" => community_join(account::JoinRequest) -> account::Joined, VaultAccess, Vault;
     "foyer.community_create" => community_create(creating::Create) -> creating::Created, VaultAccess, Foyer;
+    "foyer.community_creation" => community_creation(Empty) -> creating::Draft, VaultAccess, Foyer;
+    "foyer.community_creation_finish" => community_creation_finish(Empty) -> Empty, VaultAccess, Foyer;
     "foyer.community_creation_claim" => community_creation_claim(creating::Claim) -> creating::Claimed, VaultAccess, Foyer;
     "foyer.voucher_link_create" => voucher_link_create(vouching::LinkCreate) -> vouching::LinkInfo, VaultAccess, Foyer;
     "foyer.voucher_links" => voucher_links(Empty) -> vouching::Links, VaultAccess, Foyer;

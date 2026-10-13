@@ -111,6 +111,7 @@ crlt = { git = "https://git.corbet.ch/corbet-foss/crlt", branch = "main" }
 futures-executor = "0.3"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+blind-rsa-signatures = { version = "0.18", default-features = false }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(owned_browser_coverage)"] }

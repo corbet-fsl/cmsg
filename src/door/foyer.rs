@@ -313,7 +313,9 @@ impl Binding {
     }
 
     /// Call a public operation of the global service on the session-less channel.
-    /// Same uncertainty latch as `call`: a lost answer is never retried silently.
+    /// Only for operations the service repeats safely (`community_create` answers a
+    /// repeat with the community it already made), so a lost answer is not latched:
+    /// the caller simply asks again.
     pub async fn call_public(&mut self, name: &str, body: Value) -> Result<Value> {
         if self.uncertain {
             return Err(ErrorCode::Reconcile);
@@ -322,16 +324,8 @@ impl Binding {
             return Err(ErrorCode::Unauthorized);
         }
         let client = self.sessions.public.as_mut().ok_or(ErrorCode::Unavailable)?;
-        self.uncertain = true;
-        let result = client.call(name, body).await.map_err(map_error);
-        if !matches!(result, Err(ErrorCode::Reconcile)) {
-            self.uncertain = false;
-        }
-        let result = result?;
-        if check_result_size(&result).is_err() {
-            self.uncertain = true;
-            return Err(ErrorCode::Reconcile);
-        }
+        let result = client.call(name, body).await.map_err(map_error)?;
+        check_result_size(&result).map_err(|_| ErrorCode::Unavailable)?;
         Ok(result)
     }
 

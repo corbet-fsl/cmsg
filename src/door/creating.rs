@@ -11,6 +11,7 @@
 //!
 //! The raw owner operations are used internally and are not republished: a
 //! forwarded call could not hold the token between issuance and redemption.
+use super::vouching;
 use super::*;
 use cfyr::{address, creation_token};
 
@@ -26,9 +27,12 @@ const LEGAL: &str = "legal";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Create {
-    /// The community address: lowercase letters and digits.
+    /// The community address: lowercase letters and digits. Empty (with an empty name)
+    /// resumes the creation the Vault already holds.
+    #[serde(default)]
     pub address: String,
     /// Name shown to members; it is not part of the address.
+    #[serde(default)]
     pub display_name: String,
     /// Admission gates the creator chose; `legal` is always required.
     #[serde(default)]
@@ -175,85 +179,234 @@ async fn owner<T: serde::de::DeserializeOwned>(
     serde_json::from_value(answer).map_err(|_| ErrorCode::Unavailable)
 }
 
-/// Obtain a token (once) and redeem it for the new community.
+/// Where a creation stands, kept in the Vault from the moment the person has made
+/// their choices. The choices (address, name, gates) are human effort and are written
+/// first; the system steps after them are repeated silently after an interruption.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct Record {
+    pub address: String,
+    pub display_name: String,
+    pub gates: Vec<String>,
+    /// A blinded message sent (or about to be) to the issuer; asking again with the
+    /// same one returns the same answer without a second count.
+    #[serde(default)]
+    pub pending: Option<creation_token::PendingState>,
+    /// The finished token, until the service has made the community.
+    #[serde(default)]
+    pub token: Option<creation_token::Token>,
+    /// The service's answer, with the claim secret.
+    #[serde(default)]
+    pub created: Option<Created>,
+}
+
+impl Record {
+    pub(super) fn wipe(&mut self) {
+        use zeroize::Zeroize;
+        if let Some(pending) = &mut self.pending {
+            pending.secret.zeroize();
+        }
+        if let Some(created) = &mut self.created {
+            created.claim.zeroize();
+        }
+    }
+}
+
+/// What the person already chose, so a restarted device never asks again.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Draft {
+    /// `None` when no creation is under way.
+    pub creation: Option<Created>,
+    /// The choices of an unfinished creation, empty strings when there is none.
+    pub address: String,
+    pub display_name: String,
+    pub gates: Vec<String>,
+    /// `chosen`, `token`, `created`: how far the system steps got.
+    pub stage: String,
+}
+
+fn stage(record: &Record) -> &'static str {
+    if record.created.is_some() {
+        "created"
+    } else if record.token.is_some() {
+        "token"
+    } else {
+        "chosen"
+    }
+}
+
+fn token_json(token: &creation_token::Token) -> Value {
+    serde_json::json!({
+        "message": token.message,
+        "randomizer": token.randomizer,
+        "signature": token.signature,
+    })
+}
+
+/// Make the community, resuming wherever an earlier call stopped. The body is
+/// needed once; while a creation is under way the stored choices are used and a
+/// body naming another address replaces them only before the service made it.
 pub(super) async fn community_create(
     door: &mut Door,
     key: &[u8; 32],
     request: Create,
 ) -> Result<(Created, Vec<Event>)> {
-    let (display_name, gates) = checked(&request)?;
     let origin = origin_of(door, key)?;
-    // A token from an earlier attempt that the service refused for its address
-    // (not for the token) is reused; issuance is limited per person.
-    let token = match door.creation_tokens.get(&origin).cloned() {
-        Some(token) => token,
+    let mut loaded = vouching::load(door, &origin).await?;
+    let fresh = request.address.is_empty() && request.display_name.is_empty();
+    let record = match loaded.book.creation.clone() {
+        Some(record) if fresh || record.address == request.address => record,
+        Some(record) if record.created.is_none() => {
+            // The person changed their mind before anything was made.
+            let (display_name, gates) = checked(&request)?;
+            let record = Record {
+                address: request.address.clone(),
+                display_name,
+                gates,
+                pending: record.pending,
+                token: record.token,
+                created: None,
+            };
+            loaded.book.creation = Some(record.clone());
+            loaded.save(door, &origin).await?;
+            record
+        }
+        Some(_) => return Err(ErrorCode::Refused),
         None => {
-            let key: WireKey =
-                owner(door, &origin, "creation_token_key", serde_json::json!({})).await?;
-            let public =
-                creation_token::public_key(&key.public_key).map_err(|_| ErrorCode::Unavailable)?;
-            let mut message = [0u8; MESSAGE];
-            getrandom::fill(&mut message).map_err(|_| ErrorCode::Unavailable)?;
-            let (pending, blinded) =
-                creation_token::request(&public, message).map_err(|_| ErrorCode::Unavailable)?;
-            let signed: WireSigned = owner(
-                door,
-                &origin,
-                "creation_token_issue",
-                serde_json::json!({ "blinded": blinded }),
-            )
-            .await?;
-            let token = creation_token::finish(&public, pending, &signed.blind_signature)
-                .map_err(|_| ErrorCode::Unavailable)?;
-            door.creation_tokens.insert(origin.clone(), token.clone());
-            token
+            let (display_name, gates) = checked(&request)?;
+            let record = Record {
+                address: request.address.clone(),
+                display_name,
+                gates,
+                pending: None,
+                token: None,
+                created: None,
+            };
+            // Human effort first: nothing below can lose it.
+            loaded.book.creation = Some(record.clone());
+            loaded.save(door, &origin).await?;
+            record
         }
     };
+    if let Some(created) = record.created.clone() {
+        return Ok((created, vec![]));
+    }
+    let mut record = record;
+    if record.token.is_none() {
+        let key: WireKey =
+            owner(door, &origin, "creation_token_key", serde_json::json!({})).await?;
+        let public =
+            creation_token::public_key(&key.public_key).map_err(|_| ErrorCode::Unavailable)?;
+        let pending = match record.pending.clone() {
+            Some(state) => {
+                creation_token::Pending::from_state(state).map_err(|_| ErrorCode::Unavailable)?
+            }
+            None => {
+                let mut message = [0u8; MESSAGE];
+                getrandom::fill(&mut message).map_err(|_| ErrorCode::Unavailable)?;
+                let (pending, _) = creation_token::request(&public, message)
+                    .map_err(|_| ErrorCode::Unavailable)?;
+                // Kept before the request leaves: a lost answer is asked for again.
+                record.pending = Some(pending.to_state());
+                loaded.book.creation = Some(record.clone());
+                loaded.save(door, &origin).await?;
+                pending
+            }
+        };
+        let signed: WireSigned = owner(
+            door,
+            &origin,
+            "creation_token_issue",
+            serde_json::json!({ "blinded": pending.blinded() }),
+        )
+        .await?;
+        let token = creation_token::finish(&public, pending, &signed.blind_signature)
+            .map_err(|_| ErrorCode::Unavailable)?;
+        record.token = Some(token);
+        record.pending = None;
+        loaded.book.creation = Some(record.clone());
+        loaded.save(door, &origin).await?;
+    }
+    let token = record.token.clone().ok_or(ErrorCode::Unavailable)?;
     let binding = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
+    // A lost answer is asked again with the same token and address: the service
+    // answers a repeated creation from the community it already made.
     let answer = binding
         .call_public(
             "community_create",
             serde_json::json!({
-                "address": request.address,
-                "display_name": display_name,
-                "gates": gates,
-                "token": {
-                    "message": token.message,
-                    "randomizer": token.randomizer,
-                    "signature": token.signature,
-                },
+                "address": record.address,
+                "display_name": record.display_name,
+                "gates": record.gates,
+                "token": token_json(&token),
             }),
         )
-        .await;
-    let answer = match answer {
-        Ok(answer) => answer,
-        Err(error) => {
-            // The service refused: the token was not spent and stays for a retry
-            // with another address. A lost answer is `Reconcile`; the token is kept
-            // as well, since the service releases it again when nothing was created.
-            return Err(error);
-        }
+        .await?;
+    let wire: WireCreated = serde_json::from_value(answer).map_err(|_| ErrorCode::Unavailable)?;
+    let created = Created {
+        address: record.address.clone(),
+        display_name: record.display_name.clone(),
+        gates: record.gates.clone(),
+        id: wire.id,
+        fingerprint: wire.fingerprint,
+        community_host: wire.community_host,
+        vault_host: wire.vault_host,
+        claim: to_hex(&wire.claim),
+        expires_at: wire.expires_at,
     };
-    door.creation_tokens.remove(&origin);
-    let created: WireCreated =
-        serde_json::from_value(answer).map_err(|_| ErrorCode::Unavailable)?;
+    record.created = Some(created.clone());
+    record.token = None;
+    loaded.book.creation = Some(record);
+    loaded.save(door, &origin).await?;
+    Ok((created, vec![]))
+}
+
+/// What the person already chose and how far the system got.
+pub(super) async fn community_creation(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(Draft, Vec<Event>)> {
+    let origin = origin_of(door, key)?;
+    let loaded = vouching::load(door, &origin).await?;
     Ok((
-        Created {
-            address: request.address,
-            display_name,
-            gates,
-            id: created.id,
-            fingerprint: created.fingerprint,
-            community_host: created.community_host,
-            vault_host: created.vault_host,
-            claim: to_hex(&created.claim),
-            expires_at: created.expires_at,
+        match &loaded.book.creation {
+            Some(record) => Draft {
+                creation: record.created.clone(),
+                address: record.address.clone(),
+                display_name: record.display_name.clone(),
+                gates: record.gates.clone(),
+                stage: stage(record).into(),
+            },
+            None => Draft {
+                creation: None,
+                address: String::new(),
+                display_name: String::new(),
+                gates: Vec::new(),
+                stage: "none".into(),
+            },
         },
         vec![],
     ))
 }
 
+/// The new community is joined: forget the creation.
+pub(super) async fn community_creation_finish(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(Empty, Vec<Event>)> {
+    let origin = origin_of(door, key)?;
+    let mut loaded = vouching::load(door, &origin).await?;
+    if loaded.book.creation.take().is_some() {
+        loaded.save(door, &origin).await?;
+    }
+    Ok((Empty {}, vec![]))
+}
+
 /// Claim the first admin seat on the new community's Door and arm the admission.
+/// Repeating it is harmless; the creation id is kept in this Vault until the
+/// admission is done, so a restarted device arms itself again (`rearm`).
 pub(super) async fn community_creation_claim(
     door: &mut Door,
     key: &[u8; 32],
@@ -268,12 +421,12 @@ pub(super) async fn community_creation_claim(
         serde_json::json!({ "claim": secret }),
     )
     .await?;
-    // The next admission of this member presents the creation id. Without an
-    // account actor the id is still returned for the embedder to arm later.
-    if door.accounts.contains_key(&origin) {
-        super::registry::account_call(door, key, account::Command::Creation(claimed.id.clone()))
-            .await?;
+    let mut loaded = vouching::load(door, &origin).await?;
+    if loaded.book.claimed.as_deref() != Some(claimed.id.as_str()) {
+        loaded.book.claimed = Some(claimed.id.clone());
+        loaded.save(door, &origin).await?;
     }
+    arm(door, key, &claimed.id).await?;
     Ok((
         Claimed {
             id: claimed.id,
@@ -283,6 +436,43 @@ pub(super) async fn community_creation_claim(
     ))
 }
 
+async fn arm(door: &mut Door, key: &[u8; 32], id: &str) -> Result<()> {
+    let origin = origin_of(door, key)?;
+    if door.accounts.contains_key(&origin) {
+        super::registry::account_call(door, key, account::Command::Creation(id.to_owned())).await?;
+    }
+    Ok(())
+}
+
+/// Before a join: a restarted device presents the creation id it kept.
+pub(super) async fn rearm(door: &mut Door, key: &[u8; 32]) -> Result<()> {
+    let origin = origin_of(door, key)?;
+    // A Vault without the custody record has nothing to present.
+    let Ok(loaded) = vouching::load(door, &origin).await else {
+        return Ok(());
+    };
+    match loaded.book.claimed.clone() {
+        Some(id) => arm(door, key, &id).await,
+        None => Ok(()),
+    }
+}
+
+/// The join is done: the creation id has done its work.
+pub(super) async fn settle(door: &mut Door, key: &[u8; 32]) -> Result<()> {
+    let origin = origin_of(door, key)?;
+    let Ok(mut loaded) = vouching::load(door, &origin).await else {
+        return Ok(());
+    };
+    if loaded.book.claimed.take().is_some() {
+        loaded.save(door, &origin).await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "../../tests/support/creating.rs"]
 mod tests;
+
+#[cfg(all(test, not(feature = "ohttp")))]
+#[path = "../../tests/support/creating_resume.rs"]
+mod resume;

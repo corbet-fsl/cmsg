@@ -109,6 +109,13 @@ pub(super) struct Book {
     pub nonces: Vec<NonceEntry>,
     #[serde(default)]
     pub endorsements: Vec<Endorsement>,
+    /// A community this member is creating: the human input first, then every
+    /// system step as it completes, so an interruption resumes where it stopped.
+    #[serde(default)]
+    pub creation: Option<super::creating::Record>,
+    /// Creation id of a claimed seat in THIS community, until the admission is done.
+    #[serde(default)]
+    pub claimed: Option<String>,
 }
 
 impl Drop for Book {
@@ -122,6 +129,9 @@ impl Drop for Book {
         }
         for nonce in &mut self.nonces {
             nonce.nonce.zeroize();
+        }
+        if let Some(record) = &mut self.creation {
+            record.wipe();
         }
     }
 }
@@ -437,12 +447,12 @@ fn exhausted(book: &Book, remaining: Option<u32>, now: u64) -> Vec<String> {
 
 /// The issuer's open custody record, read together with its raw bytes so the
 /// next write is a compare-and-swap against exactly what was read.
-struct Loaded {
-    raw: Option<Zeroizing<Vec<u8>>>,
-    book: Book,
+pub(super) struct Loaded {
+    pub(super) raw: Option<Zeroizing<Vec<u8>>>,
+    pub(super) book: Book,
 }
 
-async fn load(door: &mut Door, origin: &str) -> Result<Loaded> {
+pub(super) async fn load(door: &mut Door, origin: &str) -> Result<Loaded> {
     let vault = door.vaults.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
     let raw = vault.voucher_custody().await?;
     let book = Book::decode(raw.as_deref().map(Vec::as_slice))?;
@@ -452,7 +462,7 @@ async fn load(door: &mut Door, origin: &str) -> Result<Loaded> {
 impl Loaded {
     /// Write the book if it changed. A lost race is `Reconcile`; nothing is
     /// overwritten.
-    async fn save(&mut self, door: &mut Door, origin: &str) -> Result<()> {
+    pub(super) async fn save(&mut self, door: &mut Door, origin: &str) -> Result<()> {
         let encoded = self.book.encode()?;
         if self.raw.as_deref().map(Vec::as_slice) == Some(encoded.as_slice()) {
             return Ok(());
