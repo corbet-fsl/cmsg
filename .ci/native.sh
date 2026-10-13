@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Worker-only native qualification. Browser/coverage gates remain independent.
 set -euo pipefail
+# nix-shell must not resolve bashInteractive through <nixpkgs>, which the worker environment lacks.
+export NIX_BUILD_SHELL=bash
 # Keep actual compiler/test diagnostics in the retained product job stream.
 exec 2>&1
 mkdir -p evidence/native
@@ -48,6 +50,7 @@ done
 # Qualify the actual maintained Tor transport separately from inert record tests.
 # Existing provisioned original tools are required; this route never installs them.
 python3 .ci/test-private-tor-journey.py
+# The Tor build links openssl through the Keyhole test server: use the pinned shell.
 cargo metadata --locked --features native-tor --format-version 1 > evidence/native/tor-metadata.json
-cargo test --locked --features native-tor --test initial_tor --no-run --message-format=json > evidence/native/tor-build.jsonl
+nix-shell tests/fixture/owner/check-shell.nix --run 'cargo test --locked --features native-tor --test initial_tor --no-run --message-format=json > evidence/native/tor-build.jsonl'
 python3 .ci/private-tor-journey.py
