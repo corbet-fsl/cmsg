@@ -25,7 +25,8 @@ pub enum ActivationPoll {
 /// The device's prover for activation proofs, lent by the trusted embedder. A poll
 /// starts the proof in the background the first time and never blocks the Door.
 pub trait ActivationProver: Send + Sync {
-    fn poll(&self, address: &str, terms: &Value) -> ActivationPoll;
+    /// `owner` is the one-time value the proof must bind (`czkp::activation_owner`).
+    fn poll(&self, address: &str, owner: [u8; 32], terms: &Value) -> ActivationPoll;
 }
 
 /// Prove synchronously (the caller runs this off the Door's executor).
@@ -33,6 +34,7 @@ pub trait ActivationProver: Send + Sync {
 pub fn prove(
     prover: &ckmg::wallet_engine::native_prover::NativeProver,
     address: &str,
+    owner: [u8; 32],
     terms: &Value,
 ) -> Result<Activation> {
     use ckmg::wallet_engine::account as engine;
@@ -73,6 +75,7 @@ pub fn prove(
             extension: engine_extension_policy(&extension),
             standing,
             checked_at: observed,
+            owner,
         },
     )
     .map_err(|_| ErrorCode::Unavailable)?;
@@ -124,11 +127,16 @@ impl NativeActivationProver {
 
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 impl ActivationProver for NativeActivationProver {
-    fn poll(&self, address: &str, terms: &Value) -> ActivationPoll {
+    fn poll(&self, address: &str, owner: [u8; 32], terms: &Value) -> ActivationPoll {
         let Ok(mut jobs) = self.jobs.lock() else {
             return ActivationPoll::Failed;
         };
-        if let Some(job) = jobs.get(address) {
+        // One job per creation: the same address with another token is another proof.
+        let key = format!(
+            "{address}/{}",
+            owner.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        );
+        if let Some(job) = jobs.get(&key) {
             let Ok(mut slot) = job.lock() else {
                 return ActivationPoll::Failed;
             };
@@ -136,25 +144,25 @@ impl ActivationProver for NativeActivationProver {
                 None => ActivationPoll::Pending,
                 Some(Ok(activation)) => {
                     drop(slot);
-                    jobs.remove(address);
+                    jobs.remove(&key);
                     ActivationPoll::Ready(activation)
                 }
                 Some(Err(_)) => {
                     drop(slot);
-                    jobs.remove(address);
+                    jobs.remove(&key);
                     ActivationPoll::Failed
                 }
             };
         }
         let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
-        jobs.insert(address.to_owned(), slot.clone());
+        jobs.insert(key, slot.clone());
         let (artifacts, address, terms) =
             (self.artifacts.clone(), address.to_owned(), terms.clone());
         std::thread::spawn(move || {
             let result = artifacts
                 .prover()
                 .map_err(|_| ErrorCode::Unavailable)
-                .and_then(|prover| prove(&prover, &address, &terms));
+                .and_then(|prover| prove(&prover, &address, owner, &terms));
             if let Ok(mut slot) = slot.lock() {
                 *slot = Some(result);
             }

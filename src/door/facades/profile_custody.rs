@@ -137,9 +137,7 @@ where
     }
 
     /// The member's voucher custody record, read under fresh Keys authority.
-    pub(super) async fn voucher_custody_owned(
-        &mut self,
-    ) -> Result<Option<Zeroizing<Vec<u8>>>> {
+    pub(super) async fn voucher_custody_owned(&mut self) -> Result<Option<Zeroizing<Vec<u8>>>> {
         self.vault.voucher_custody().await.map_err(credential_error)
     }
 

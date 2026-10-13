@@ -82,18 +82,16 @@ fn the_raw_creation_operations_are_not_republished_but_the_device_actions_are() 
 #[cfg(not(feature = "ohttp"))]
 #[tokio::test]
 async fn a_lent_global_session_serves_creation_and_nothing_else() {
-    use super::super::foyer::{Binding, Scope, Sessions, fixture_transport, owner_operation};
+    use super::super::foyer::{fixture_transport, owner_operation, Binding, Scope, Sessions};
     let transport = || fixture_transport("http://127.0.0.1:9", "community.test");
     let mut sessions = Sessions::new(Scope::Community, cfyr::Foyer::new(transport()));
     sessions
         .attach_creation(cfyr::Foyer::new(transport()), cfyr::Foyer::new(transport()))
         .unwrap();
     // The channels cannot be attached twice.
-    assert!(
-        sessions
-            .attach_creation(cfyr::Foyer::new(transport()), cfyr::Foyer::new(transport()))
-            .is_err()
-    );
+    assert!(sessions
+        .attach_creation(cfyr::Foyer::new(transport()), cfyr::Foyer::new(transport()))
+        .is_err());
     let mut binding = Binding {
         role: Role::Member,
         root_board: false,

@@ -7,7 +7,7 @@ use super::super::facades::{BoundVault, OwnedFuture, VaultIdentity};
 use super::*;
 use blind_rsa_signatures::{DefaultRng, KeyPairSha384PSSRandomized as KeyPair};
 use http_body_util::{BodyExt, Full};
-use hyper::{Request, Response, body::Bytes, service::service_fn};
+use hyper::{body::Bytes, service::service_fn, Request, Response};
 use hyper_util::rt::TokioIo;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -281,11 +281,9 @@ async fn interrupted(step: &'static str, lose: bool) -> (Shared, Created) {
         }
     }
     let mut first = start(&base, &custody);
-    assert!(
-        community_create(&mut first.door, &first.key, chosen())
-            .await
-            .is_err()
-    );
+    assert!(community_create(&mut first.door, &first.key, chosen())
+        .await
+        .is_err());
     // The choices are in the Vault already: nothing has to be entered again.
     let kept = draft(&mut first).await;
     assert_eq!(
@@ -360,11 +358,9 @@ async fn a_finished_creation_is_answered_from_the_vault_and_forgotten_on_request
         .await
         .unwrap();
     assert_eq!(draft(&mut device).await.stage, "none");
-    assert!(
-        community_create(&mut device.door, &device.key, other)
-            .await
-            .is_ok()
-    );
+    assert!(community_create(&mut device.door, &device.key, other)
+        .await
+        .is_ok());
 }
 
 #[tokio::test]
@@ -374,11 +370,9 @@ async fn the_choices_can_change_until_the_service_made_the_community() {
     let custody = Arc::new(Mutex::new(None));
     shared.lock().unwrap().drop.insert("community_create");
     let mut device = start(&base, &custody);
-    assert!(
-        community_create(&mut device.door, &device.key, chosen())
-            .await
-            .is_err()
-    );
+    assert!(community_create(&mut device.door, &device.key, chosen())
+        .await
+        .is_err());
     let mut changed = chosen();
     changed.address = "rosegarden".into();
     let (created, _) = community_create(&mut device.door, &device.key, changed)
@@ -430,11 +424,14 @@ fn draft_claimed(custody: &Arc<Mutex<Option<Vec<u8>>>>) -> Option<String> {
 struct Scripted {
     script: Mutex<Vec<accounting::ActivationPoll>>,
     polls: Mutex<usize>,
+    /// The one-time owner each poll was asked to bind.
+    owners: Mutex<Vec<[u8; 32]>>,
 }
 
 impl accounting::ActivationProver for Scripted {
-    fn poll(&self, _address: &str, terms: &Value) -> accounting::ActivationPoll {
+    fn poll(&self, _address: &str, owner: [u8; 32], terms: &Value) -> accounting::ActivationPoll {
         assert_eq!(terms["observed_at"], 5);
+        self.owners.lock().unwrap().push(owner);
         *self.polls.lock().unwrap() += 1;
         let mut script = self.script.lock().unwrap();
         if script.is_empty() {
@@ -460,6 +457,7 @@ fn scripted(script: Vec<accounting::ActivationPoll>) -> Arc<Scripted> {
     Arc::new(Scripted {
         script: Mutex::new(script),
         polls: Mutex::new(0),
+        owners: Mutex::new(Vec::new()),
     })
 }
 
@@ -470,7 +468,6 @@ async fn the_accounting_proof_runs_in_the_background_and_nothing_is_asked_again(
     let base = serve(shared.clone()).await;
     let custody = Arc::new(Mutex::new(None));
     let prover = scripted(vec![
-        accounting::ActivationPoll::Pending,
         accounting::ActivationPoll::Pending,
         accounting::ActivationPoll::Failed,
         accounting::ActivationPoll::Ready(activation()),
@@ -507,6 +504,11 @@ async fn the_accounting_proof_runs_in_the_background_and_nothing_is_asked_again(
     assert_eq!(service.issuances, 1);
     assert_eq!(service.activations.len(), 1);
     assert_eq!(service.activations[0]["proof"], json!([4, 2]));
+    // Every poll asked for the one-time owner of THIS creation's token message.
+    let message = service.created.keys().next().unwrap().clone();
+    let expected = czkp::activation_owner("gardenclub", &message);
+    let owners = prover.owners.lock().unwrap().clone();
+    assert!(!owners.is_empty() && owners.iter().all(|owner| *owner == expected));
     drop(service);
     // The proof is not kept once the community exists.
     let held = custody.lock().unwrap().clone().unwrap();
@@ -556,11 +558,9 @@ async fn a_platform_without_accounts_needs_no_proof_and_no_prover() {
     let base = serve(shared.clone()).await;
     let custody = Arc::new(Mutex::new(None));
     let mut device = start(&base, &custody);
-    assert!(
-        community_create(&mut device.door, &device.key, chosen())
-            .await
-            .is_ok()
-    );
+    assert!(community_create(&mut device.door, &device.key, chosen())
+        .await
+        .is_ok());
     assert!(shared.lock().unwrap().activations.is_empty());
 }
 
@@ -578,4 +578,24 @@ async fn a_device_that_cannot_prove_is_unavailable_not_stuck() {
         Some(ErrorCode::Unavailable)
     );
     assert_eq!(shared.lock().unwrap().creations, 0);
+}
+
+#[tokio::test]
+async fn a_later_creation_of_the_same_name_binds_a_new_one_time_owner() {
+    let mut owners = Vec::new();
+    for _ in 0..2 {
+        let shared = service();
+        shared.lock().unwrap().terms = Some(accounts());
+        let base = serve(shared.clone()).await;
+        let custody = Arc::new(Mutex::new(None));
+        let prover = scripted(vec![accounting::ActivationPoll::Ready(activation())]);
+        let mut device = start(&base, &custody);
+        device.door.set_activation_prover(prover.clone());
+        community_create(&mut device.door, &device.key, chosen())
+            .await
+            .unwrap();
+        owners.push(prover.owners.lock().unwrap()[0]);
+    }
+    // Same address, two creations (two fresh tokens): the proofs cannot be swapped.
+    assert_ne!(owners[0], owners[1]);
 }

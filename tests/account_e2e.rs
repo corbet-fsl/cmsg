@@ -29,7 +29,6 @@ fn fixture() -> Value {
     fixture["certified_wallet"].clone()
 }
 
-
 /// The device configuration the composer takes, from the assembled fixture worlds.
 fn device(
     f: &Value,

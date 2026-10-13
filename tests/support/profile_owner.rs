@@ -55,10 +55,9 @@ impl ckmg::Authority for IntentAuthority {
                 self.verifier
                     .consume(&request, "https://member.example.test")
             }
-            ckmg::Action::SignDeviceEd25519 if request.root == root && request.epoch == 1 => {
-                self.verifier
-                    .consume(&request, "https://member.example.test")
-            }
+            ckmg::Action::SignDeviceEd25519 if request.root == root && request.epoch == 1 => self
+                .verifier
+                .consume(&request, "https://member.example.test"),
             _ => Err(ckmg::Error::Unauthorized),
         }
     }

@@ -3,9 +3,13 @@ use board::{
     attend as board_attend, depart as board_depart, discovery as board_discovery,
     group_act as board_group_act, group_answer as board_group_answer,
     group_message as board_group_message, group_propose as board_group_propose,
-    group_welcome as board_group_welcome, groups as board_groups,
-    room_join as board_room_join, room_leave as board_room_leave, room_serve as board_room_serve, heartbeat as board_heartbeat,
-    profile_publish as board_profile_publish, search as board_search, watch as board_watch,
+    group_welcome as board_group_welcome, groups as board_groups, heartbeat as board_heartbeat,
+    profile_publish as board_profile_publish, room_join as board_room_join,
+    room_leave as board_room_leave, room_serve as board_room_serve, search as board_search,
+    watch as board_watch,
+};
+use creating::{
+    community_create, community_creation, community_creation_claim, community_creation_finish,
 };
 use foyer::refresh as foyer_refresh;
 use inbox::{blocking_rules as inbox_blocking_rules, contact_act as inbox_contact_act};
@@ -19,14 +23,12 @@ use inbox_waves::{
     wave_outbox as inbox_wave_outbox, wave_punish as inbox_wave_punish,
     wave_receive as inbox_wave_receive, wave_send as inbox_wave_send, waves as inbox_waves_list,
 };
-use creating::{
-    community_create, community_creation, community_creation_claim, community_creation_finish,
-};
+use login::{cancel as login_cancel, poll as login_poll, start as login_start};
 use vouching::{
     link_create as voucher_link_create, link_revoke as voucher_link_revoke, links as voucher_links,
-    signoff_decide as voucher_signoff_decide, vouched_by as voucher_vouched_by, signoff_list as voucher_signoff_list,
+    signoff_decide as voucher_signoff_decide, signoff_list as voucher_signoff_list,
+    vouched_by as voucher_vouched_by,
 };
-use login::{cancel as login_cancel, poll as login_poll, start as login_start};
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,

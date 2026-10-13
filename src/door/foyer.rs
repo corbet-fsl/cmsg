@@ -329,7 +329,11 @@ impl Binding {
         if self.role != Role::Member {
             return Err(ErrorCode::Unauthorized);
         }
-        let client = self.sessions.public.as_mut().ok_or(ErrorCode::Unavailable)?;
+        let client = self
+            .sessions
+            .public
+            .as_mut()
+            .ok_or(ErrorCode::Unavailable)?;
         let result = client.call(name, body).await.map_err(map_error)?;
         check_result_size(&result).map_err(|_| ErrorCode::Unavailable)?;
         Ok(result)
@@ -524,7 +528,10 @@ impl Binding {
     /// Founding-key fingerprint the community trust is anchored to, if it is.
     pub(super) fn community_fingerprint(&mut self) -> Option<super::identity::Fingerprint> {
         let trust = self.community().ok()?.trust().ok()?;
-        trust.fingerprint().copied().map(super::identity::Fingerprint)
+        trust
+            .fingerprint()
+            .copied()
+            .map(super::identity::Fingerprint)
     }
     fn community(&mut self) -> Result<&mut Foyer<Transport>> {
         self.sessions

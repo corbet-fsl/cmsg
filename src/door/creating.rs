@@ -269,6 +269,7 @@ async fn activation_step(
     origin: &str,
     loaded: &mut vouching::Loaded,
     record: &mut Record,
+    token_message: &[u8],
 ) -> Result<bool> {
     if record.activation.is_some() {
         return Ok(true);
@@ -298,7 +299,8 @@ async fn activation_step(
         .activation_prover
         .clone()
         .ok_or(ErrorCode::Unavailable)?;
-    match prover.poll(&record.address, &terms) {
+    let owner = czkp::activation_owner(&record.address, token_message);
+    match prover.poll(&record.address, owner, &terms) {
         super::accounting::ActivationPoll::Ready(activation) => {
             record.activation = Some(activation);
             loaded.book.creation = Some(record.clone());
@@ -364,9 +366,6 @@ pub(super) async fn community_create(
         return Ok((created, vec![]));
     }
     let mut record = record;
-    // Start the accounting proof first: it runs in the background while the token
-    // is obtained, and the person is never held at this step.
-    let mut ready = activation_step(door, &origin, &mut loaded, &mut record).await?;
     if record.token.is_none() {
         let key: WireKey =
             owner(door, &origin, "creation_token_key", serde_json::json!({})).await?;
@@ -403,9 +402,10 @@ pub(super) async fn community_create(
         loaded.save(door, &origin).await?;
     }
     let token = record.token.clone().ok_or(ErrorCode::Unavailable)?;
-    if !ready {
-        ready = activation_step(door, &origin, &mut loaded, &mut record).await?;
-    }
+    // The accounting proof binds this creation's fresh token message (one-time, so it
+    // can never serve a later incarnation of the name). It runs in the background and
+    // the person is never held at this step.
+    let ready = activation_step(door, &origin, &mut loaded, &mut record, &token.message).await?;
     if !ready {
         // Being prepared: ask again (`foyer.community_create` with an empty body
         // resumes). The person's choices and the token are already kept.

@@ -14,9 +14,9 @@ mod genesis;
 mod lifecycle;
 mod pending;
 mod request;
-pub use activation::{Activation, ActivationPoll, ActivationProver};
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub use activation::{prove as prove_activation, NativeActivationProver};
+pub use activation::{Activation, ActivationPoll, ActivationProver};
 pub use checkpoint::{CheckpointAcquisition, CurrentEnrollment, SubmittedEnrollment};
 pub use custody::CommunityAccount;
 pub use genesis::PreparedAccount;

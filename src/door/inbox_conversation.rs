@@ -138,9 +138,7 @@ where
             self.peers().await?,
         );
         let mut authority = match &claim {
-            Some(claim) => {
-                cnbx::ContactAuthority::with_claim(&contacts, &mut for_authority, claim)
-            }
+            Some(claim) => cnbx::ContactAuthority::with_claim(&contacts, &mut for_authority, claim),
             None => cnbx::ContactAuthority::new(&contacts, &mut for_authority),
         };
         let published = {

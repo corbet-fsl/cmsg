@@ -37,8 +37,8 @@ mod pairing_flow;
 pub mod passport;
 pub mod record;
 mod registry;
-mod vouching;
 pub(crate) mod rooms;
+mod vouching;
 pub use rooms::RoomLink;
 #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
 pub mod scenario;
@@ -298,7 +298,10 @@ impl Door {
     }
 
     /// Trusted embedding control: lend the prover for new communities' accounting.
-    pub fn set_activation_prover(&mut self, prover: std::sync::Arc<dyn accounting::ActivationProver>) {
+    pub fn set_activation_prover(
+        &mut self,
+        prover: std::sync::Arc<dyn accounting::ActivationProver>,
+    ) {
         self.activation_prover = Some(prover);
     }
 
