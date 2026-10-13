@@ -105,10 +105,13 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
         // Original recovery performs forced lineage reads and fresh HTTPS checks
         // before lending Store custody. Missing records never create new state.
         let owners = member.prepare_recovery(&candidate, network.clone()).await?;
+        let peers = network.clone();
         let restored = owners.open(network, config.backend).await?;
-        let owner = door
+        let mut owner = door
             .bind_vault_with_board_owner(origin, restored.vault, restored.intent, restored.lifetime)
             .await?;
+        // Every native device has groups: peers are verified, never claimed.
+        owner.enable_verified_groups(peers, door.current_policy(origin)?)?;
         if let Some(board) = self.board.take() {
             board.bind(door, origin, owner)?;
         }

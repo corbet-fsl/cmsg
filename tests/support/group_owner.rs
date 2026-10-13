@@ -169,3 +169,97 @@ async fn an_unreadable_or_untrusted_peer_has_no_lineage() {
     let mut peers = VerifiedPeers::new(Dead, NoTrust, || Some(1_000));
     assert!(peers.lineage(&binding, b"handle").await.is_none());
 }
+
+/// A network with no reachable node: any use of it is `Unavailable`.
+#[derive(Clone)]
+struct DeadNetwork;
+impl cdht::Network for DeadNetwork {
+    fn now_ms(&self) -> u64 {
+        0
+    }
+    async fn closest(&self, _: &cdht::RecordKey) -> Result<Vec<cdht::NodeId>, cdht::Error> {
+        Err(cdht::Error::Unavailable)
+    }
+    async fn descriptor(
+        &self,
+        _: &cdht::NodeId,
+        _: &cdht::RecordKey,
+    ) -> Result<Option<cdht::Descriptor>, cdht::Error> {
+        Err(cdht::Error::Unavailable)
+    }
+    async fn get(
+        &self,
+        _: &cdht::NodeId,
+        _: &cdht::RecordKey,
+        _: u32,
+    ) -> Result<Option<cdht::SignedValue>, cdht::Error> {
+        Err(cdht::Error::Unavailable)
+    }
+    async fn set(
+        &self,
+        _: &cdht::NodeId,
+        _: &cdht::Descriptor,
+        _: u32,
+        _: &cdht::SignedValue,
+    ) -> Result<cdht::SetOutcome, cdht::Error> {
+        Err(cdht::Error::Unavailable)
+    }
+    async fn watch(
+        &self,
+        _: &cdht::NodeId,
+        _: &cdht::RecordKey,
+    ) -> Result<cdht::WatchId, cdht::Error> {
+        Err(cdht::Error::Unavailable)
+    }
+    async fn cancel_watch(&self, _: &cdht::NodeId, _: cdht::WatchId) -> Result<(), cdht::Error> {
+        Err(cdht::Error::Unavailable)
+    }
+    async fn changes(
+        &self,
+        _: &cdht::NodeId,
+        _: cdht::WatchId,
+    ) -> Result<Vec<cdht::Change>, cdht::Error> {
+        Err(cdht::Error::Unavailable)
+    }
+}
+
+#[tokio::test]
+async fn the_production_composer_peers_fail_closed_without_charter_trust_or_network() {
+    use crate::door::inbox_lineage::CharterView;
+    let foyer = cfyr::Foyer::new(crate::door::foyer::fixture_transport(
+        "http://127.0.0.1:1",
+        "127.0.0.1",
+    ));
+    // A Foyer that never followed a Charter has no trust to inspect.
+    let mut view = foyer.current_policy();
+    assert_eq!(
+        CharterView::with_current(&mut view, "alpha", 1_000, |_| Ok(())),
+        Err(cnbx::ContactError::Unavailable)
+    );
+    let me = member("a");
+    let peer = member("c");
+    let (mut owner, _, _) = open_as(&me, true).await;
+    owner
+        .enable_verified_groups(DeadNetwork, foyer.current_policy())
+        .unwrap();
+    let groups = owner.groups().unwrap();
+    let now = groups.now().unwrap();
+    groups
+        .refresh(
+            &BTreeSet::from([peer.clone()]),
+            &BTreeSet::from([peer.clone()]),
+        )
+        .await
+        .unwrap();
+    // The own consent is still verifiable through the own lineage only.
+    let mut forged = consent(&peer, now);
+    forged.signature = vec![0; 64];
+    forged.authority = vec![1; 32];
+    assert!(groups.authority().consent(&forged, now).is_err());
+    // Once the Foyer is gone the view stays closed.
+    drop(foyer);
+    assert_eq!(
+        CharterView::with_current(&mut view, "alpha", 1_000, |_| Ok(())),
+        Err(cnbx::ContactError::Unavailable)
+    );
+}

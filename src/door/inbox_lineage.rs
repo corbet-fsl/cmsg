@@ -37,6 +37,31 @@ pub trait CharterView {
     ) -> Result<T, cnbx::ContactError>;
 }
 
+/// The weak scoped read of the community's one current Charter that the Door
+/// lends to trusted composers. It holds no policy: once the Foyer is gone or
+/// stale every inspection is `Unavailable`.
+impl CharterView for cfyr::policy::CurrentPolicy<foyer::Transport> {
+    fn with_current<T>(
+        &mut self,
+        community: &str,
+        now: u64,
+        inspect: impl FnOnce(&VerifiedCharter) -> Result<T, cnbx::ContactError>,
+    ) -> Result<T, cnbx::ContactError> {
+        let mut inner = None;
+        let outer = cfyr::policy::CurrentPolicy::with_current(self, now, |charter| {
+            inner = Some(if charter.community() == community {
+                inspect(charter)
+            } else {
+                Err(cnbx::ContactError::Unavailable)
+            });
+        });
+        match (outer, inner) {
+            (Ok(()), Some(result)) => result,
+            _ => Err(cnbx::ContactError::Unavailable),
+        }
+    }
+}
+
 /// The original Foyer-retained Envoy view; its own freshness rules apply.
 impl CharterView for foyer::Binding {
     fn with_current<T>(

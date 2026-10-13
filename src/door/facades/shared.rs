@@ -51,6 +51,24 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> VaultBoardOwner<B, C, E, A, R, W>
         Ok(())
     }
 
+    /// The production group owner: other members' lineage is read through the
+    /// handle this member's Contacts journal retained and reverified against the
+    /// community Charter (`policy`, the Door's weak current-policy read).
+    pub fn enable_verified_groups<N>(
+        &mut self,
+        network: N,
+        policy: cfyr::policy::CurrentPolicy<crate::door::foyer::Transport>,
+    ) -> Result<()>
+    where
+        N: cdht::Network + Clone + 'static,
+    {
+        self.enable_groups(Some(Box::new(group_custody::VerifiedPeers::new(
+            crate::door::inbox_lineage::TorHandleOpener::new(network),
+            policy,
+            || ckmg::Clock::now(&mut crate::door::custody::SystemClock).ok(),
+        ))))
+    }
+
     fn require_open(&self) -> Result<()> {
         if self.lifetime.is_closed() {
             Err(ErrorCode::Unauthorized)
