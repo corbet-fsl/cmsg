@@ -233,6 +233,8 @@ pub struct VaultGroupOwner<B: cwst::backend::Backend, C, E, A, R, W> {
     cache: Rc<RefCell<Cache>>,
     authority: cbrd::BoardAuthority<CacheDevices, CacheContacts, NoSeeds>,
     version: u64,
+    /// Locators received with an invitation; the own journal wins.
+    provided: BTreeMap<String, Vec<u8>>,
 }
 
 impl<B: cwst::backend::Backend, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W> {
@@ -257,6 +259,7 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
             peers: peers.map(|peers| Rc::new(Mutex::new(peers))),
             cache,
             version: 0,
+            provided: BTreeMap::new(),
         }
     }
     fn open(&self) -> cgrp::Result<()> {
@@ -480,6 +483,10 @@ where
                             journal.handle(peer).map_err(|_| cgrp::Error::Unavailable)?
                         {
                             handles.insert(peer.clone(), handle);
+                        } else if let Some(handle) = self.provided.get(peer) {
+                            // A locator only: the lineage it yields is still
+                            // Charter-verified and must bind to `peer`.
+                            handles.insert(peer.clone(), handle.clone());
                         }
                     }
                 }
@@ -511,8 +518,10 @@ where
                 } else {
                     None
                 };
-                // A lineage that is missing leaves that member unverifiable.
-                if let Some(lineage) = lineage {
+                // A lineage that is missing, or that belongs to another member
+                // (a substituted locator), leaves that member unverifiable.
+                let asked = ckmg::Binding::new(&community, member).ok();
+                if let Some(lineage) = lineage.filter(|l| Some(&l.binding) == asked.as_ref()) {
                     let read_at = ckmg::Clock::now(&mut crate::door::custody::SystemClock)
                         .map_err(|_| cgrp::Error::Clock)?;
                     let _ = now;
@@ -559,6 +568,40 @@ where
                 authority: public.value().to_vec(),
             })
         })
+    }
+    fn handles<'a>(
+        &'a mut self,
+        members: &'a BTreeSet<String>,
+    ) -> cbrd::PortFuture<'a, BTreeMap<String, Vec<u8>>> {
+        Box::pin(async move {
+            self.open()?;
+            let mut retained = self.retained.lock().await;
+            self.open()?;
+            let custody = retained.as_mut().ok_or(cgrp::Error::Unavailable)?;
+            let storage = custody.vault.storage().clone();
+            let store = storage.lock().await;
+            custody
+                .check_scope(&store)
+                .await
+                .map_err(|_| cgrp::Error::Authority)?;
+            let journal = custody
+                .inbox
+                .contacts(&store)
+                .map_err(|_| cgrp::Error::Unavailable)?;
+            let mut found = BTreeMap::new();
+            for member in members {
+                if let Some(handle) = journal
+                    .handle(member)
+                    .map_err(|_| cgrp::Error::Unavailable)?
+                {
+                    found.insert(member.clone(), handle);
+                }
+            }
+            Ok(found)
+        })
+    }
+    fn provide_handles(&mut self, handles: BTreeMap<String, Vec<u8>>) {
+        self.provided = handles;
     }
     fn key_package(
         &mut self,
