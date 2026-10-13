@@ -5,6 +5,8 @@ mod current_tests;
 mod inbox_waves_tests;
 #[path = "profile_owner.rs"]
 mod profile_owner_tests;
+#[path = "group_owner.rs"]
+mod group_owner_tests;
 use super::*;
 use crate::door::board::CommittedOwner;
 use futures_util::FutureExt;
@@ -98,6 +100,7 @@ async fn sibling_board_refuses_before_lock_is_polled_and_retained_store_is_revok
         }))),
         lifetime,
         origin: ORIGIN.into(),
+        groups: None,
     };
     // Internal partial-owner fixture only; public bind would reject locked Keys.
     let mut closing = Box::new(owner.clone()).lock();
@@ -280,6 +283,7 @@ async fn open_fixture() -> (FixtureOwner, Rc<Mutex<()>>, Rc<Cell<usize>>) {
         }))),
         lifetime,
         origin: ORIGIN.into(),
+        groups: None,
     };
     (owner, gate, checks)
 }

@@ -37,7 +37,7 @@ impl ckmg::Authority for IntentAuthority {
             || request.device != self.device
             || request.target.is_some()
             || request.statement.is_some()
-            || request.signing.is_some()
+            || (request.signing.is_some() != (request.action == ckmg::Action::SignDeviceEd25519))
         {
             return Err(ckmg::Error::Unauthorized);
         }
@@ -52,6 +52,10 @@ impl ckmg::Authority for IntentAuthority {
             ckmg::Action::Use if request.root == root && request.epoch == 1 => Ok(()),
             ckmg::Action::LendProfileCustody if request.root == root && request.epoch == 1 => {
                 self.lends.set(self.lends.get() + 1);
+                self.verifier
+                    .consume(&request, "https://member.example.test")
+            }
+            ckmg::Action::SignDeviceEd25519 if request.root == root && request.epoch == 1 => {
                 self.verifier
                     .consume(&request, "https://member.example.test")
             }
@@ -160,6 +164,7 @@ pub(super) async fn open_as(
         }))),
         lifetime,
         origin: ORIGIN.into(),
+        groups: None,
     };
     (owner, device, lends)
 }

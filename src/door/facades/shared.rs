@@ -1,4 +1,5 @@
 //! One actual Vault retained by its Door and the Board's scoped owner.
+use super::group_custody::{self, GroupPeers};
 use super::*;
 use crate::door::{board, custody::CustodyLifetime};
 use futures_util::lock::Mutex;
@@ -13,6 +14,8 @@ pub struct VaultBoardOwner<B: cwst::backend::Backend, C, E, A, R, W> {
     retained: Retained<B, C, E, A, R, W>,
     lifetime: CustodyLifetime,
     origin: String,
+    /// Present only on the Board's own handle (never on the Door's clone).
+    groups: Option<group_custody::VaultGroupOwner<B, C, E, A, R, W>>,
 }
 impl<B: cwst::backend::Backend, C, E, A, R, W> Clone for VaultBoardOwner<B, C, E, A, R, W> {
     fn clone(&self) -> Self {
@@ -20,10 +23,34 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> Clone for VaultBoardOwner<B, C, E
             retained: self.retained.clone(),
             lifetime: self.lifetime.clone(),
             origin: self.origin.clone(),
+            groups: None,
         }
     }
 }
 impl<B: cwst::backend::Backend, C, E, A, R, W> VaultBoardOwner<B, C, E, A, R, W> {
+    /// Give the Board its group owner. `peers` is the forced, Charter-verified
+    /// lineage read of other members; without it only this member's own
+    /// consents can be verified. Call once, right after binding.
+    pub fn enable_groups(&mut self, peers: Option<Box<dyn GroupPeers>>) -> Result<()> {
+        let member = {
+            let retained = self.retained.try_lock().ok_or(ErrorCode::Reconcile)?;
+            retained
+                .as_ref()
+                .ok_or(ErrorCode::Unavailable)?
+                .binding
+                .member()
+                .to_owned()
+        };
+        self.groups = Some(group_custody::VaultGroupOwner::new(
+            self.retained.clone(),
+            self.lifetime.clone(),
+            self.origin.clone(),
+            member,
+            peers,
+        ));
+        Ok(())
+    }
+
     fn require_open(&self) -> Result<()> {
         if self.lifetime.is_closed() {
             Err(ErrorCode::Unauthorized)
@@ -49,6 +76,11 @@ where
     R: cvlt::Records,
 {
     type Backend = B;
+    fn groups(&mut self) -> Option<&mut dyn cbrd::GroupOwner> {
+        self.groups
+            .as_mut()
+            .map(|groups| groups as &mut dyn cbrd::GroupOwner)
+    }
     fn with_current<'a, T: 'a, F>(&'a mut self, read: F) -> board::OwnerFuture<'a, T>
     where
         F: for<'read> FnOnce(board::CommittedRead<'read, B>) -> Result<T> + 'a,
@@ -438,6 +470,7 @@ impl Door {
             }))),
             lifetime,
             origin: origin.into(),
+            groups: None,
         };
         self.vaults.insert(origin.into(), Box::new(owner.clone()));
         Ok(owner)
