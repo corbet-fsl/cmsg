@@ -13,6 +13,7 @@ fn forum() -> Configuration {
         timeout_millis: 5_000,
         search_candidates: 8,
         search_publication_bytes: 65_536,
+        tls_root_files: vec![],
         read_policy: ReadPolicy {
             admission_action: "fixture".into(),
             maximum_snapshot_age: 60,

@@ -54,6 +54,11 @@ pub struct Configuration {
     pub search_candidates: usize,
     pub search_publication_bytes: usize,
     pub read_policy: ReadPolicy,
+    /// Extra DER certificate files trusted for the forum origin, added to the public roots
+    /// (direct HTTPS on native builds only). Deployment option for private test stacks;
+    /// production leaves it empty and no code path differs.
+    #[serde(default)]
+    pub tls_root_files: Vec<std::path::PathBuf>,
     /// Relay and gateway keys for the forum calls.
     #[cfg(feature = "ohttp")]
     pub ohttp: super::ohttp::OhttpEndpoint,
@@ -179,7 +184,22 @@ fn forum_transport(config: &Configuration, origin: &str) -> Result<Transport> {
         )
         .map_err(before_send)
     }
-    #[cfg(not(feature = "ohttp"))]
+    #[cfg(all(not(feature = "ohttp"), not(target_arch = "wasm32")))]
+    {
+        let mut roots = Vec::new();
+        for file in &config.tls_root_files {
+            roots.push(std::fs::read(file).map_err(|_| ErrorCode::InvalidRequest)?);
+        }
+        Transport::with_roots(
+            config.forum_origin.clone(),
+            origin.into(),
+            config.maximum_response_bytes,
+            std::time::Duration::from_millis(config.timeout_millis.into()),
+            &roots,
+        )
+        .map_err(before_send)
+    }
+    #[cfg(all(not(feature = "ohttp"), target_arch = "wasm32"))]
     {
         Transport::new(
             config.forum_origin.clone(),
