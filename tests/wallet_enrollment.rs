@@ -27,7 +27,10 @@ fn fixture() -> Value {
     assert_eq!(actual["wallet"]["scope"], "wallet");
     actual
 }
+static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn scenario() {
+    let _gate = GATE.lock().await;
     tokio::time::timeout(Duration::from_secs(180), async {
         let f = fixture();
         let wallet_world = &f["wallet"];
