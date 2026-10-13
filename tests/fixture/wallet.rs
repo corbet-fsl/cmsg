@@ -6,7 +6,7 @@ use cvld::{
     api::{GlobalPublic, TrustFeed},
     service::{Clock, Door, SystemClock},
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{io, path::Path, sync::Arc, time::Duration};
 
 const COMMUNITY: &str = "omega";
@@ -85,8 +85,11 @@ impl Fixture {
                         .map_err(|_| refused_stage("community Rulebook"))?;
                 cmty::cplc::crbk::RecordEpochSettings::define(&mut rules, &account.period_key)
                     .map_err(|_| refused_stage("Rulebook period key"))?;
-                cmty::cplc::crbk::OutcomeQuotaSettings::define(&mut rules, &account.settlement.quota_key)
-                    .map_err(|_| refused_stage("Rulebook quota key"))?;
+                cmty::cplc::crbk::OutcomeQuotaSettings::define(
+                    &mut rules,
+                    &account.settlement.quota_key,
+                )
+                .map_err(|_| refused_stage("Rulebook quota key"))?;
                 rules
                     .set_community(&account.period_key, Some(json!(86_400)))
                     .map_err(|_| refused_stage("Rulebook period"))?;
@@ -210,7 +213,10 @@ fn lose_first_account_response(router: axum::Router) -> axum::Router {
                     }
                 };
                 let response = next
-                    .run(axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes)))
+                    .run(axum::extract::Request::from_parts(
+                        parts,
+                        axum::body::Body::from(bytes),
+                    ))
                     .await;
                 if lose {
                     return axum::http::StatusCode::BAD_GATEWAY.into_response();

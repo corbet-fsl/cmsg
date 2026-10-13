@@ -81,7 +81,8 @@ fn prover(config: &Value) -> ckmg::wallet_engine::native_prover::NativeProver {
 
 async fn call(door: &mut cmsg::door::Door, origin: &str, token: &str, action: &str) -> Output {
     let request = json!({"action":action,"version":1,"body":{}}).to_string();
-    door.dispatch(origin, token, request.as_bytes(), now()).await
+    door.dispatch(origin, token, request.as_bytes(), now())
+        .await
 }
 
 fn result(output: Output) -> Value {
@@ -115,9 +116,15 @@ async fn enroll_open_lose_the_response_reopen_activate_and_repeat_on_the_real_op
             ckmg::EnrollmentSeed::new(ckmg::Binding::new("wallet", &user).unwrap(), &mut entropy)
                 .unwrap();
         let commitment = seed.commitment().unwrap();
-        let pending = reservation.continue_initial(&api, commitment, now).await.unwrap();
+        let pending = reservation
+            .continue_initial(&api, commitment, now)
+            .await
+            .unwrap();
         let mut keys = passkeys(wallet_world);
-        let registration = keys.register_member(pending.options().clone()).await.unwrap();
+        let registration = keys
+            .register_member(pending.options().clone())
+            .await
+            .unwrap();
         let wallet_backend = cwst::backend::Memory::new();
         let candidate = custody::retain_global_initial_enrollment(
             &api,
@@ -145,15 +152,20 @@ async fn enroll_open_lose_the_response_reopen_activate_and_repeat_on_the_real_op
         api.call("development_gate", json!({})).await.unwrap();
         let wallet_door = bound("wallet", wallet_origin, Role::Member, Scope::Global, api);
         // The recovery owners live as long as the account actor: lend them for 'static.
-        let wallet_policy: &'static mut _ =
-            Box::leak(Box::new(wallet_door.wallet_current_policy(wallet_origin).unwrap()));
+        let wallet_policy: &'static mut _ = Box::leak(Box::new(
+            wallet_door.wallet_current_policy(wallet_origin).unwrap(),
+        ));
         let lease = initial(&wallet_door, wallet_origin, &mut *wallet_policy).await;
         let creation = custody::activate_initial(candidate, lease, &mut clock, &mut entropy)
             .await
             .unwrap();
         let lease = initial(&wallet_door, wallet_origin, &mut *wallet_policy).await;
         let (creation, lease) = custody::prepare_initial_publication(
-            creation, lease, &mut keys, &mut clock, &mut entropy,
+            creation,
+            lease,
+            &mut keys,
+            &mut clock,
+            &mut entropy,
         )
         .await
         .unwrap();
@@ -162,7 +174,10 @@ async fn enroll_open_lose_the_response_reopen_activate_and_repeat_on_the_real_op
             .unwrap();
         let network = initial_network::Nodes::new();
         let staged = creation
-            .stage(cdht::NetworkBackend::new(network.clone(), initial_network::Verifier))
+            .stage(cdht::NetworkBackend::new(
+                network.clone(),
+                initial_network::Verifier,
+            ))
             .await
             .unwrap();
         let (creation, _) = staged.flush().await.unwrap();
@@ -210,8 +225,9 @@ async fn enroll_open_lose_the_response_reopen_activate_and_repeat_on_the_real_op
         let mut records = opening.tor_records(network.clone()).await.unwrap();
         let checkpoint = records.checkpoint(&locator).await.unwrap();
         drop(records);
-        let recovered: &'static cvlt::RecoveryCandidate =
-            Box::leak(Box::new(opening.prepare_initial_recovery(&checkpoint).unwrap()));
+        let recovered: &'static cvlt::RecoveryCandidate = Box::leak(Box::new(
+            opening.prepare_initial_recovery(&checkpoint).unwrap(),
+        ));
         let lease = initial(&wallet_door, wallet_origin, wallet_policy).await;
         let owners = custody::prepare_initial_recovery(recovered, lease, network.clone())
             .await
@@ -303,8 +319,9 @@ async fn enroll_open_lose_the_response_reopen_activate_and_repeat_on_the_real_op
         let mut records = opening.tor_records(network.clone()).await.unwrap();
         let checkpoint = records.checkpoint(&opening.locator()).await.unwrap();
         drop(records);
-        let recovered: &'static cvlt::RecoveryCandidate =
-            Box::leak(Box::new(opening.prepare_initial_recovery(&checkpoint).unwrap()));
+        let recovered: &'static cvlt::RecoveryCandidate = Box::leak(Box::new(
+            opening.prepare_initial_recovery(&checkpoint).unwrap(),
+        ));
         let policy: &'static mut _ = Box::leak(Box::new(door.current_policy(origin).unwrap()));
         let lease = common_record::initial(&door, origin, policy).await;
         let owners = custody::prepare_initial_recovery(recovered, lease, network.clone())
@@ -331,8 +348,13 @@ async fn enroll_open_lose_the_response_reopen_activate_and_repeat_on_the_real_op
         );
         door.bind_account(origin, actor).unwrap();
         let actions = BTreeSet::from(
-            ["account_enroll", "account_open", "account_reopen", "account_activate"]
-                .map(String::from),
+            [
+                "account_enroll",
+                "account_open",
+                "account_reopen",
+                "account_activate",
+            ]
+            .map(String::from),
         );
         let token = door
             .pair_client(origin, Role::Member, actions, now(), expires)
@@ -346,7 +368,9 @@ async fn enroll_open_lose_the_response_reopen_activate_and_repeat_on_the_real_op
             if answer["checkpoint"] == "ready" {
                 break;
             }
-            let eligible = answer["eligible_at"].as_u64().expect("a pending checkpoint names its time");
+            let eligible = answer["eligible_at"]
+                .as_u64()
+                .expect("a pending checkpoint names its time");
             assert!(waited < 3, "the checkpoint never became ready");
             waited += 1;
             tokio::time::sleep(Duration::from_secs(eligible.saturating_sub(now()) + 2)).await;
@@ -372,7 +396,12 @@ async fn enroll_open_lose_the_response_reopen_activate_and_repeat_on_the_real_op
         let activation = result(call(&mut door, origin, &token, "account_activate").await);
         assert_eq!(activation["outbox_settled"], true);
         // 9. Every action repeated on the active account returns the existing state.
-        for action in ["account_enroll", "account_open", "account_reopen", "account_activate"] {
+        for action in [
+            "account_enroll",
+            "account_open",
+            "account_reopen",
+            "account_activate",
+        ] {
             let again = result(call(&mut door, origin, &token, action).await);
             match action {
                 "account_enroll" => assert_eq!(again["checkpoint"], "ready"),
