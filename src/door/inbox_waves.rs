@@ -63,7 +63,7 @@ impl Door {
 
 /// One request to the bound Vault, wave or conversation, with its reply.
 pub(super) enum Op {
-    Waves(Command),
+    Waves(Box<Command>),
     Chat(inbox_conversation::Command),
 }
 pub(super) enum Reply {
@@ -91,7 +91,7 @@ pub(super) async fn run_op(door: &mut Door, key: &[u8; 32], op: Op) -> Result<Re
         },
         move |vault, ports| match op {
             Op::Waves(command) => {
-                Box::pin(async move { vault.waves(command, ports).await.map(Reply::Waves) })
+                Box::pin(async move { vault.waves(*command, ports).await.map(Reply::Waves) })
             }
             Op::Chat(command) => {
                 Box::pin(async move { vault.conversation(command, ports).await.map(Reply::Chat) })
@@ -104,7 +104,7 @@ pub(super) async fn run_op(door: &mut Door, key: &[u8; 32], op: Op) -> Result<Re
 }
 
 async fn run(door: &mut Door, key: &[u8; 32], command: Command) -> Result<(Answer, Vec<Event>)> {
-    match run_op(door, key, Op::Waves(command)).await? {
+    match run_op(door, key, Op::Waves(Box::new(command))).await? {
         Reply::Waves(answer) => Ok((answer, vec![])),
         Reply::Chat(_) => Err(ErrorCode::Unavailable),
     }
