@@ -1454,7 +1454,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#246082a552130c7a57710993769f3793b4029fec"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#f3d917f0d3f30b729ae2fb154ca84d390aafe991"
 dependencies = [
  "blake3",
  "cchr",
@@ -1490,7 +1490,7 @@ dependencies = [
 [[package]]
 name = "cchr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=v01#6549a02af9dfd750d83bdc28c84835dbee5dc5d0"
+source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=v01#36635ada67ce7b9c3cb4fa9e05142595589b8d8c"
 dependencies = [
  "cbcn",
  "cblv",
@@ -1767,7 +1767,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#e9383f85bdf1bdf7406ce19956e7b68431fca438"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#db7cf5968ddd253596b73c9ce35bfad0da866f8e"
 dependencies = [
  "arti-client",
  "blake3",
@@ -3175,12 +3175,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba91f619216e76a5eb2515783f7ec2e271938b51aadac592f4930517f4626863"
 dependencies = [
  "heck 0.5.0",
- "indexmap 1.9.3",
- "itertools 0.13.0",
+ "indexmap 2.14.2",
+ "itertools 0.15.0",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "sha3 0.10.9",
+ "sha3 0.12.0",
  "strum 0.28.0",
  "syn 3.0.9",
  "unicode-ident",
