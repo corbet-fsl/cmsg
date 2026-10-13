@@ -41,7 +41,7 @@ cmmr = { git = "https://git.corbet.ch/corbet-foss/cmmr.git", branch = "v01" }
 cdht = { git = "https://git.corbet.ch/corbet-foss/cdht.git", branch = "v01" }
 cmsh = { git = "https://git.corbet.ch/corbet-libs/cmsh.git", branch = "v01" }
 cvlt = { git = "https://git.corbet.ch/corbet-libs/cvlt.git", branch = "v01", features = ["wallet"] }
-cnbx = { git = "https://git.corbet.ch/corbet-libs/cnbx.git", branch = "v01" }
+cnbx = { git = "https://git.corbet.ch/corbet-libs/cnbx.git", branch = "claim-send" }
 ctcs = { git = "https://git.corbet.ch/corbet-foss/ctcs.git", branch = "v01" }
 cthr = { git = "https://git.corbet.ch/corbet-foss/cthr.git", branch = "v01" }
 ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "v01", features = ["profile-envelope"] }

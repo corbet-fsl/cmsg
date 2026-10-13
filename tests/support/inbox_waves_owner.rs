@@ -359,3 +359,62 @@ async fn a_blocked_peer_is_refused_on_this_device_in_both_directions() {
     .await
     .is_err());
 }
+
+#[tokio::test]
+async fn an_unanswered_wave_gives_no_claim_so_the_pending_conversation_cannot_send() {
+    use crate::door::inbox_conversation::{Command as Chat, ConversationRetry, ConversationSend};
+    let (mut owner, ports) = open().await;
+    let hello = Hello {
+        conversation: [9; 32],
+        group: [1; 32],
+        contact_policy: [2; 32],
+        history: [3; 32],
+        opened_at: 1,
+        expires_at: u64::MAX,
+        sender_authority: [4; 32],
+        sender_challenge: [7; 32],
+    };
+    let accepted = status(
+        &mut owner,
+        &ports,
+        Command::Receive(WaveIncoming {
+            peer: member(PEER),
+            envelope: Envelope {
+                version: WAVE_VERSION,
+                conversation: hello.conversation,
+                sender: member(PEER),
+                sequence: 0,
+                message: WaveMessage::Hello {
+                    nonce: [1; 32],
+                    hello: hello.clone(),
+                },
+            },
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!((accepted.role, accepted.stage), (1, Stage::Hello));
+    // The recipient has not answered: no Claimed Answer, no Established contact.
+    assert!(owner
+        .conversation(
+            Chat::Send(ConversationSend {
+                peer: member(PEER),
+                conversation: hello.conversation,
+                text: "too early".into(),
+            }),
+            &ports
+        )
+        .await
+        .is_err());
+    assert!(owner
+        .conversation(
+            Chat::Retry(ConversationRetry {
+                peer: member(PEER),
+                conversation: hello.conversation,
+                message: [1; 32],
+            }),
+            &ports
+        )
+        .await
+        .is_err());
+}
