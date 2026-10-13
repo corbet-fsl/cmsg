@@ -22,6 +22,13 @@ impl Embedded {
     ) -> LocalBoxFuture<'a, std::result::Result<(), cpky::Error>> {
         self.ceremony.complete(pending)
     }
+    pub(in crate::door) fn assert<'a>(
+        &'a mut self,
+        context: cpky::Context,
+        options: serde_json::Value,
+    ) -> LocalBoxFuture<'a, std::result::Result<serde_json::Value, cpky::Error>> {
+        self.ceremony.assert(context, options)
+    }
 }
 
 trait Ceremony {
@@ -29,6 +36,11 @@ trait Ceremony {
         &'a mut self,
         pending: &'a cpky::native::BrowserCeremony,
     ) -> LocalBoxFuture<'a, std::result::Result<(), cpky::Error>>;
+    fn assert<'a>(
+        &'a mut self,
+        context: cpky::Context,
+        options: serde_json::Value,
+    ) -> LocalBoxFuture<'a, std::result::Result<serde_json::Value, cpky::Error>>;
 }
 
 struct Factory<F>(F);
@@ -39,6 +51,21 @@ impl<A: cpky::Authenticator + 'static, F: FnMut() -> A> Ceremony for Factory<F> 
         pending: &'a cpky::native::BrowserCeremony,
     ) -> LocalBoxFuture<'a, std::result::Result<(), cpky::Error>> {
         Box::pin(pending.complete_with_authenticator((self.0)()))
+    }
+    fn assert<'a>(
+        &'a mut self,
+        context: cpky::Context,
+        options: serde_json::Value,
+    ) -> LocalBoxFuture<'a, std::result::Result<serde_json::Value, cpky::Error>> {
+        let authenticator = (self.0)();
+        Box::pin(async move {
+            // Only the public assertion leaves; any PRF output is dropped with the client.
+            let (credential, _) = cpky::Client::new(context, authenticator)
+                .sign_in(options)
+                .await?
+                .into_parts();
+            Ok(credential.into_json())
+        })
     }
 }
 
@@ -104,5 +131,31 @@ impl Door {
             },
         );
         Ok(())
+    }
+
+    /// Trusted embedding only, never an action: one user-verifying assertion of the bound
+    /// authenticator for a server challenge that the caller obtained for ONE exact action
+    /// (a step-up ceremony, a lineage receipt challenge). The configured portal fixes the
+    /// origin and relying party; the caller holds the ceremony and decides what the
+    /// assertion is for. The PRF output of the ceremony is dropped here.
+    #[allow(dead_code)] // first caller: the existing device's pairing steps
+    pub(in crate::door) async fn passkey_assert(
+        &mut self,
+        origin: &str,
+        options: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let context = self
+            .login_configuration
+            .get(origin)
+            .ok_or(ErrorCode::Unavailable)?
+            .context()?;
+        let embedded = self
+            .embedded_authenticators
+            .get_mut(origin)
+            .ok_or(ErrorCode::Unavailable)?;
+        embedded
+            .assert(context, options)
+            .await
+            .map_err(|_| ErrorCode::Unauthorized)
     }
 }

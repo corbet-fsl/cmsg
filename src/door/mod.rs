@@ -33,6 +33,7 @@ pub mod network_native;
 #[cfg(feature = "ohttp")]
 pub mod ohttp;
 pub mod pairing;
+pub mod pairing_roles;
 mod pairing_flow;
 pub mod pairing_publish;
 pub mod passport;

@@ -2,10 +2,15 @@
 //!
 //! The existing device shows a `cvpr1.` link (QR or text) holding a one-time
 //! 256-bit secret, an offer id, a one-time HPKE public key and its mesh address.
-//! The new device sends ONE sealed message to that address and gets ONE sealed
-//! reply. Both are HPKE PSK mode (RFC 9180) with the link secret as the pre-shared
-//! key and the offer id as its identifier, so only the holder of the link can
-//! produce or read either message. Nothing passes through our servers, and the
+//! The new device runs THREE rounds, each one sealed message to that address and one
+//! sealed reply: (1) hello, answered with the registration options of its own passkey;
+//! (2) the registration credential, answered with the current lineage anchor; (3) the
+//! pairing request, answered with the grant. Every message is HPKE PSK mode (RFC 9180)
+//! with the link secret as the pre-shared key and the offer id as its identifier, so only
+//! the holder of the link can produce or read any of them. The round number is part of
+//! the HPKE `info`, so a message cannot be replayed into another round. A repeated
+//! identical message gets the identical reply again (a lost answer costs the person
+//! nothing), and nothing else is accepted out of order. Nothing passes through our servers, and the
 //! link is the only secret: no command or reply of the Door carries it.
 //!
 //! The payloads are opaque bytes here (the public `PairingRequest` and the
@@ -30,8 +35,16 @@ pub const OFFER_SECONDS: u64 = 300;
 
 const VERSION: u8 = 1;
 const ENC: usize = 32;
-const INFO_REQUEST: &[u8] = b"cvpr.pairing.request.v1";
-const INFO_GRANT: &[u8] = b"cvpr.pairing.grant.v1";
+const INFO_REQUEST: &[u8] = b"cvpr.pairing.request.v2";
+const INFO_REPLY: &[u8] = b"cvpr.pairing.reply.v2";
+/// Number of request/reply rounds of one pairing.
+pub const ROUNDS: u8 = 3;
+
+fn info(base: &[u8], round: u8) -> Vec<u8> {
+    let mut info = base.to_vec();
+    info.push(round);
+    info
+}
 
 fn random<const N: usize>() -> Result<[u8; N]> {
     let mut bytes = [0u8; N];
@@ -153,54 +166,107 @@ impl Link {
         &self.address
     }
 
-    /// Seal the new device's public pairing request. The returned [`Awaiting`]
-    /// opens the reply, which only the holder of this link can have produced.
-    pub fn seal_request(&self, request: &[u8]) -> Result<(Vec<u8>, Awaiting)> {
-        let (sk, pk) = <Kem as KemTrait>::derive_keypair(&random::<32>()?);
+    /// Seal the new device's message of `round` (1..=ROUNDS) under a fresh reply key. The
+    /// returned [`Awaiting`] opens the reply, which only the holder of this link can have
+    /// produced. A retry of the same round must resend the SAME sealed bytes, not seal
+    /// again; a caller that must survive a restart keeps `seed` and the message.
+    pub fn seal_round(&self, round: u8, payload: &[u8]) -> Result<(Vec<u8>, Awaiting)> {
+        self.seal_round_with(&random::<32>()?, round, payload)
+    }
+
+    /// As [`Self::seal_round`] with the reply key derived from a caller-kept `seed`, so the
+    /// reply of a round can be opened after a restart ([`Self::awaiting`]).
+    pub fn seal_round_with(
+        &self,
+        seed: &[u8; 32],
+        round: u8,
+        payload: &[u8],
+    ) -> Result<(Vec<u8>, Awaiting)> {
+        if round == 0 || round > ROUNDS {
+            return Err(ErrorCode::InvalidRequest);
+        }
+        let awaiting = self.awaiting(seed, round)?;
+        let pk = <Kem as KemTrait>::sk_to_pk(&awaiting.private);
         let mut plaintext = pk.to_bytes().to_vec();
-        plaintext.extend_from_slice(request);
+        plaintext.extend_from_slice(payload);
         let message = seal(
             &self.recipient,
             &self.secret,
             &self.id,
-            INFO_REQUEST,
+            &info(INFO_REQUEST, round),
             &plaintext,
         )?;
-        Ok((
-            message,
-            Awaiting {
-                secret: self.secret.clone(),
-                id: self.id,
-                private: sk,
-            },
-        ))
+        Ok((message, awaiting))
+    }
+
+    /// The reply opener of a round sealed from `seed`.
+    pub fn awaiting(&self, seed: &[u8; 32], round: u8) -> Result<Awaiting> {
+        if round == 0 || round > ROUNDS {
+            return Err(ErrorCode::InvalidRequest);
+        }
+        let (private, _) = <Kem as KemTrait>::derive_keypair(seed);
+        Ok(Awaiting {
+            secret: self.secret.clone(),
+            id: self.id,
+            round,
+            private,
+        })
     }
 }
 
-/// The new device between its request and the reply.
+/// The new device between one request and its reply.
 pub struct Awaiting {
     secret: Zeroizing<[u8; 32]>,
     id: [u8; 16],
+    round: u8,
     private: <Kem as KemTrait>::PrivateKey,
 }
 
 impl Awaiting {
-    /// Open the sealed grant bytes. Anything not sealed under the link is Refused.
-    pub fn open_grant(&self, message: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
-        open(&self.private, &self.secret, &self.id, INFO_GRANT, message)
+    /// Open the sealed reply bytes. Anything not sealed under the link for this round
+    /// is Refused.
+    pub fn open_reply(&self, message: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
+        open(
+            &self.private,
+            &self.secret,
+            &self.id,
+            &info(INFO_REPLY, self.round),
+            message,
+        )
     }
 }
 
-/// The existing device's open offer: the one-time secret and key behind a link.
+/// The existing device's open offer: the one-time secret and key behind a link, and
+/// how far the three rounds have come.
 pub struct Offer {
     secret: Zeroizing<[u8; 32]>,
     id: [u8; 16],
     private: <Kem as KemTrait>::PrivateKey,
     expires: u64,
+    /// Rounds answered so far; the next accepted round is `done + 1`.
+    done: u8,
+    /// Digest of the accepted message and its sealed reply, per answered round.
+    answered: Vec<([u8; 32], Vec<u8>)>,
 }
 
-/// Where a request came from, kept to seal the one reply.
+/// Where a request came from, kept to seal the reply.
 pub struct ReplyTo([u8; 32]);
+
+/// One accepted message of the new device.
+pub enum Received {
+    /// A new message for the next round.
+    Round {
+        /// 1..=ROUNDS.
+        round: u8,
+        /// The opaque payload.
+        payload: Zeroizing<Vec<u8>>,
+        /// To seal the reply.
+        reply_to: ReplyTo,
+    },
+    /// The exact message of an answered round again (the answer was lost): the identical
+    /// sealed reply, to be resent without any new effect.
+    Repeat(Vec<u8>),
+}
 
 impl Offer {
     /// Open an offer for `address` until `now + OFFER_SECONDS`; returns it with
@@ -231,6 +297,8 @@ impl Offer {
                 id,
                 private,
                 expires: now.checked_add(OFFER_SECONDS).ok_or(ErrorCode::Clock)?,
+                done: 0,
+                answered: Vec::new(),
             },
             link,
         ))
@@ -241,24 +309,69 @@ impl Offer {
         self.expires
     }
 
-    /// Open the new device's sealed request. A message not sealed under this
-    /// offer's link is Refused; a message after the deadline is Unauthorized.
-    pub fn open_request(&self, message: &[u8], now: u64) -> Result<(Zeroizing<Vec<u8>>, ReplyTo)> {
+    /// Rounds answered so far.
+    pub fn rounds_done(&self) -> u8 {
+        self.done
+    }
+
+    /// All three rounds are answered: this offer serves nothing more.
+    pub fn finished(&self) -> bool {
+        self.done == ROUNDS
+    }
+
+    /// Open the new device's next sealed message. A message not sealed under this
+    /// offer's link, or for a round other than the next one, is Refused (the two are
+    /// indistinguishable); after the deadline everything is Unauthorized. The exact
+    /// message of an answered round yields its stored reply again.
+    pub fn open_round(&self, message: &[u8], now: u64) -> Result<Received> {
         if now >= self.expires {
             return Err(ErrorCode::Unauthorized);
         }
-        let plaintext = open(&self.private, &self.secret, &self.id, INFO_REQUEST, message)?;
+        let digest: [u8; 32] = Sha256::digest(message).into();
+        if let Some((_, reply)) = self.answered.iter().find(|(seen, _)| *seen == digest) {
+            return Ok(Received::Repeat(reply.clone()));
+        }
+        if self.done >= ROUNDS {
+            return Err(ErrorCode::Refused);
+        }
+        let round = self.done + 1;
+        let plaintext = open(
+            &self.private,
+            &self.secret,
+            &self.id,
+            &info(INFO_REQUEST, round),
+            message,
+        )?;
         let reply: [u8; 32] = plaintext
             .get(..32)
             .and_then(|key| key.try_into().ok())
             .ok_or(ErrorCode::InvalidRequest)?;
-        Ok((Zeroizing::new(plaintext[32..].to_vec()), ReplyTo(reply)))
+        Ok(Received::Round {
+            round,
+            payload: Zeroizing::new(plaintext[32..].to_vec()),
+            reply_to: ReplyTo(reply),
+        })
     }
 
-    /// Seal the grant for the requester; consumes the offer, so one link serves
-    /// exactly one pairing.
-    pub fn seal_grant(self, to: &ReplyTo, grant: &[u8]) -> Result<Vec<u8>> {
-        seal(&to.0, &self.secret, &self.id, INFO_GRANT, grant)
+    /// Seal the reply of the round just received and record it, so the next round is
+    /// accepted and a repeated message gets this very reply again. `message` is the
+    /// request it answers.
+    pub fn answer(&mut self, message: &[u8], to: &ReplyTo, reply: &[u8]) -> Result<Vec<u8>> {
+        if self.done >= ROUNDS {
+            return Err(ErrorCode::Refused);
+        }
+        let round = self.done + 1;
+        let sealed = seal(
+            &to.0,
+            &self.secret,
+            &self.id,
+            &info(INFO_REPLY, round),
+            reply,
+        )?;
+        self.answered
+            .push((Sha256::digest(message).into(), sealed.clone()));
+        self.done = round;
+        Ok(sealed)
     }
 }
 
@@ -270,22 +383,67 @@ mod tests {
         cmsh::Address::new(cmsh::Scheme::new("tor").unwrap(), vec![7; 35]).unwrap()
     }
 
+    fn round(offer: &Offer, message: &[u8], now: u64) -> (u8, Vec<u8>, ReplyTo) {
+        match offer.open_round(message, now).unwrap() {
+            Received::Round {
+                round,
+                payload,
+                reply_to,
+            } => (round, payload.to_vec(), reply_to),
+            Received::Repeat(_) => panic!("fresh message"),
+        }
+    }
+
     #[test]
-    fn a_link_carries_one_exchange_each_way_and_nothing_else() {
-        let (offer, text) = Offer::new(&address(), 1_000).unwrap();
+    fn a_link_carries_three_rounds_in_order_and_nothing_else() {
+        let (mut offer, text) = Offer::new(&address(), 1_000).unwrap();
         assert!(text.starts_with(PREFIX) && text.len() <= MAX_LINK_CHARS);
         let link = Link::parse(&text).unwrap();
         assert_eq!(link.address(), &address());
-        let (message, awaiting) = link.seal_request(b"public pairing request").unwrap();
-        let (request, reply_to) = offer.open_request(&message, 1_100).unwrap();
-        assert_eq!(&request[..], b"public pairing request");
-        let grant = offer
-            .seal_grant(&reply_to, b"grant with sealed root")
-            .unwrap();
+        for n in 1..=ROUNDS {
+            let (message, awaiting) = link.seal_round(n, &[n; 5]).unwrap();
+            let (got, payload, to) = round(&offer, &message, 1_100);
+            assert_eq!((got, payload), (n, vec![n; 5]));
+            assert!(!offer.finished());
+            let sealed = offer.answer(&message, &to, &[n + 10; 3]).unwrap();
+            assert_eq!(&awaiting.open_reply(&sealed).unwrap()[..], &[n + 10; 3]);
+        }
+        assert!(offer.finished());
+        // Nothing new is accepted afterwards.
+        let (message, _) = link.seal_round(1, b"again").unwrap();
         assert_eq!(
-            &awaiting.open_grant(&grant).unwrap()[..],
-            b"grant with sealed root"
+            offer.open_round(&message, 1_100).err(),
+            Some(ErrorCode::Refused)
         );
+    }
+
+    #[test]
+    fn a_lost_answer_is_repeated_not_redone_and_rounds_cannot_be_skipped() {
+        let (mut offer, text) = Offer::new(&address(), 1_000).unwrap();
+        let link = Link::parse(&text).unwrap();
+        // Round 2 before round 1 is refused without detail.
+        let (early, _) = link.seal_round(2, b"x").unwrap();
+        assert_eq!(
+            offer.open_round(&early, 1_001).err(),
+            Some(ErrorCode::Refused)
+        );
+        let (first, awaiting) = link.seal_round(1, b"hello").unwrap();
+        let (_, _, to) = round(&offer, &first, 1_001);
+        let sealed = offer.answer(&first, &to, b"options").unwrap();
+        // The same message again yields the identical reply bytes and no new round.
+        match offer.open_round(&first, 1_002).unwrap() {
+            Received::Repeat(again) => assert_eq!(again, sealed),
+            Received::Round { .. } => panic!("repeat"),
+        }
+        assert_eq!(offer.rounds_done(), 1);
+        assert_eq!(&awaiting.open_reply(&sealed).unwrap()[..], b"options");
+        // A reply of one round is not accepted for another.
+        let (second, awaiting2) = link.seal_round(2, b"credential").unwrap();
+        assert_eq!(
+            awaiting2.open_reply(&sealed).err(),
+            Some(ErrorCode::Refused)
+        );
+        let _ = second;
     }
 
     #[test]
@@ -295,38 +453,43 @@ mod tests {
         // Another offer's link cannot talk to this offer.
         let (message, _) = Link::parse(&other_text)
             .unwrap()
-            .seal_request(b"x")
+            .seal_round(1, b"x")
             .unwrap();
         assert_eq!(
-            offer.open_request(&message, 1_001).err(),
+            offer.open_round(&message, 1_001).err(),
             Some(ErrorCode::Refused)
         );
         // A tampered message and a truncated one are refused without detail.
-        let (mut message, awaiting) = Link::parse(&text).unwrap().seal_request(b"x").unwrap();
+        let (mut message, awaiting) = Link::parse(&text).unwrap().seal_round(1, b"x").unwrap();
         let last = message.len() - 1;
         message[last] ^= 1;
         assert_eq!(
-            offer.open_request(&message, 1_001).err(),
+            offer.open_round(&message, 1_001).err(),
             Some(ErrorCode::Refused)
         );
         assert_eq!(
-            offer.open_request(&message[..ENC], 1_001).err(),
+            offer.open_round(&message[..ENC], 1_001).err(),
             Some(ErrorCode::InvalidRequest)
         );
         // A reply not sealed under this link is refused by the requester.
         assert_eq!(
-            awaiting.open_grant(&message).err(),
+            awaiting.open_reply(&message).err(),
             Some(ErrorCode::Refused)
         );
+        assert!(Link::parse(&text).unwrap().seal_round(0, b"x").is_err());
+        assert!(Link::parse(&text)
+            .unwrap()
+            .seal_round(ROUNDS + 1, b"x")
+            .is_err());
     }
 
     #[test]
-    fn an_offer_expires_and_serves_one_pairing() {
+    fn an_offer_expires() {
         let (offer, text) = Offer::new(&address(), 1_000).unwrap();
         assert_eq!(offer.expires(), 1_000 + OFFER_SECONDS);
-        let (message, _) = Link::parse(&text).unwrap().seal_request(b"x").unwrap();
+        let (message, _) = Link::parse(&text).unwrap().seal_round(1, b"x").unwrap();
         assert_eq!(
-            offer.open_request(&message, 1_000 + OFFER_SECONDS).err(),
+            offer.open_round(&message, 1_000 + OFFER_SECONDS).err(),
             Some(ErrorCode::Unauthorized)
         );
     }
