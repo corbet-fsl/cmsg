@@ -1460,7 +1460,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#92772473eedbd601457eb57d113d4cfff1960b1b"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#36b04ab2beee0b54a676c7b6b2f963f7722a50df"
 dependencies = [
  "blake3",
  "cchr",
@@ -1642,7 +1642,7 @@ dependencies = [
 [[package]]
 name = "cgrp"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=v01#d222dce4d04a2e5ac9fbd6092dc7da16429f2574"
+source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=v01#9f411dde3ae136397400163987d37fa7070467de"
 dependencies = [
  "ckmg",
  "cmbl",
@@ -1774,7 +1774,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#db7cf5968ddd253596b73c9ce35bfad0da866f8e"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=v01#15510d5b2ba0b5dee50a22bf77b9804c27ea32ae"
 dependencies = [
  "arti-client",
  "blake3",

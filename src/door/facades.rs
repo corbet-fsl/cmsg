@@ -82,6 +82,14 @@ pub(super) trait BoundBoard {
     ) -> OwnedFuture<'_, board::GroupAnswered> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    fn group_welcome(
+        &mut self,
+        _operation: [u8; 32],
+        _delivered: Vec<String>,
+        _expires: u64,
+    ) -> OwnedFuture<'_, board::GroupWelcomes> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn profile_publish(&mut self, _edit: cbrd::Edit, _expires: u64) -> OwnedFuture<'_, u64> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }

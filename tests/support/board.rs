@@ -39,6 +39,7 @@ fn configured() -> (Door, ClientToken) {
         "board.group_propose".into(),
         "board.group_message".into(),
         "board.group_answer".into(),
+        "board.group_welcome".into(),
         "board.profile_publish".into(),
     ]);
     let token = door
@@ -69,6 +70,10 @@ async fn original_board_without_committed_owner_refuses_every_new_action() {
         (
             "board.group_answer",
             json!({"operation":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"accept":true}),
+        ),
+        (
+            "board.group_welcome",
+            json!({"operation":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"delivered":[]}),
         ),
         (
             "board.group_act",

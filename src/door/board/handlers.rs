@@ -121,6 +121,26 @@ pub(super) struct OwnedBoard<T, R, O> {
 struct DeskRecord {
     proposals: Vec<cbrd::GroupProposal>,
     invitations: Vec<cbrd::Invitation>,
+    /// Invitations this member accepted, waiting for the actor's Welcome.
+    #[serde(default)]
+    accepted: Vec<cbrd::Invitation>,
+    /// Welcomes this member, as creator, still owes to other members.
+    #[serde(default)]
+    welcomes: Vec<PendingWelcome>,
+}
+
+/// How long after the request's consent window a Welcome stays valid to
+/// deliver or to join from (the group already exists; members may be offline).
+const WELCOME_SECONDS: u64 = 7 * 24 * 3_600;
+
+#[derive(Clone, Serialize, Deserialize)]
+struct PendingWelcome {
+    operation: [u8; 32],
+    until: u64,
+    /// Members that have not been reported as served.
+    remaining: BTreeSet<String>,
+    /// The Welcome message text (the same for every member).
+    text: String,
 }
 
 /// Group proposals this member made and invitations awaiting this member's own
@@ -130,6 +150,8 @@ struct DeskRecord {
 struct GroupDesk {
     proposals: BTreeMap<[u8; 32], cbrd::GroupProposal>,
     invitations: BTreeMap<[u8; 32], cbrd::Invitation>,
+    accepted: BTreeMap<[u8; 32], cbrd::Invitation>,
+    welcomes: BTreeMap<[u8; 32], PendingWelcome>,
 }
 
 /// Open proposals and open invitations each; further ones are refused until
@@ -539,6 +561,16 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
                 .into_iter()
                 .map(|i| (i.operation(), i))
                 .collect();
+            self.desk.accepted = record
+                .accepted
+                .into_iter()
+                .map(|i| (i.operation(), i))
+                .collect();
+            self.desk.welcomes = record
+                .welcomes
+                .into_iter()
+                .map(|w| (w.operation, w))
+                .collect();
         }
         self.desk_loaded = true;
         Ok(())
@@ -548,6 +580,8 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
         let record = DeskRecord {
             proposals: self.desk.proposals.values().cloned().collect(),
             invitations: self.desk.invitations.values().cloned().collect(),
+            accepted: self.desk.accepted.values().cloned().collect(),
+            welcomes: self.desk.welcomes.values().cloned().collect(),
         };
         let bytes = serde_json::to_vec(&record).map_err(|_| ErrorCode::Reconcile)?;
         let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
@@ -565,24 +599,57 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
     fn prune_group_desk(&mut self, now: u64) {
         self.desk.proposals.retain(|_, p| p.expires_at() >= now);
         self.desk.invitations.retain(|_, i| i.expires_at() >= now);
+        self.desk
+            .accepted
+            .retain(|_, i| i.expires_at().saturating_add(WELCOME_SECONDS) >= now);
+        self.desk.welcomes.retain(|_, w| w.until >= now);
     }
 
     async fn commit_proposal(
         &mut self,
         operation: [u8; 32],
         expires: u64,
-    ) -> Result<Vec<cbrd::GroupView>> {
+    ) -> Result<(Vec<cbrd::GroupView>, Vec<GroupInvite>)> {
         let source = self.group_policy(expires).await?;
         let proposal = self
             .desk
             .proposals
             .get(&operation)
             .ok_or(ErrorCode::Refused)?;
+        let others: BTreeSet<String> = proposal
+            .request()
+            .consents
+            .iter()
+            .map(|consent| consent.member.clone())
+            .filter(|member| member != &proposal.request().actor)
+            .collect();
+        let until = proposal.expires_at().saturating_add(WELCOME_SECONDS);
         let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
         let outcome = cbrd::commit_group_proposal(owner, &source, proposal, MAX_GROUPS).await;
         // A refused or interrupted commit never leaves a reusable consent set.
         self.desk.proposals.remove(&operation);
-        Ok(outcome.map_err(group_error)?.0)
+        let committed = outcome.map_err(group_error)?;
+        let mut welcomes = vec![];
+        if let Some(message) = committed.welcome {
+            let text = message.to_text().map_err(group_error)?;
+            welcomes = others
+                .iter()
+                .map(|member| GroupInvite {
+                    member: member.clone(),
+                    text: text.clone(),
+                })
+                .collect();
+            self.desk.welcomes.insert(
+                operation,
+                PendingWelcome {
+                    operation,
+                    until,
+                    remaining: others,
+                    text,
+                },
+            );
+        }
+        Ok((committed.views, welcomes))
     }
 }
 
@@ -715,7 +782,7 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
             let operation = proposal.operation();
             if proposal.complete() {
                 self.desk.proposals.insert(operation, proposal);
-                let views = self.commit_proposal(operation, expires).await?;
+                let (views, _) = self.commit_proposal(operation, expires).await?;
                 self.save_desk().await?;
                 return Ok(GroupProposed {
                     operation,
@@ -779,10 +846,32 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
                     members,
                 });
             }
+            if let cbrd::GroupMessage::Welcome { request, .. } = &message {
+                // Only an invitation this member accepted can be joined from, and
+                // only the actor's own Welcome (checked again by the join).
+                let operation = request.operation;
+                let invitation = self
+                    .desk
+                    .accepted
+                    .get(&operation)
+                    .ok_or(ErrorCode::Refused)?
+                    .clone();
+                let source = self.group_policy(expires).await?;
+                let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+                let (views, _) = invitation
+                    .join(owner, &source, &from, message, MAX_GROUPS)
+                    .await
+                    .map_err(group_error)?;
+                self.desk.accepted.remove(&operation);
+                self.save_desk().await?;
+                return Ok(GroupInbound::Joined { operation, views });
+            }
             let operation = match &message {
                 cbrd::GroupMessage::Consent { consent, .. } => consent.operation,
                 cbrd::GroupMessage::Decline { operation, .. } => *operation,
-                cbrd::GroupMessage::Invite { .. } => return Err(ErrorCode::InvalidRequest),
+                cbrd::GroupMessage::Invite { .. } | cbrd::GroupMessage::Welcome { .. } => {
+                    return Err(ErrorCode::InvalidRequest);
+                }
             };
             let proposal = self
                 .desk
@@ -796,9 +885,13 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
                 return Ok(GroupInbound::Declined { operation });
             }
             if proposal.complete() {
-                let views = self.commit_proposal(operation, expires).await?;
+                let (views, welcomes) = self.commit_proposal(operation, expires).await?;
                 self.save_desk().await?;
-                return Ok(GroupInbound::Committed { operation, views });
+                return Ok(GroupInbound::Committed {
+                    operation,
+                    views,
+                    welcomes,
+                });
             }
             let awaiting = proposal.awaiting().iter().cloned().collect();
             self.save_desk().await?;
@@ -830,10 +923,54 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
                 .answer(owner, accept, visible)
                 .await
                 .map_err(group_error)?;
+            // A group that needs MLS follows with the actor's Welcome.
+            if accept && cbrd::created_group(&invitation.request().command).is_some() {
+                self.desk.accepted.insert(operation, invitation.clone());
+            }
             self.save_desk().await?;
             Ok(GroupAnswered {
                 actor: invitation.actor().to_owned(),
                 text: message.to_text().map_err(group_error)?,
+            })
+        })
+    }
+    fn group_welcome(
+        &mut self,
+        operation: [u8; 32],
+        delivered: Vec<String>,
+        _expires: u64,
+    ) -> OwnedFuture<'_, GroupWelcomes> {
+        Box::pin(async move {
+            self.idle()?;
+            if self.owner.groups().is_none() {
+                return Err(ErrorCode::Unavailable);
+            }
+            self.load_desk().await?;
+            let now = self.group_clock()?;
+            self.prune_group_desk(now);
+            let pending = self
+                .desk
+                .welcomes
+                .get_mut(&operation)
+                .ok_or(ErrorCode::Refused)?;
+            for member in &delivered {
+                pending.remaining.remove(member);
+            }
+            let offered = pending
+                .remaining
+                .iter()
+                .map(|member| GroupInvite {
+                    member: member.clone(),
+                    text: pending.text.clone(),
+                })
+                .collect();
+            if pending.remaining.is_empty() {
+                self.desk.welcomes.remove(&operation);
+            }
+            self.save_desk().await?;
+            Ok(GroupWelcomes {
+                operation,
+                pending: offered,
             })
         })
     }

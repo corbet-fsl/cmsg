@@ -14,10 +14,10 @@ mod group_act;
 mod groups;
 mod handlers;
 mod profile;
-pub(super) use group_act::{group_act, group_answer, group_message, group_propose};
+pub(super) use group_act::{group_act, group_answer, group_message, group_propose, group_welcome};
 pub use group_act::{
     GroupAct, GroupAnswer, GroupAnswered, GroupInbound, GroupInvite, GroupMessageIn, GroupPropose,
-    GroupProposed,
+    GroupProposed, GroupWelcome, GroupWelcomes,
 };
 pub(super) use groups::groups;
 pub(super) use handlers::{attend, discovery, search, watch};

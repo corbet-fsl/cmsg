@@ -20,6 +20,7 @@ fn consent(member: &str, now: u64) -> Consent {
         command_digest: [9; 32],
         profile_visibility: false,
         valid_until: now + 600,
+        key_package: vec![],
         signature: vec![],
         authority: vec![],
     }
@@ -262,4 +263,19 @@ async fn the_production_composer_peers_fail_closed_without_charter_trust_or_netw
         CharterView::with_current(&mut view, "alpha", 1_000, |_| Ok(())),
         Err(cnbx::ContactError::Unavailable)
     );
+}
+
+#[tokio::test]
+async fn a_key_package_is_made_by_the_real_threads_store_and_never_repeats() {
+    let mut owner = owner("a", true).await;
+    let groups = owner.groups().unwrap();
+    let first = groups.key_package([1; 32], [2; 32]).await.unwrap();
+    assert!(!first.is_empty());
+    // A second package for the same group is a different one (fresh key).
+    let second = groups.key_package([1; 32], [3; 32]).await;
+    // Threads keeps one pending package per group slot: a second request for
+    // the same slot is either fresh or refused, never a copy of the first.
+    if let Ok(second) = second {
+        assert_ne!(first, second);
+    }
 }

@@ -61,6 +61,25 @@ pub struct GroupProposed {
     pub committed: Option<Vec<cbrd::GroupView>>,
 }
 
+/// Welcome messages still owed to members, as text for each member's direct
+/// conversation. Sent again until the caller reports them delivered.
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GroupWelcome {
+    pub operation: [u8; 32],
+    /// Members whose Welcome the caller has delivered; they are not offered again.
+    #[serde(default)]
+    pub delivered: Vec<String>,
+}
+
+#[derive(Clone, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GroupWelcomes {
+    pub operation: [u8; 32],
+    /// One message per member that has not yet been reported as served.
+    pub pending: Vec<GroupInvite>,
+}
+
 /// A text received in the direct conversation with `from` (authenticated by
 /// the conversation, never named by the message itself).
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -88,6 +107,13 @@ pub enum GroupInbound {
         operation: [u8; 32],
     },
     Committed {
+        operation: [u8; 32],
+        views: Vec<cbrd::GroupView>,
+        /// The Welcome each other member needs, to send in its conversation.
+        welcomes: Vec<GroupInvite>,
+    },
+    /// This member joined the group from the actor's Welcome.
+    Joined {
         operation: [u8; 32],
         views: Vec<cbrd::GroupView>,
     },
@@ -147,6 +173,18 @@ pub(in crate::door) async fn group_message(
         .group_message(request.from, request.text, expires)
         .await?;
     Ok((inbound, vec![]))
+}
+
+pub(in crate::door) async fn group_welcome(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: GroupWelcome,
+) -> Result<(GroupWelcomes, Vec<Event>)> {
+    let (board, expires) = board_of(door, key)?;
+    let pending = board
+        .group_welcome(request.operation, request.delivered, expires)
+        .await?;
+    Ok((pending, vec![]))
 }
 
 pub(in crate::door) async fn group_answer(

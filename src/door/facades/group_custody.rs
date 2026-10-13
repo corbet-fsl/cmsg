@@ -2,7 +2,7 @@
 //! of the group owner.
 //!
 //! What may be signed: only the local member's own consent, as the exact
-//! `cgrp.consent.v2` statement bytes Groups built for one command, signed with
+//! `cgrp.consent.v3` statement bytes (which cover the member's MLS key package) Groups built for one command, signed with
 //! the member's device key through the same single-use `SignDeviceEd25519`
 //! intent as every other exact signature (one admission, one signature; the
 //! statement is bound to community, member, operation, policy epoch and the
@@ -164,6 +164,63 @@ impl cbrd::Seeds for NoSeeds {
     }
 }
 
+/// Current lineages for Threads: this member's own and the peers' lineages the
+/// last `refresh` read (Charter-verified, fresh). Anything else is unavailable.
+struct GroupDevices {
+    own: ckmg::Lineage,
+    cache: Rc<RefCell<Cache>>,
+}
+impl cnbx::DeviceAuthority for GroupDevices {
+    async fn current(
+        &mut self,
+        binding: &ckmg::Binding,
+    ) -> std::result::Result<ckmg::Lineage, cnbx::ContactError> {
+        if binding.member() == self.own.binding.member() {
+            return if *binding == self.own.binding {
+                Ok(self.own.clone())
+            } else {
+                Err(cnbx::ContactError::Authority)
+            };
+        }
+        let now = ckmg::Clock::now(&mut crate::door::custody::SystemClock)
+            .map_err(|_| cnbx::ContactError::Unavailable)?;
+        match self.cache.borrow().lineages.get(binding.member()) {
+            Some((lineage, read_at))
+                if lineage.binding == *binding
+                    && now.saturating_sub(*read_at) <= LINEAGE_FRESH_SECONDS =>
+            {
+                Ok(lineage.clone())
+            }
+            _ => Err(cnbx::ContactError::Unavailable),
+        }
+    }
+}
+
+/// Sized view of the unsized policy the Board hands to the owner.
+struct PolicyRef<'a>(&'a dyn cgrp::PolicySource);
+impl cgrp::PolicySource for PolicyRef<'_> {
+    fn current(&self, community: &str, now: u64) -> cgrp::Result<cgrp::Policy> {
+        self.0.current(community, now)
+    }
+}
+
+fn mls_error(error: cthr::Error) -> cgrp::Error {
+    match error {
+        cthr::Error::Authority | cthr::Error::Scope => cgrp::Error::Authority,
+        cthr::Error::Conflict => cgrp::Error::Reconcile,
+        cthr::Error::Storage => cgrp::Error::Reconcile,
+        _ => cgrp::Error::Unavailable,
+    }
+}
+
+fn mls_operation(label: &str, group: &cgrp::Id, operation: &cgrp::Id) -> [u8; 32] {
+    let mut bytes = b"cmsg.group.mls.v1\0".to_vec();
+    bytes.extend_from_slice(label.as_bytes());
+    bytes.extend_from_slice(group);
+    bytes.extend_from_slice(operation);
+    *ckmg::hash(&bytes).value()
+}
+
 type Retained<B, C, E, A, R, W> = Rc<Mutex<Option<Custody<B, C, E, A, R, W>>>>;
 
 /// The group owner of one bound Vault.
@@ -208,6 +265,110 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
         } else {
             Ok(())
         }
+    }
+}
+
+enum MlsStep<'a> {
+    Create(&'a [Vec<u8>]),
+    Join(&'a [u8]),
+}
+
+impl<B, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
+where
+    B: cwst::backend::Backend,
+    C: ckmg::Clock,
+    E: ckmg::Entropy,
+    A: ckmg::Authority,
+    R: cvlt::Records,
+{
+    /// Groups and the MLS group of `group` become visible in ONE Store commit
+    /// (`Candidate::commit_groups`), after Threads built them from the same
+    /// decision Groups prepared. Current authority is repeated inside.
+    async fn mls_commit(
+        &mut self,
+        candidate: cgrp::Candidate,
+        group: cgrp::Id,
+        operation: cgrp::Id,
+        step: MlsStep<'_>,
+        policy: &dyn cgrp::PolicySource,
+    ) -> cgrp::Result<(Snapshot, Vec<cgrp::CommittedEffect>, cthr::Committed)> {
+        self.open()?;
+        let mut retained = self.retained.lock().await;
+        self.open()?;
+        let custody = retained.as_mut().ok_or(cgrp::Error::Unavailable)?;
+        let binding = custody.binding.clone();
+        let handle = custody
+            .vault
+            .keys()
+            .key(cnbx::threads_purpose())
+            .await
+            .map_err(|_| cgrp::Error::Authority)?;
+        let own = custody
+            .vault
+            .keys()
+            .lineage()
+            .await
+            .map_err(|_| cgrp::Error::Authority)?;
+        let storage = custody.vault.storage().clone();
+        let mut store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| cgrp::Error::Authority)?;
+        let mut devices = GroupDevices {
+            own,
+            cache: self.cache.clone(),
+        };
+        let mut port = cnbx::KeyPort {
+            keys: custody.vault.keys(),
+            handle: &handle,
+            devices: &mut devices,
+        };
+        let mut clock = crate::door::custody::SystemClock;
+        let threads = cthr::Threads::load(binding, group, &store).map_err(mls_error)?;
+        let step_label = match step {
+            MlsStep::Create(_) => "create",
+            MlsStep::Join(_) => "join",
+        };
+        let prepared = {
+            let effects = candidate.prepare_effects();
+            let decision = effects
+                .iter()
+                .find(|effect| {
+                    matches!(effect.event(), cgrp::Effect::Membership { group: g, .. } if g == &group)
+                })
+                .ok_or(cgrp::Error::Authority)?;
+            match step {
+                MlsStep::Create(packages) => {
+                    threads
+                        .create_fork(&mut port, decision, packages, &mut clock)
+                        .await
+                }
+                MlsStep::Join(welcome) => {
+                    threads
+                        .join_fork(&mut port, decision, welcome, &mut clock)
+                        .await
+                }
+            }
+            .map_err(mls_error)?
+        };
+        let commit_operation = match step_label {
+            "join" => mls_operation("join", &group, &group),
+            _ => mls_operation("create", &group, &operation),
+        };
+        let (committed, snapshot, effects) = prepared
+            .commit_groups(
+                &mut port,
+                candidate,
+                &mut store,
+                commit_operation,
+                (&PolicyRef(policy), &self.authority),
+                &mut clock,
+            )
+            .await
+            .map_err(mls_error)?;
+        self.open()?;
+        Ok((snapshot, effects, committed))
     }
 }
 
@@ -397,6 +558,133 @@ where
                 signature: signed.signature,
                 authority: public.value().to_vec(),
             })
+        })
+    }
+    fn key_package(
+        &mut self,
+        group: cgrp::Id,
+        operation: cgrp::Id,
+    ) -> cbrd::PortFuture<'_, Vec<u8>> {
+        Box::pin(async move {
+            self.open()?;
+            let mut retained = self.retained.lock().await;
+            self.open()?;
+            let custody = retained.as_mut().ok_or(cgrp::Error::Unavailable)?;
+            let binding = custody.binding.clone();
+            // Keys first: creating a key checkpoints through the Store.
+            let handle = custody
+                .vault
+                .keys()
+                .key(cnbx::threads_purpose())
+                .await
+                .map_err(|_| cgrp::Error::Authority)?;
+            let own = custody
+                .vault
+                .keys()
+                .lineage()
+                .await
+                .map_err(|_| cgrp::Error::Authority)?;
+            let storage = custody.vault.storage().clone();
+            let mut store = storage.lock().await;
+            custody
+                .check_scope(&store)
+                .await
+                .map_err(|_| cgrp::Error::Authority)?;
+            let mut devices = GroupDevices {
+                own,
+                cache: self.cache.clone(),
+            };
+            let mut port = cnbx::KeyPort {
+                keys: custody.vault.keys(),
+                handle: &handle,
+                devices: &mut devices,
+            };
+            let threads = cthr::Threads::load(binding, group, &store).map_err(mls_error)?;
+            let committed = threads
+                .key_package(&mut port)
+                .await
+                .map_err(mls_error)?
+                .commit(
+                    &mut port,
+                    &mut cthr::Unavailable,
+                    &mut store,
+                    mls_operation("key-package", &group, &operation),
+                    &[],
+                )
+                .await
+                .map_err(mls_error)?;
+            self.open()?;
+            committed
+                .events()
+                .iter()
+                .find_map(|event| match event {
+                    cthr::Event::KeyPackage { bytes } => Some(bytes.clone()),
+                    _ => None,
+                })
+                .ok_or(cgrp::Error::Unavailable)
+        })
+    }
+    fn publish_request<'a>(
+        &'a mut self,
+        candidate: cgrp::Candidate,
+        request: &'a cgrp::Request,
+        policy: &'a dyn cgrp::PolicySource,
+        now: u64,
+    ) -> cbrd::PortFuture<'a, cbrd::Published> {
+        Box::pin(async move {
+            let Some(group) = cbrd::created_group(&request.command) else {
+                let (snapshot, effects) = cbrd::GroupOwner::publish(self, candidate, now).await?;
+                return Ok(cbrd::Published {
+                    snapshot,
+                    effects,
+                    welcome: None,
+                });
+            };
+            // Every other member's package, each covered by its signed consent.
+            let packages: Vec<Vec<u8>> = request
+                .consents
+                .iter()
+                .filter(|consent| consent.member != request.actor)
+                .map(|consent| consent.key_package.clone())
+                .collect();
+            let published = self
+                .mls_commit(
+                    candidate,
+                    group,
+                    request.operation,
+                    MlsStep::Create(&packages),
+                    policy,
+                )
+                .await;
+            // Whatever was read for this operation is gone with it.
+            *self.cache.borrow_mut() = Cache::default();
+            let (snapshot, effects, committed) = published?;
+            let welcome = committed.events().iter().find_map(|event| match event {
+                cthr::Event::Invitation { welcome, .. } => Some(welcome.clone()),
+                _ => None,
+            });
+            Ok(cbrd::Published {
+                snapshot,
+                effects,
+                welcome,
+            })
+        })
+    }
+    fn publish_welcome<'a>(
+        &'a mut self,
+        candidate: cgrp::Candidate,
+        group: cgrp::Id,
+        welcome: &'a [u8],
+        policy: &'a dyn cgrp::PolicySource,
+        _now: u64,
+    ) -> cbrd::PortFuture<'a, (Snapshot, Vec<cgrp::CommittedEffect>)> {
+        Box::pin(async move {
+            let outcome = self
+                .mls_commit(candidate, group, [0; 32], MlsStep::Join(welcome), policy)
+                .await;
+            *self.cache.borrow_mut() = Cache::default();
+            let (snapshot, effects, _) = outcome?;
+            Ok((snapshot, effects))
         })
     }
     fn desk_load(&mut self) -> cbrd::PortFuture<'_, Option<Vec<u8>>> {

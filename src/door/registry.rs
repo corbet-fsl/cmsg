@@ -3,8 +3,8 @@ use board::{
     attend as board_attend, depart as board_depart, discovery as board_discovery,
     group_act as board_group_act, group_answer as board_group_answer,
     group_message as board_group_message, group_propose as board_group_propose,
-    groups as board_groups, heartbeat as board_heartbeat, profile_publish as board_profile_publish,
-    search as board_search, watch as board_watch,
+    group_welcome as board_group_welcome, groups as board_groups, heartbeat as board_heartbeat,
+    profile_publish as board_profile_publish, search as board_search, watch as board_watch,
 };
 use foyer::refresh as foyer_refresh;
 use inbox::{blocking_rules as inbox_blocking_rules, contact_act as inbox_contact_act};
@@ -385,6 +385,7 @@ actions! {
     "board.group_propose" => board_group_propose(board::GroupPropose) -> board::GroupProposed, GroupRecord, Board;
     "board.group_message" => board_group_message(board::GroupMessageIn) -> board::GroupInbound, GroupRecord, Board;
     "board.group_answer" => board_group_answer(board::GroupAnswer) -> board::GroupAnswered, GroupRecord, Board;
+    "board.group_welcome" => board_group_welcome(board::GroupWelcome) -> board::GroupWelcomes, GroupRecord, Board;
     "board.profile_publish" => board_profile_publish(board::ProfilePublish) -> board::ProfilePublished, ProfileRecord, Board;
     "board.heartbeat" => board_heartbeat(Empty) -> cbrd::cfrm::LiveOutput, BoardRecord, Board;
     "board.depart" => board_depart(Empty) -> cbrd::cfrm::EmptyOutput, BoardRecord, Board;

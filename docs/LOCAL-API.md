@@ -250,7 +250,21 @@ always a fork the members consent to; there are no admins):
   expire with the consent window (one hour); a restart means proposing again.
 - `board.group_answer {operation, accept, accept_profile_visibility}` is the
   member's own decision on a stored invitation; it returns `{actor, text}` to
-  send back in the conversation with the actor.
+  send back in the conversation with the actor. For a command that creates a
+  group (create, fork) an accepted answer carries the member's fresh MLS key
+  package inside the signed consent (the signature covers it).
+- A committed create or fork returns `welcomes: [{member, text}]` in
+  `state: "committed"`: send each `text` in the direct conversation with that
+  member. The actor built the MLS group from exactly the signed packages and
+  published Groups and Threads in one write. The receiving member passes the
+  text to `board.group_message`; it is accepted only from the acting member, only
+  for an invitation this member accepted, and joins (`state: "joined"`) after
+  Groups re-checks every consent. A member whose co-members' lineage cannot be
+  read refuses (fail closed).
+- `board.group_welcome {operation, delivered}` lists the Welcome texts still
+  owed (members not yet reported in `delivered`); call it again to retry over
+  the same conversation until every member is served. Welcomes are kept for a
+  week.
 
 `board.profile_publish` takes `{"profile": {...}, "rules": [...], "reachability": [...]}`
 and publishes the member's own answers and rules as one signed bundle. The caller
