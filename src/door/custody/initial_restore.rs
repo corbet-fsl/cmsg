@@ -44,9 +44,10 @@ pub async fn prepare_initial_recovery<'a, 'p, N: cdht::Network + Clone>(
     initial: cfyr::membership::InitialCreationLease<'p, Transport>,
     network: N,
 ) -> super::super::Result<InitialRecoveryOwners<'a, 'p, N>> {
-    let acknowledged = candidate
-        .acknowledged_initial()
-        .map_err(|_| ErrorCode::Unauthorized)?;
+    let acknowledged = candidate.acknowledged_initial().map_err(|e| {
+        eprintln!("DIAG-RESTORE acknowledged_initial {e:?}");
+        ErrorCode::Unauthorized
+    })?;
     let mut authority = InitialRecoveryAuthority {
         candidate: acknowledged,
         initial,
@@ -60,7 +61,10 @@ pub async fn prepare_initial_recovery<'a, 'p, N: cdht::Network + Clone>(
     let reader = candidate
         .read_lineage(&mut SystemClock, &mut authority)
         .await
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|e| {
+            eprintln!("DIAG-RESTORE read_lineage {e:?}");
+            ErrorCode::Unauthorized
+        })?;
     let backend = cvlt::TorLineageRecord::provisional_lineage(network, reader)
         .await
         .map_err(|_| ErrorCode::Unavailable)?;
@@ -70,7 +74,10 @@ pub async fn prepare_initial_recovery<'a, 'p, N: cdht::Network + Clone>(
     let recovery = candidate
         .authorize(&mut SystemClock, &mut authority)
         .await
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|e| {
+            eprintln!("DIAG-RESTORE authorize {e:?}");
+            ErrorCode::Unauthorized
+        })?;
     Ok(InitialRecoveryOwners {
         recovery,
         authority,
