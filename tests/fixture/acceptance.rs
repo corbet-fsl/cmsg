@@ -98,7 +98,6 @@ impl Inputs {
                     Some(&config.schema_file),
                     Some(&config.global_key_ring_file),
                     Some(&config.global_status_file),
-                    Some(&config.voucher_public_key_file),
                     config.root.bootstrap_file.as_deref(),
                     config.admin.bootstrap_file.as_deref(),
                 ])?;

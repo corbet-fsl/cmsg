@@ -63,6 +63,7 @@ arti-client = { version = "0.46", default-features = false, optional = true }
 tor-rtcompat = { version = "0.46", default-features = false, features = ["tokio", "rustls"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 cbrd = { git = "https://git.corbet.ch/corbet-libs/cbrd.git", branch = "v01", default-features = false, features = ["http"] }
+cvch = { git = "https://git.corbet.ch/corbet-foss/cvch", branch = "main" }
 futures-util = "0.3"
 cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "v01", default-features = false, features = ["http"] }
 reqwest = { version = "0.13", default-features = false }

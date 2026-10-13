@@ -47,8 +47,8 @@ pub struct Activation {
     pub outbox_settled: bool,
 }
 
-/// Body of `community_join`. The voucher is the member's own `cvch1.` text; it is
-/// needed only while the community's lobby still asks for it. The handle is the
+/// Body of `community_join`. The voucher is the member's own link text (the part
+/// after `#`, `cvch2.` and hex); it is needed only while the community's lobby still asks for it. The handle is the
 /// member's chosen community handle, reserved once (a repeat with the same handle
 /// is a no-op; a different one than already reserved is refused).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -444,6 +444,7 @@ mod run {
     async fn gate(
         membership: &mut cfyr::membership::LiveMembership<Transport>,
         join: &JoinRequest,
+        nonces: &mut std::collections::BTreeMap<String, [u8; cvch::link::NONCE_BYTES]>,
     ) -> Result<Gate> {
         let mut lease = membership
             .observe_lease(clock)
@@ -472,7 +473,21 @@ mod run {
             }
         }
         if let (true, Some(code)) = (lacks(&lobby), join.voucher.as_deref()) {
-            lobby = lease.submit_voucher(code, clock).await.map_err(map_error)?;
+            // The bond nonce is chosen once per link and kept for every retry: the
+            // issuer's device derives the bond from the first notice it receives.
+            let nonce = match nonces.get(code) {
+                Some(nonce) => *nonce,
+                None => {
+                    let nonce = cvch::link::entropy().map_err(|_| ErrorCode::Unavailable)?;
+                    nonces.insert(code.to_owned(), nonce);
+                    nonce
+                }
+            };
+            lobby = lease
+                .submit_voucher(code, join.handle.as_deref(), nonce, clock)
+                .await
+                .map_err(map_error)?
+                .lobby;
         }
         Ok(Gate {
             ready: !lacks(&lobby),
@@ -529,6 +544,7 @@ mod run {
             prover,
         } = parts;
         let mut carried = None;
+        let mut nonces = std::collections::BTreeMap::new();
         loop {
             let first = match carried.take() {
                 Some(command) => command,
@@ -539,7 +555,9 @@ mod run {
                 // already through them, otherwise the lobby decides.
                 let reply = match repeat(first.clone(), &mut account).await {
                     Repeat::Answer(answer) => Ok(answer),
-                    Repeat::As(_) => gate(&mut membership, join).await.map(Answer::Gate),
+                    Repeat::As(_) => gate(&mut membership, join, &mut nonces)
+                        .await
+                        .map(Answer::Gate),
                 };
                 mailbox.reply(reply);
                 continue;
@@ -842,7 +860,7 @@ mod tests {
             Command::Reopen,
             Command::Activate,
             Command::Join(JoinRequest {
-                voucher: Some("cvch1.x".into()),
+                voucher: Some("cvch2.x".into()),
                 handle: Some("h".into()),
             }),
         ]
