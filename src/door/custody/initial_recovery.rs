@@ -46,10 +46,7 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                         .map_err(|_| dbg_u(line!()))?)
             || self.initial.seed().map_err(|_| dbg_u(line!()))?
                 != self.candidate.enrollment_commitment()
-            || self
-                .initial
-                .publication()
-                .map_err(|_| dbg_u(line!()))?
+            || self.initial.publication().map_err(|_| dbg_u(line!()))?
                 != Some(self.candidate.publication_commitment())
         {
             return Err(dbg_u(line!()));
@@ -61,10 +58,7 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         if signing.is_some_and(|signing| now >= signing.expires) {
             return Err(Error::Expired);
         }
-        let observation = self
-            .initial
-            .observation()
-            .map_err(|_| dbg_u(line!()))?;
+        let observation = self.initial.observation().map_err(|_| dbg_u(line!()))?;
         if observation.member != request.binding.member()
             || !observation.device_keys.contains(request.device.value())
         {
@@ -106,10 +100,7 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                         || Some(lineage.root) != request.root
                         || lineage.epoch != request.epoch
                         || verified.author(now).map_err(|_| dbg_u(line!()))? != request.device
-                        || verified
-                            .credential_id(now)
-                            .map_err(|_| dbg_u(line!()))?
-                            != credential
+                        || verified.credential_id(now).map_err(|_| dbg_u(line!()))? != credential
                         || request
                             .statement
                             .is_some_and(|digest| lineage.digest().ok() != Some(digest))
@@ -120,7 +111,10 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                     Ok(())
                 },
             )
-            .map_err(|e| { eprintln!("DIAG-LEASE {e:?}"); dbg_u(line!()) })??;
+            .map_err(|e| {
+                eprintln!("DIAG-LEASE {e:?}");
+                dbg_u(line!())
+            })??;
         if failed {
             return Err(Error::Clock);
         }
