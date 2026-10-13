@@ -262,7 +262,11 @@ async fn community_join(
     key: &[u8; 32],
     request: account::JoinRequest,
 ) -> Result<(account::Joined, Vec<Event>)> {
-    if request.voucher.as_ref().is_some_and(|code| code.len() > 512) {
+    if request
+        .voucher
+        .as_ref()
+        .is_some_and(|code| code.len() > 512)
+    {
         return Err(ErrorCode::InvalidRequest);
     }
     let gate = account_call(door, key, account::Command::Join(request.voucher))

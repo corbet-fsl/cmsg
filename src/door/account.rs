@@ -398,10 +398,7 @@ mod run {
             .map_err(|_| ErrorCode::Unavailable)?;
         let mut lobby = lease.lobby(clock).await.map_err(map_error)?;
         if let (true, Some(code)) = (lacks(&lobby), voucher) {
-            lobby = lease
-                .submit_voucher(code, clock)
-                .await
-                .map_err(map_error)?;
+            lobby = lease.submit_voucher(code, clock).await.map_err(map_error)?;
         }
         Ok(Gate {
             ready: !lacks(&lobby),
