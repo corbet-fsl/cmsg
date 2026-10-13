@@ -11,14 +11,13 @@ use cbrd::join_seal::{self, JoinKey};
 use std::collections::BTreeMap;
 
 /// A room is named by its opaque identifier from the listing and by the group
-/// it belongs to. `accept_profile_visibility` is the semipublic consent.
+/// it belongs to. There is no per-join profile switch: joining a public room IS
+/// the consent that members see visible profiles.
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoomJoin {
     pub room: [u8; 16],
     pub group: [u8; 32],
-    #[serde(default)]
-    pub accept_profile_visibility: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -156,7 +155,7 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             owner,
             &source,
             intent,
-            join.accept_profile_visibility,
+            true,
             MAX_GROUPS,
         )
         .await

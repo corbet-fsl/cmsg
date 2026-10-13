@@ -486,16 +486,6 @@ where
             .lineage()
             .await
             .map_err(|_| Fail::Authority)?;
-        // The locator of this member's own certified lineage record: read-only,
-        // never secret material. Admitting members read the lineage through it.
-        let locator = custody
-            .vault
-            .keys()
-            .export_lineage_read_capability()
-            .await
-            .map_err(|_| Fail::Authority)?
-            .as_bytes()
-            .to_vec();
         let storage = custody.vault.storage().clone();
         let mut store = storage.lock().await;
         custody
@@ -518,7 +508,6 @@ where
         let source = PolicyRef(task.policy);
         let companion = cbrd::RoomCompanion {
             request: task.request,
-            handle: locator,
         }
         .encode()
         .ok_or(Fail::Invalid)?;
@@ -653,7 +642,10 @@ where
         }
         // Read the newcomer's lineage first (a fresh, Charter-verified read
         // through the locator it supplied); the cache serves only this admission.
-        self.provided = BTreeMap::from([(newcomer.clone(), companion.handle.clone())]);
+        self.provided = cbrd::consent_handles(&companion.request)
+            .into_iter()
+            .filter(|(member, _)| member == &newcomer)
+            .collect();
         let read = cbrd::GroupOwner::refresh(
             self,
             &BTreeSet::new(),
@@ -940,19 +932,24 @@ where
                     .map_err(|_| cgrp::Error::Unavailable)?;
                 for peer in devices {
                     if peer != &self.member {
-                        if let Some(handle) =
+                        // The handle the peer attached to its own consent wins;
+                        // it is a locator only: the lineage it yields is still
+                        // Charter-verified and must bind to `peer`.
+                        if let Some(handle) = self.provided.get(peer) {
+                            handles.insert(peer.clone(), handle.clone());
+                        } else if let Some(handle) =
                             journal.handle(peer).map_err(|_| cgrp::Error::Unavailable)?
                         {
                             handles.insert(peer.clone(), handle);
-                        } else if let Some(handle) = self.provided.get(peer) {
-                            // A locator only: the lineage it yields is still
-                            // Charter-verified and must bind to `peer`.
-                            handles.insert(peer.clone(), handle.clone());
                         }
                     }
                 }
                 let mut cache = self.cache.borrow_mut();
                 for peer in contacts {
+                    // The own journal holds no relation to oneself.
+                    if peer == &self.member {
+                        continue;
+                    }
                     let relation = journal
                         .relation(peer)
                         .map_err(|_| cgrp::Error::Unavailable)?;
@@ -1030,35 +1027,24 @@ where
             })
         })
     }
-    fn handles<'a>(
-        &'a mut self,
-        members: &'a BTreeSet<String>,
-    ) -> cbrd::PortFuture<'a, BTreeMap<String, Vec<u8>>> {
+    fn own_handle(&mut self) -> cbrd::PortFuture<'_, Vec<u8>> {
         Box::pin(async move {
             self.open()?;
             let mut retained = self.retained.lock().await;
             self.open()?;
             let custody = retained.as_mut().ok_or(cgrp::Error::Unavailable)?;
-            let storage = custody.vault.storage().clone();
-            let store = storage.lock().await;
-            custody
-                .check_scope(&store)
+            // The locator of this member's own certified lineage record:
+            // read-only, never secret material.
+            let handle = custody
+                .vault
+                .keys()
+                .export_lineage_read_capability()
                 .await
-                .map_err(|_| cgrp::Error::Authority)?;
-            let journal = custody
-                .inbox
-                .contacts(&store)
-                .map_err(|_| cgrp::Error::Unavailable)?;
-            let mut found = BTreeMap::new();
-            for member in members {
-                if let Some(handle) = journal
-                    .handle(member)
-                    .map_err(|_| cgrp::Error::Unavailable)?
-                {
-                    found.insert(member.clone(), handle);
-                }
-            }
-            Ok(found)
+                .map_err(|_| cgrp::Error::Authority)?
+                .as_bytes()
+                .to_vec();
+            self.open()?;
+            Ok(handle)
         })
     }
     fn provide_handles(&mut self, handles: BTreeMap<String, Vec<u8>>) {

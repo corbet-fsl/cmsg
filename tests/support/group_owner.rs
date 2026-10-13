@@ -21,6 +21,7 @@ fn consent(member: &str, now: u64) -> Consent {
         profile_visibility: false,
         valid_until: now + 600,
         key_package: vec![],
+        lineage_handle: vec![],
         signature: vec![],
         authority: vec![],
     }

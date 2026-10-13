@@ -131,7 +131,7 @@ fn router() -> Arc<Router> {
             cmmr::Scope::new(COMMUNITY, "boot").unwrap(),
             cmmr::Limits {
                 records: 8,
-                value_bytes: 4_000_000,
+                value_bytes: 1_000_000,
                 batch: 8,
                 indexes_per_record: 1,
                 page: 8,
@@ -361,25 +361,67 @@ async fn standing(owner: &ProfileOwner) -> (BTreeSet<String>, u64) {
     (members, epoch)
 }
 
-/// The member of the room: it holds the standing room alone.
+/// The unix seconds the owners themselves read.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// The member of the room. A public room needs at least three founding members
+/// who each consent for themselves; the other two only lend their consent and
+/// key package (their devices are not part of the scene afterwards). Fixture
+/// only: the product has no seed rooms, a room grows out of a group.
 async fn founder(directory: &Directory) -> ProfileOwner {
     let mut founder = owner("a", 31, directory).await;
     let id = member_id("a");
-    let groups = founder.groups.as_mut().unwrap();
     let policy = policy_at();
-    let proposal = cbrd::propose_group_command(
+    let others = [("x", 34u8), ("y", 35u8)];
+    let mut members = BTreeSet::from([id]);
+    let mut lenders = vec![];
+    for (letter, prf) in others {
+        let lender = owner(letter, prf, directory).await;
+        let (lineage, handle) = own_lineage(&lender).await;
+        directory.0.borrow_mut().insert(handle, lineage);
+        members.insert(member_id(letter));
+        lenders.push((member_id(letter), lender));
+    }
+    let groups = founder.groups.as_mut().unwrap();
+    let mut proposal = cbrd::propose_group_command(
         groups,
         &policy,
         cgrp::Command::Create {
             id: GROUP,
-            members: BTreeSet::from([id]),
+            members,
             seed: true,
         },
         true,
     )
     .await
     .unwrap();
-    cbrd::commit_group_proposal(groups, &policy, &proposal, 10)
+    // Each lender answers for itself over an invitation built from the exact
+    // request (a conversation is not part of this scene).
+    let mut open = proposal.request().clone();
+    open.consents.clear();
+    for (member, lender) in &mut lenders {
+        let invitation = cbrd::Invitation::from_bytes(
+            &serde_json::to_vec(&serde_json::json!({
+                "request": open,
+                "community": COMMUNITY,
+                "epoch": 1,
+                "member": member,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let reply = invitation
+            .answer(lender.groups.as_mut().unwrap(), true, true)
+            .await
+            .unwrap();
+        proposal.admit(member, reply, unix_now()).unwrap();
+    }
+    cbrd::commit_group_proposal(founder.groups.as_mut().unwrap(), &policy, &proposal, 10)
         .await
         .unwrap();
     founder
@@ -494,7 +536,7 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
     assert_eq!(admitted.len(), 1);
     assert!(admitted[0].is_err());
     let (members, epoch) = standing(&member).await;
-    assert_eq!(members, BTreeSet::from([member_id("a")]));
+    assert_eq!(members.len(), 3);
     assert_eq!(epoch, epoch_before);
 
     // The stranger that supplies the handle of its OWN record is admitted.
@@ -517,7 +559,7 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
     joined.unwrap();
     assert_eq!(admitted.len(), 1);
     admitted[0].as_ref().unwrap();
-    let both = BTreeSet::from([member_id("a"), member_id("b")]);
+    let both = BTreeSet::from([member_id("a"), member_id("x"), member_id("y"), member_id("b")]);
     let (joiner_members, joiner_epoch) = standing(&joiner).await;
     let (member_members, member_epoch) = standing(&member).await;
     assert_eq!(joiner_members, both);
