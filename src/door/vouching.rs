@@ -821,6 +821,20 @@ pub(super) async fn vouched_by(
     ))
 }
 
+/// The newcomer's received endorsement in wire form, for the profile's system
+/// field. Only visible-mode admissions ever leave one in custody, so this is
+/// `None` for everyone else and the profile never gains the field retroactively.
+pub(super) async fn endorsement_wire(door: &mut Door, origin: &str) -> Option<Vec<u8>> {
+    let loaded = load(door, origin).await.ok()?;
+    let have = loaded.book.received.first()?;
+    let device: [u8; 32] = from_hex(&have.device)?.try_into().ok()?;
+    let signature: [u8; 64] = from_hex(&have.signature)?.try_into().ok()?;
+    cvch::link::Endorsement::new(&have.handle, device, signature)
+        .ok()?
+        .to_bytes()
+        .ok()
+}
+
 /// Issue a link: generate it on this device, keep it in custody, then register
 /// only its hashes with the community.
 pub(super) async fn link_create(
