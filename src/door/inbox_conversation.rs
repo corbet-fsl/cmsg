@@ -5,10 +5,11 @@
 //! wires returned here are already durable and go to the Mesh unchanged.
 //!
 //! A conversation opened by a Claimed Answer is Pending in Contacts until the
-//! settled Answer upgrades it. The authority used here accepts Established
-//! contacts only, so sending and receiving in a Pending conversation wait for
-//! the settled Answer (DEVIATION recorded in the Inbox RESULT: a claim-aware
-//! authority would make that wait invisible but is authority-bearing).
+//! settled Answer upgrades it. While this member's own Answer is Claimed in the
+//! Waves journal the recipient may SEND at once (claim-aware authority); a
+//! reverted claim leaves the durable messages pending until the settled Answer
+//! or a fresh claim. Receiving always waits for Established, so the sender's
+//! device shows nothing before it has verified the Answer proof.
 use super::inbox_waves::engine::{inbox_error, Devices, Env};
 use super::*;
 use ckmg::{Authority, Clock, Entropy, SecureStore};
@@ -123,16 +124,25 @@ where
     async fn chat_send(&mut self, request: ConversationSend) -> Result<Sent> {
         self.refuse_blocked(&request.peer)?;
         let contacts = self.contacts_journal()?;
-        let view = self
+        let claim = self.claim_for(&request.peer, &request.conversation)?;
+        let mut view = self
             .inbox
             .view(request.conversation, self.store)
             .map_err(inbox_error)?;
+        if let Some(claim) = &claim {
+            view = view.with_claim(claim.clone());
+        }
         let (mut for_authority, mut for_keys, mut for_commit) = (
             self.peers().await?,
             self.peers().await?,
             self.peers().await?,
         );
-        let mut authority = cnbx::ContactAuthority::new(&contacts, &mut for_authority);
+        let mut authority = match &claim {
+            Some(claim) => {
+                cnbx::ContactAuthority::with_claim(&contacts, &mut for_authority, claim)
+            }
+            None => cnbx::ContactAuthority::new(&contacts, &mut for_authority),
+        };
         let published = {
             let mut port = cnbx::KeyPort {
                 keys: self.keys,
@@ -294,10 +304,13 @@ where
 
     async fn chat_retry(&mut self, request: ConversationRetry) -> Result<Retried> {
         self.refuse_blocked(&request.peer)?;
-        let view = self
+        let mut view = self
             .inbox
             .view(request.conversation, self.store)
             .map_err(inbox_error)?;
+        if let Some(claim) = self.claim_for(&request.peer, &request.conversation)? {
+            view = view.with_claim(claim);
+        }
         let mut devices = self.peers().await?;
         let wire = view
             .retry(&request.message, &mut devices)

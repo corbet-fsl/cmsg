@@ -1,10 +1,12 @@
 //! Bound actual owner facades. Type erasure here preserves their own methods;
 //! no generic accepting domain driver or caller-supplied success is exposed.
 use super::*;
+mod group_custody;
 mod inbox_custody;
 mod profile_custody;
 mod shared;
 use cbrd::clnk;
+pub use group_custody::{GroupPeers, VaultGroupOwner};
 pub use shared::VaultBoardOwner;
 use std::{future::Future, pin::Pin};
 

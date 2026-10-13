@@ -1454,7 +1454,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#f3d917f0d3f30b729ae2fb154ca84d390aafe991"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#a94dcdf274ca31d6ff6946d77dd3adb9b251a16c"
 dependencies = [
  "blake3",
  "cchr",
@@ -1526,7 +1526,7 @@ dependencies = [
 [[package]]
 name = "cdlv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=v01#13735ae68d7fa475c40b4342568edf8b9bf46e5e"
+source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=v01#3f420442bc10d31dfd461216f2589b7ab3624168"
 dependencies = [
  "ckmg",
  "ctcs",
@@ -1635,7 +1635,7 @@ dependencies = [
 [[package]]
 name = "cgrp"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=v01#4a48771e24ae6b7c5856153dd27c09d6cfc00d46"
+source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=v01#d222dce4d04a2e5ac9fbd6092dc7da16429f2574"
 dependencies = [
  "ckmg",
  "cmbl",
@@ -1967,6 +1967,7 @@ dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
  "gloo-timers 0.3.0",
+ "hpke",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -2008,7 +2009,7 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=v01#60d7d4e9b9bf12aecfc476065928fb496f18d001"
+source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=v01#aad117bf59d76fa8e512f6f7af2c639127c59b0d"
 dependencies = [
  "cdlv",
  "cgrp",
@@ -2609,7 +2610,7 @@ dependencies = [
 [[package]]
 name = "ctnd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctnd.git?branch=v01#722897fadf66102f86022c41b9373441bcc3718c"
+source = "git+https://git.corbet.ch/corbet-foss/ctnd.git?branch=v01#dd5eed917533dbd7da44d280786cec19f7060cbc"
 dependencies = [
  "cgrp",
  "schemars 1.2.2",
@@ -3176,7 +3177,7 @@ checksum = "ba91f619216e76a5eb2515783f7ec2e271938b51aadac592f4930517f4626863"
 dependencies = [
  "heck 0.5.0",
  "indexmap 2.14.2",
- "itertools 0.15.0",
+ "itertools 0.13.0",
  "proc-macro-crate",
  "proc-macro2",
  "quote",

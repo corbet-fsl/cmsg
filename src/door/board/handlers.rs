@@ -113,6 +113,14 @@ pub(super) struct OwnedBoard<T, R, O> {
     // attendance attempt is fenced and requires owner reconciliation, not retry.
     attendance_pending: bool,
     desk: GroupDesk,
+    desk_loaded: bool,
+}
+
+/// The durable form of the desk, kept by the owner in its encrypted records.
+#[derive(Default, Serialize, Deserialize)]
+struct DeskRecord {
+    proposals: Vec<cbrd::GroupProposal>,
+    invitations: Vec<cbrd::Invitation>,
 }
 
 /// Group proposals this member made and invitations awaiting this member's own
@@ -193,6 +201,7 @@ impl Door {
                 current,
                 attendance_pending: false,
                 desk: GroupDesk::default(),
+                desk_loaded: false,
             }),
         );
         Ok(())
@@ -510,6 +519,41 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
         Ok(cbrd::PolicyAt::new(&community, projected))
     }
 
+    /// Read the durable desk once per binding; a restart keeps every pending
+    /// invitation and proposal until its own expiry.
+    async fn load_desk(&mut self) -> Result<()> {
+        if self.desk_loaded {
+            return Ok(());
+        }
+        let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+        if let Some(bytes) = owner.desk_load().await.map_err(group_error)? {
+            let record: DeskRecord =
+                serde_json::from_slice(&bytes).map_err(|_| ErrorCode::Reconcile)?;
+            self.desk.proposals = record
+                .proposals
+                .into_iter()
+                .map(|p| (p.operation(), p))
+                .collect();
+            self.desk.invitations = record
+                .invitations
+                .into_iter()
+                .map(|i| (i.operation(), i))
+                .collect();
+        }
+        self.desk_loaded = true;
+        Ok(())
+    }
+
+    async fn save_desk(&mut self) -> Result<()> {
+        let record = DeskRecord {
+            proposals: self.desk.proposals.values().cloned().collect(),
+            invitations: self.desk.invitations.values().cloned().collect(),
+        };
+        let bytes = serde_json::to_vec(&record).map_err(|_| ErrorCode::Reconcile)?;
+        let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+        owner.desk_save(&bytes).await.map_err(group_error)
+    }
+
     fn group_clock(&mut self) -> Result<u64> {
         self.owner
             .groups()
@@ -656,6 +700,7 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
             if self.owner.groups().is_none() {
                 return Err(ErrorCode::Unavailable);
             }
+            self.load_desk().await?;
             let now = self.group_clock()?;
             self.prune_group_desk(now);
             if self.desk.proposals.len() >= MAX_PENDING_GROUP {
@@ -671,6 +716,7 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
             if proposal.complete() {
                 self.desk.proposals.insert(operation, proposal);
                 let views = self.commit_proposal(operation, expires).await?;
+                self.save_desk().await?;
                 return Ok(GroupProposed {
                     operation,
                     invitations: vec![],
@@ -687,6 +733,7 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
                 })
                 .collect();
             self.desk.proposals.insert(operation, proposal);
+            self.save_desk().await?;
             Ok(GroupProposed {
                 operation,
                 invitations,
@@ -705,6 +752,7 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
             if self.owner.groups().is_none() {
                 return Err(ErrorCode::Unavailable);
             }
+            self.load_desk().await?;
             let now = self.group_clock()?;
             self.prune_group_desk(now);
             let message = cbrd::GroupMessage::from_text(&text).map_err(group_error)?;
@@ -723,6 +771,7 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
                 let operation = invitation.operation();
                 let actor = invitation.actor().to_owned();
                 self.desk.invitations.insert(operation, invitation);
+                self.save_desk().await?;
                 return Ok(GroupInbound::Invitation {
                     operation,
                     actor,
@@ -743,15 +792,19 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
             proposal.admit(&from, message, now).map_err(group_error)?;
             if proposal.declined() {
                 self.desk.proposals.remove(&operation);
+                self.save_desk().await?;
                 return Ok(GroupInbound::Declined { operation });
             }
             if proposal.complete() {
                 let views = self.commit_proposal(operation, expires).await?;
+                self.save_desk().await?;
                 return Ok(GroupInbound::Committed { operation, views });
             }
+            let awaiting = proposal.awaiting().iter().cloned().collect();
+            self.save_desk().await?;
             Ok(GroupInbound::Waiting {
                 operation,
-                awaiting: proposal.awaiting().iter().cloned().collect(),
+                awaiting,
             })
         })
     }
@@ -764,6 +817,7 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
     ) -> OwnedFuture<'_, GroupAnswered> {
         Box::pin(async move {
             self.idle()?;
+            self.load_desk().await?;
             let now = self.group_clock()?;
             self.prune_group_desk(now);
             let invitation = self
@@ -776,6 +830,7 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
                 .answer(owner, accept, visible)
                 .await
                 .map_err(group_error)?;
+            self.save_desk().await?;
             Ok(GroupAnswered {
                 actor: invitation.actor().to_owned(),
                 text: message.to_text().map_err(group_error)?,
