@@ -33,13 +33,12 @@ async fn garden_session(service: &Running, scope: &str, member: &mut Member) {
     .await;
 }
 
-/// Found `scope` for real: its first Root member prepares an original creation
-/// recipient, the Global Root operator initializes the community through the
-/// public action, and the member redeems the signed invitation with every
-/// configured admission gate. No library hook or role setter is involved.
+/// Found `scope` for real: the launcher arms a one-time creator claim, the first
+/// member claims the seat through the public action and redeems the creation id
+/// with every configured admission gate. No library hook or role setter is involved.
 async fn found(
-    wallet: &Running,
-    operator: &Member,
+    _wallet: &Running,
+    _operator: &Member,
     service: &Running,
     scope: &str,
     holder: &cpsd::OpaqueHolder,
@@ -52,27 +51,17 @@ async fn found(
     api.call("handle_reserve", json!({"handle":handle}))
         .await
         .unwrap();
-    let recipient = api
-        .call(
-            "community_creation_recipient",
-            json!({"id":null,"expires_at":NOW + 300,"purpose":"root"}),
-        )
+    // The launcher arms a one-time creator claim; the member claims the first seat.
+    let secret = b"fixture-creation-claim-secret!!".to_vec();
+    service
+        .door
+        .arm_creation(&secret, NOW + 300)
         .await
         .unwrap();
-    let invitation = match client(wallet, ROOT, Some(&operator.session))
-        .call(
-            "community_creation_initialize",
-            json!({"community":scope,"recipient":recipient["recipient"]}),
-        )
+    let claimed = api
+        .call("community_creation_claim", json!({ "claim": secret }))
         .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            // Test-side diagnosis only: the real HTTP-level refusal for this founding.
-            eprintln!("founding {scope} refused: {error:?}");
-            panic!("founding refused");
-        }
-    };
+        .unwrap();
     let pseudonym = holder
         .pseudonym(&cpsd::CommunityId::new(scope).unwrap())
         .to_hex();
@@ -89,7 +78,7 @@ async fn found(
                 "credential_issue",
                 json!({
                     "presentation":presentation,"devices":[member.signing_key],
-                    "creation":invitation["invitation"]
+                    "creation":claimed["id"]
                 }),
             )
             .await
@@ -305,7 +294,6 @@ async fn root_member(
 ) -> Member {
     let host = format!("api.{scope}.example.test");
     // Link before any member session exists: the link changes the target's state.
-    wallet.door.link_community_creation(&service.door).await.unwrap();
     let presentation = proof(service, scope, holder, None).await;
     let ceremony: Ceremony = serde_json::from_value(
         client(service, &host, None)
