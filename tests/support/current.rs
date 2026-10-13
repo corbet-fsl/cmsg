@@ -144,12 +144,7 @@ impl PublicFeed {
         .unwrap();
         trust.start(|| now).await.unwrap();
         foyer::Foyer::with_trust(
-            foyer::Transport::new(
-                "https://keyhole.example.test".into(),
-                "keyhole.example.test".into(),
-                None,
-            )
-            .unwrap(),
+            foyer::fixture_transport("https://keyhole.example.test", "keyhole.example.test"),
             trust,
         )
     }

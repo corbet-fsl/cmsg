@@ -45,8 +45,17 @@ esac
 node tools/client-conformance.mjs "$conformance_bin"
 CMSG_LAST_GATE="native-clippy"
 cargo clippy --locked --all-targets --keep-going -- -D warnings
+CMSG_LAST_GATE="ohttp-feature"
+# The Oblivious HTTP feature has its own test set (the integration targets do
+# not run through the gateway transport). The key-selection target must pass;
+# the lib result is held until the full native run has reported as well.
+cargo clippy --locked --features ohttp --lib --test ohttp_keys -- -D warnings
+cargo test --locked --features ohttp --test ohttp_keys
+ohttp_lib=0
+cargo test --locked --features ohttp --lib || ohttp_lib=$?
 CMSG_LAST_GATE="native-tests"
 cargo test --locked --all-targets
+test "$ohttp_lib" -eq 0 || { echo "ohttp lib tests failed: $ohttp_lib" >&2; exit "$ohttp_lib"; }
 command -v wasm-pack >/dev/null || { echo 'missing wasm-pack' >&2; exit 2; }
 CMSG_LAST_GATE="wasm-pack"
 wasm-pack test --headless --chrome -- --locked

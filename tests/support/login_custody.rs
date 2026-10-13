@@ -31,14 +31,10 @@ async fn fixture() -> Value {
 }
 fn client(fixture: &Value) -> foyer::Foyer<foyer::Transport> {
     let row = &fixture["vault"];
-    foyer::Foyer::new(
-        foyer::Transport::new(
-            row["base"].as_str().unwrap().into(),
-            row["host"].as_str().unwrap().into(),
-            None,
-        )
-        .unwrap(),
-    )
+    foyer::Foyer::new(foyer::fixture_transport(
+        row["base"].as_str().unwrap(),
+        row["host"].as_str().unwrap(),
+    ))
 }
 fn door(fixture: &Value, role: Role, scope: foyer::Scope, now: u64) -> (Door, ClientToken) {
     let mut door = Door::new(
@@ -131,12 +127,8 @@ async fn actual_login_custody_is_consumed_once_with_local_and_original_session_r
         .into_parts();
     drop(registration_unlock);
     let row = &fixture["vault"];
-    let mut registration_transport = foyer::Transport::new(
-        row["base"].as_str().unwrap().into(),
-        row["host"].as_str().unwrap().into(),
-        None,
-    )
-    .unwrap();
+    let mut registration_transport =
+        foyer::fixture_transport(row["base"].as_str().unwrap(), row["host"].as_str().unwrap());
     registration_transport
         .send(
             "/v1/register_finish",

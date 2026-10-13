@@ -158,3 +158,22 @@ impl Post for ReqwestPost {
         })
     }
 }
+
+/// Endpoint with one placeholder key for fixtures whose transport is never used.
+#[cfg(test)]
+pub(crate) fn fixture_endpoint() -> OhttpEndpoint {
+    let mut config = vec![1, 0x00, 0x20];
+    config.extend([2; 32]);
+    config.extend([0x00, 0x04, 0x00, 0x01, 0x00, 0x03]);
+    OhttpEndpoint {
+        relay: "https://relay.example.test".into(),
+        keys: vec![OhttpKey {
+            service: "fixture.example.test".into(),
+            key_id: 1,
+            config,
+            not_before: 0,
+            not_after: u64::MAX,
+        }],
+        feed: Arc::default(),
+    }
+}

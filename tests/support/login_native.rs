@@ -12,14 +12,10 @@ fn pending_door(now: u64) -> (Door, [u8; 32]) {
         .unwrap(),
     );
     // This transport is never called. Only the real local lifecycle is under test.
-    let client = foyer::Foyer::new(
-        foyer::Transport::new(
-            "https://alpha.example.test".into(),
-            "alpha.example.test".into(),
-            None,
-        )
-        .unwrap(),
-    );
+    let client = foyer::Foyer::new(foyer::fixture_transport(
+        "https://alpha.example.test",
+        "alpha.example.test",
+    ));
     door.bind_foyer(
         ORIGIN,
         Role::Member,
@@ -156,10 +152,10 @@ async fn unknown_session_result_and_cancelled_reply_fence_original_foyer() {
             )
             .unwrap(),
         );
-        let client = foyer::Foyer::new(
-            foyer::Transport::new(base.into(), fault["host"].as_str().unwrap().into(), None)
-                .unwrap(),
-        );
+        let client = foyer::Foyer::new(foyer::fixture_transport(
+            base,
+            fault["host"].as_str().unwrap(),
+        ));
         door.bind_foyer(
             ORIGIN,
             Role::Member,

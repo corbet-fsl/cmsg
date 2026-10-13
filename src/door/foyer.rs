@@ -11,6 +11,23 @@ pub use cfyr::BrowserClient as Transport;
 #[cfg(all(not(feature = "ohttp"), not(target_arch = "wasm32")))]
 pub use cfyr::HttpClient as Transport;
 
+/// Transport of a test fixture host. With `ohttp` the relay is a placeholder
+/// that is never reached: tests needing a live owner world do not run there.
+#[cfg(all(test, not(feature = "ohttp")))]
+pub(crate) fn fixture_transport(base: &str, host: &str) -> Transport {
+    Transport::new(base.into(), host.into(), None).unwrap()
+}
+
+#[cfg(all(test, feature = "ohttp"))]
+pub(crate) fn fixture_transport(_base: &str, host: &str) -> Transport {
+    Transport::new(
+        super::ohttp::fixture_endpoint().wire(host).unwrap(),
+        host.into(),
+        None,
+    )
+    .unwrap()
+}
+
 /// A service scope selected by the trusted embedding, never by request JSON.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, JsonSchema,
