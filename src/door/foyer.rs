@@ -123,7 +123,9 @@ const OWNED_BY_ACCOUNT_LIFECYCLE: [&str; 8] = [
 /// secrets (`vouching`): the raw owner operations are used internally but are not
 /// republished, because a forwarded call would bypass the Vault (link secrets,
 /// notices, bonds) and could never be completed correctly by a frontend.
-const DEVICE_VOUCHER: [&str; 6] = [
+const DEVICE_VOUCHER: [&str; 8] = [
+    "voucher_reply_post",
+    "voucher_reply_get",
     "voucher_link_create",
     "voucher_link_view",
     "voucher_link_revoke",

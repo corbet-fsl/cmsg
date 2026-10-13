@@ -20,7 +20,7 @@ use inbox_waves::{
 };
 use vouching::{
     link_create as voucher_link_create, link_revoke as voucher_link_revoke, links as voucher_links,
-    signoff_decide as voucher_signoff_decide, signoff_list as voucher_signoff_list,
+    signoff_decide as voucher_signoff_decide, vouched_by as voucher_vouched_by, signoff_list as voucher_signoff_list,
 };
 use login::{cancel as login_cancel, poll as login_poll, start as login_start};
 
@@ -428,6 +428,7 @@ actions! {
     "foyer.voucher_link_revoke" => voucher_link_revoke(vouching::LinkRef) -> vouching::LinkRevoked, VaultAccess, Foyer;
     "foyer.voucher_signoff_list" => voucher_signoff_list(Empty) -> vouching::Applicants, VaultAccess, Foyer;
     "foyer.voucher_signoff_decide" => voucher_signoff_decide(vouching::Decide) -> vouching::Decided, VaultAccess, Foyer;
+    "foyer.voucher_vouched_by" => voucher_vouched_by(Empty) -> vouching::VouchedBy, VaultAccess, Foyer;
     "login.start" => login_start(super::login::Start) -> super::login::Status, LocalBootstrap, Foyer;
     "login.poll" => login_poll(super::login::Poll) -> super::login::Status, LocalBootstrap, Foyer;
     "login.cancel" => login_cancel(super::login::Cancel) -> super::login::Status, LocalBootstrap, Foyer;
