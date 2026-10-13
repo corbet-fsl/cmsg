@@ -51,6 +51,16 @@ pub fn prove(
             .ok_or(ErrorCode::InvalidRequest)?,
     )
     .map_err(|_| ErrorCode::InvalidRequest)?;
+    // The values of the community's rulebook as the hub resolved them; the engine
+    // refuses the proof unless their digest is the extension policy's.
+    let values: std::collections::BTreeMap<String, Value> = serde_json::from_value(
+        terms
+            .get("standing")
+            .cloned()
+            .ok_or(ErrorCode::InvalidRequest)?,
+    )
+    .map_err(|_| ErrorCode::InvalidRequest)?;
+    let standing = crbk::standing_params(&values).map_err(|_| ErrorCode::InvalidRequest)?;
     let observed = terms
         .get("observed_at")
         .and_then(Value::as_u64)
@@ -61,7 +71,7 @@ pub fn prove(
             community_id: address.to_owned(),
             policy: engine_account_policy(&account),
             extension: engine_extension_policy(&extension),
-            standing: czkp::standing::Params::default(),
+            standing,
             checked_at: observed,
         },
     )

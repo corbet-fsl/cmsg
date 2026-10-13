@@ -78,10 +78,10 @@ fn context(
         owner: member,
         policy: engine_account_policy(policy),
         extension: engine_extension_policy(extension),
-        // The rulebook parameters the community's published digest names. The engine
-        // refuses the genesis unless their digest equals `extension.standing`, so a
-        // community that tuned them differently is refused, never silently accepted.
-        standing: czkp::standing::Params::default(),
+        // The parameters of the community's verified rulebook. The engine refuses the
+        // genesis unless their digest equals `extension.standing`, so a community that
+        // tuned them differently is refused, never silently accepted.
+        standing: current.standing,
         // DEBT (asked of sonnet-vacct3): the sponsor bond is not handed in yet; the
         // vouchee device holds the secret in custody but not the sponsor's member id.
         bond: None,

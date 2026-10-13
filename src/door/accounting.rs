@@ -64,6 +64,9 @@ pub struct PreparedEnrollment<'p> {
 
 struct CurrentAdmission {
     material: cblc::publication::PublicVerifierMaterial,
+    /// The standing and voucher parameters of the same verified rulebook; the engine
+    /// refuses a genesis unless their digest is the material's published one.
+    standing: czkp::standing::Params,
     material_digest: [u8; 32],
     trust: admission::AdmissionTrust,
     grant: admission::AdmissionGrant,
@@ -255,7 +258,13 @@ impl AccountAdmission<'_> {
                     if checked >= expires {
                         return Err(ErrorCode::Unauthorized);
                     }
+                    let standing = current
+                        .settings(checked)
+                        .map_err(|_| ErrorCode::Unauthorized)?
+                        .standing_params()
+                        .map_err(|_| ErrorCode::Unauthorized)?;
                     Ok(CurrentAdmission {
+                        standing,
                         material_digest: Sha256::digest(balance.payload()).into(),
                         material,
                         trust,
