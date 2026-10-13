@@ -106,6 +106,9 @@ pub(super) enum Command {
     Activate,
     /// Pass the community's gates (submitting the voucher when one is needed).
     Join(JoinRequest),
+    /// Remember the creation id of the claim this member made; the next admission
+    /// presents it. Carries the id only, which is bound to the claimed member.
+    Creation(String),
 }
 
 /// Typed answer of one command.
@@ -120,6 +123,8 @@ pub(super) enum Answer {
     Reopened(Opened),
     Activated(Activation),
     Gate(Gate),
+    /// The creation id was noted for the next admission.
+    Noted,
 }
 
 macro_rules! accessor {
@@ -200,6 +205,7 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
                 ready: true,
                 steps: Vec::new(),
             }),
+            Command::Creation(_) => Answer::Noted,
         });
     }
     match command {
@@ -287,6 +293,7 @@ pub use run::{bind_native_account, AccountParts};
 
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 mod run {
+    use super::super::vouching::Book;
     use super::super::{
         accounting::{
             existing_active, has_pending, issue_account_admission, AccountAdmission,
@@ -298,7 +305,6 @@ mod run {
         foyer::{map_error, Transport},
         passport::GlobalPassport,
     };
-    use super::super::vouching::Book;
     use super::*;
     use ckmg::{Authority, Clock, Entropy};
     use cvlt::Records;
@@ -533,6 +539,7 @@ mod run {
         global: &mut GlobalPassport<B, C, E, A, R>,
         device: [u8; 32],
         rng: &mut G,
+        creation: Option<&str>,
     ) -> Result<AccountAdmission<'p>>
     where
         B: cwst::backend::Backend,
@@ -550,7 +557,7 @@ mod run {
             .account_challenge(policy, clock)
             .await
             .map_err(|_| ErrorCode::Reconcile)?;
-        issue_account_admission(challenge, global, device, rng).await
+        issue_account_admission(challenge, global, device, rng, creation).await
     }
 
     async fn run<B, C, E, A, R, G>(
@@ -576,11 +583,17 @@ mod run {
             prover,
         } = parts;
         let mut carried = None;
+        let mut creation: Option<String> = None;
         loop {
             let first = match carried.take() {
                 Some(command) => command,
                 None => mailbox.next().await,
             };
+            if let Command::Creation(id) = &first {
+                creation = Some(id.clone());
+                mailbox.reply(Ok(Answer::Noted));
+                continue;
+            }
             if let Command::Join(join) = &first {
                 // The gates come before any admission: an active account is
                 // already through them, otherwise the lobby decides.
@@ -593,14 +606,22 @@ mod run {
                 mailbox.reply(reply);
                 continue;
             }
-            let admission =
-                match admit(&mut membership, &mut policy, &mut global, device, &mut rng).await {
-                    Ok(admission) => admission,
-                    Err(error) => {
-                        mailbox.reply(Err(error));
-                        continue;
-                    }
-                };
+            let admission = match admit(
+                &mut membership,
+                &mut policy,
+                &mut global,
+                device,
+                &mut rng,
+                creation.as_deref(),
+            )
+            .await
+            {
+                Ok(admission) => admission,
+                Err(error) => {
+                    mailbox.reply(Err(error));
+                    continue;
+                }
+            };
             // The credential issued with this admission is kept in the Vault
             // before anything else uses the admission; the same one is a no-op.
             if let Err(error) = account
@@ -628,6 +649,10 @@ mod run {
                         break;
                     }
                     Next::Restart => {
+                        // The creation id has done its work once the account is active.
+                        if matches!(reply, Ok(Answer::Activated(_))) {
+                            creation = None;
+                        }
                         mailbox.reply(reply);
                         break;
                     }
@@ -750,7 +775,7 @@ mod run {
                     Err(error) => (Err(error), Next::Restart),
                 }
             }
-            Command::Join(_) => (Err(ErrorCode::Unavailable), Next::Carry),
+            Command::Join(_) | Command::Creation(_) => (Err(ErrorCode::Unavailable), Next::Carry),
             Command::Activate => {
                 let Some(admission) = stage.admission() else {
                     return (Err(ErrorCode::Unavailable), Next::Carry);

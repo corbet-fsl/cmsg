@@ -19,6 +19,7 @@ use inbox_waves::{
     wave_outbox as inbox_wave_outbox, wave_punish as inbox_wave_punish,
     wave_receive as inbox_wave_receive, wave_send as inbox_wave_send, waves as inbox_waves_list,
 };
+use creating::{community_create, community_creation_claim};
 use vouching::{
     link_create as voucher_link_create, link_revoke as voucher_link_revoke, links as voucher_links,
     signoff_decide as voucher_signoff_decide, signoff_list as voucher_signoff_list,
@@ -209,7 +210,7 @@ async fn vault_lock(door: &mut Door, key: &[u8; 32], _: Empty) -> Result<(Empty,
 
 /// Serve one account action through the origin's actor. An actor past its
 /// grant, finished or fenced is dropped here, never reused.
-async fn account_call(
+pub(super) async fn account_call(
     door: &mut Door,
     key: &[u8; 32],
     command: account::Command,
@@ -427,6 +428,8 @@ actions! {
     "account_reopen" => account_reopen(Empty) -> account::Opened, VaultAccess, Vault;
     "account_activate" => account_activate(Empty) -> account::Activation, VaultAccess, Vault;
     "community_join" => community_join(account::JoinRequest) -> account::Joined, VaultAccess, Vault;
+    "foyer.community_create" => community_create(creating::Create) -> creating::Created, VaultAccess, Foyer;
+    "foyer.community_creation_claim" => community_creation_claim(creating::Claim) -> creating::Claimed, VaultAccess, Foyer;
     "foyer.voucher_link_create" => voucher_link_create(vouching::LinkCreate) -> vouching::LinkInfo, VaultAccess, Foyer;
     "foyer.voucher_links" => voucher_links(Empty) -> vouching::Links, VaultAccess, Foyer;
     "foyer.voucher_link_revoke" => voucher_link_revoke(vouching::LinkRef) -> vouching::LinkRevoked, VaultAccess, Foyer;

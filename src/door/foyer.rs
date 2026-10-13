@@ -43,6 +43,9 @@ pub enum Scope {
 pub struct Sessions {
     pub(super) primary: Scope,
     pub(super) clients: BTreeMap<Scope, cfyr::Foyer<Transport>>,
+    /// The global service without any session, for calls that must not be linked
+    /// to the member (redeeming a creation token).
+    pub(super) public: Option<cfyr::Foyer<Transport>>,
     /// Key feed of the community service's Oblivious HTTP endpoint.
     #[cfg(feature = "ohttp")]
     pub(super) feed: Option<std::sync::Arc<cblv::keys::FeedKeys>>,
@@ -54,6 +57,7 @@ impl Sessions {
         Self {
             primary,
             clients: BTreeMap::from([(primary, client)]),
+            public: None,
             #[cfg(feature = "ohttp")]
             feed: None,
         }
@@ -63,6 +67,12 @@ impl Sessions {
     #[cfg(feature = "ohttp")]
     pub fn with_feed(mut self, feed: std::sync::Arc<cblv::keys::FeedKeys>) -> Self {
         self.feed = Some(feed);
+        self
+    }
+
+    /// Attach the session-less channel to the global service.
+    pub fn with_public(mut self, client: Foyer<Transport>) -> Self {
+        self.public = Some(client);
         self
     }
 
@@ -131,6 +141,10 @@ const DEVICE_VOUCHER: [&str; 6] = [
     "voucher_signoff_decide",
     "voucher_redeem",
 ];
+
+/// Creation operations the device performs itself (`creating`): the token is held
+/// between issuance and redemption, and the redemption must not carry the session.
+const DEVICE_CREATION: [&str; 2] = ["community_create", "community_creation_claim"];
 
 static OPERATIONS: LazyLock<Vec<Operation>> = LazyLock::new(|| operations(cfyr::contract()));
 
@@ -237,17 +251,21 @@ fn inline_schema(value: &Value, document: &Value, depth: usize) -> Option<Value>
     }
 }
 
+fn is_device_owned(name: &str) -> bool {
+    DEVICE_VOUCHER.contains(&name) || DEVICE_CREATION.contains(&name)
+}
+
 pub(super) fn catalog() -> impl Iterator<Item = ActionDescription> {
     OPERATIONS
         .iter()
-        .filter(|op| !DEVICE_VOUCHER.contains(&op.name.as_str()))
+        .filter(|op| !is_device_owned(&op.name))
         .map(|op| op.description.clone())
 }
 
 pub(super) fn action(name: &str) -> Option<&'static Operation> {
     OPERATIONS
         .iter()
-        .find(|op| op.description.action == name && !DEVICE_VOUCHER.contains(&op.name.as_str()))
+        .find(|op| op.description.action == name && !is_device_owned(&op.name))
 }
 
 /// A raw owner operation by name, including those the device performs itself.
@@ -256,6 +274,29 @@ pub(super) fn owner_operation(name: &str) -> Option<&'static Operation> {
 }
 
 impl Binding {
+    /// Call a public operation of the global service on the session-less channel.
+    /// Same uncertainty latch as `call`: a lost answer is never retried silently.
+    pub async fn call_public(&mut self, name: &str, body: Value) -> Result<Value> {
+        if self.uncertain {
+            return Err(ErrorCode::Reconcile);
+        }
+        if self.role != Role::Member {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let client = self.sessions.public.as_mut().ok_or(ErrorCode::Unavailable)?;
+        self.uncertain = true;
+        let result = client.call(name, body).await.map_err(map_error);
+        if !matches!(result, Err(ErrorCode::Reconcile)) {
+            self.uncertain = false;
+        }
+        let result = result?;
+        if check_result_size(&result).is_err() {
+            self.uncertain = true;
+            return Err(ErrorCode::Reconcile);
+        }
+        Ok(result)
+    }
+
     pub async fn call(&mut self, operation: &Operation, body: Value) -> Result<Value> {
         if self.uncertain {
             return Err(ErrorCode::Reconcile);

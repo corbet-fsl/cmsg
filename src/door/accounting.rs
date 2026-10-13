@@ -84,6 +84,7 @@ pub async fn issue_account_admission<'p, B, C, E, A, R, G>(
     global: &mut super::passport::GlobalPassport<B, C, E, A, R>,
     device: [u8; 32],
     rng: &mut G,
+    creation: Option<&str>,
 ) -> Result<AccountAdmission<'p>>
 where
     B: cwst::backend::Backend,
@@ -93,6 +94,11 @@ where
     R: Records,
     G: passport::rand::RngCore + passport::rand::CryptoRng,
 {
+    // The creator of a community presents the creation id of the claim it made, so
+    // this one admission seats it as first admin; everyone else sends nothing.
+    if let Some(id) = creation {
+        challenge = challenge.with_creation(id.to_owned());
+    }
     let (proof, cohort) = global
         .with_global_passport(|holder| {
             challenge

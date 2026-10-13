@@ -155,6 +155,31 @@ pub mod records;
 #[cfg(all(target_arch = "wasm32", feature = "browser-tor"))]
 pub mod restore;
 
+/// One HTTPS (or Oblivious HTTP) transport to a configured service.
+fn open_transport(service: &Service, roots: &[Vec<u8>]) -> Result<foyer::Transport> {
+    #[cfg(feature = "ohttp")]
+    {
+        let _ = roots;
+        foyer::Transport::new(
+            service.ohttp.wire(&service.host)?,
+            service.host.clone(),
+            None,
+        )
+        .map_err(|_| ErrorCode::InvalidRequest)
+    }
+    #[cfg(all(not(feature = "ohttp"), not(target_arch = "wasm32")))]
+    {
+        foyer::Transport::with_roots(service.base.clone(), service.host.clone(), None, roots)
+            .map_err(|_| ErrorCode::InvalidRequest)
+    }
+    #[cfg(all(not(feature = "ohttp"), target_arch = "wasm32"))]
+    {
+        let _ = roots;
+        foyer::Transport::new(service.base.clone(), service.host.clone(), None)
+            .map_err(|_| ErrorCode::InvalidRequest)
+    }
+}
+
 impl Configuration {
     /// Restoring hosts retain their original Board until the same Vault can
     /// supply its committed-read/signing owner. Validate before starting custody.
@@ -223,6 +248,7 @@ impl Configuration {
         }
         let mut sessions = None;
         let mut other = None;
+        let mut public = None;
         #[cfg(feature = "ohttp")]
         let mut community_feed = None;
         for service in self.services {
@@ -234,16 +260,12 @@ impl Configuration {
                 .map_err(|_| ErrorCode::InvalidRequest)?
                 .origin()
                 .ascii_serialization();
-            #[cfg(feature = "ohttp")]
-            let transport =
-                foyer::Transport::new(service.ohttp.wire(&service.host)?, service.host, None)
-                    .map_err(|_| ErrorCode::InvalidRequest)?;
-            #[cfg(all(not(feature = "ohttp"), not(target_arch = "wasm32")))]
-            let transport = foyer::Transport::with_roots(service.base, service.host, None, roots)
-                .map_err(|_| ErrorCode::InvalidRequest)?;
-            #[cfg(all(not(feature = "ohttp"), target_arch = "wasm32"))]
-            let transport = foyer::Transport::new(service.base, service.host, None)
-                .map_err(|_| ErrorCode::InvalidRequest)?;
+            let transport = open_transport(&service, roots)?;
+            // The creation token is redeemed on a channel that never carries the
+            // member's session.
+            if service.scope == foyer::Scope::Global {
+                public = Some(foyer::Foyer::new(open_transport(&service, roots)?));
+            }
             let trust = if service.scope == trust_scope {
                 self.trust.take()
             } else {
@@ -290,6 +312,9 @@ impl Configuration {
             return Err(ErrorCode::InvalidRequest);
         }
         let mut sessions = sessions.ok_or(ErrorCode::InvalidRequest)?;
+        if let Some(client) = public {
+            sessions = sessions.with_public(client);
+        }
         if let Some((scope, client)) = other {
             sessions = sessions.with_service(scope, client)?;
         }
