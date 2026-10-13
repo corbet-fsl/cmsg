@@ -988,7 +988,14 @@ where
         .open_global_passport(network.clone(), storage.global.clone())
         .await
         .map_err(step("global passport"))?;
-    if global.with_global_passport(|_| ()).await.is_err() {
+    // A readable session is not a passport: ask the holder itself.
+    let holds = matches!(
+        global
+            .with_global_passport(|holder| holder.attributes().is_some())
+            .await,
+        Ok(true)
+    );
+    if !holds {
         let issuance = companion
             .live_global_wallet(global_origin.into())
             .observe_lease(now)
@@ -1108,6 +1115,16 @@ where
     door.set_activation_prover(std::sync::Arc::new(
         super::accounting::NativeActivationProver::new(settings.prover.clone()),
     ));
+    // The member signs in again (vault unlock) through the same Passkeys context the
+    // community credential was registered in.
+    let login = super::login::Configuration {
+        page: format!("{}/login", settings.community.passkey_origin),
+        origin: settings.community.passkey_origin.clone(),
+        relying_party: settings.community.rp_id.clone(),
+    };
+    login.context().map_err(step("login configuration"))?;
+    door.login_configuration
+        .insert(community_origin.to_owned(), login);
     Ok(door)
 }
 
