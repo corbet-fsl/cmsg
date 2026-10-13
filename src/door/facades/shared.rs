@@ -99,6 +99,33 @@ where
             .as_mut()
             .map(|groups| groups as &mut dyn cbrd::GroupOwner)
     }
+    fn join_room<'a, T, L>(
+        &'a mut self,
+        board: &'a cbrd::Board<T, L>,
+        task: super::RoomJoinTask<'a>,
+    ) -> board::OwnerFuture<'a, cbrd::cgrp::Snapshot>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            groups.join_room(board, task).await.map_err(room_error)
+        })
+    }
+    fn room_evidence<'a>(
+        &'a mut self,
+        group: cbrd::cgrp::Id,
+        policy: &'a dyn cbrd::cgrp::PolicySource,
+    ) -> board::OwnerFuture<'a, cthr::ParentEvidence> {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            groups
+                .room_evidence(group, policy)
+                .await
+                .map_err(room_error)
+        })
+    }
     fn with_current<'a, T: 'a, F>(&'a mut self, read: F) -> board::OwnerFuture<'a, T>
     where
         F: for<'read> FnOnce(board::CommittedRead<'read, B>) -> Result<T> + 'a,
@@ -531,3 +558,14 @@ impl Door {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "../../../tests/support/shared_vault.rs"]
 mod tests;
+
+/// The door's code for a room join or evidence failure; nothing of the cause
+/// beyond its class crosses the boundary.
+pub(crate) fn room_error(error: ctnd::Error) -> ErrorCode {
+    match error {
+        ctnd::Error::Invalid => ErrorCode::InvalidRequest,
+        ctnd::Error::Authority => ErrorCode::Unauthorized,
+        ctnd::Error::Unavailable => ErrorCode::Unavailable,
+        ctnd::Error::Reconcile | ctnd::Error::Storage => ErrorCode::Reconcile,
+    }
+}

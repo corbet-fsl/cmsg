@@ -136,7 +136,7 @@ pub struct GroupAnswered {
     pub text: String,
 }
 
-fn board_of<'a>(
+pub(in crate::door) fn board_of<'a>(
     door: &'a mut Door,
     key: &[u8; 32],
 ) -> Result<(&'a mut Box<dyn crate::door::facades::BoundBoard>, u64)> {
