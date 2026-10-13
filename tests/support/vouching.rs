@@ -42,7 +42,10 @@ fn record_round_trips_and_a_foreign_version_is_refused() {
         Book::decode(Some(b"{\"version\":9}")).err(),
         Some(ErrorCode::Unavailable)
     );
-    assert_eq!(Book::decode(Some(b"nope")).err(), Some(ErrorCode::Unavailable));
+    assert_eq!(
+        Book::decode(Some(b"nope")).err(),
+        Some(ErrorCode::Unavailable)
+    );
 }
 
 #[test]
@@ -104,13 +107,19 @@ fn both_devices_derive_the_same_bond() {
         member: "member-2".into(),
         notice: sealed,
     }];
-    assert!(issuer.absorb(token.id().as_str(), &liar).unwrap().is_empty());
+    assert!(issuer
+        .absorb(token.id().as_str(), &liar)
+        .unwrap()
+        .is_empty());
     // So does a notice that is not even hex.
     let junk = vec![WireEntry {
         member: "member-1".into(),
         notice: "zz".into(),
     }];
-    assert!(issuer.absorb(token.id().as_str(), &junk).unwrap().is_empty());
+    assert!(issuer
+        .absorb(token.id().as_str(), &junk)
+        .unwrap()
+        .is_empty());
     assert_eq!(
         issuer.absorb(&"0".repeat(64), &entries).err(),
         Some(ErrorCode::Refused)
@@ -171,6 +180,9 @@ fn applicant_ids_split_into_link_and_member() {
     let id = applicant_id(&link, "member-1");
     assert_eq!(split_applicant(&id), Ok((link.as_str(), "member-1")));
     assert_eq!(split_applicant("nolink"), Err(ErrorCode::InvalidRequest));
-    assert_eq!(split_applicant(&format!("{link}:")), Err(ErrorCode::InvalidRequest));
+    assert_eq!(
+        split_applicant(&format!("{link}:")),
+        Err(ErrorCode::InvalidRequest)
+    );
     assert_eq!(split_applicant("short:m"), Err(ErrorCode::InvalidRequest));
 }
