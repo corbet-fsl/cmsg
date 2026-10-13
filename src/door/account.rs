@@ -311,7 +311,6 @@ mod run {
         pub global: GlobalPassport<B, C, E, A, R>,
         pub device: [u8; 32],
         pub intents: AccountingIntents,
-        pub request_intent: ckmg::IntentAdmission,
         pub rng: G,
         pub prover: ckmg::wallet_engine::native_prover::NativeProver,
     }
@@ -475,7 +474,6 @@ mod run {
             mut global,
             device,
             mut intents,
-            mut request_intent,
             mut rng,
             prover,
         } = parts;
@@ -520,7 +518,6 @@ mod run {
                     command.clone(),
                     &mut account,
                     &mut intents,
-                    &mut request_intent,
                     &prover,
                 )
                 .await;
@@ -568,7 +565,6 @@ mod run {
         command: Command,
         account: &mut CommunityAccount<B, C, E, A, R>,
         intents: &mut AccountingIntents,
-        request_intent: &mut ckmg::IntentAdmission,
         prover: &ckmg::wallet_engine::native_prover::NativeProver,
     ) -> (Reply, Next)
     where
@@ -637,7 +633,7 @@ mod run {
                 };
                 // Whatever happens, the enrollment is consumed; recovery after a
                 // failure is `account_reopen` from the durable state.
-                let result = open(current, account, request_intent, prover).await;
+                let result = open(current, account, &mut intents.device, prover).await;
                 (
                     result.map(|at| Answer::Opened(Opened { accepted_at: at })),
                     Next::Restart,
