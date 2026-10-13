@@ -1559,7 +1559,7 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#0b89e8c97ef7bd79d8d5bc18d6b9d390b3305651"
+source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#d66ba15782ca4e9b453ff342f5f5380e61e2105d"
 dependencies = [
  "cnvy",
  "cpky",

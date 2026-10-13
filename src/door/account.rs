@@ -48,12 +48,16 @@ pub struct Activation {
 }
 
 /// Body of `community_join`. The voucher is the member's own `cvch1.` text; it is
-/// needed only while the community's lobby still asks for it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// needed only while the community's lobby still asks for it. The handle is the
+/// member's chosen community handle, reserved once (a repeat with the same handle
+/// is a no-op; a different one than already reserved is refused).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct JoinRequest {
     #[serde(default)]
     pub voucher: Option<String>,
+    #[serde(default)]
+    pub handle: Option<String>,
 }
 
 /// One input the member can still supply to an enabled gate of the community.
@@ -101,7 +105,7 @@ pub(super) enum Command {
     Reopen,
     Activate,
     /// Pass the community's gates (submitting the voucher when one is needed).
-    Join(Option<String>),
+    Join(JoinRequest),
 }
 
 /// Typed answer of one command.
@@ -390,14 +394,35 @@ mod run {
     /// decides; a voucher the lobby no longer needs is not sent.
     async fn gate(
         membership: &mut cfyr::membership::LiveMembership<Transport>,
-        voucher: Option<&str>,
+        join: &JoinRequest,
     ) -> Result<Gate> {
         let mut lease = membership
             .observe_lease(clock)
             .await
             .map_err(|_| ErrorCode::Unavailable)?;
         let mut lobby = lease.lobby(clock).await.map_err(map_error)?;
-        if let (true, Some(code)) = (lacks(&lobby), voucher) {
+        if let Some(handle) = join.handle.as_deref() {
+            match lobby.get("handle").and_then(Value::as_str) {
+                // Resumed: this handle is already the member's.
+                Some(current) if current == handle => {}
+                Some(_) => return Err(ErrorCode::Refused),
+                None => {
+                    // Malformed is InvalidRequest, taken is Refused.
+                    if !lease
+                        .handle_available(handle, clock)
+                        .await
+                        .map_err(map_error)?
+                    {
+                        return Err(ErrorCode::Refused);
+                    }
+                    lobby = lease
+                        .reserve_handle(handle, clock)
+                        .await
+                        .map_err(map_error)?;
+                }
+            }
+        }
+        if let (true, Some(code)) = (lacks(&lobby), join.voucher.as_deref()) {
             lobby = lease.submit_voucher(code, clock).await.map_err(map_error)?;
         }
         Ok(Gate {
@@ -460,14 +485,12 @@ mod run {
                 Some(command) => command,
                 None => mailbox.next().await,
             };
-            if let Command::Join(voucher) = &first {
+            if let Command::Join(join) = &first {
                 // The gates come before any admission: an active account is
                 // already through them, otherwise the lobby decides.
                 let reply = match repeat(first.clone(), &mut account).await {
                     Repeat::Answer(answer) => Ok(answer),
-                    Repeat::As(_) => gate(&mut membership, voucher.as_deref())
-                        .await
-                        .map(Answer::Gate),
+                    Repeat::As(_) => gate(&mut membership, join).await.map(Answer::Gate),
                 };
                 mailbox.reply(reply);
                 continue;
@@ -769,7 +792,10 @@ mod tests {
             Command::Open,
             Command::Reopen,
             Command::Activate,
-            Command::Join(Some("cvch1.x".into())),
+            Command::Join(JoinRequest {
+                voucher: Some("cvch1.x".into()),
+                handle: Some("h".into()),
+            }),
         ]
     }
 
@@ -857,7 +883,7 @@ mod tests {
             probes: 0,
         };
         assert_eq!(
-            block(repeat(Command::Join(None), &mut active)),
+            block(repeat(Command::Join(JoinRequest::default()), &mut active)),
             Repeat::Answer(Answer::Gate(Gate {
                 ready: true,
                 steps: Vec::new()
@@ -871,8 +897,8 @@ mod tests {
         // A durable pending request does not skip the gates: only an active
         // account does, because the lobby is the server's to answer.
         assert_eq!(
-            block(repeat(Command::Join(None), &mut fresh)),
-            Repeat::As(Command::Join(None))
+            block(repeat(Command::Join(JoinRequest::default()), &mut fresh)),
+            Repeat::As(Command::Join(JoinRequest::default()))
         );
     }
 

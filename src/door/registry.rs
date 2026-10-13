@@ -252,7 +252,7 @@ async fn account_reopen(
         vec![],
     ))
 }
-/// Join the community: pass the gates (voucher when the lobby asks for it), then
+/// Join the community: reserve the chosen handle, pass the gates (voucher when the lobby asks for it), then
 /// run the four account steps. Each step is idempotent, so a call after any
 /// interruption resumes where the durable state stands and an active account
 /// answers `active` again. Stops, without error, at the first stage that needs
@@ -269,7 +269,7 @@ async fn community_join(
     {
         return Err(ErrorCode::InvalidRequest);
     }
-    let gate = account_call(door, key, account::Command::Join(request.voucher))
+    let gate = account_call(door, key, account::Command::Join(request))
         .await?
         .gate()?;
     if !gate.ready {
