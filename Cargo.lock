@@ -1460,7 +1460,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#403fee6289874b3fa5459ef4da2b3b5918271c19"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#ef0dd9bc977f2e65674880d485e4fdcc174ae59a"
 dependencies = [
  "blake3",
  "cchr",
@@ -1477,6 +1477,7 @@ dependencies = [
  "ctnd",
  "cwst",
  "cxch",
+ "hpke",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -1573,7 +1574,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cfrm"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=v01#921fb7c96649fd94f0666b68ff80eb6737addf44"
+source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=v01#5e40e99e2f1c2a068e8f2dad4030523748d0ad72"
 dependencies = [
  "cblv",
  "crbk",
@@ -1881,7 +1882,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 [[package]]
 name = "clnk"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/clnk.git?branch=v01#b5bf410ae9f59752cc7a400df02f92499204017d"
+source = "git+https://git.corbet.ch/corbet-foss/clnk.git?branch=v01#bdbb57503cd53dd36a2f3e600f7eddc228c4cd13"
 dependencies = [
  "cfrm",
  "cmbl",
@@ -1905,7 +1906,7 @@ dependencies = [
 [[package]]
 name = "cmbl"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#1f35359af7c4874a8773ebc756579088f86131e1"
+source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=v01#a1b7c7341a50d3d19afc4b08642b8e33f466890e"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
