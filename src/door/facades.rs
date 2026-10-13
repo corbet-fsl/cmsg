@@ -108,6 +108,19 @@ pub(super) trait BoundBoard {
     fn groups(&mut self, _expires: u64) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    /// Whether this Board carries the anonymous room transport.
+    #[allow(dead_code)] // consumed by the room actions that follow
+    fn has_rooms(&self) -> bool {
+        false
+    }
+    /// One command on the room transport (Assembly only; no membership).
+    #[allow(dead_code)] // consumed by the room actions that follow
+    fn execute_room(
+        &self,
+        _command: cbrd::clnk::cmbl::Request,
+    ) -> rooms::RoomFuture<'_, cbrd::clnk::cmbl::Outcome> {
+        Box::pin(async { Err(cbrd::clnk::ErrorCode::Rejected) })
+    }
     fn status(&self) -> cbrd::Status;
     fn disconnect(&mut self) -> cbrd::Status;
     fn prepare(&mut self, request: cbrd::cfrm::Request, nonce: [u8; 16]) -> Result<cbrd::Prepared>;
@@ -123,7 +136,16 @@ pub(super) struct BoardBinding<T, R> {
     // It is never a wire result or an automatic retry instruction.
     pub(super) pending: Option<cbrd::cfrm::Request>,
 }
-impl<T: clnk::Transport, R> BoundBoard for BoardBinding<T, R> {
+impl<T: clnk::Transport, R: RoomLink> BoundBoard for BoardBinding<T, R> {
+    fn has_rooms(&self) -> bool {
+        R::ROOMS
+    }
+    fn execute_room(
+        &self,
+        command: cbrd::clnk::cmbl::Request,
+    ) -> rooms::RoomFuture<'_, cbrd::clnk::cmbl::Outcome> {
+        R::execute_room(&self.board, command)
+    }
     fn status(&self) -> cbrd::Status {
         self.board.status()
     }
@@ -485,7 +507,7 @@ impl Door {
 
     /// Bind the actual sole Board for a configured member portal. Construction
     /// itself grants neither forum attendance nor readiness.
-    pub fn bind_board<T: clnk::Transport + 'static, R: 'static>(
+    pub fn bind_board<T: clnk::Transport + 'static, R: RoomLink>(
         &mut self,
         origin: &str,
         board: cbrd::Board<T, R>,
