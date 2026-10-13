@@ -6,6 +6,16 @@ use board::{
 };
 use foyer::refresh as foyer_refresh;
 use inbox::{blocking_rules as inbox_blocking_rules, contact_act as inbox_contact_act};
+use inbox_conversation::{
+    acknowledge as inbox_ack, receive as inbox_receive, retry as inbox_retry, send as inbox_send,
+};
+use inbox_waves::{
+    wave_decide as inbox_wave_decide, wave_delivered as inbox_wave_delivered,
+    wave_job_done as inbox_wave_job_done, wave_job_next as inbox_wave_job_next,
+    wave_job_retry as inbox_wave_job_retry, wave_jobs_recover as inbox_wave_jobs_recover,
+    wave_outbox as inbox_wave_outbox, wave_punish as inbox_wave_punish,
+    wave_receive as inbox_wave_receive, wave_send as inbox_wave_send, waves as inbox_waves_list,
+};
 use login::{cancel as login_cancel, poll as login_poll, start as login_start};
 
 #[derive(
@@ -380,6 +390,21 @@ actions! {
     "inbox.delivery_status" => inbox_delivery(facades::Delivery) -> Option<cnbx::DeliveryStatus>, VaultAccess, Inbox;
     "inbox.blocking_rules" => inbox_blocking_rules(Empty) -> Vec<String>, VaultAccess, Inbox;
     "inbox.contact_act" => inbox_contact_act(inbox::ContactAct) -> cnbx::Relation, InboxRecord, Inbox;
+    "inbox.send" => inbox_send(inbox_conversation::ConversationSend) -> inbox_conversation::Sent, InboxRecord, Inbox;
+    "inbox.receive" => inbox_receive(inbox_conversation::Wired) -> inbox_conversation::Received, InboxRecord, Inbox;
+    "inbox.ack" => inbox_ack(inbox_conversation::Wired) -> inbox_conversation::Acked, InboxRecord, Inbox;
+    "inbox.retry" => inbox_retry(inbox_conversation::ConversationRetry) -> inbox_conversation::Retried, VaultAccess, Inbox;
+    "inbox.waves" => inbox_waves_list(Empty) -> inbox_waves::WaveList, VaultAccess, Inbox;
+    "inbox.wave_send" => inbox_wave_send(inbox_waves::WaveSend) -> inbox_waves::WaveStatus, InboxRecord, Inbox;
+    "inbox.wave_decide" => inbox_wave_decide(inbox_waves::WaveDecide) -> inbox_waves::WaveStatus, InboxRecord, Inbox;
+    "inbox.wave_punish" => inbox_wave_punish(inbox_waves::WavePunish) -> cnbx::Relation, InboxRecord, Inbox;
+    "inbox.wave_receive" => inbox_wave_receive(inbox_waves::WaveIncoming) -> inbox_waves::WaveStatus, InboxRecord, Inbox;
+    "inbox.wave_outbox" => inbox_wave_outbox(Empty) -> inbox_waves::Outbox, VaultAccess, Inbox;
+    "inbox.wave_delivered" => inbox_wave_delivered(inbox_waves::Delivered) -> Empty, InboxRecord, Inbox;
+    "inbox.wave_job_next" => inbox_wave_job_next(Empty) -> inbox_waves::JobOffer, InboxRecord, Inbox;
+    "inbox.wave_job_retry" => inbox_wave_job_retry(inbox_waves::JobRef) -> Empty, InboxRecord, Inbox;
+    "inbox.wave_jobs_recover" => inbox_wave_jobs_recover(Empty) -> Empty, InboxRecord, Inbox;
+    "inbox.wave_job_done" => inbox_wave_job_done(inbox_waves::JobDone) -> inbox_waves::WaveStatus, InboxRecord, Inbox;
     "mesh.status" => mesh_status(Empty) -> Vec<cmsh::BackendView>, Read, Mesh;
     "mesh.disconnect" => mesh_disconnect(Empty) -> Empty, LocalLifecycle, Mesh;
     "vault.lock" => vault_lock(Empty) -> Empty, LocalLifecycle, Vault;

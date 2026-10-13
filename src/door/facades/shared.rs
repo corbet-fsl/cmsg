@@ -288,6 +288,44 @@ where
             self.after_wait(result)
         })
     }
+    fn waves<'a>(
+        &'a mut self,
+        command: inbox_waves::Command,
+        ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, inbox_waves::Answer> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .waves(command, ports)
+                .await;
+            self.after_wait(result)
+        })
+    }
+    fn conversation<'a>(
+        &'a mut self,
+        command: inbox_conversation::Command,
+        ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, inbox_conversation::Answer> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .conversation(command, ports)
+                .await;
+            self.after_wait(result)
+        })
+    }
     fn contact_act(&mut self, request: inbox::ContactAct) -> OwnedFuture<'_, cnbx::Relation> {
         Box::pin(async move {
             if self.lifetime.is_closed() {

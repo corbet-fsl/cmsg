@@ -4,14 +4,14 @@ use super::*;
 use crate::door::board::CommittedOwner;
 use std::cell::RefCell;
 
-struct Clock;
+pub(super) struct Clock;
 impl ckmg::Clock for Clock {
     fn now(&mut self) -> std::result::Result<u64, ckmg::Error> {
         // The owner admits custody against the system clock; Keys must agree.
         ckmg::Clock::now(&mut crate::door::custody::SystemClock)
     }
 }
-struct Missing;
+pub(super) struct Missing;
 impl cvlt::Records for Missing {
     async fn lookup(&mut self, _: &ckmg::Locator) -> cvlt::RestoreLookup {
         cvlt::RestoreLookup::Unavailable
@@ -20,7 +20,7 @@ impl cvlt::Records for Missing {
 
 // Fixture-only: Create once, Use for the exact root, and the custody lend only
 // by consuming the admitted command (as MemberAuthority does).
-struct IntentAuthority {
+pub(super) struct IntentAuthority {
     binding: ckmg::Binding,
     device: ckmg::PublicKey,
     root: Rc<RefCell<Option<ckmg::PublicKey>>>,
@@ -59,7 +59,7 @@ impl ckmg::Authority for IntentAuthority {
         }
     }
 }
-type ProfileOwner = VaultBoardOwner<
+pub(super) type ProfileOwner = VaultBoardOwner<
     cwst::backend::Memory,
     Clock,
     ckmg::SystemEntropy,
@@ -69,8 +69,17 @@ type ProfileOwner = VaultBoardOwner<
 >;
 
 async fn open(with_intent: bool) -> (ProfileOwner, ckmg::PublicKey, Rc<Cell<usize>>) {
+    open_as("fixture", with_intent).await
+}
+
+/// The same fixture for an arbitrary member string (the wave tests need the
+/// canonical 96-character pseudonym).
+pub(super) async fn open_as(
+    member: &str,
+    with_intent: bool,
+) -> (ProfileOwner, ckmg::PublicKey, Rc<Cell<usize>>) {
     const ORIGIN: &str = "https://member.example.test";
-    let binding = ckmg::Binding::new("alpha", "fixture").unwrap();
+    let binding = ckmg::Binding::new("alpha", member).unwrap();
     let prf = ckmg::passkey::PrfOutput::from_bytes(&[23; 32]).unwrap();
     let device = ckmg::passkey::device_public_key(&prf, "alpha").unwrap();
     let root = Rc::new(RefCell::new(None));
