@@ -332,6 +332,20 @@ impl Memberships {
         }
         done
     }
+    /// [`Memberships::retire`] over the verified end-of-chain entries of the
+    /// platform's charter (`VerifiedCharter::ended()`). The reason class changes
+    /// nothing: a dissolved and a banned community are deleted alike.
+    pub fn retire_ended(
+        &mut self,
+        ended: &[cchr::Ended],
+        data: &mut impl LocalData,
+    ) -> Vec<Fingerprint> {
+        let fingerprints: Vec<Fingerprint> = ended
+            .iter()
+            .map(|entry| Fingerprint(entry.fingerprint))
+            .collect();
+        self.retire(&fingerprints, data)
+    }
 }
 
 /// Ask the browser to forget a credential the community no longer knows
@@ -551,6 +565,33 @@ mod tests {
         assert_eq!(pins.fingerprint("chess"), None);
         assert_eq!(pins.fingerprint("garden"), Some(&fp(3)));
         assert!(pins.retire(&[fp(1)], &mut disk).is_empty());
+    }
+
+    #[test]
+    fn verified_end_entries_delete_whatever_the_reason() {
+        let mut pins = Memberships::default();
+        pins.join("garden", fp(1)).unwrap();
+        pins.join("chess", fp(2)).unwrap();
+        pins.join("keep", fp(3)).unwrap();
+        let entry = |byte, reason| cchr::Ended {
+            fingerprint: [byte; 32],
+            reason_class: reason,
+            ended_at: 1,
+        };
+        let mut disk = Disk {
+            purged: vec![],
+            fail: false,
+        };
+        let done = pins.retire_ended(
+            &[
+                entry(1, cchr::EndReason::Banned),
+                entry(2, cchr::EndReason::Dissolved),
+            ],
+            &mut disk,
+        );
+        assert_eq!(done, vec![fp(1), fp(2)]);
+        assert_eq!(pins.fingerprint("keep"), Some(&fp(3)));
+        assert_eq!(pins.fingerprint("garden"), None);
     }
 
     #[test]
