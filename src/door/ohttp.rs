@@ -7,7 +7,7 @@ use super::*;
 use cblv::client::{Post, RawReply};
 use cblv::{
     client::OhttpWire,
-    keys::{PublishedKey, VerifiedKeys},
+    keys::{Directory, PublishedKey, Snapshot},
 };
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -33,7 +33,7 @@ pub struct OhttpEndpoint {
 pub type Outer = cblv::browser::FetchPost;
 #[cfg(not(target_arch = "wasm32"))]
 pub type Outer = ReqwestPost;
-pub type Wire = OhttpWire<Outer>;
+pub type Wire = OhttpWire<Outer, Snapshot>;
 
 impl OhttpEndpoint {
     /// The wire for the gateway whose inner authority is `service`.
@@ -53,9 +53,13 @@ impl OhttpEndpoint {
                 not_after: key.not_after,
             })
             .collect();
-        let keys =
-            VerifiedKeys::from_verified_feed(entries).map_err(|_| ErrorCode::InvalidRequest)?;
-        Ok(OhttpWire::new(outer()?, &self.relay, service, keys, now))
+        let keys = Directory {
+            relay: self.relay.clone(),
+            keys: entries,
+        }
+        .verify()
+        .map_err(|_| ErrorCode::InvalidRequest)?;
+        Ok(OhttpWire::new(outer()?, service, keys, now))
     }
 }
 
