@@ -27,8 +27,13 @@ fn fixture() -> Value {
     assert_eq!(actual["wallet"]["scope"], "wallet");
     actual
 }
+/// All tests share one owner fixture with bounded ceremony and registration
+/// capacity; running them concurrently makes admission depend on timing.
+static FIXTURE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test(flavor = "multi_thread")]
 async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community() {
+    let _gate = FIXTURE_GATE.lock().await;
     tokio::time::timeout(Duration::from_secs(180), async {
         let f = fixture();
         let wallet_world = &f["wallet"];
@@ -435,6 +440,7 @@ async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn wallet_factory_refuses_community_scope_or_operator_bindings() {
+    let _gate = FIXTURE_GATE.lock().await;
     let f = fixture();
     let origin = f["wallet"]["passkey_origin"].as_str().unwrap();
     for (community, role, scope) in [
@@ -456,6 +462,7 @@ async fn wallet_factory_refuses_community_scope_or_operator_bindings() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn another_real_reserved_uuid_cannot_label_the_original_registration_tuple() {
+    let _gate = FIXTURE_GATE.lock().await;
     let f = fixture();
     let world = &f["wallet"];
     let trusted = world["base"].as_str().unwrap();
