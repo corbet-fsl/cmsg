@@ -195,6 +195,14 @@ pub(super) trait BoundVault {
     ) -> OwnedFuture<'a, inbox_waves::Answer> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    /// One conversation action over a released direct conversation.
+    fn conversation<'a>(
+        &'a mut self,
+        _command: inbox_conversation::Command,
+        _ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, inbox_conversation::Answer> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn sign_board<'a>(
         &'a mut self,
         prepared: &'a cbrd::Prepared,
@@ -361,6 +369,13 @@ where
         ports: &'a dyn inbox_waves::WavePorts,
     ) -> OwnedFuture<'a, inbox_waves::Answer> {
         Box::pin(self.waves_owned(command, ports))
+    }
+    fn conversation<'a>(
+        &'a mut self,
+        command: inbox_conversation::Command,
+        ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, inbox_conversation::Answer> {
+        Box::pin(self.conversation_owned(command, ports))
     }
     fn contact_act(&mut self, request: inbox::ContactAct) -> OwnedFuture<'_, cnbx::Relation> {
         Box::pin(self.contact_act_owned(request))

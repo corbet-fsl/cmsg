@@ -15,6 +15,7 @@ pub mod custody;
 pub mod facades;
 pub mod foyer;
 mod inbox;
+pub mod inbox_conversation;
 pub mod inbox_lineage;
 pub mod inbox_waves;
 mod json;

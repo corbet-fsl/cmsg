@@ -23,6 +23,7 @@ pub(crate) struct Env<'a, S, C, R, A, B: Backend> {
     pub ports: &'a dyn WavePorts,
     pub contacts: &'a KeyHandle,
     pub threads: &'a KeyHandle,
+    pub delivery: &'a KeyHandle,
 }
 
 /// Map an owner refusal to the Door's stable codes. A conflicting or unknown
@@ -189,7 +190,7 @@ where
 
     /// The device refuses every wave exchange with a peer this member blocked,
     /// before anything is countersigned or sent. Blocks live in Contacts.
-    fn refuse_blocked(&self, peer: &str) -> Result<()> {
+    pub(crate) fn refuse_blocked(&self, peer: &str) -> Result<()> {
         let relation = self
             .inbox
             .contacts(self.store)

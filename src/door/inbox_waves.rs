@@ -21,7 +21,7 @@ pub use ports::{verify_outcome_with, verify_reservation_with, Policy, WavePorts}
 pub use types::*;
 
 /// One request to the bound Vault. The Vault answers with the matching variant.
-pub(super) enum Command {
+pub(crate) enum Command {
     Send(WaveSend),
     Decide(WaveDecide),
     Punish(WavePunish),
@@ -34,7 +34,7 @@ pub(super) enum Command {
     Retry([u8; 32]),
     Recover,
 }
-pub(super) enum Answer {
+pub(crate) enum Answer {
     Status(WaveStatus),
     List(WaveList),
     Outbox(Outbox),
@@ -61,14 +61,26 @@ impl Door {
     }
 }
 
-async fn run(door: &mut Door, key: &[u8; 32], command: Command) -> Result<(Answer, Vec<Event>)> {
+/// One request to the bound Vault, wave or conversation, with its reply.
+pub(super) enum Op {
+    Waves(Command),
+    Chat(inbox_conversation::Command),
+}
+pub(super) enum Reply {
+    Waves(Answer),
+    Chat(inbox_conversation::Answer),
+}
+
+/// Run one request against the bound Vault together with this origin's ports,
+/// inside the same current-policy and clock bracket as every other Inbox action.
+pub(super) async fn run_op(door: &mut Door, key: &[u8; 32], op: Op) -> Result<Reply> {
     let grant = door.grants.get(key).ok_or(ErrorCode::Unauthorized)?;
     let origin = grant.origin.clone();
     let expires = grant.expires;
     let mut policy = door.current_policy(&origin)?;
     let ports = door.wave_ports.get(&origin).ok_or(ErrorCode::Unavailable)?;
     let vault = door.vaults.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
-    let (answer, completed) = current::read_with(
+    let (reply, completed) = current::read_with(
         vault.as_mut(),
         ports.as_ref(),
         &mut policy,
@@ -77,11 +89,25 @@ async fn run(door: &mut Door, key: &[u8; 32], command: Command) -> Result<(Answe
             expires,
             floor: door.clock_floor,
         },
-        move |vault, ports| vault.waves(command, ports),
+        move |vault, ports| match op {
+            Op::Waves(command) => {
+                Box::pin(async move { vault.waves(command, ports).await.map(Reply::Waves) })
+            }
+            Op::Chat(command) => {
+                Box::pin(async move { vault.conversation(command, ports).await.map(Reply::Chat) })
+            }
+        },
     )
     .await?;
     door.observe(completed)?;
-    Ok((answer, vec![]))
+    Ok(reply)
+}
+
+async fn run(door: &mut Door, key: &[u8; 32], command: Command) -> Result<(Answer, Vec<Event>)> {
+    match run_op(door, key, Op::Waves(command)).await? {
+        Reply::Waves(answer) => Ok((answer, vec![])),
+        Reply::Chat(_) => Err(ErrorCode::Unavailable),
+    }
 }
 
 fn status(answer: Answer) -> Result<WaveStatus> {
