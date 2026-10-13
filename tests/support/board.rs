@@ -36,6 +36,9 @@ fn configured() -> (Door, ClientToken) {
         "board.discovery".into(),
         "board.groups".into(),
         "board.group_act".into(),
+        "board.group_propose".into(),
+        "board.group_message".into(),
+        "board.group_answer".into(),
         "board.profile_publish".into(),
     ]);
     let token = door
@@ -57,6 +60,15 @@ async fn original_board_without_committed_owner_refuses_every_new_action() {
         (
             "board.profile_publish",
             json!({"profile":{"community":"fixture","schema_version":1,"public":{},"private":{}},"rules":[],"reachability":[]}),
+        ),
+        (
+            "board.group_propose",
+            json!({"intent":{"intent":"leave","group":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"accept_profile_visibility":false}),
+        ),
+        ("board.group_message", json!({"from":"m1","text":"{}"})),
+        (
+            "board.group_answer",
+            json!({"operation":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"accept":true}),
         ),
         (
             "board.group_act",
@@ -103,6 +115,9 @@ async fn public_board_actions_cannot_inject_owner_inputs_or_duplicate_paging_fie
         br#"{"action":"board.group_act","version":1,"body":{"intent":{"intent":"leave","group":[1],"member":"m1"}}}"#.as_slice(),
         br#"{"action":"board.group_act","version":1,"body":{"intent":{"intent":"leave","group":[1]},"actor":"m1"}}"#.as_slice(),
         br#"{"action":"board.group_act","version":1,"body":{"intent":{"intent":"leave","group":[1]},"consents":[]}}"#.as_slice(),
+        br#"{"action":"board.group_propose","version":1,"body":{"intent":{"intent":"leave","group":[1]},"consents":[]}}"#.as_slice(),
+        br#"{"action":"board.group_message","version":1,"body":{"from":"m1","text":"{}","member":"m2"}}"#.as_slice(),
+        br#"{"action":"board.group_answer","version":1,"body":{"operation":[1],"accept":true,"actor":"m1"}}"#.as_slice(),
     ] {
         let result = door.dispatch(ORIGIN, token.expose_for_transport(), request, 2).await;
         assert!(matches!(result, Output::Error { error: ErrorCode::InvalidRequest }));

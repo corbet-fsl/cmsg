@@ -112,6 +112,37 @@ pub(super) struct OwnedBoard<T, R, O> {
     // Original Link does not expose Enter's request for replay. An interrupted
     // attendance attempt is fenced and requires owner reconciliation, not retry.
     attendance_pending: bool,
+    desk: GroupDesk,
+}
+
+/// Group proposals this member made and invitations awaiting this member's own
+/// answer. Held in memory only: after a restart a pending consent is gone and
+/// the actor must propose again; nothing is ever consented on a member's behalf.
+#[derive(Default)]
+struct GroupDesk {
+    proposals: BTreeMap<[u8; 32], cbrd::GroupProposal>,
+    invitations: BTreeMap<[u8; 32], cbrd::Invitation>,
+}
+
+/// Open proposals and open invitations each; further ones are refused until
+/// answered or expired.
+const MAX_PENDING_GROUP: usize = 16;
+
+fn command_summary(command: &cbrd::cgrp::Command) -> (String, Vec<String>) {
+    use cbrd::cgrp::Command;
+    match command {
+        Command::Create { members, .. } => ("create".into(), members.iter().cloned().collect()),
+        Command::Fork { members, .. } => ("fork".into(), members.iter().cloned().collect()),
+        Command::Join {
+            member, vouches, ..
+        } => (
+            "join".into(),
+            vouches.iter().cloned().chain([member.clone()]).collect(),
+        ),
+        Command::Leave { .. } => ("leave".into(), vec![]),
+        Command::Describe { .. } => ("describe".into(), vec![]),
+        Command::Tick => ("tick".into(), vec![]),
+    }
 }
 
 enum PageKind {
@@ -161,6 +192,7 @@ impl Door {
                 policy,
                 current,
                 attendance_pending: false,
+                desk: GroupDesk::default(),
             }),
         );
         Ok(())
@@ -458,6 +490,58 @@ async fn attendance<T: clnk::Transport, R, O: CommittedOwner>(
     Ok(status)
 }
 
+impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
+    /// The signed Rulebook's group policy for the current moment.
+    async fn group_policy(&mut self, expires: u64) -> Result<cbrd::PolicyAt> {
+        let community = self.inner.board.community().to_owned();
+        let board = &self.inner.board;
+        let current = &mut self.current;
+        let policy = &self.policy;
+        let projected = self
+            .owner
+            .with_current(|read| {
+                with_context(current, policy, &community, expires, read, |context, _| {
+                    board
+                        .read_group_policy_committed(context)
+                        .map_err(board_error)
+                })
+            })
+            .await?;
+        Ok(cbrd::PolicyAt::new(&community, projected))
+    }
+
+    fn group_clock(&mut self) -> Result<u64> {
+        self.owner
+            .groups()
+            .ok_or(ErrorCode::Unavailable)?
+            .now()
+            .map_err(group_error)
+    }
+
+    fn prune_group_desk(&mut self, now: u64) {
+        self.desk.proposals.retain(|_, p| p.expires_at() >= now);
+        self.desk.invitations.retain(|_, i| i.expires_at() >= now);
+    }
+
+    async fn commit_proposal(
+        &mut self,
+        operation: [u8; 32],
+        expires: u64,
+    ) -> Result<Vec<cbrd::GroupView>> {
+        let source = self.group_policy(expires).await?;
+        let proposal = self
+            .desk
+            .proposals
+            .get(&operation)
+            .ok_or(ErrorCode::Refused)?;
+        let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+        let outcome = cbrd::commit_group_proposal(owner, &source, proposal, MAX_GROUPS).await;
+        // A refused or interrupted commit never leaves a reusable consent set.
+        self.desk.proposals.remove(&operation);
+        Ok(outcome.map_err(group_error)?.0)
+    }
+}
+
 impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O> {
     fn require_committed(&self) -> Result<()> {
         self.idle()
@@ -559,6 +643,143 @@ impl<T: clnk::Transport, R, O: CommittedOwner> BoundBoard for OwnedBoard<T, R, O
                     .await
                     .map_err(group_error)?;
             Ok(views)
+        })
+    }
+    fn group_propose(
+        &mut self,
+        intent: cbrd::GroupIntent,
+        visible: bool,
+        expires: u64,
+    ) -> OwnedFuture<'_, GroupProposed> {
+        Box::pin(async move {
+            self.idle()?;
+            if self.owner.groups().is_none() {
+                return Err(ErrorCode::Unavailable);
+            }
+            let now = self.group_clock()?;
+            self.prune_group_desk(now);
+            if self.desk.proposals.len() >= MAX_PENDING_GROUP {
+                return Err(ErrorCode::Capacity);
+            }
+            let source = self.group_policy(expires).await?;
+            let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+            let command = intent.command(&owner.member().map_err(group_error)?);
+            let proposal = cbrd::propose_group_command(owner, &source, command, visible)
+                .await
+                .map_err(group_error)?;
+            let operation = proposal.operation();
+            if proposal.complete() {
+                self.desk.proposals.insert(operation, proposal);
+                let views = self.commit_proposal(operation, expires).await?;
+                return Ok(GroupProposed {
+                    operation,
+                    invitations: vec![],
+                    committed: Some(views),
+                });
+            }
+            let text = proposal.invitation().to_text().map_err(group_error)?;
+            let invitations = proposal
+                .awaiting()
+                .iter()
+                .map(|member| GroupInvite {
+                    member: member.clone(),
+                    text: text.clone(),
+                })
+                .collect();
+            self.desk.proposals.insert(operation, proposal);
+            Ok(GroupProposed {
+                operation,
+                invitations,
+                committed: None,
+            })
+        })
+    }
+    fn group_message(
+        &mut self,
+        from: String,
+        text: String,
+        expires: u64,
+    ) -> OwnedFuture<'_, GroupInbound> {
+        Box::pin(async move {
+            self.idle()?;
+            if self.owner.groups().is_none() {
+                return Err(ErrorCode::Unavailable);
+            }
+            let now = self.group_clock()?;
+            self.prune_group_desk(now);
+            let message = cbrd::GroupMessage::from_text(&text).map_err(group_error)?;
+            if let cbrd::GroupMessage::Invite { request, .. } = &message {
+                if self.desk.invitations.len() >= MAX_PENDING_GROUP
+                    || self.desk.invitations.contains_key(&request.operation)
+                {
+                    return Err(ErrorCode::Capacity);
+                }
+                let source = self.group_policy(expires).await?;
+                let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+                let invitation = cbrd::Invitation::receive(owner, &source, &from, message)
+                    .await
+                    .map_err(group_error)?;
+                let (command, members) = command_summary(&invitation.request().command);
+                let operation = invitation.operation();
+                let actor = invitation.actor().to_owned();
+                self.desk.invitations.insert(operation, invitation);
+                return Ok(GroupInbound::Invitation {
+                    operation,
+                    actor,
+                    command,
+                    members,
+                });
+            }
+            let operation = match &message {
+                cbrd::GroupMessage::Consent { consent, .. } => consent.operation,
+                cbrd::GroupMessage::Decline { operation, .. } => *operation,
+                cbrd::GroupMessage::Invite { .. } => return Err(ErrorCode::InvalidRequest),
+            };
+            let proposal = self
+                .desk
+                .proposals
+                .get_mut(&operation)
+                .ok_or(ErrorCode::Refused)?;
+            proposal.admit(&from, message, now).map_err(group_error)?;
+            if proposal.declined() {
+                self.desk.proposals.remove(&operation);
+                return Ok(GroupInbound::Declined { operation });
+            }
+            if proposal.complete() {
+                let views = self.commit_proposal(operation, expires).await?;
+                return Ok(GroupInbound::Committed { operation, views });
+            }
+            Ok(GroupInbound::Waiting {
+                operation,
+                awaiting: proposal.awaiting().iter().cloned().collect(),
+            })
+        })
+    }
+    fn group_answer(
+        &mut self,
+        operation: [u8; 32],
+        accept: bool,
+        visible: bool,
+        _expires: u64,
+    ) -> OwnedFuture<'_, GroupAnswered> {
+        Box::pin(async move {
+            self.idle()?;
+            let now = self.group_clock()?;
+            self.prune_group_desk(now);
+            let invitation = self
+                .desk
+                .invitations
+                .remove(&operation)
+                .ok_or(ErrorCode::Refused)?;
+            let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+            let message = invitation
+                .answer(owner, accept, visible)
+                .await
+                .map_err(group_error)?;
+            Ok(GroupAnswered {
+                actor: invitation.actor().to_owned(),
+                text: message.to_text().map_err(group_error)?,
+            })
         })
     }
     fn profile_publish(&mut self, edit: cbrd::Edit, expires: u64) -> OwnedFuture<'_, u64> {

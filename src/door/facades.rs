@@ -53,6 +53,31 @@ pub(super) trait BoundBoard {
     ) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    fn group_propose(
+        &mut self,
+        _intent: cbrd::GroupIntent,
+        _visible: bool,
+        _expires: u64,
+    ) -> OwnedFuture<'_, board::GroupProposed> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    fn group_message(
+        &mut self,
+        _from: String,
+        _text: String,
+        _expires: u64,
+    ) -> OwnedFuture<'_, board::GroupInbound> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    fn group_answer(
+        &mut self,
+        _operation: [u8; 32],
+        _accept: bool,
+        _visible: bool,
+        _expires: u64,
+    ) -> OwnedFuture<'_, board::GroupAnswered> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn profile_publish(&mut self, _edit: cbrd::Edit, _expires: u64) -> OwnedFuture<'_, u64> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }

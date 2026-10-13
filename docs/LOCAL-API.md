@@ -228,6 +228,30 @@ opening a room requires `accept_profile_visibility: true` (members of the group
 may see your private profile); without it Groups refuses. The action refuses with
 `unavailable` until the retained owner provides the group integration.
 
+Commands that need other members (`create`, `fork`, `join` with vouches) run in
+three door actions over the members' direct conversations; nobody is ever added,
+removed or consented for by someone else, and groups stay immutable (a change is
+always a fork the members consent to; there are no admins):
+
+- `board.group_propose {intent, accept_profile_visibility}` signs only the local
+  member's own consent and returns `{operation, invitations: [{member, text}],
+  committed}`. Send each `text` unchanged in the direct conversation with that
+  contact. A command that needs nobody else commits at once (`committed` set).
+- `board.group_message {from, text}` takes a text received in the conversation
+  with `from` (`from` comes from the authenticated conversation, never from the
+  text). An invitation is only stored and returned as `state: "invitation"` for
+  the member to decide; it is refused unless `from` is the acting member and an
+  established contact, the local member is a consenting party, the request is
+  fresh and the policy epoch is current. A consent or decline from an invited
+  member is admitted only for that member, that operation and that exact command
+  digest; the group is prepared and published (Groups re-checks contacts,
+  devices, standing and policy) only when every consent is present. A decline
+  ends the proposal. Pending proposals and invitations live in memory only and
+  expire with the consent window (one hour); a restart means proposing again.
+- `board.group_answer {operation, accept, accept_profile_visibility}` is the
+  member's own decision on a stored invitation; it returns `{actor, text}` to
+  send back in the conversation with the actor.
+
 `board.profile_publish` takes `{"profile": {...}, "rules": [...], "reachability": [...]}`
 and publishes the member's own answers and rules as one signed bundle. The caller
 never supplies a revision, key, signature, credential or block rule: the next
