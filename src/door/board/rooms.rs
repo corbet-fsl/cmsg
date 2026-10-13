@@ -138,7 +138,7 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             group: join.group,
             vouches: Default::default(),
         };
-        let (candidate, current, now) = cbrd::prepare_group_intent(
+        let (candidate, current, now, request) = cbrd::prepare_group_intent(
             owner,
             &source,
             intent,
@@ -147,6 +147,9 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         )
         .await
         .map_err(group_error)?;
+        // The signed Join request rides with the ordered commit; members admit
+        // the newcomer only with it.
+        let companion = serde_json::to_vec(&request).map_err(|_| ErrorCode::Unavailable)?;
         let snapshot = self
             .owner
             .join_room(
@@ -155,12 +158,51 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
                     room: join.room,
                     group: join.group,
                     candidate,
+                    companion,
                     evidence,
                     policy: &source,
                 },
             )
             .await?;
         snapshot.views(&current, now).map_err(group_error)
+    }
+
+    /// Leave a member room: Groups `Leave`, the Threads state and the Attend
+    /// withdrawal in one commit. A device that never joined through Attend
+    /// leaves in Groups alone.
+    pub(super) async fn room_leave_step(
+        &mut self,
+        room: RoomRef,
+        expires: u64,
+    ) -> Result<Vec<cbrd::GroupView>> {
+        self.idle()?;
+        self.joins.forget(room.room);
+        let source = self.group_policy(expires).await?;
+        let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+        let intent = cbrd::GroupIntent::Leave { group: room.group };
+        let (candidate, current, now, _) =
+            cbrd::prepare_group_intent(owner, &source, intent.clone(), false, MAX_GROUPS)
+                .await
+                .map_err(group_error)?;
+        let left = self
+            .owner
+            .leave_room(crate::door::facades::RoomLeaveTask {
+                group: room.group,
+                candidate,
+                policy: &source,
+            })
+            .await?;
+        match left {
+            Some(snapshot) => snapshot.views(&current, now).map_err(group_error),
+            None => {
+                let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+                let (views, _) =
+                    cbrd::execute_group_intent(owner, &source, intent, false, MAX_GROUPS)
+                        .await
+                        .map_err(group_error)?;
+                Ok(views)
+            }
+        }
     }
 
     /// Answer the live join requests of `room` with this member's own evidence,
@@ -227,23 +269,13 @@ pub(in crate::door) async fn room_serve(
     Ok((board.room_serve(request, expires).await?, vec![]))
 }
 
-/// Leaving is the Groups `Leave` of the room's group; the open join request for
-/// the room, if any, is dropped with it.
+/// Leaving withdraws Attend, removes this device's Threads state and leaves
+/// the room's group in one commit; an open join request for the room is dropped.
 pub(in crate::door) async fn room_leave(
     door: &mut Door,
     key: &[u8; 32],
     request: RoomRef,
 ) -> Result<(Vec<cbrd::GroupView>, Vec<Event>)> {
     let (board, expires) = handles(door, key)?;
-    board.room_forget(request.room);
-    let views = board
-        .group_act(
-            cbrd::GroupIntent::Leave {
-                group: request.group,
-            },
-            false,
-            expires,
-        )
-        .await?;
-    Ok((views, vec![]))
+    Ok((board.room_leave(request, expires).await?, vec![]))
 }
