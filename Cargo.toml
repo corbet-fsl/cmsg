@@ -33,6 +33,7 @@ cblv = { git = "https://git.corbet.ch/corbet-foss/cblv", branch = "main", option
 crbk = { git = "https://git.corbet.ch/corbet-foss/crbk", branch = "main", default-features = false }
 cblc = { git = "https://git.corbet.ch/corbet-libs/cblc", branch = "main", default-features = false, features = ["publication"] }
 cwlt = { git = "https://git.corbet.ch/corbet-foss/cwlt", branch = "main", default-features = false, features = ["passport", "wave", "schema"] }
+czkp = { git = "https://git.corbet.ch/corbet-foss/czkp", branch = "main" }
 ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh", branch = "main", default-features = false }
 cchr = { git = "https://git.corbet.ch/corbet-foss/cchr.git", branch = "main" }
 cpfl = { git = "https://git.corbet.ch/corbet-foss/cpfl.git", branch = "main" }

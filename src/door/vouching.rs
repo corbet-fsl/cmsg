@@ -77,6 +77,10 @@ pub(super) struct BondEntry {
     /// The vouchee's member id (empty on the vouchee's own device).
     pub member: String,
     pub bond: String,
+    /// On the vouchee's device: the sponsor's opaque community member id (hex),
+    /// read from the link text. Empty on the issuer's device.
+    #[serde(default)]
+    pub sponsor_id: String,
 }
 
 /// The bond nonce a newcomer chose for a link, kept until the bond exists.
@@ -84,6 +88,20 @@ pub(super) struct BondEntry {
 pub(super) struct NonceEntry {
     pub link: String,
     pub nonce: String,
+    /// The link text, kept to read the issuer's reply after admission.
+    #[serde(default)]
+    pub fragment: String,
+}
+
+/// An endorsement received from a sponsor whose signature was checked for this
+/// community and this member. The sponsor's device is not yet checked against
+/// their verified lineage: whoever shows it must do that first.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct Received {
+    pub link: String,
+    pub handle: String,
+    pub device: String,
+    pub signature: String,
 }
 
 /// A statement the issuer's device signed in visible mode.
@@ -94,6 +112,9 @@ pub(super) struct Endorsement {
     pub handle: String,
     pub device: String,
     pub signature: String,
+    /// Left for the vouchee through the community's sealed relay.
+    #[serde(default)]
+    pub posted: bool,
 }
 
 /// The decoded custody record.
@@ -116,6 +137,8 @@ pub(super) struct Book {
     /// Creation id of a claimed seat in THIS community, until the admission is done.
     #[serde(default)]
     pub claimed: Option<String>,
+    #[serde(default)]
+    pub received: Vec<Received>,
 }
 
 impl Drop for Book {
@@ -129,6 +152,7 @@ impl Drop for Book {
         }
         for nonce in &mut self.nonces {
             nonce.nonce.zeroize();
+            nonce.fragment.zeroize();
         }
         if let Some(record) = &mut self.creation {
             record.wipe();
@@ -176,11 +200,9 @@ impl Book {
     /// Record a bond once. A second notice for the same person changes nothing:
     /// the first one fixes the bond.
     pub(super) fn add_bond(&mut self, entry: BondEntry) -> Result<bool> {
-        if self
-            .bonds
-            .iter()
-            .any(|have| have.sponsor == entry.sponsor && have.link == entry.link && have.member == entry.member)
-        {
+        if self.bonds.iter().any(|have| {
+            have.sponsor == entry.sponsor && have.link == entry.link && have.member == entry.member
+        }) {
             return Ok(false);
         }
         if self.bonds.len() >= MAXIMUM_BONDS {
@@ -204,11 +226,11 @@ impl Book {
         if self.nonces.len() >= MAXIMUM_BONDS {
             return Err(ErrorCode::Capacity);
         }
-        let nonce: [u8; NONCE_BYTES] =
-            cvch::link::entropy().map_err(|_| ErrorCode::Unavailable)?;
+        let nonce: [u8; NONCE_BYTES] = cvch::link::entropy().map_err(|_| ErrorCode::Unavailable)?;
         self.nonces.push(NonceEntry {
             link: id,
             nonce: to_hex(&nonce),
+            fragment: token.fragment().to_string(),
         });
         Ok(nonce)
     }
@@ -224,8 +246,23 @@ impl Book {
             link: id,
             member: String::new(),
             bond: to_hex(bond.as_bytes()),
+            sponsor_id: to_hex(&token.sponsor()),
         })?;
         Ok(())
+    }
+
+    /// The bond this newcomer's device derived at redemption, with the sponsor's
+    /// opaque member id from the link text: the account genesis binds both.
+    pub(super) fn vouchee_bond(&self) -> Option<([u8; 32], [u8; 32])> {
+        let entry = self
+            .bonds
+            .iter()
+            .rev()
+            .find(|bond| !bond.sponsor && !bond.sponsor_id.is_empty())?;
+        Some((
+            from_hex(&entry.sponsor_id)?.try_into().ok()?,
+            from_hex(&entry.bond)?.try_into().ok()?,
+        ))
     }
 
     /// The issuer's device reads the people the community reports for `link`
@@ -292,6 +329,10 @@ struct WireWaiting {
 #[derive(Deserialize)]
 struct WireDecision {
     admitted: bool,
+}
+#[derive(Deserialize)]
+struct WireReply {
+    reply: Option<String>,
 }
 #[derive(Deserialize)]
 struct WireRevoked {
@@ -530,7 +571,12 @@ async fn endorse(
     let started = now()?;
     let vault = door.vaults.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
     let (signature, device) = vault
-        .sign_endorsement(&message, origin, started, started.saturating_add(SIGN_SECONDS))
+        .sign_endorsement(
+            &message,
+            origin,
+            started,
+            started.saturating_add(SIGN_SECONDS),
+        )
         .await?;
     book.endorsements.push(Endorsement {
         link: link.into(),
@@ -538,7 +584,42 @@ async fn endorse(
         handle,
         device: to_hex(&device),
         signature: to_hex(&signature),
+        posted: false,
     });
+    Ok(())
+}
+
+/// Leave every signed endorsement of `id` that is not yet with the community in
+/// the sealed relay, sealed with the bond so the community cannot read it.
+async fn post_endorsements(door: &mut Door, origin: &str, book: &mut Book, id: &str) -> Result<()> {
+    let link_id = LinkId::parse(id).map_err(|_| ErrorCode::Unavailable)?;
+    let waiting: Vec<(usize, Vec<u8>, String)> = book
+        .endorsements
+        .iter()
+        .enumerate()
+        .filter(|(_, have)| have.link == id && !have.posted)
+        .filter_map(|(at, have)| {
+            let bond = book
+                .bonds
+                .iter()
+                .find(|bond| bond.sponsor && bond.link == id && bond.member == have.vouchee)?;
+            let bond = Bond::from_bytes(from_hex(&bond.bond)?.try_into().ok()?);
+            let device: [u8; 32] = from_hex(&have.device)?.try_into().ok()?;
+            let signature: [u8; 64] = from_hex(&have.signature)?.try_into().ok()?;
+            let plain = cvch::link::Endorsement::new(&have.handle, device, signature)
+                .and_then(|endorsement| endorsement.to_bytes())
+                .ok()?;
+            let sealed = bond.seal_reply(&link_id, &plain).ok()?;
+            Some((at, sealed, have.vouchee.clone()))
+        })
+        .collect();
+    for (at, sealed, vouchee) in waiting {
+        let mut body = manage_body(book, id)?;
+        body["member"] = Value::String(vouchee);
+        body["reply"] = Value::String(to_hex(&sealed));
+        let _: Value = owner(door, origin, "voucher_reply_post", body).await?;
+        book.endorsements[at].posted = true;
+    }
     Ok(())
 }
 
@@ -556,6 +637,7 @@ async fn settle_admitted(
             link: id.into(),
             member: person.member.clone(),
             bond: to_hex(person.token_bond.as_bytes()),
+            sponsor_id: String::new(),
         })?;
         // A failed signature leaves the bond in place; the endorsement is
         // retried on every sync until it exists.
@@ -564,7 +646,11 @@ async fn settle_admitted(
             Err(error) => return Err(error),
         }
     }
-    Ok(())
+    // Retried on every sync until the community holds the sealed reply.
+    match post_endorsements(door, origin, book, id).await {
+        Ok(()) | Err(ErrorCode::Unavailable | ErrorCode::Refused) => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 fn counts(view: &WireView) -> (u32, u32) {
@@ -579,7 +665,12 @@ fn counts(view: &WireView) -> (u32, u32) {
 /// up. Returns the infos in creation order.
 async fn sync(door: &mut Door, origin: &str, loaded: &mut Loaded) -> Result<Vec<LinkInfo>> {
     let started = now()?;
-    let ids: Vec<String> = loaded.book.issued.iter().map(|link| link.id.clone()).collect();
+    let ids: Vec<String> = loaded
+        .book
+        .issued
+        .iter()
+        .map(|link| link.id.clone())
+        .collect();
     let mut infos = Vec::new();
     let mut failure = None;
     for id in ids {
@@ -633,8 +724,7 @@ async fn sync(door: &mut Door, origin: &str, loaded: &mut Loaded) -> Result<Vec<
     let remaining = door.voucher_allowance;
     for id in exhausted(&loaded.book, remaining, started) {
         let body = manage_body(&loaded.book, &id)?;
-        let released: Result<WireRevoked> =
-            owner(door, origin, "voucher_link_revoke", body).await;
+        let released: Result<WireRevoked> = owner(door, origin, "voucher_link_revoke", body).await;
         match released {
             Ok(_) => {
                 if let Some(link) = loaded.book.issued_mut(&id) {
@@ -657,6 +747,110 @@ async fn sync(door: &mut Door, origin: &str, loaded: &mut Loaded) -> Result<Vec<
     }
 }
 
+/// What a newcomer's device knows about who vouched for them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VouchedBy {
+    /// The sponsor's handle, once an endorsement arrived and its signature holds
+    /// for this community and this member.
+    pub handle: Option<String>,
+    /// The sponsor's device key (hex) that signed. Showing the handle needs this
+    /// key to belong to the sponsor's charter-verified lineage.
+    pub device: Option<String>,
+    /// The signature (hex) over the statement, for the profile to carry.
+    pub signature: Option<String>,
+}
+
+/// The newcomer's device reads the sealed reply the sponsor left, opens it with
+/// the bond, checks the signature for this community and member, and keeps it.
+pub(super) async fn vouched_by(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(VouchedBy, Vec<Event>)> {
+    let origin = origin_of(door, key)?;
+    let mut loaded = load(door, &origin).await?;
+    let lobby: Value = owner(door, &origin, "lobby", serde_json::json!({})).await?;
+    let member = lobby
+        .get("member_id")
+        .and_then(Value::as_str)
+        .ok_or(ErrorCode::Unavailable)?
+        .to_owned();
+    let community = door.config.community.clone();
+    let candidates: Vec<(String, String)> = loaded
+        .book
+        .bonds
+        .iter()
+        .filter(|bond| !bond.sponsor)
+        .filter(|bond| {
+            !loaded
+                .book
+                .received
+                .iter()
+                .any(|have| have.link == bond.link)
+        })
+        .filter_map(|bond| {
+            let fragment = loaded
+                .book
+                .nonces
+                .iter()
+                .find(|nonce| nonce.link == bond.link && !nonce.fragment.is_empty())?
+                .fragment
+                .clone();
+            Some((bond.link.clone(), fragment))
+        })
+        .collect();
+    for (link, fragment) in candidates {
+        let token = Token::parse(&fragment).map_err(|_| ErrorCode::Unavailable)?;
+        let presentation = token.presentation();
+        let body = serde_json::json!({
+            "id": link,
+            "secret": presentation.secret_hex().as_str(),
+        });
+        let answer: WireReply = owner(door, &origin, "voucher_reply_get", body).await?;
+        let Some(sealed) = answer.reply.as_deref().and_then(from_hex) else {
+            continue;
+        };
+        let bond = loaded
+            .book
+            .bonds
+            .iter()
+            .find(|bond| !bond.sponsor && bond.link == link)
+            .and_then(|bond| from_hex(&bond.bond))
+            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+            .map(Bond::from_bytes)
+            .ok_or(ErrorCode::Unavailable)?;
+        let link_id = LinkId::parse(&link).map_err(|_| ErrorCode::Unavailable)?;
+        // Anything that does not open, parse or verify is ignored: a sponsor
+        // that signs wrongly is no sponsor to show.
+        let verified = bond
+            .open_reply(&link_id, &sealed)
+            .and_then(|plain| cvch::link::Endorsement::from_bytes(&plain))
+            .and_then(|endorsement| {
+                endorsement.verify(&community, &member)?;
+                Ok(endorsement)
+            });
+        if let Ok(endorsement) = verified {
+            loaded.book.received.push(Received {
+                link,
+                handle: endorsement.handle,
+                device: to_hex(&endorsement.device),
+                signature: to_hex(&endorsement.signature),
+            });
+        }
+    }
+    loaded.save(door, &origin).await?;
+    let shown = loaded.book.received.first();
+    Ok((
+        VouchedBy {
+            handle: shown.map(|have| have.handle.clone()),
+            device: shown.map(|have| have.device.clone()),
+            signature: shown.map(|have| have.signature.clone()),
+        },
+        vec![],
+    ))
+}
+
 /// Issue a link: generate it on this device, keep it in custody, then register
 /// only its hashes with the community.
 pub(super) async fn link_create(
@@ -671,7 +865,17 @@ pub(super) async fn link_create(
         }
     }
     let started = now()?;
-    let (token, secret) = Token::generate().map_err(|_| ErrorCode::Unavailable)?;
+    // The link text carries the issuer's opaque community member id so the
+    // newcomer's account can bind its sponsor at admission; the community never
+    // sees the text.
+    let lobby: Value = owner(door, &origin, "lobby", serde_json::json!({})).await?;
+    let sponsor: [u8; 32] = lobby
+        .get("member_id")
+        .and_then(Value::as_str)
+        .and_then(from_hex)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or(ErrorCode::Unavailable)?;
+    let (token, secret) = Token::generate(sponsor).map_err(|_| ErrorCode::Unavailable)?;
     let registration = token.registration();
     let id = registration.id().as_str().to_owned();
     let mut loaded = load(door, &origin).await?;
@@ -680,7 +884,9 @@ pub(super) async fn link_create(
         fragment: token.fragment().to_string(),
         key: to_hex(secret.as_bytes()),
         uses: request.uses,
-        signoff: request.signoff.unwrap_or(cvch::link::default_signoff(request.uses)),
+        signoff: request
+            .signoff
+            .unwrap_or(cvch::link::default_signoff(request.uses)),
         visible: request.visible.unwrap_or(true),
         created_at: started,
         expires_at: started.saturating_add(request.valid_for),

@@ -19,7 +19,7 @@ fn issued_with(token: &Token, secret: &IssuerSecret) -> Issued {
 }
 
 fn link() -> (Token, IssuerSecret) {
-    Token::issue([7; 32], [9; 32]).unwrap()
+    Token::issue([7; 32], [9; 32], [5; 32]).unwrap()
 }
 
 #[test]
@@ -42,7 +42,10 @@ fn record_round_trips_and_a_foreign_version_is_refused() {
         Book::decode(Some(b"{\"version\":9}")).err(),
         Some(ErrorCode::Unavailable)
     );
-    assert_eq!(Book::decode(Some(b"nope")).err(), Some(ErrorCode::Unavailable));
+    assert_eq!(
+        Book::decode(Some(b"nope")).err(),
+        Some(ErrorCode::Unavailable)
+    );
 }
 
 #[test]
@@ -104,13 +107,19 @@ fn both_devices_derive_the_same_bond() {
         member: "member-2".into(),
         notice: sealed,
     }];
-    assert!(issuer.absorb(token.id().as_str(), &liar).unwrap().is_empty());
+    assert!(issuer
+        .absorb(token.id().as_str(), &liar)
+        .unwrap()
+        .is_empty());
     // So does a notice that is not even hex.
     let junk = vec![WireEntry {
         member: "member-1".into(),
         notice: "zz".into(),
     }];
-    assert!(issuer.absorb(token.id().as_str(), &junk).unwrap().is_empty());
+    assert!(issuer
+        .absorb(token.id().as_str(), &junk)
+        .unwrap()
+        .is_empty());
     assert_eq!(
         issuer.absorb(&"0".repeat(64), &entries).err(),
         Some(ErrorCode::Refused)
@@ -125,6 +134,7 @@ fn a_bond_is_recorded_once_per_person() {
         link: "l".into(),
         member: "m".into(),
         bond: "aa".into(),
+        sponsor_id: String::new(),
     };
     assert!(book.add_bond(entry.clone()).unwrap());
     let mut second = entry;
@@ -171,6 +181,31 @@ fn applicant_ids_split_into_link_and_member() {
     let id = applicant_id(&link, "member-1");
     assert_eq!(split_applicant(&id), Ok((link.as_str(), "member-1")));
     assert_eq!(split_applicant("nolink"), Err(ErrorCode::InvalidRequest));
-    assert_eq!(split_applicant(&format!("{link}:")), Err(ErrorCode::InvalidRequest));
+    assert_eq!(
+        split_applicant(&format!("{link}:")),
+        Err(ErrorCode::InvalidRequest)
+    );
     assert_eq!(split_applicant("short:m"), Err(ErrorCode::InvalidRequest));
+}
+
+#[test]
+fn the_vouchee_keeps_the_sponsor_id_from_the_link_text_beside_the_bond() {
+    let (token, _) = link();
+    let mut book = Book::decode(None).unwrap();
+    assert_eq!(book.vouchee_bond(), None);
+    let bond = Bond::from_bytes([3; 32]);
+    book.add_vouchee_bond(&token.fragment(), &bond).unwrap();
+    assert_eq!(book.vouchee_bond(), Some(([5; 32], [3; 32])));
+    // The issuer's own entries never count as a vouchee bond.
+    let mut issuer = Book::decode(None).unwrap();
+    issuer
+        .add_bond(BondEntry {
+            sponsor: true,
+            link: "l".into(),
+            member: "m".into(),
+            bond: "aa".repeat(32),
+            sponsor_id: String::new(),
+        })
+        .unwrap();
+    assert_eq!(issuer.vouchee_bond(), None);
 }
