@@ -6,7 +6,7 @@ mod inbox_custody;
 mod profile_custody;
 mod shared;
 use cbrd::clnk;
-pub use group_custody::{GroupPeers, VaultGroupOwner};
+pub use group_custody::{GroupPeers, VaultGroupOwner, VerifiedPeers};
 pub use shared::VaultBoardOwner;
 use std::{future::Future, pin::Pin};
 

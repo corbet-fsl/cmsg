@@ -138,3 +138,34 @@ async fn the_desk_and_the_checkpoint_live_in_the_encrypted_store() {
     // The desk write moved the Store; the checkpoint is read fresh each time.
     assert_eq!(groups.snapshot().await.unwrap().revision(), 0);
 }
+
+struct Dead;
+impl crate::door::inbox_lineage::HandleOpener for Dead {
+    async fn read(
+        &mut self,
+        _: &ckmg::Binding,
+        _: &[u8],
+    ) -> std::result::Result<Vec<cvlt::LineageEvidence>, crate::door::inbox_lineage::PeerUnavailable>
+    {
+        Err(crate::door::inbox_lineage::PeerUnavailable)
+    }
+}
+struct NoTrust;
+impl crate::door::inbox_lineage::CharterView for NoTrust {
+    fn with_current<T>(
+        &mut self,
+        _: &str,
+        _: u64,
+        _: impl FnOnce(&cchr::VerifiedCharter) -> std::result::Result<T, cnbx::ContactError>,
+    ) -> std::result::Result<T, cnbx::ContactError> {
+        Err(cnbx::ContactError::Unavailable)
+    }
+}
+
+#[tokio::test]
+async fn an_unreadable_or_untrusted_peer_has_no_lineage() {
+    use super::super::group_custody::{GroupPeers, VerifiedPeers};
+    let binding = ckmg::Binding::new("alpha", &member("c")).unwrap();
+    let mut peers = VerifiedPeers::new(Dead, NoTrust, || Some(1_000));
+    assert!(peers.lineage(&binding, b"handle").await.is_none());
+}

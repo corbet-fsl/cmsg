@@ -17,6 +17,9 @@
 //! Charter-verified lineage. Standing-room (seed) authority and vouches by
 //! other members' contacts are refused until their evidence exists.
 use super::*;
+use crate::door::inbox_lineage::{
+    CharterView, HandleOpener, PeerLineage, PeerUnavailable, StoredHandleRecords,
+};
 use cbrd::cgrp::{self, Snapshot};
 use futures_util::lock::Mutex;
 use std::{cell::RefCell, collections::BTreeMap, collections::BTreeSet, rc::Rc};
@@ -26,21 +29,80 @@ const LINEAGE_FRESH_SECONDS: u64 = 120;
 const DESK_OWNER: &str = "cbrd";
 const DESK_KEY: &[u8] = b"groups.desk.v1";
 
-/// Forced, Charter-verified read of a peer's current lineage. Any failure is
-/// `None`; a missing lineage makes that member's consent unverifiable.
+/// Forced, Charter-verified read of a peer's current lineage. `handle` is the
+/// lineage-read capability this member's own Contacts journal retained for
+/// that peer; no handle, no read. Any failure is `None`, so a missing lineage
+/// makes that member's consent unverifiable.
 pub trait GroupPeers {
     fn lineage<'a>(
         &'a mut self,
         binding: &'a ckmg::Binding,
+        handle: &'a [u8],
     ) -> Pin<Box<dyn Future<Output = Option<ckmg::Lineage>> + 'a>>;
 }
 
-impl<T: cnbx::DeviceAuthority> GroupPeers for T {
+struct OpenerRef<'a, O>(&'a mut O);
+impl<O: HandleOpener> HandleOpener for OpenerRef<'_, O> {
+    async fn read(
+        &mut self,
+        binding: &ckmg::Binding,
+        handle: &[u8],
+    ) -> std::result::Result<Vec<cvlt::LineageEvidence>, PeerUnavailable> {
+        self.0.read(binding, handle).await
+    }
+}
+struct ViewRef<'a, V>(&'a mut V);
+impl<V: CharterView> CharterView for ViewRef<'_, V> {
+    fn with_current<T>(
+        &mut self,
+        community: &str,
+        now: u64,
+        inspect: impl FnOnce(&cchr::VerifiedCharter) -> std::result::Result<T, cnbx::ContactError>,
+    ) -> std::result::Result<T, cnbx::ContactError> {
+        self.0.with_current(community, now, inspect)
+    }
+}
+
+/// Production peers: the peer's lineage records are read through the handle
+/// this member's Contacts journal retained (never a claim the peer sends us)
+/// and every item is reverified against the door-held community Charter,
+/// including its passkey revocations (`PeerLineage`). Anything unreadable,
+/// stale, revoked or foreign is refused.
+pub struct VerifiedPeers<O, V, C> {
+    opener: O,
+    view: V,
+    clock: C,
+}
+impl<O, V, C> VerifiedPeers<O, V, C> {
+    pub fn new(opener: O, view: V, clock: C) -> Self {
+        Self {
+            opener,
+            view,
+            clock,
+        }
+    }
+}
+impl<O, V, C> GroupPeers for VerifiedPeers<O, V, C>
+where
+    O: HandleOpener,
+    V: CharterView,
+    C: FnMut() -> Option<u64>,
+{
     fn lineage<'a>(
         &'a mut self,
         binding: &'a ckmg::Binding,
+        handle: &'a [u8],
     ) -> Pin<Box<dyn Future<Output = Option<ckmg::Lineage>> + 'a>> {
-        Box::pin(async move { self.current(binding).await.ok() })
+        Box::pin(async move {
+            let records = StoredHandleRecords::new(
+                BTreeMap::from([(binding.member().to_owned(), handle.to_vec())]),
+                OpenerRef(&mut self.opener),
+            );
+            let mut port = PeerLineage::new(records, ViewRef(&mut self.view), &mut self.clock);
+            cnbx::DeviceAuthority::current(&mut port, binding)
+                .await
+                .ok()
+        })
     }
 }
 
@@ -239,6 +301,7 @@ where
             let custody = retained.as_mut().ok_or(cgrp::Error::Unavailable)?;
             let now = ckmg::Clock::now(&mut crate::door::custody::SystemClock)
                 .map_err(|_| cgrp::Error::Clock)?;
+            let mut handles = BTreeMap::new();
             {
                 let storage = custody.vault.storage().clone();
                 let store = storage.lock().await;
@@ -250,6 +313,15 @@ where
                     .inbox
                     .contacts(&store)
                     .map_err(|_| cgrp::Error::Unavailable)?;
+                for peer in devices {
+                    if peer != &self.member {
+                        if let Some(handle) =
+                            journal.handle(peer).map_err(|_| cgrp::Error::Unavailable)?
+                        {
+                            handles.insert(peer.clone(), handle);
+                        }
+                    }
+                }
                 let mut cache = self.cache.borrow_mut();
                 for peer in contacts {
                     let relation = journal
@@ -271,10 +343,10 @@ where
                             .await
                             .map_err(|_| cgrp::Error::Authority)?,
                     )
-                } else if let Some(peers) = &self.peers {
+                } else if let (Some(peers), Some(handle)) = (&self.peers, handles.get(member)) {
                     let binding =
                         ckmg::Binding::new(&community, member).map_err(|_| cgrp::Error::Invalid)?;
-                    peers.lock().await.lineage(&binding).await
+                    peers.lock().await.lineage(&binding, handle).await
                 } else {
                     None
                 };
