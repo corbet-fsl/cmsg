@@ -92,5 +92,5 @@ chromedriver --version
 chromium --version
 rustup run nightly rustc -vV
 rustup run nightly cargo llvm-cov --version
-"$CCID_BIN" cached --repo "$PWD" --check verify
-test -s ".ccid/results/verify.jsonl"
+# openssl-sys (Keyhole test server dev-dependency) builds inside the pinned shell.
+nix-shell .ci/check-shell.nix --run 'set -e; "$CCID_BIN" cached --repo "$PWD" --check verify; test -s ".ccid/results/verify.jsonl"'
