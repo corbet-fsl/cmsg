@@ -887,7 +887,9 @@ where
         };
         let applied = self.apply(&mut desk, &job, session.clone(), proved).await;
         if let Err(error) = applied {
-            // A refused or unavailable result never loses the action.
+            // A refused or unavailable result never loses the action. The failure
+            // is recorded on a fresh desk: nothing the failed step half-applied
+            // in memory is ever written.
             if matches!(
                 error,
                 ErrorCode::Refused
@@ -895,7 +897,8 @@ where
                     | ErrorCode::Unauthorized
                     | ErrorCode::InvalidRequest
             ) {
-                self.job_failed(&mut desk, &job, &session).await?;
+                let mut fresh = Desk::load(self.store)?;
+                self.job_failed(&mut fresh, &job, &session).await?;
             }
             return Err(error);
         }
@@ -949,27 +952,46 @@ where
         let mut clock = custody::SystemClock;
         match job.work {
             Work::ReserveSender => {
-                let receipt = proved.receipt_digest.ok_or(ErrorCode::Refused)?;
+                let receipt = proved
+                    .receipt_digest
+                    .filter(|digest| *digest != [0; 32])
+                    .ok_or(ErrorCode::Refused)?;
+                // Our own proof is checked before it is queued: garbage from the
+                // prover is a failed attempt, never an offer the peer must reject.
+                let statement: WaveStatement = blob_statement(&proved.blob)?;
+                self.ports
+                    .verify_reservation(&statement, &proved.blob.proof, &sender, now)
+                    .await?;
                 let s = desk.wave_mut(&nonce)?;
                 s.own = Some(proved.blob.clone());
                 s.receipt_digest = Some(receipt);
-                s.stage = Stage::Offered;
-                s.outbox.push(WaveMessage::Offer {
-                    nonce,
-                    reservation: proved.blob.clone(),
-                    receipt_digest: receipt,
-                });
+                if s.stage == Stage::Reserving {
+                    s.stage = Stage::Offered;
+                    s.outbox.push(WaveMessage::Offer {
+                        nonce,
+                        reservation: proved.blob.clone(),
+                        receipt_digest: receipt,
+                    });
+                }
             }
             Work::ReserveRecipient => {
                 let package = session.key_package.clone().ok_or(ErrorCode::Refused)?;
+                let statement: WaveStatement = blob_statement(&proved.blob)?;
+                self.ports
+                    .verify_reservation(&statement, &proved.blob.proof, &recipient, now)
+                    .await?;
                 let s = desk.wave_mut(&nonce)?;
                 s.own = Some(proved.blob.clone());
-                s.stage = Stage::Reserved;
-                s.outbox.push(WaveMessage::Reservation {
-                    nonce,
-                    reservation: proved.blob.clone(),
-                    key_package: package,
-                });
+                // A member who closed meanwhile sends no reservation: the Close
+                // outcome that follows settles the slot.
+                if s.stage == Stage::Reserving {
+                    s.stage = Stage::Reserved;
+                    s.outbox.push(WaveMessage::Reservation {
+                        nonce,
+                        reservation: proved.blob.clone(),
+                        key_package: package,
+                    });
+                }
             }
             Work::Answer | Work::Close => {
                 let receipt = session.receipt_digest.ok_or(ErrorCode::Refused)?;
@@ -1021,7 +1043,6 @@ where
                 // Punishment is private to the punisher: nothing is sent.
             }
         }
-        let _ = sender;
         desk.finish(&job.id)?;
         self.write_wallet(desk, &proved.wallet, operation(&job.id, "applied"))
             .await
