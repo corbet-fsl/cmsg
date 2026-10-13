@@ -14,8 +14,6 @@ pub use composition::VaultComposer;
 pub mod custody;
 pub mod facades;
 pub mod foyer;
-#[cfg(feature = "ohttp")]
-pub mod ohttp;
 mod inbox;
 pub mod inbox_conversation;
 pub mod inbox_lineage;
@@ -28,6 +26,8 @@ pub mod native;
 pub mod network_browser;
 #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
 pub mod network_native;
+#[cfg(feature = "ohttp")]
+pub mod ohttp;
 pub mod passport;
 pub mod record;
 mod registry;

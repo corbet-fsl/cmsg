@@ -116,6 +116,9 @@ impl Post for ReqwestPost {
         if bytes.len() > 1 << 20 {
             return Err(cblv::Error::Transport);
         }
-        Ok(RawReply { status, body: bytes.to_vec() })
+        Ok(RawReply {
+            status,
+            body: bytes.to_vec(),
+        })
     }
 }
