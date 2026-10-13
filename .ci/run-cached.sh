@@ -11,6 +11,19 @@ if [ "$CHECKS" != "verify" ]; then
   echo "CHECKS must be exactly 'verify', got: $CHECKS" >&2
   exit 2
 fi
+# Branch-keyed cargo target cache: runs on different branches must not share
+# one target dir ("Target cache is in use"). v01 keeps the existing cmsg-v01
+# cache; every other branch gets /caches/cargo/cmsg-<sanitised branch>/target.
+ci_branch=${CI_BRANCH:-$(git symbolic-ref --short -q HEAD 2>/dev/null || true)}
+ci_branch=${ci_branch:-detached-${CI_COMMIT_SHA:0:12}}
+case "$ci_branch" in
+  v01) export CARGO_TARGET_DIR=/caches/cargo/cmsg-v01/target ;;
+  *)
+    ci_key=$(printf '%s' "$ci_branch" | tr -c 'A-Za-z0-9._-' '-')
+    export CARGO_TARGET_DIR="/caches/cargo/cmsg-${ci_key}/target"
+    ;;
+esac
+echo "cargo target cache: $CARGO_TARGET_DIR (branch $ci_branch)"
 cache_root=${CI_CACHE_ROOT:-${CARGO_HOME:-}}
 [[ $cache_root = /* ]] || { echo 'An absolute persistent CI_CACHE_ROOT or CARGO_HOME is required' >&2; exit 2; }
 namespace=$(printf '%s' "$CI_REPOSITORY_URL" | sha256sum | cut -c1-24)
