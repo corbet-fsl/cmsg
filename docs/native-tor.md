@@ -211,14 +211,16 @@ forced polling reads. No node signer substitutes for record authority.
 The configured host adds neither first creation nor readiness claims. This
 wrapper and CLI selection await executed qualification.
 
-With the native `test-authenticator` feature, trusted test composition may call
-`Door::bind_test_authenticator(origin, owner)` after configuring that member's
-Foyer and login. Supply an original `cpky::software::SoftwareAuthenticator`
-genuinely enrolled with the real service. Live or uncertain login prevents
-rebinding. Login uses the same pending ceremony's original HTTP callback helper
-with `synced_test_device()`, then the unchanged wait/Foyer verification/custody
-path. An explicit helper failure drops the ceremony before clearing uncertainty;
-cancellation keeps the existing Foyer fence raised. With no bound test owner,
+With the native `embedded-authenticator` feature, a trusted native embedding may
+call `Door::bind_authenticator(origin, role, make)` after configuring that
+portal's Foyer and login. `make` returns a fresh `cpky::Authenticator` per login
+(a test `SoftwareAuthenticator` genuinely enrolled with the real service, or a
+seed-held operator credential). The binding is scoped to the named portal and
+role: a Root binding never serves a member session. Live or uncertain login
+prevents rebinding. Login uses the same pending ceremony's original HTTP
+callback helper, then the unchanged wait/Foyer verification/custody path. An
+explicit helper failure drops the ceremony before clearing uncertainty;
+cancellation keeps the existing Foyer fence raised. With no bound authenticator,
 the original browser launcher runs. There is no public provider configuration.
 The test-only Cmeet child constructor and real enrollment/retained provider setup
 remain to be wired; enabling a feature cannot supply either or complete custody.

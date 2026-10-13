@@ -246,8 +246,8 @@ pub struct Door {
     accounts: BTreeMap<String, account::AccountActor>,
     login_configuration: BTreeMap<String, login::Configuration>,
     logins: BTreeMap<[u8; 32], login::session::State>,
-    #[cfg(all(feature = "test-authenticator", not(target_arch = "wasm32")))]
-    test_authenticators: BTreeMap<String, cpky::software::SoftwareAuthenticator>,
+    #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
+    embedded_authenticators: BTreeMap<String, login::native::Embedded>,
     #[cfg(target_arch = "wasm32")]
     browser_gesture: Option<login::browser::Gesture>,
 }
@@ -266,8 +266,8 @@ impl Door {
             accounts: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
             logins: BTreeMap::new(),
-            #[cfg(all(feature = "test-authenticator", not(target_arch = "wasm32")))]
-            test_authenticators: BTreeMap::new(),
+            #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
+            embedded_authenticators: BTreeMap::new(),
             #[cfg(target_arch = "wasm32")]
             browser_gesture: None,
         }
