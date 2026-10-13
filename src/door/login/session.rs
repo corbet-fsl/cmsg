@@ -101,6 +101,26 @@ pub(super) fn poll(door: &mut Door, key: &[u8; 32]) -> Result<Status> {
                 let (credential, custody) = authentication.into_parts();
                 let binding = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
                 let scope = binding.sessions.primary;
+                // A passkey whose user handle does not open with this community's
+                // fingerprint belongs to another incarnation of the name: hold it
+                // back before anything is sent and tell the browser to forget it.
+                let rejected = (scope == foyer::Scope::Community)
+                    .then(|| binding.community_fingerprint())
+                    .flatten()
+                    .and_then(|fingerprint| {
+                        identity::guard_assertion(credential.as_json(), &fingerprint).err()
+                    });
+                if let Some(rejected) = rejected {
+                    binding.uncertain = false;
+                    if let (Some(id), Some(login)) = (
+                        rejected.credential_id.as_deref(),
+                        door.login_configuration.get(&origin),
+                    ) {
+                        identity::signal_unknown_credential(&login.relying_party, id);
+                    }
+                    door.logins.insert(*key, State::Refused(ErrorCode::Refused));
+                    return Err(ErrorCode::Refused);
+                }
                 let mut client = binding
                     .sessions
                     .clients

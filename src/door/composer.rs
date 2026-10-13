@@ -22,6 +22,7 @@ use super::{
     foyer::{Scope, Sessions, Transport},
     Configuration, Door, Role,
 };
+use super::identity;
 use cfyr::{passkeys::Client, Foyer};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -55,6 +56,16 @@ pub struct ServiceSettings {
     pub rp_id: String,
     /// Pinned key ring (the serialized `cnvy` key ring).
     pub trust_key_ring: Value,
+    /// Founding-key fingerprint of the community (hex). When set, the trust is
+    /// anchored to it instead of `trust_key_ring`: the feed must carry the
+    /// genesis and an unbroken key chain, and registration options must carry
+    /// a user id that opens with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+    /// Chain head this device verified before (from its pinned membership);
+    /// a feed that rolls back below it or forks from it is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<identity::Head>,
     /// Host or address the HTTPS client dials (the origin's own host in production).
     pub connect_host: String,
     /// Extra DER certificate files trusted for this service.
@@ -328,6 +339,22 @@ async fn lease<'p>(
         .map_err(step("lease"))
 }
 
+/// Fingerprint the community trust of this Foyer is anchored to, if it is.
+fn anchored(api: &mut Foyer<Transport>) -> Option<identity::Fingerprint> {
+    let trust = api.trust().ok()?;
+    trust.fingerprint().copied().map(identity::Fingerprint)
+}
+
+/// Hold back an assertion whose user handle does not open with the anchored
+/// community's fingerprint; it is dropped here and never sent.
+fn guard(api: &mut Foyer<Transport>, credential: &Value) -> Result<(), ComposeError> {
+    match anchored(api) {
+        Some(fingerprint) => identity::guard_assertion(credential, &fingerprint)
+            .map_err(|_| ComposeError::Inconsistent("a passkey of another community")),
+        None => Ok(()),
+    }
+}
+
 async fn login<A: cfyr::passkeys::Authenticator>(
     api: &mut Foyer<Transport>,
     keys: &mut Client<A>,
@@ -339,6 +366,7 @@ async fn login<A: cfyr::passkeys::Authenticator>(
         .map_err(step("login"))?
         .into_parts();
     drop(unlock);
+    guard(api, credential.as_json())?;
     api.finish_browser_login(challenge.ceremony, credential)
         .await
         .map(|_| ())
@@ -364,6 +392,7 @@ async fn authorize_device<A: cfyr::passkeys::Authenticator>(
         .await
         .map_err(step("device authorize"))?
         .into_parts();
+    guard(api, credential.as_json())?;
     let body = json!({
         "key": device.value(),
         "step_up": {"ceremony": begin["ceremony"], "credential": credential.into_json()},
@@ -652,6 +681,10 @@ where
                 .begin_initial_registration(passport, commitment, now)
                 .await
                 .map_err(step("register"))?;
+            if let Some(fingerprint) = anchored(api) {
+                identity::guard_creation(pending.options(), &fingerprint)
+                    .map_err(|_| ComposeError::Inconsistent("registration user id of another community"))?;
+            }
             let registration = keys
                 .register_member(pending.options().clone())
                 .await
@@ -697,6 +730,7 @@ where
         return Err(ComposeError::Inconsistent("the authenticator gave no PRF"));
     };
     let opening = cvlt::PreparedOpen::new(unlock, scope).map_err(step("restore"))?;
+    guard(companion, credential.as_json())?;
     companion
         .finish_browser_login(challenge.ceremony, credential)
         .await
@@ -784,14 +818,6 @@ impl Services for NativeServices<'_> {
         for file in &settings.tls_root_files {
             roots.push(std::fs::read(file).map_err(step("tls roots"))?);
         }
-        let configuration = cfyr::trust::Configuration {
-            origin: settings.origin.clone(),
-            community: settings.scope.clone(),
-            key_ring: serde_json::from_value(settings.trust_key_ring.clone())
-                .map_err(|e| ComposeError::Config(e.to_string()))?,
-            minimum_revision: 1,
-            ring_revision: 0,
-        };
         let following = cfyr::trust::Config {
             retry_entropy: 27,
             refresh_seconds: 30,
@@ -801,10 +827,36 @@ impl Services for NativeServices<'_> {
             maximum_backoff_seconds: 10,
             maximum_staleness_seconds: 900,
         };
-        let mut trust = if service == Service::Global {
-            cfyr::trust::Trust::wallet_native(configuration, following, &roots)
+        let mut trust = if let (Some(fingerprint), Service::Community) =
+            (settings.fingerprint.as_deref(), service)
+        {
+            let fingerprint = identity::Fingerprint::from_hex(fingerprint)
+                .ok_or_else(|| ComposeError::Config("fingerprint".into()))?;
+            cfyr::trust::Trust::anchored_native(
+                &cfyr::trust::Anchor {
+                    origin: &settings.origin,
+                    community: &settings.scope,
+                    fingerprint: fingerprint.0,
+                    minimum_revision: 1,
+                    pin: settings.pin.map(Into::into),
+                },
+                following,
+                &roots,
+            )
         } else {
-            cfyr::trust::Trust::native(configuration, following, &roots)
+            let configuration = cfyr::trust::Configuration {
+                origin: settings.origin.clone(),
+                community: settings.scope.clone(),
+                key_ring: serde_json::from_value(settings.trust_key_ring.clone())
+                    .map_err(|e| ComposeError::Config(e.to_string()))?,
+                minimum_revision: 1,
+                ring_revision: 0,
+            };
+            if service == Service::Global {
+                cfyr::trust::Trust::wallet_native(configuration, following, &roots)
+            } else {
+                cfyr::trust::Trust::native(configuration, following, &roots)
+            }
         }
         .map_err(step("trust"))?;
         trust.start(now).await.map_err(step("trust"))?;
@@ -1045,6 +1097,8 @@ mod tests {
             passkey_origin: origin.into(),
             rp_id: "example.test".into(),
             trust_key_ring: Value::Null,
+            fingerprint: None,
+            pin: None,
             connect_host: "127.0.0.1".into(),
             tls_root_files: vec![],
         };

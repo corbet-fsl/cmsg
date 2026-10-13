@@ -382,6 +382,11 @@ impl Door {
 /// Borrow only the original retained community Foyer. Public request data never
 /// chooses another service or supplies a policy snapshot.
 impl Binding {
+    /// Founding-key fingerprint the community trust is anchored to, if it is.
+    pub(super) fn community_fingerprint(&mut self) -> Option<super::identity::Fingerprint> {
+        let trust = self.community().ok()?.trust().ok()?;
+        trust.fingerprint().copied().map(super::identity::Fingerprint)
+    }
     fn community(&mut self) -> Result<&mut Foyer<Transport>> {
         self.sessions
             .clients
