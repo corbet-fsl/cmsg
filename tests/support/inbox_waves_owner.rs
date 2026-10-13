@@ -4,8 +4,8 @@
 use super::profile_owner_tests::{open_as, ProfileOwner};
 use super::*;
 use crate::door::inbox_waves::{
-    Answer, Command, Decision, Delivered, Hello, JobDone, JobResult, Policy, Stage, Terms,
-    Envelope, WaveDecide, WaveIncoming, WaveMessage, WAVE_VERSION, WavePorts, WavePunish, WaveSend,
+    Answer, Command, Decision, Delivered, Envelope, Hello, JobDone, JobResult, Policy, Stage,
+    Terms, WaveDecide, WaveIncoming, WaveMessage, WavePorts, WavePunish, WaveSend, WAVE_VERSION,
 };
 use cwlt::wave::{
     VerifiedWaveOutcome, VerifiedWaveReservation, WaveContext, WaveOutcome, WaveOutcomeStatement,
@@ -89,7 +89,11 @@ async fn open() -> (ProfileOwner, Ports) {
     (owner, Ports { lineage })
 }
 
-async fn status(owner: &mut ProfileOwner, ports: &Ports, command: Command) -> Result<crate::door::inbox_waves::WaveStatus> {
+async fn status(
+    owner: &mut ProfileOwner,
+    ports: &Ports,
+    command: Command,
+) -> Result<crate::door::inbox_waves::WaveStatus> {
     match owner.waves(command, ports).await? {
         Answer::Status(status) => Ok(status),
         _ => panic!("a wave status"),
@@ -99,9 +103,13 @@ async fn status(owner: &mut ProfileOwner, ports: &Ports, command: Command) -> Re
 #[tokio::test]
 async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof() {
     let (mut owner, ports) = open().await;
-    let sent = status(&mut owner, &ports, Command::Send(WaveSend { peer: member(PEER) }))
-        .await
-        .unwrap();
+    let sent = status(
+        &mut owner,
+        &ports,
+        Command::Send(WaveSend { peer: member(PEER) }),
+    )
+    .await
+    .unwrap();
     assert_eq!((sent.role, sent.stage, sent.pending), (0, Stage::Hello, 1));
     assert_eq!(sent.conversation, None);
     let nonce = sent.nonce;
@@ -124,16 +132,33 @@ async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof()
     };
     assert!(matches!(
         outbox.messages.as_slice(),
-        [crate::door::inbox_waves::Queued { envelope: Envelope { message: WaveMessage::Hello { .. }, .. }, .. }]
+        [crate::door::inbox_waves::Queued {
+            envelope: Envelope {
+                message: WaveMessage::Hello { .. },
+                ..
+            },
+            ..
+        }]
     ));
-    let delivered = Delivered { nonce, kind: "hello".into() };
+    let delivered = Delivered {
+        nonce,
+        kind: "hello".into(),
+    };
     assert!(matches!(
-        owner.waves(Command::Delivered(delivered.clone()), &ports).await,
+        owner
+            .waves(Command::Delivered(delivered.clone()), &ports)
+            .await,
         Ok(Answer::Done)
     ));
-    assert!(owner.waves(Command::Delivered(delivered), &ports).await.is_err());
+    assert!(owner
+        .waves(Command::Delivered(delivered), &ports)
+        .await
+        .is_err());
     // A hello or terms from a stranger or from the wrong peer is refused.
-    let terms = Terms { recipient_authority: [5; 32], recipient_challenge: [6; 32] };
+    let terms = Terms {
+        recipient_authority: [5; 32],
+        recipient_challenge: [6; 32],
+    };
     let wrong = WaveIncoming {
         peer: member("ef"),
         envelope: terms_envelope(nonce, terms.clone(), "ef", 0, conversation),
@@ -144,10 +169,16 @@ async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof()
     );
     // A wrong version, a mis-bound conversation and a stale sequence are refused.
     for envelope in [
-        Envelope { version: 2, ..terms_envelope(nonce, terms.clone(), PEER, 0, conversation) },
+        Envelope {
+            version: 2,
+            ..terms_envelope(nonce, terms.clone(), PEER, 0, conversation)
+        },
         terms_envelope(nonce, terms.clone(), PEER, 0, [0xee; 32]),
     ] {
-        let bad = WaveIncoming { peer: member(PEER), envelope };
+        let bad = WaveIncoming {
+            peer: member(PEER),
+            envelope,
+        };
         assert_eq!(
             status(&mut owner, &ports, Command::Receive(bad)).await,
             Err(ErrorCode::Refused)
@@ -191,7 +222,10 @@ async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof()
         let kept = status(
             &mut owner,
             &ports,
-            Command::JobDone(JobDone { id: job.id, result: JobResult::Failed }),
+            Command::JobDone(JobDone {
+                id: job.id,
+                result: JobResult::Failed,
+            }),
         )
         .await
         .unwrap();
@@ -214,7 +248,10 @@ async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof()
     };
     assert!(again.job.is_some());
     // A restart returns the job being proved to the queue.
-    assert!(matches!(owner.waves(Command::Recover, &ports).await, Ok(Answer::Done)));
+    assert!(matches!(
+        owner.waves(Command::Recover, &ports).await,
+        Ok(Answer::Done)
+    ));
     let Answer::Job(requeued) = owner.waves(Command::NextJob, &ports).await.unwrap() else {
         panic!("a job offer")
     };
@@ -242,10 +279,15 @@ async fn a_blocked_peer_is_refused_on_this_device_in_both_directions() {
             conversation: hello.conversation,
             sender: member(peer),
             sequence: 0,
-            message: WaveMessage::Hello { nonce: [nonce; 32], hello: hello.clone() },
+            message: WaveMessage::Hello {
+                nonce: [nonce; 32],
+                hello: hello.clone(),
+            },
         },
     };
-    let accepted = status(&mut owner, &ports, Command::Receive(incoming(PEER, 1))).await.unwrap();
+    let accepted = status(&mut owner, &ports, Command::Receive(incoming(PEER, 1)))
+        .await
+        .unwrap();
     assert_eq!((accepted.role, accepted.stage), (1, Stage::Hello));
     // The same wave twice, and a stranger's expired hello, are refused.
     assert_eq!(
@@ -257,7 +299,10 @@ async fn a_blocked_peer_is_refused_on_this_device_in_both_directions() {
         status(
             &mut owner,
             &ports,
-            Command::Decide(WaveDecide { nonce: [1; 32], decision: Decision::Answer })
+            Command::Decide(WaveDecide {
+                nonce: [1; 32],
+                decision: Decision::Answer
+            })
         )
         .await,
         Err(ErrorCode::Refused)
@@ -265,7 +310,10 @@ async fn a_blocked_peer_is_refused_on_this_device_in_both_directions() {
     // Punishing blocks at once, on this device, and records the punishment as work.
     let Answer::Relation(relation) = owner
         .waves(
-            Command::Punish(WavePunish { peer: member(PEER), nonce: Some([1; 32]) }),
+            Command::Punish(WavePunish {
+                peer: member(PEER),
+                nonce: Some([1; 32]),
+            }),
             &ports,
         )
         .await
@@ -285,10 +333,29 @@ async fn a_blocked_peer_is_refused_on_this_device_in_both_directions() {
         Err(ErrorCode::Refused)
     );
     assert_eq!(
-        status(&mut owner, &ports, Command::Send(WaveSend { peer: member(PEER) })).await,
+        status(
+            &mut owner,
+            &ports,
+            Command::Send(WaveSend { peer: member(PEER) })
+        )
+        .await,
         Err(ErrorCode::Refused)
     );
     // Not oneself, and not a malformed member string.
-    assert!(status(&mut owner, &ports, Command::Send(WaveSend { peer: member(ME) })).await.is_err());
-    assert!(status(&mut owner, &ports, Command::Send(WaveSend { peer: "short".into() })).await.is_err());
+    assert!(status(
+        &mut owner,
+        &ports,
+        Command::Send(WaveSend { peer: member(ME) })
+    )
+    .await
+    .is_err());
+    assert!(status(
+        &mut owner,
+        &ports,
+        Command::Send(WaveSend {
+            peer: "short".into()
+        })
+    )
+    .await
+    .is_err());
 }

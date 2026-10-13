@@ -6,15 +6,15 @@ use board::{
 };
 use foyer::refresh as foyer_refresh;
 use inbox::{blocking_rules as inbox_blocking_rules, contact_act as inbox_contact_act};
-use inbox_waves::{
-    wave_decide as inbox_wave_decide, wave_delivered as inbox_wave_delivered,
-    wave_job_done as inbox_wave_job_done, wave_job_retry as inbox_wave_job_retry,
-    wave_jobs_recover as inbox_wave_jobs_recover, wave_job_next as inbox_wave_job_next,
-    wave_outbox as inbox_wave_outbox, wave_punish as inbox_wave_punish,
-    wave_receive as inbox_wave_receive, wave_send as inbox_wave_send, waves as inbox_waves_list,
-};
 use inbox_conversation::{
     acknowledge as inbox_ack, receive as inbox_receive, retry as inbox_retry, send as inbox_send,
+};
+use inbox_waves::{
+    wave_decide as inbox_wave_decide, wave_delivered as inbox_wave_delivered,
+    wave_job_done as inbox_wave_job_done, wave_job_next as inbox_wave_job_next,
+    wave_job_retry as inbox_wave_job_retry, wave_jobs_recover as inbox_wave_jobs_recover,
+    wave_outbox as inbox_wave_outbox, wave_punish as inbox_wave_punish,
+    wave_receive as inbox_wave_receive, wave_send as inbox_wave_send, waves as inbox_waves_list,
 };
 use login::{cancel as login_cancel, poll as login_poll, start as login_start};
 

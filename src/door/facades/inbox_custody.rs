@@ -49,7 +49,9 @@ where
     /// through that same Store.
     async fn with_env<T, F>(&mut self, ports: &dyn inbox_waves::WavePorts, act: F) -> Result<T>
     where
-        F: for<'e> AsyncFnOnce(&mut inbox_waves::engine::Env<'e, cvlt::KeyStore<B>, C, E, A, B>) -> Result<T>,
+        F: for<'e> AsyncFnOnce(
+            &mut inbox_waves::engine::Env<'e, cvlt::KeyStore<B>, C, E, A, B>,
+        ) -> Result<T>,
     {
         let contacts = cnbx::Contacts::key(self.vault.keys())
             .await
