@@ -3,6 +3,8 @@
 use super::*;
 mod group_custody;
 mod inbox_custody;
+mod pairing_custody;
+pub use pairing_custody::PairApproved;
 mod profile_custody;
 mod shared;
 use cbrd::clnk;
@@ -237,6 +239,15 @@ pub(super) trait BoundVault {
         now: u64,
         expires: u64,
     ) -> OwnedFuture<'a, SignedBoard>;
+    /// Existing-device pairing approval: add exactly the proven device named by `request`.
+    /// Needs the member's explicit approval and a distinct single-use Pair admission.
+    fn pair_device<'a>(
+        &'a mut self,
+        _request: &'a ckmg::PairingRequest,
+        _origin: &'a str,
+    ) -> OwnedFuture<'a, PairApproved> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn lock(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + 'static>>;
 }
 
@@ -415,6 +426,14 @@ where
         expires: u64,
     ) -> OwnedFuture<'a, SignedBoard> {
         Box::pin(self.sign_transcript(prepared.message(), origin, now, expires))
+    }
+
+    fn pair_device<'a>(
+        &'a mut self,
+        request: &'a ckmg::PairingRequest,
+        origin: &'a str,
+    ) -> OwnedFuture<'a, PairApproved> {
+        Box::pin(self.pair_owned(request, origin))
     }
 
     fn lock(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + 'static>> {

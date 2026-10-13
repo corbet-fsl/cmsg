@@ -31,6 +31,7 @@ pub mod network_native;
 #[cfg(feature = "ohttp")]
 pub mod ohttp;
 pub mod pairing;
+mod pairing_flow;
 pub mod passport;
 pub mod record;
 mod registry;
@@ -251,6 +252,7 @@ pub struct Door {
     meshes: BTreeMap<String, facades::BoundMesh>,
     vaults: BTreeMap<String, Box<dyn facades::BoundVault>>,
     accounts: BTreeMap<String, account::AccountActor>,
+    pairings: BTreeMap<String, pairing_flow::PendingApproval>,
     wave_ports: BTreeMap<String, Box<dyn inbox_waves::WavePorts>>,
     login_configuration: BTreeMap<String, login::Configuration>,
     logins: BTreeMap<[u8; 32], login::session::State>,
@@ -272,6 +274,7 @@ impl Door {
             meshes: BTreeMap::new(),
             vaults: BTreeMap::new(),
             accounts: BTreeMap::new(),
+            pairings: BTreeMap::new(),
             wave_ports: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
             logins: BTreeMap::new(),
