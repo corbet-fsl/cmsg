@@ -146,7 +146,13 @@ mod tests {
     fn projection_refuses_missing_mistyped_and_foreign_inputs() {
         for key in snapshot().content.keys() {
             // Hysteresis and join pace travel inside the signed curve rows.
-            let unused = ["groups.band_hysteresis", "groups.join_rate_per_hour"];
+            // The exclusion-fork cost in sp is charged by the points ledger, not by
+            // the group policy, so the projection does not read it.
+            let unused = [
+                "groups.band_hysteresis",
+                "groups.join_rate_per_hour",
+                "groups.fork_cost_sp",
+            ];
             let owned = ["groups.", "seats.", "waves."];
             if unused.contains(&key.as_str()) || !owned.iter().any(|p| key.starts_with(p)) {
                 continue;
