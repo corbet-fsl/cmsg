@@ -25,8 +25,8 @@ pub(super) use handlers::{attend, discovery, search, watch};
 pub use handlers::{CommittedOwner, CommittedRead, OwnerFuture, ReadPolicy, SignedAttendance};
 pub(super) use profile::profile_publish;
 pub use profile::{ProfileParts, ProfilePublish, ProfilePublished};
-pub(super) use rooms::{room_join, room_leave, room_serve};
-pub use rooms::{RoomJoin, RoomJoinStatus, RoomRef, RoomServed};
+pub(super) use rooms::{room_admit, room_join, room_leave, room_serve};
+pub use rooms::{RoomAdmitted, RoomJoin, RoomJoinStatus, RoomRef, RoomServed};
 
 /// Only the user's paging choice crosses the public boundary. Link supplies
 /// the live session/nonce and Vault signs its exact prepared transcript.

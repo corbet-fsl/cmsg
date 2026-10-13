@@ -9,7 +9,9 @@ pub use pairing_custody::PairApproved;
 mod profile_custody;
 mod shared;
 use cbrd::clnk;
-pub use group_custody::{GroupPeers, RoomJoinTask, RoomLeaveTask, VaultGroupOwner, VerifiedPeers};
+pub use group_custody::{
+    GroupPeers, RoomAdmitTask, RoomJoinTask, RoomLeaveTask, VaultGroupOwner, VerifiedPeers,
+};
 pub use shared::{AccountPort, PortVault, VaultBoardOwner};
 use std::{future::Future, pin::Pin};
 
@@ -116,6 +118,14 @@ pub(super) trait BoundBoard {
         _room: board::RoomRef,
         _expires: u64,
     ) -> OwnedFuture<'_, board::RoomServed> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// Admit the newcomers whose ordered external commits the room holds.
+    fn room_admit(
+        &mut self,
+        _room: board::RoomRef,
+        _expires: u64,
+    ) -> OwnedFuture<'_, board::RoomAdmitted> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
     /// Leave a member room (Groups, Threads state, Attend in one commit).

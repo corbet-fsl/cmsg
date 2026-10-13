@@ -120,6 +120,20 @@ pub trait CommittedOwner {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
 
+    /// Admit a newcomer to a member room; see `VaultGroupOwner::admit_room`.
+    /// Owners without Threads custody refuse.
+    fn admit_room<'a, T, L>(
+        &'a mut self,
+        _board: &'a cbrd::Board<T, L>,
+        _task: crate::door::facades::RoomAdmitTask<'a>,
+    ) -> OwnerFuture<'a, cbrd::cgrp::Snapshot>
+    where
+        T: clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
     /// This member's evidence for a room it belongs to, for answering joins.
     fn room_evidence<'a>(
         &'a mut self,
@@ -756,6 +770,13 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
         expires: u64,
     ) -> OwnedFuture<'_, super::RoomServed> {
         Box::pin(self.room_serve_step(room, expires))
+    }
+    fn room_admit(
+        &mut self,
+        room: super::RoomRef,
+        expires: u64,
+    ) -> OwnedFuture<'_, super::RoomAdmitted> {
+        Box::pin(self.room_admit_step(room, expires))
     }
     fn room_leave(
         &mut self,
