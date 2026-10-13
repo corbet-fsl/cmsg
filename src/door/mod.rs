@@ -36,6 +36,7 @@ mod pairing_flow;
 pub mod passport;
 pub mod record;
 mod registry;
+mod vouching;
 #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
 pub mod scenario;
 pub mod surface;
@@ -253,6 +254,10 @@ pub struct Door {
     meshes: BTreeMap<String, facades::BoundMesh>,
     vaults: BTreeMap<String, Box<dyn facades::BoundVault>>,
     accounts: BTreeMap<String, account::AccountActor>,
+    /// Vouchers the member may still spend, as last reported by the accounting
+    /// owner. `None` until one is known; links are then limited only by the
+    /// community's own (alpha) allowance.
+    voucher_allowance: Option<u32>,
     wave_ports: BTreeMap<String, Box<dyn inbox_waves::WavePorts>>,
     login_configuration: BTreeMap<String, login::Configuration>,
     logins: BTreeMap<[u8; 32], login::session::State>,
@@ -274,6 +279,7 @@ impl Door {
             meshes: BTreeMap::new(),
             vaults: BTreeMap::new(),
             accounts: BTreeMap::new(),
+            voucher_allowance: None,
             wave_ports: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
             logins: BTreeMap::new(),
@@ -282,6 +288,14 @@ impl Door {
             #[cfg(target_arch = "wasm32")]
             browser_gesture: None,
         }
+    }
+
+    /// Trusted embedding control: the accounting owner reports how many vouchers
+    /// the member may still spend. At zero every open link is stopped and no new
+    /// one is issued; a link may not offer more uses than remain. Absent from
+    /// every callable projection.
+    pub fn set_voucher_allowance(&mut self, remaining: Option<u32>) {
+        self.voucher_allowance = remaining;
     }
 
     /// Trusted embedding control: the runtime reports the network connection

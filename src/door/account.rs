@@ -298,6 +298,7 @@ mod run {
         foyer::{map_error, Transport},
         passport::GlobalPassport,
     };
+    use super::super::vouching::Book;
     use super::*;
     use ckmg::{Authority, Clock, Entropy};
     use cvlt::Records;
@@ -318,6 +319,30 @@ mod run {
 
     fn clock() -> u64 {
         SystemClock.now().unwrap_or(u64::MAX)
+    }
+
+    /// Write the voucher custody when it changed; the compare-and-swap value for
+    /// the next write is returned.
+    async fn save_book<B, C, E, A, R>(
+        account: &mut CommunityAccount<B, C, E, A, R>,
+        raw: Option<Zeroizing<Vec<u8>>>,
+        book: &Book,
+    ) -> Result<Option<Zeroizing<Vec<u8>>>>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
+        let encoded = book.encode()?;
+        if raw.as_deref().map(Vec::as_slice) == Some(encoded.as_slice()) {
+            return Ok(raw);
+        }
+        account
+            .replace_voucher_custody(raw.as_deref().map(Vec::as_slice), &encoded)
+            .await?;
+        Ok(Some(encoded))
     }
 
     /// The actor's view of the enrollment while one admission is held.
@@ -441,11 +466,18 @@ mod run {
     /// Read the lobby through the held member lease and, when something is still
     /// missing and the member brought a voucher, submit it once. The server alone
     /// decides; a voucher the lobby no longer needs is not sent.
-    async fn gate(
+    async fn gate<B, C, E, A, R>(
         membership: &mut cfyr::membership::LiveMembership<Transport>,
+        account: &mut CommunityAccount<B, C, E, A, R>,
         join: &JoinRequest,
-        nonces: &mut std::collections::BTreeMap<String, [u8; cvch::link::NONCE_BYTES]>,
-    ) -> Result<Gate> {
+    ) -> Result<Gate>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
         let mut lease = membership
             .observe_lease(clock)
             .await
@@ -473,21 +505,21 @@ mod run {
             }
         }
         if let (true, Some(code)) = (lacks(&lobby), join.voucher.as_deref()) {
-            // The bond nonce is chosen once per link and kept for every retry: the
-            // issuer's device derives the bond from the first notice it receives.
-            let nonce = match nonces.get(code) {
-                Some(nonce) => *nonce,
-                None => {
-                    let nonce = cvch::link::entropy().map_err(|_| ErrorCode::Unavailable)?;
-                    nonces.insert(code.to_owned(), nonce);
-                    nonce
-                }
-            };
-            lobby = lease
+            // The bond nonce is chosen once per link and kept in the Vault for
+            // every retry, even after a restart: the issuer's device derives
+            // the bond from the first notice it receives. It is saved before it
+            // is used, and the bond is saved as soon as it exists.
+            let raw = account.voucher_custody().await?;
+            let mut book = Book::decode(raw.as_deref().map(Vec::as_slice))?;
+            let nonce = book.nonce_for(code)?;
+            let mut written = save_book(account, raw, &book).await?;
+            let redeemed = lease
                 .submit_voucher(code, join.handle.as_deref(), nonce, clock)
                 .await
-                .map_err(map_error)?
-                .lobby;
+                .map_err(map_error)?;
+            book.add_vouchee_bond(code, &redeemed.bond)?;
+            save_book(account, written.take(), &book).await?;
+            lobby = redeemed.lobby;
         }
         Ok(Gate {
             ready: !lacks(&lobby),
@@ -544,7 +576,6 @@ mod run {
             prover,
         } = parts;
         let mut carried = None;
-        let mut nonces = std::collections::BTreeMap::new();
         loop {
             let first = match carried.take() {
                 Some(command) => command,
@@ -555,7 +586,7 @@ mod run {
                 // already through them, otherwise the lobby decides.
                 let reply = match repeat(first.clone(), &mut account).await {
                     Repeat::Answer(answer) => Ok(answer),
-                    Repeat::As(_) => gate(&mut membership, join, &mut nonces)
+                    Repeat::As(_) => gate(&mut membership, &mut account, join)
                         .await
                         .map(Answer::Gate),
                 };

@@ -119,6 +119,19 @@ const OWNED_BY_ACCOUNT_LIFECYCLE: [&str; 8] = [
     "device_authorize",
 ];
 
+/// Voucher operations the device performs itself with custody of the link
+/// secrets (`vouching`): the raw owner operations are used internally but are not
+/// republished, because a forwarded call would bypass the Vault (link secrets,
+/// notices, bonds) and could never be completed correctly by a frontend.
+const DEVICE_VOUCHER: [&str; 6] = [
+    "voucher_link_create",
+    "voucher_link_view",
+    "voucher_link_revoke",
+    "voucher_signoff_list",
+    "voucher_signoff_decide",
+    "voucher_redeem",
+];
+
 static OPERATIONS: LazyLock<Vec<Operation>> = LazyLock::new(|| operations(cfyr::contract()));
 
 fn operations(document: &Value) -> Vec<Operation> {
@@ -225,11 +238,21 @@ fn inline_schema(value: &Value, document: &Value, depth: usize) -> Option<Value>
 }
 
 pub(super) fn catalog() -> impl Iterator<Item = ActionDescription> {
-    OPERATIONS.iter().map(|op| op.description.clone())
+    OPERATIONS
+        .iter()
+        .filter(|op| !DEVICE_VOUCHER.contains(&op.name.as_str()))
+        .map(|op| op.description.clone())
 }
 
 pub(super) fn action(name: &str) -> Option<&'static Operation> {
-    OPERATIONS.iter().find(|op| op.description.action == name)
+    OPERATIONS
+        .iter()
+        .find(|op| op.description.action == name && !DEVICE_VOUCHER.contains(&op.name.as_str()))
+}
+
+/// A raw owner operation by name, including those the device performs itself.
+pub(super) fn owner_operation(name: &str) -> Option<&'static Operation> {
+    OPERATIONS.iter().find(|op| op.name == name)
 }
 
 impl Binding {

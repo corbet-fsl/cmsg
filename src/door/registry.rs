@@ -18,6 +18,10 @@ use inbox_waves::{
     wave_outbox as inbox_wave_outbox, wave_punish as inbox_wave_punish,
     wave_receive as inbox_wave_receive, wave_send as inbox_wave_send, waves as inbox_waves_list,
 };
+use vouching::{
+    link_create as voucher_link_create, link_revoke as voucher_link_revoke, links as voucher_links,
+    signoff_decide as voucher_signoff_decide, signoff_list as voucher_signoff_list,
+};
 use login::{cancel as login_cancel, poll as login_poll, start as login_start};
 
 #[derive(
@@ -419,6 +423,11 @@ actions! {
     "account_reopen" => account_reopen(Empty) -> account::Opened, VaultAccess, Vault;
     "account_activate" => account_activate(Empty) -> account::Activation, VaultAccess, Vault;
     "community_join" => community_join(account::JoinRequest) -> account::Joined, VaultAccess, Vault;
+    "foyer.voucher_link_create" => voucher_link_create(vouching::LinkCreate) -> vouching::LinkInfo, VaultAccess, Foyer;
+    "foyer.voucher_links" => voucher_links(Empty) -> vouching::Links, VaultAccess, Foyer;
+    "foyer.voucher_link_revoke" => voucher_link_revoke(vouching::LinkRef) -> vouching::LinkRevoked, VaultAccess, Foyer;
+    "foyer.voucher_signoff_list" => voucher_signoff_list(Empty) -> vouching::Applicants, VaultAccess, Foyer;
+    "foyer.voucher_signoff_decide" => voucher_signoff_decide(vouching::Decide) -> vouching::Decided, VaultAccess, Foyer;
     "login.start" => login_start(super::login::Start) -> super::login::Status, LocalBootstrap, Foyer;
     "login.poll" => login_poll(super::login::Poll) -> super::login::Status, LocalBootstrap, Foyer;
     "login.cancel" => login_cancel(super::login::Cancel) -> super::login::Status, LocalBootstrap, Foyer;

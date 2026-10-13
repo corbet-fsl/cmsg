@@ -2773,7 +2773,7 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#12a5aa5a376056d8a5f98e32564dfc883cf2953f"
+source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#ceae65939865d9afe1adc94411477cad68da9b5d"
 dependencies = [
  "blake3",
  "cchr",

@@ -229,6 +229,29 @@ pub(super) trait BoundVault {
     fn blocking_rules(&mut self) -> OwnedFuture<'_, Vec<String>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    /// The member's voucher custody record (link secrets, bonds, nonces).
+    fn voucher_custody(&mut self) -> OwnedFuture<'_, Option<Zeroizing<Vec<u8>>>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// Replace the voucher custody by compare-and-swap against `expected`.
+    fn replace_voucher_custody<'a>(
+        &'a mut self,
+        _expected: Option<&'a [u8]>,
+        _custody: &'a [u8],
+    ) -> OwnedFuture<'a, ()> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// Sign an endorsement statement with the device key; the signature and the
+    /// device public key.
+    fn sign_endorsement<'a>(
+        &'a mut self,
+        _message: &'a [u8],
+        _origin: &'a str,
+        _now: u64,
+        _expires: u64,
+    ) -> OwnedFuture<'a, (Vec<u8>, Vec<u8>)> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn contact_act(&mut self, _request: inbox::ContactAct) -> OwnedFuture<'_, cnbx::Relation> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
@@ -417,6 +440,25 @@ where
     }
     fn blocking_rules(&mut self) -> OwnedFuture<'_, Vec<String>> {
         Box::pin(self.blocking_rules_owned())
+    }
+    fn voucher_custody(&mut self) -> OwnedFuture<'_, Option<Zeroizing<Vec<u8>>>> {
+        Box::pin(self.voucher_custody_owned())
+    }
+    fn replace_voucher_custody<'a>(
+        &'a mut self,
+        expected: Option<&'a [u8]>,
+        custody: &'a [u8],
+    ) -> OwnedFuture<'a, ()> {
+        Box::pin(self.replace_voucher_custody_owned(expected, custody))
+    }
+    fn sign_endorsement<'a>(
+        &'a mut self,
+        message: &'a [u8],
+        origin: &'a str,
+        now: u64,
+        expires: u64,
+    ) -> OwnedFuture<'a, (Vec<u8>, Vec<u8>)> {
+        Box::pin(self.sign_endorsement_owned(message, origin, now, expires))
     }
     fn store_pin(
         &mut self,

@@ -12,7 +12,7 @@ use crate::door::board::{CommittedRead, ProfileParts};
 /// callback runs synchronously right after admission; this only bounds waits.
 const PROFILE_CUSTODY_SECONDS: u64 = 30;
 
-fn credential_error(error: cvlt::CredentialError) -> ErrorCode {
+pub(super) fn credential_error(error: cvlt::CredentialError) -> ErrorCode {
     match error {
         cvlt::CredentialError::Keys(error) => keys_error(error),
         cvlt::CredentialError::Scope | cvlt::CredentialError::Foreign => ErrorCode::Unauthorized,
@@ -134,6 +134,46 @@ where
             .replace_community_credential(expected, credential)
             .await
             .map_err(credential_error)
+    }
+
+    /// The member's voucher custody record, read under fresh Keys authority.
+    pub(super) async fn voucher_custody_owned(
+        &mut self,
+    ) -> Result<Option<Zeroizing<Vec<u8>>>> {
+        self.vault.voucher_custody().await.map_err(credential_error)
+    }
+
+    /// Replace the voucher custody by compare-and-swap; a lost race is Reconcile.
+    pub(super) async fn replace_voucher_custody_owned(
+        &mut self,
+        expected: Option<&[u8]>,
+        custody: &[u8],
+    ) -> Result<()> {
+        self.vault
+            .replace_voucher_custody(expected, custody)
+            .await
+            .map(|_| ())
+            .map_err(credential_error)
+    }
+
+    /// Sign an exact statement with the device key under its own single-use
+    /// admission. Returns the signature and the device's public key.
+    pub(super) async fn sign_endorsement_owned(
+        &mut self,
+        message: &[u8],
+        origin: &str,
+        now: u64,
+        expires: u64,
+    ) -> Result<(Vec<u8>, Vec<u8>)> {
+        let signed = self.sign_transcript(message, origin, now, expires).await?;
+        drop(signed.admitted);
+        let device = self
+            .vault
+            .keys()
+            .device_public_key()
+            .await
+            .map_err(keys_error)?;
+        Ok((signed.signature, device.value().to_vec()))
     }
 
     /// Pin the verified chain head of this membership's community in the Vault,

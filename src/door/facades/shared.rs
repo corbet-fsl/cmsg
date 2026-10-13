@@ -371,6 +371,61 @@ where
             self.after_wait(result)
         })
     }
+    fn voucher_custody(&mut self) -> OwnedFuture<'_, Option<Zeroizing<Vec<u8>>>> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .voucher_custody_owned()
+                .await;
+            self.after_wait(result)
+        })
+    }
+    fn replace_voucher_custody<'a>(
+        &'a mut self,
+        expected: Option<&'a [u8]>,
+        custody: &'a [u8],
+    ) -> OwnedFuture<'a, ()> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .replace_voucher_custody_owned(expected, custody)
+                .await;
+            self.after_wait(result)
+        })
+    }
+    fn sign_endorsement<'a>(
+        &'a mut self,
+        message: &'a [u8],
+        origin: &'a str,
+        now: u64,
+        expires: u64,
+    ) -> OwnedFuture<'a, (Vec<u8>, Vec<u8>)> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() || origin != self.origin {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .sign_endorsement_owned(message, origin, now, expires)
+                .await;
+            self.after_wait(result)
+        })
+    }
     fn waves<'a>(
         &'a mut self,
         command: inbox_waves::Command,

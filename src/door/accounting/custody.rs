@@ -116,6 +116,34 @@ where
         }
     }
 
+    /// The voucher custody record (link secrets, bond nonces, bonds), read after
+    /// fresh original Keys authority.
+    pub async fn voucher_custody(&mut self) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
+        let origin = self.origin.clone();
+        self.check(&origin).await?;
+        self.vault
+            .voucher_custody()
+            .await
+            .map_err(|_| ErrorCode::Unavailable)
+    }
+
+    /// Replace the voucher custody by compare-and-swap against what the caller
+    /// read. A lost race writes nothing and is `Reconcile`.
+    pub async fn replace_voucher_custody(
+        &mut self,
+        expected: Option<&[u8]>,
+        custody: &[u8],
+    ) -> Result<()> {
+        let origin = self.origin.clone();
+        self.check(&origin).await?;
+        match self.vault.replace_voucher_custody(expected, custody).await {
+            Ok(_) => Ok(()),
+            Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
+            Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),
+            Err(_) => Err(ErrorCode::Unavailable),
+        }
+    }
+
     /// Bind this exact recovered account (origin, Lineage, device, credential),
     /// the pinned Balance payload digest and the digest of the original signed
     /// ApplyExtended outbox into the data sealed with the pending companion. Fresh
