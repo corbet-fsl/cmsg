@@ -71,14 +71,10 @@ async fn sibling_board_refuses_before_lock_is_polled_and_retained_store_is_revok
         .unwrap(),
     );
     // Original Foyer is configured but never logged in; it grants no authority.
-    let foyer = foyer::Foyer::new(
-        foyer::Transport::new(
-            "https://keyhole.example.test".into(),
-            "keyhole.example.test".into(),
-            None,
-        )
-        .unwrap(),
-    );
+    let foyer = foyer::Foyer::new(foyer::fixture_transport(
+        "https://keyhole.example.test",
+        "keyhole.example.test",
+    ));
     door.bind_foyer(
         ORIGIN,
         Role::Member,
@@ -262,14 +258,10 @@ async fn open_fixture() -> (FixtureOwner, Rc<Mutex<()>>, Rc<Cell<usize>>) {
         )
         .unwrap(),
     );
-    let foyer = foyer::Foyer::new(
-        foyer::Transport::new(
-            "https://keyhole.example.test".into(),
-            "keyhole.example.test".into(),
-            None,
-        )
-        .unwrap(),
-    );
+    let foyer = foyer::Foyer::new(foyer::fixture_transport(
+        "https://keyhole.example.test",
+        "keyhole.example.test",
+    ));
     door.bind_foyer(
         ORIGIN,
         Role::Member,

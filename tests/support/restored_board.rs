@@ -17,6 +17,8 @@ fn forum() -> Configuration {
             admission_action: "fixture".into(),
             maximum_snapshot_age: 60,
         },
+        #[cfg(feature = "ohttp")]
+        ohttp: crate::door::ohttp::fixture_endpoint(),
     }
 }
 
@@ -31,6 +33,8 @@ fn configuration(forum: Option<Configuration>) -> browser::Configuration {
             scope: foyer::Scope::Community,
             base: "https://keyhole.alpha.example.test".into(),
             host: "keyhole.alpha.example.test".into(),
+            #[cfg(feature = "ohttp")]
+            ohttp: crate::door::ohttp::fixture_endpoint(),
         }],
         forum,
         trust: None,

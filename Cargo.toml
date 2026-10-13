@@ -127,3 +127,7 @@ path = "tests/support/client-server.rs"
 required-features = ["conformance"]
 
 # v01 integration: first-party dependencies point directly at v01 branches; no [patch] tables.
+
+[[test]]
+name = "ohttp_keys"
+required-features = ["ohttp"]

@@ -23,6 +23,8 @@ fn configured() -> (Door, ClientToken) {
                 admission_action: "fixture".into(),
                 maximum_snapshot_age: 60,
             },
+            #[cfg(feature = "ohttp")]
+            ohttp: crate::door::ohttp::fixture_endpoint(),
         },
         SystemClock,
     )

@@ -7,8 +7,9 @@ use super::*;
 use cblv::client::{Post, RawReply};
 use cblv::{
     client::OhttpWire,
-    keys::{Directory, PublishedKey, Snapshot},
+    keys::{Directory, FeedKeys, KeySource, Preferred, PublishedKey, Snapshot},
 };
+use std::sync::Arc;
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -27,21 +28,44 @@ pub struct OhttpEndpoint {
     pub relay: String,
     /// Key entries taken from the verified trust feed manifest.
     pub keys: Vec<OhttpKey>,
+    /// Keys of the verified community feed. Until a verified publication is
+    /// installed the configured `keys` serve; afterwards the feed alone does.
+    #[serde(skip)]
+    feed: Arc<FeedKeys>,
+}
+
+/// Key source of one endpoint: the verified feed replaces the configured
+/// snapshot as soon as it has been installed; the two are never merged.
+#[derive(Clone)]
+pub struct Keys {
+    feed: Arc<FeedKeys>,
+    configured: Arc<Snapshot>,
+}
+
+impl KeySource for Keys {
+    fn current(&self, service: &str, now: u64) -> Option<(String, PublishedKey)> {
+        Preferred {
+            feed: &self.feed,
+            configured: self.configured.clone(),
+        }
+        .current(service, now)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
 pub type Outer = cblv::browser::FetchPost;
 #[cfg(not(target_arch = "wasm32"))]
 pub type Outer = ReqwestPost;
-pub type Wire = OhttpWire<Outer, Snapshot>;
+pub type Wire = OhttpWire<Outer, Keys>;
 
 impl OhttpEndpoint {
-    /// The wire for the gateway whose inner authority is `service`.
-    pub(super) fn wire(&self, service: &str) -> Result<Wire> {
-        let url = url::Url::parse(&self.relay).map_err(|_| ErrorCode::InvalidRequest)?;
-        if url.scheme() != "https" {
-            return Err(ErrorCode::InvalidRequest);
-        }
+    /// The feed that follows the verified community trust publications.
+    pub fn feed(&self) -> Arc<FeedKeys> {
+        self.feed.clone()
+    }
+
+    /// The key source: the verified feed once installed, else the configured keys.
+    pub fn keys(&self) -> Result<Keys> {
         let entries = self
             .keys
             .iter()
@@ -59,7 +83,19 @@ impl OhttpEndpoint {
         }
         .verify()
         .map_err(|_| ErrorCode::InvalidRequest)?;
-        Ok(OhttpWire::new(outer()?, service, keys, now))
+        Ok(Keys {
+            feed: self.feed.clone(),
+            configured: Arc::new(keys),
+        })
+    }
+
+    /// The wire for the gateway whose inner authority is `service`.
+    pub(super) fn wire(&self, service: &str) -> Result<Wire> {
+        let url = url::Url::parse(&self.relay).map_err(|_| ErrorCode::InvalidRequest)?;
+        if url.scheme() != "https" {
+            return Err(ErrorCode::InvalidRequest);
+        }
+        Ok(OhttpWire::new(outer()?, service, self.keys()?, now))
     }
 }
 
@@ -120,5 +156,24 @@ impl Post for ReqwestPost {
             status,
             body: bytes.to_vec(),
         })
+    }
+}
+
+/// Endpoint with one placeholder key for fixtures whose transport is never used.
+#[cfg(test)]
+pub(crate) fn fixture_endpoint() -> OhttpEndpoint {
+    let mut config = vec![1, 0x00, 0x20];
+    config.extend([2; 32]);
+    config.extend([0x00, 0x04, 0x00, 0x01, 0x00, 0x03]);
+    OhttpEndpoint {
+        relay: "https://relay.example.test".into(),
+        keys: vec![OhttpKey {
+            service: "fixture.example.test".into(),
+            key_id: 1,
+            config,
+            not_before: 0,
+            not_after: u64::MAX,
+        }],
+        feed: Arc::default(),
     }
 }

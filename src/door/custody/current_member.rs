@@ -294,6 +294,8 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+// The fixture drives a live owner world over TLS; no gateway fixture stands in
+// front of it, so it cannot run through the Oblivious HTTP transport.
+#[cfg(all(test, not(target_arch = "wasm32"), not(feature = "ohttp")))]
 #[path = "../../../tests/support/current_member.rs"]
 mod tests;

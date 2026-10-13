@@ -138,14 +138,10 @@ pub(super) async fn open_as(
         )
         .unwrap(),
     );
-    let foyer = foyer::Foyer::new(
-        foyer::Transport::new(
-            "https://keyhole.example.test".into(),
-            "keyhole.example.test".into(),
-            None,
-        )
-        .unwrap(),
-    );
+    let foyer = foyer::Foyer::new(foyer::fixture_transport(
+        "https://keyhole.example.test",
+        "keyhole.example.test",
+    ));
     door.bind_foyer(
         ORIGIN,
         Role::Member,
