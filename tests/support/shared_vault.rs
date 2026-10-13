@@ -7,6 +7,8 @@ mod inbox_waves_tests;
 mod profile_owner_tests;
 #[path = "group_owner.rs"]
 mod group_owner_tests;
+#[path = "room_door.rs"]
+mod room_door_tests;
 use super::*;
 use crate::door::board::CommittedOwner;
 use futures_util::FutureExt;
