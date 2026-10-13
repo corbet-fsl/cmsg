@@ -1437,7 +1437,7 @@ dependencies = [
 [[package]]
 name = "cblv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cblv.git?branch=main#1bb82eb44feb4d44fa74c74270c3f6b8b5dd09ab"
+source = "git+https://git.corbet.ch/corbet-foss/cblv?branch=main#1bb82eb44feb4d44fa74c74270c3f6b8b5dd09ab"
 dependencies = [
  "bhttp",
  "getrandom 0.3.4",
