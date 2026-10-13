@@ -57,7 +57,10 @@ pub struct TorDeployment {
 impl TorDeployment {
     /// Replace the public Tor network with a private one. Only embedding code can call this;
     /// a deployment file cannot carry network overrides.
-    pub fn with_private_network(mut self, network: arti_client::config::TorClientConfigBuilder) -> Self {
+    pub fn with_private_network(
+        mut self,
+        network: arti_client::config::TorClientConfigBuilder,
+    ) -> Self {
         self.private_network = Some(network);
         self
     }
