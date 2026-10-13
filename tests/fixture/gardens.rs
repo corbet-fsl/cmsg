@@ -76,12 +76,9 @@ async fn found(
     let pseudonym = holder
         .pseudonym(&cpsd::CommunityId::new(scope).unwrap())
         .to_hex();
-    api.call(
-        "gate_voucher",
-        voucher(scope, &pseudonym, handle, NOW + 172800),
-    )
-    .await
-    .unwrap();
+    api.voucher_redeem(voucher(scope, &pseudonym, handle, NOW + 172800))
+        .await
+        .unwrap();
     let presentation = proof(service, scope, holder, session).await;
     let admitted: CredentialResponse = serde_json::from_value(
         client(service, &host, session)
@@ -114,10 +111,7 @@ async fn gates(
         .await
         .unwrap();
     session
-        .call(
-            "gate_voucher",
-            voucher(scope, pseudonym, handle, NOW + 172800),
-        )
+        .voucher_redeem(voucher(scope, pseudonym, handle, NOW + 172800))
         .await
         .unwrap();
 }
