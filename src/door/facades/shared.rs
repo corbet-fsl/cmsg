@@ -230,6 +230,26 @@ where
         self.after_wait(result)
     }
 
+    /// Pin the verified chain head of this community in the Vault.
+    pub async fn store_pin(
+        &mut self,
+        fingerprint: [u8; 32],
+        ring_revision: u64,
+        head: [u8; 32],
+    ) -> Result<()> {
+        if self.lifetime.is_closed() {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let mut retained = self.retained.lock().await;
+        self.require_open()?;
+        let result = retained
+            .as_mut()
+            .ok_or(ErrorCode::Unavailable)?
+            .store_pin_owned(fingerprint, ring_revision, head)
+            .await;
+        self.after_wait(result)
+    }
+
     /// Trusted composition only: record the community credential the community
     /// issued to this device when joining. `expected` is the credential believed
     /// current (`None` the first time); a mismatch writes nothing.
@@ -322,6 +342,19 @@ where
                 .await;
             self.after_wait(result)
         })
+    }
+    fn store_pin(
+        &mut self,
+        fingerprint: [u8; 32],
+        ring_revision: u64,
+        head: [u8; 32],
+    ) -> OwnedFuture<'_, ()> {
+        Box::pin(VaultBoardOwner::store_pin(
+            self,
+            fingerprint,
+            ring_revision,
+            head,
+        ))
     }
     fn blocking_rules(&mut self) -> OwnedFuture<'_, Vec<String>> {
         Box::pin(async move {

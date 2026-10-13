@@ -217,6 +217,15 @@ pub(super) trait BoundVault {
     fn history(&mut self, request: Conversation) -> OwnedFuture<'_, Vec<cnbx::Message>>;
     fn relation(&mut self, request: Relation) -> OwnedFuture<'_, cnbx::Relation>;
     fn delivery(&mut self, request: Delivery) -> OwnedFuture<'_, Option<cnbx::DeliveryStatus>>;
+    /// Pin the verified key-chain head of this community beside its credential.
+    fn store_pin(
+        &mut self,
+        _fingerprint: [u8; 32],
+        _ring_revision: u64,
+        _head: [u8; 32],
+    ) -> OwnedFuture<'_, ()> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn blocking_rules(&mut self) -> OwnedFuture<'_, Vec<String>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
@@ -408,6 +417,14 @@ where
     }
     fn blocking_rules(&mut self) -> OwnedFuture<'_, Vec<String>> {
         Box::pin(self.blocking_rules_owned())
+    }
+    fn store_pin(
+        &mut self,
+        fingerprint: [u8; 32],
+        ring_revision: u64,
+        head: [u8; 32],
+    ) -> OwnedFuture<'_, ()> {
+        Box::pin(self.store_pin_owned(fingerprint, ring_revision, head))
     }
     fn waves<'a>(
         &'a mut self,

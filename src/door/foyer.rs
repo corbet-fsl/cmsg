@@ -469,7 +469,11 @@ pub(super) async fn refresh(
     let now = cbrd::clnk::Clock::now(&board::SystemClock).map_err(|_| ErrorCode::Clock)? / 1000;
     #[cfg(feature = "ohttp")]
     let feed = binding.sessions.feed.clone();
+    let mut verified = None;
     binding.current(&community, now, |_charter| {
+        verified = _charter
+            .fingerprint()
+            .map(|fingerprint| (*fingerprint, _charter.chain_pin()));
         // The verified publication carries the Oblivious HTTP keys. An equal
         // or older revision is refused by the feed and keeps what is installed.
         #[cfg(feature = "ohttp")]
@@ -478,6 +482,15 @@ pub(super) async fn refresh(
         }
         Ok(())
     })?;
+    // Every verified refresh pins the chain head in the Vault. Nothing is
+    // written for a feed that failed verification (it returned above), and the
+    // Vault refuses a head that is not a forward move. No bound Vault yet means
+    // no membership to pin.
+    if let (Some((fingerprint, pin)), Some(vault)) = (verified, door.vaults.get_mut(&origin)) {
+        vault
+            .store_pin(fingerprint, pin.ring_revision, pin.head)
+            .await?;
+    }
     door.observe(now)?;
     Ok((Empty {}, vec![]))
 }

@@ -209,6 +209,44 @@ pub enum PinError {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PurgeFailed;
 
+/// What to write to the vault's pin record after a feed verified to `head` for
+/// `fingerprint`: `Ok(None)` when it is already pinned, `Ok(Some(pin))` for a
+/// first pin or a forward move. A pin for another founding key, a lower ring
+/// revision (rollback) or another ring at the same revision (fork) is an error
+/// and nothing may be written. The vault re-checks all of it under its own
+/// compare-and-swap.
+pub fn next_pin(
+    current: Option<&cvlt::CommunityPin>,
+    fingerprint: &Fingerprint,
+    head: Head,
+) -> Result<Option<cvlt::CommunityPin>, PinError> {
+    let new = cvlt::CommunityPin {
+        fingerprint: fingerprint.0,
+        head: Some(cvlt::PinnedHead {
+            ring_revision: head.ring_revision,
+            digest: head.digest.0,
+        }),
+    };
+    let Some(current) = current else {
+        return Ok(Some(new));
+    };
+    if current.fingerprint != fingerprint.0 {
+        return Err(PinError::Stranger);
+    }
+    match current.head {
+        None => Ok(Some(new)),
+        Some(old) if head.ring_revision < old.ring_revision => Err(PinError::Rollback),
+        Some(old) if head.ring_revision == old.ring_revision => {
+            if head.digest.0 == old.digest {
+                Ok(None)
+            } else {
+                Err(PinError::Fork)
+            }
+        }
+        Some(_) => Ok(Some(new)),
+    }
+}
+
 /// Local data keyed by a community namespace (IndexedDB, caches, vault records).
 pub trait LocalData {
     /// Remove everything stored under `namespace`. Removing nothing is success;
@@ -592,6 +630,48 @@ mod tests {
         assert_eq!(done, vec![fp(1), fp(2)]);
         assert_eq!(pins.fingerprint("keep"), Some(&fp(3)));
         assert_eq!(pins.fingerprint("garden"), None);
+    }
+
+    #[test]
+    fn a_rolled_back_or_forked_head_never_reaches_the_vault_write() {
+        let pinned = |revision, byte| cvlt::CommunityPin {
+            fingerprint: [1; 32],
+            head: Some(cvlt::PinnedHead {
+                ring_revision: revision,
+                digest: [byte; 32],
+            }),
+        };
+        let head = |revision, byte| Head {
+            ring_revision: revision,
+            digest: fp(byte),
+        };
+        let current = pinned(3, 7);
+        assert_eq!(
+            next_pin(Some(&current), &fp(1), head(2, 7)),
+            Err(PinError::Rollback)
+        );
+        assert_eq!(
+            next_pin(Some(&current), &fp(1), head(3, 8)),
+            Err(PinError::Fork)
+        );
+        assert_eq!(
+            next_pin(Some(&current), &fp(2), head(4, 7)),
+            Err(PinError::Stranger)
+        );
+        assert_eq!(next_pin(Some(&current), &fp(1), head(3, 7)), Ok(None));
+        assert_eq!(
+            next_pin(Some(&current), &fp(1), head(4, 9)),
+            Ok(Some(pinned(4, 9)))
+        );
+        assert_eq!(next_pin(None, &fp(1), head(0, 5)), Ok(Some(pinned(0, 5))));
+        let headless = cvlt::CommunityPin {
+            fingerprint: [1; 32],
+            head: None,
+        };
+        assert_eq!(
+            next_pin(Some(&headless), &fp(1), head(1, 5)),
+            Ok(Some(pinned(1, 5)))
+        );
     }
 
     #[test]

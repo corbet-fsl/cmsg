@@ -136,6 +136,33 @@ where
             .map_err(credential_error)
     }
 
+    /// Pin the verified chain head of this membership's community in the Vault,
+    /// beside the community credential. Only a first pin or a forward move is
+    /// written; anything else is refused and writes nothing.
+    pub(super) async fn store_pin_owned(
+        &mut self,
+        fingerprint: [u8; 32],
+        ring_revision: u64,
+        head: [u8; 32],
+    ) -> Result<()> {
+        use crate::door::identity::{self, Fingerprint, Head};
+        let current = self.vault.community_pin().await.map_err(credential_error)?;
+        let head = Head {
+            ring_revision,
+            digest: Fingerprint(head),
+        };
+        match identity::next_pin(current.as_ref(), &Fingerprint(fingerprint), head) {
+            Ok(None) => Ok(()),
+            Ok(Some(pin)) => self
+                .vault
+                .write_community_pin(current.as_ref(), &pin, None)
+                .await
+                .map(|_| ())
+                .map_err(credential_error),
+            Err(_) => Err(ErrorCode::Refused),
+        }
+    }
+
     /// Is this peer blocked in the Contacts journal? Read under fresh Use in the
     /// same Store snapshot, so a Profile or Exchange input from a blocked sender
     /// can be refused before any decryption.
