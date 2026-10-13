@@ -27,7 +27,7 @@ pub use lifecycle::{existing_active, has_pending, Activated};
 pub use pending::PendingBinding;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub use request::response_trust;
-pub use request::{AcceptedResponse, ProvenGenesis, SignedApplyExtended};
+pub use request::{AcceptedResponse, ProvenGenesis, ProvenUpdate, SignedApplyExtended};
 
 /// Distinct local intentions reserved by the trusted recovery composer. No
 /// caller can admit arbitrary transcript bytes through this opaque owner.
@@ -280,14 +280,19 @@ impl AccountAdmission<'_> {
 }
 
 impl<'p> AccountAdmission<'p> {
-    /// Bind only this existing durable account coordinate to the original root
-    /// and device authorization transcripts. All awaits are followed by current
-    /// issuer/Charter and actual Keys checks; each signer consumes separate intent.
-    pub async fn delegate<B, C, E, A, R>(
-        mut self,
+    /// Have the root authorize this community device under its own one-use
+    /// intent, and return the verified authorization with the guard that keeps the
+    /// intent reserved, the freshly verified admission and the common deadline.
+    pub(super) async fn authorize_device<B, C, E, A, R>(
+        &mut self,
         account: &mut CommunityAccount<B, C, E, A, R>,
         intents: &mut AccountingIntents,
-    ) -> Result<PreparedEnrollment<'p>>
+    ) -> Result<(
+        admission::DeviceAuthorization,
+        ckmg::IntentGuard,
+        CurrentAdmission,
+        u64,
+    )>
     where
         B: cwst::backend::Backend,
         C: Clock,
@@ -295,13 +300,6 @@ impl<'p> AccountAdmission<'p> {
         A: Authority,
         R: Records,
     {
-        let admitted_origin = self.current()?.origin;
-        account.check(&admitted_origin).await?;
-        let coordinate = account
-            .vault
-            .account_projection()
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
         let current = self.current()?;
         let expires = current.expires.min(intents.expires);
         let plan = account
@@ -353,6 +351,35 @@ impl<'p> AccountAdmission<'p> {
         .map_err(|_| ErrorCode::Unauthorized)?;
         admission::verify_device_authorization(&authorization, &current.grant, current.now)
             .map_err(|_| ErrorCode::Unauthorized)?;
+        Ok((authorization, root, current, expires))
+    }
+}
+
+impl<'p> AccountAdmission<'p> {
+    /// Bind only this existing durable account coordinate to the original root
+    /// and device authorization transcripts. All awaits are followed by current
+    /// issuer/Charter and actual Keys checks; each signer consumes separate intent.
+    pub async fn delegate<B, C, E, A, R>(
+        mut self,
+        account: &mut CommunityAccount<B, C, E, A, R>,
+        intents: &mut AccountingIntents,
+    ) -> Result<PreparedEnrollment<'p>>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
+        let admitted_origin = self.current()?.origin;
+        account.check(&admitted_origin).await?;
+        let coordinate = account
+            .vault
+            .account_projection()
+            .await
+            .map_err(|_| ErrorCode::Unauthorized)?;
+        let (authorization, root, current, expires) =
+            self.authorize_device(account, intents).await?;
         let mut delegation = enrollment::AccountingDelegation {
             version: 1,
             hash_scheme: enrollment::ACCOUNT_HASH_SCHEME.into(),
