@@ -16,6 +16,7 @@ pub use composition::VaultComposer;
 pub mod custody;
 pub mod facades;
 pub mod foyer;
+pub mod identity;
 mod inbox;
 pub mod inbox_conversation;
 pub mod inbox_lineage;

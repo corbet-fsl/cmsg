@@ -48,6 +48,8 @@ fn device(
         trust_key_ring: world["trust_key_ring"].clone(),
         connect_host: "127.0.0.1".into(),
         tls_root_files: vec![root.clone()],
+        fingerprint: None,
+        pin: None,
     };
     let files = &config["extension_artifacts"];
     let path = |key: &str| std::path::PathBuf::from(files[key].as_str().unwrap());

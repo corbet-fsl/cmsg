@@ -1608,7 +1608,7 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#2ac0bb90052f94fd55bd629d3b7d49a642fa4678"
+source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#fd0cea8575714eabd4c487b286e9c01fdc319deb"
 dependencies = [
  "cnvy",
  "cpky",
@@ -2049,7 +2049,7 @@ dependencies = [
 [[package]]
 name = "cnvy"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cnvy.git?branch=v01#628c690a5ac123fd58cd74b9e6f7188f6a7d315b"
+source = "git+https://git.corbet.ch/corbet-foss/cnvy.git?branch=v01#c0d165ad9f2ef568ea0452242d9441f98a366abe"
 dependencies = [
  "cchr",
  "futures-util",
@@ -2748,7 +2748,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#d9ada5231234048f3ba5bcac734ead4828ff31b9"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#8d2167cfad143eb64e7d229377221d8d7373de5b"
 dependencies = [
  "any_ascii",
  "cblv",
