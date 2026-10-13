@@ -27,10 +27,10 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                     && request.statement.is_none()
                     && request.evidence.is_empty() =>
             {
-                Some(request.signing.ok_or(Error::Unauthorized)?)
+                Some(request.signing.ok_or_else(|| dbg_u(line!()))?)
             }
             Action::ReadLineage | Action::Use if request.signing.is_none() => None,
-            _ => return Err(Error::Unauthorized),
+            _ => return Err(dbg_u(line!())),
         };
         if request.target.is_some()
             || (!(matches!(
@@ -43,16 +43,16 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                         .candidate
                         .evidence()
                         .to_bytes()
-                        .map_err(|_| Error::Unauthorized)?)
-            || self.initial.seed().map_err(|_| Error::Unauthorized)?
+                        .map_err(|_| dbg_u(line!()))?)
+            || self.initial.seed().map_err(|_| dbg_u(line!()))?
                 != self.candidate.enrollment_commitment()
             || self
                 .initial
                 .publication()
-                .map_err(|_| Error::Unauthorized)?
+                .map_err(|_| dbg_u(line!()))?
                 != Some(self.candidate.publication_commitment())
         {
-            return Err(Error::Unauthorized);
+            return Err(dbg_u(line!()));
         }
         let now = self.clock.now()?;
         if now < request.now {
@@ -64,21 +64,21 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         let observation = self
             .initial
             .observation()
-            .map_err(|_| Error::Unauthorized)?;
+            .map_err(|_| dbg_u(line!()))?;
         if observation.member != request.binding.member()
             || !observation.device_keys.contains(request.device.value())
         {
-            return Err(Error::Unauthorized);
+            return Err(dbg_u(line!()));
         }
         let certificate = self
             .initial
             .certificate_bytes()
-            .map_err(|_| Error::Unauthorized)?
+            .map_err(|_| dbg_u(line!()))?
             .to_vec();
         let credential = self
             .initial
             .credential_id()
-            .map_err(|_| Error::Unauthorized)?
+            .map_err(|_| dbg_u(line!()))?
             .to_vec();
         let candidate = self.candidate;
         let mut failed = false;
@@ -93,34 +93,34 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                 },
                 |current| {
                     if current.revocations().device_revoked(request.device.value()) {
-                        return Err(Error::Unauthorized);
+                        return Err(dbg_u(line!()));
                     }
                     let verified = candidate
                         .reauthorize(current, &certificate, request.binding.member(), now)
-                        .map_err(|_| Error::Unauthorized)?;
+                        .map_err(|_| dbg_u(line!()))?;
                     if signing.is_some_and(|signing| signing.expires > verified.valid_until()) {
                         return Err(Error::Expired);
                     }
-                    let lineage = verified.lineage(now).map_err(|_| Error::Unauthorized)?;
+                    let lineage = verified.lineage(now).map_err(|_| dbg_u(line!()))?;
                     if &lineage.binding != request.binding
                         || Some(lineage.root) != request.root
                         || lineage.epoch != request.epoch
-                        || verified.author(now).map_err(|_| Error::Unauthorized)? != request.device
+                        || verified.author(now).map_err(|_| dbg_u(line!()))? != request.device
                         || verified
                             .credential_id(now)
-                            .map_err(|_| Error::Unauthorized)?
+                            .map_err(|_| dbg_u(line!()))?
                             != credential
                         || request
                             .statement
                             .is_some_and(|digest| lineage.digest().ok() != Some(digest))
                         || (request.action == Action::ReadLineage && request.statement.is_none())
                     {
-                        return Err(Error::Unauthorized);
+                        return Err(dbg_u(line!()));
                     }
                     Ok(())
                 },
             )
-            .map_err(|_| Error::Unauthorized)??;
+            .map_err(|e| { eprintln!("DIAG-LEASE {e:?}"); dbg_u(line!()) })??;
         if failed {
             return Err(Error::Clock);
         }
@@ -130,7 +130,7 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         }
         if let Some(signing) = signing {
             if completed >= signing.expires
-                || signing.expires > self.initial.expires().map_err(|_| Error::Unauthorized)?
+                || signing.expires > self.initial.expires().map_err(|_| dbg_u(line!()))?
             {
                 return Err(Error::Expired);
             }
@@ -337,4 +337,9 @@ pub async fn complete_initial_recovery<B: cwst::backend::Backend, N: cdht::Netwo
     creation
         .retire_recovery(network, &mut clock, &mut authority)
         .await
+}
+
+fn dbg_u(line: u32) -> Error {
+    eprintln!("DIAG-UNAUTH initial_recovery.rs:{line}");
+    Error::Unauthorized
 }
