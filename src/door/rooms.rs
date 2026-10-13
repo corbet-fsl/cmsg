@@ -26,6 +26,38 @@ pub trait RoomLink: Sized + 'static {
         Box::pin(async { Err(LinkError::Rejected) })
     }
     fn close_rooms<T: clnk::Transport>(_board: &mut cbrd::Board<T, Self>) {}
+    /// Post a join request (fresh ephemeral key); returns its relay sequence.
+    fn request_room_join<'a, T: clnk::Transport>(
+        _board: &'a cbrd::Board<T, Self>,
+        _room: cmbl::Id,
+        _public_key: [u8; 32],
+    ) -> RoomFuture<'a, u64> {
+        Box::pin(async { Err(LinkError::Rejected) })
+    }
+    /// Live join requests a member can answer: `(request, ephemeral key)`.
+    fn room_join_requests<'a, T: clnk::Transport>(
+        _board: &'a cbrd::Board<T, Self>,
+        _room: cmbl::Id,
+    ) -> RoomFuture<'a, Vec<(u64, [u8; 32])>> {
+        Box::pin(async { Err(LinkError::Rejected) })
+    }
+    /// A member answers request `to` with state sealed to the request's key.
+    fn answer_room_join<'a, T: clnk::Transport>(
+        _board: &'a cbrd::Board<T, Self>,
+        _room: cmbl::Id,
+        _to: u64,
+        _sealed: Vec<u8>,
+    ) -> RoomFuture<'a, ()> {
+        Box::pin(async { Err(LinkError::Rejected) })
+    }
+    /// Sealed answers to request `to`: `(ordering, counter, sealed)`.
+    fn room_join_answers<'a, T: clnk::Transport>(
+        _board: &'a cbrd::Board<T, Self>,
+        _room: cmbl::Id,
+        _to: u64,
+    ) -> RoomFuture<'a, Vec<(cmbl::Id, u64, Vec<u8>)>> {
+        Box::pin(async { Err(LinkError::Rejected) })
+    }
 }
 
 impl RoomLink for () {}
@@ -47,6 +79,34 @@ impl<R: clnk::Transport + 'static> RoomLink for clnk::AnonymousRooms<R> {
     }
     fn close_rooms<T: clnk::Transport>(board: &mut cbrd::Board<T, Self>) {
         board.close_rooms();
+    }
+    fn request_room_join<'a, T: clnk::Transport>(
+        board: &'a cbrd::Board<T, Self>,
+        room: cmbl::Id,
+        public_key: [u8; 32],
+    ) -> RoomFuture<'a, u64> {
+        Box::pin(board.request_room_join(room, public_key))
+    }
+    fn room_join_requests<'a, T: clnk::Transport>(
+        board: &'a cbrd::Board<T, Self>,
+        room: cmbl::Id,
+    ) -> RoomFuture<'a, Vec<(u64, [u8; 32])>> {
+        Box::pin(board.room_join_requests(room))
+    }
+    fn answer_room_join<'a, T: clnk::Transport>(
+        board: &'a cbrd::Board<T, Self>,
+        room: cmbl::Id,
+        to: u64,
+        sealed: Vec<u8>,
+    ) -> RoomFuture<'a, ()> {
+        Box::pin(board.answer_room_join(room, to, sealed))
+    }
+    fn room_join_answers<'a, T: clnk::Transport>(
+        board: &'a cbrd::Board<T, Self>,
+        room: cmbl::Id,
+        to: u64,
+    ) -> RoomFuture<'a, Vec<(cmbl::Id, u64, Vec<u8>)>> {
+        Box::pin(board.room_join_answers(room, to))
     }
 }
 
