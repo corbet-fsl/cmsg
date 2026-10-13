@@ -77,6 +77,10 @@ pub(super) struct BondEntry {
     /// The vouchee's member id (empty on the vouchee's own device).
     pub member: String,
     pub bond: String,
+    /// On the vouchee's device: the sponsor's opaque community member id (hex),
+    /// read from the link text. Empty on the issuer's device.
+    #[serde(default)]
+    pub sponsor_id: String,
 }
 
 /// The bond nonce a newcomer chose for a link, kept until the bond exists.
@@ -242,8 +246,23 @@ impl Book {
             link: id,
             member: String::new(),
             bond: to_hex(bond.as_bytes()),
+            sponsor_id: to_hex(&token.sponsor()),
         })?;
         Ok(())
+    }
+
+    /// The bond this newcomer's device derived at redemption, with the sponsor's
+    /// opaque member id from the link text: the account genesis binds both.
+    pub(super) fn vouchee_bond(&self) -> Option<([u8; 32], [u8; 32])> {
+        let entry = self
+            .bonds
+            .iter()
+            .rev()
+            .find(|bond| !bond.sponsor && !bond.sponsor_id.is_empty())?;
+        Some((
+            from_hex(&entry.sponsor_id)?.try_into().ok()?,
+            from_hex(&entry.bond)?.try_into().ok()?,
+        ))
     }
 
     /// The issuer's device reads the people the community reports for `link`
@@ -618,6 +637,7 @@ async fn settle_admitted(
             link: id.into(),
             member: person.member.clone(),
             bond: to_hex(person.token_bond.as_bytes()),
+            sponsor_id: String::new(),
         })?;
         // A failed signature leaves the bond in place; the endorsement is
         // retried on every sync until it exists.
@@ -845,7 +865,17 @@ pub(super) async fn link_create(
         }
     }
     let started = now()?;
-    let (token, secret) = Token::generate().map_err(|_| ErrorCode::Unavailable)?;
+    // The link text carries the issuer's opaque community member id so the
+    // newcomer's account can bind its sponsor at admission; the community never
+    // sees the text.
+    let lobby: Value = owner(door, &origin, "lobby", serde_json::json!({})).await?;
+    let sponsor: [u8; 32] = lobby
+        .get("member_id")
+        .and_then(Value::as_str)
+        .and_then(from_hex)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or(ErrorCode::Unavailable)?;
+    let (token, secret) = Token::generate(sponsor).map_err(|_| ErrorCode::Unavailable)?;
     let registration = token.registration();
     let id = registration.id().as_str().to_owned();
     let mut loaded = load(door, &origin).await?;
