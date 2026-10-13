@@ -199,7 +199,8 @@ impl<C: Clock> TransportAuthority<C> {
 /// Member use requires a new forced Records observation and current policy on
 /// every call. Only rollback floors and negative session state are retained.
 /// Exact device signing additionally consumes the Door-owned one-use intent.
-/// Pairing, rotation and broader signer loans remain refused.
+/// Pairing needs a separately admitted single-use Pair command for one exact
+/// target and request digest; rotation and broader signer loans remain refused.
 pub struct MemberAuthority<C, B: cdht::runtime::Backend> {
     live: TransportAuthority<C>,
     policy: cfyr::policy::CurrentPolicy<Transport>,
@@ -261,8 +262,20 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
     async fn check(&mut self, mut request: Authorization<'_>) -> Result<(), Error> {
         self.discard_pending_current();
         self.live.lifetime.check(&request)?;
+        let pair = request.action == Action::Pair;
         let signing = match request.action {
             Action::Use if request.signing.is_none() => false,
+            // Device pairing: the existing device adds exactly one proven new device. Only
+            // against a distinct, single-use admitted command naming that target and the
+            // digest of the exact pairing request; the lineage digest is not the statement.
+            Action::Pair
+                if request.signing.is_none()
+                    && request.target.is_some()
+                    && request.statement.is_some()
+                    && self.intent.is_some() =>
+            {
+                true
+            }
             Action::SignDeviceEd25519
                 if request.signing.is_some()
                     && request.statement.is_none()
@@ -283,7 +296,7 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
         };
         if request.root.is_none()
             || request.epoch == 0
-            || request.target.is_some()
+            || (request.target.is_some() && !pair)
             || request.evidence.len() > ckmg::MAX_MESSAGE_BYTES
         {
             return Err(Error::Unauthorized);
@@ -337,9 +350,10 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
                     .map_err(|_| Error::Unauthorized)?;
                 if request.root != Some(lineage.root)
                     || request.epoch != lineage.epoch
-                    || request
-                        .statement
-                        .is_some_and(|digest| lineage.digest().ok() != Some(digest))
+                    || (!pair
+                        && request
+                            .statement
+                            .is_some_and(|digest| lineage.digest().ok() != Some(digest)))
                 {
                     return Err(Error::Unauthorized);
                 }
