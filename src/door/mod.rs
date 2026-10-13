@@ -28,6 +28,7 @@ pub mod network_browser;
 pub mod network_native;
 #[cfg(feature = "ohttp")]
 pub mod ohttp;
+pub mod pairing;
 pub mod passport;
 pub mod record;
 mod registry;
