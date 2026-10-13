@@ -86,6 +86,29 @@ pub trait CommittedOwner {
         None
     }
 
+    /// Ordered external commit into a member room; see `VaultGroupOwner::join_room`.
+    /// Owners without Threads custody refuse.
+    fn join_room<'a, T, L>(
+        &'a mut self,
+        _board: &'a cbrd::Board<T, L>,
+        _task: crate::door::facades::RoomJoinTask<'a>,
+    ) -> OwnerFuture<'a, cbrd::cgrp::Snapshot>
+    where
+        T: clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
+    /// This member's evidence for a room it belongs to, for answering joins.
+    fn room_evidence<'a>(
+        &'a mut self,
+        _group: cbrd::cgrp::Id,
+        _policy: &'a dyn cbrd::cgrp::PolicySource,
+    ) -> OwnerFuture<'a, cthr::ParentEvidence> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
     /// Profile publication. Lend the actual device signer and Envelope custody
     /// together with the committed Store read, after fresh Keys authority, to a
     /// synchronous callback; return its result unchanged. Owners without this
@@ -112,6 +135,7 @@ pub(super) struct OwnedBoard<T, R, O> {
     // Original Link does not expose Enter's request for replay. An interrupted
     // attendance attempt is fenced and requires owner reconciliation, not retry.
     attendance_pending: bool,
+    pub(super) joins: super::rooms::RoomJoins,
     desk: GroupDesk,
     desk_loaded: bool,
 }
@@ -222,6 +246,7 @@ impl Door {
                 policy,
                 current,
                 attendance_pending: false,
+                joins: Default::default(),
                 desk: GroupDesk::default(),
                 desk_loaded: false,
             }),
@@ -310,9 +335,9 @@ fn publication<B: cwst::backend::Backend>(
     Ok(committed.bytes().to_vec())
 }
 /// Upper bound on groups one device keeps (Groups refuses beyond it).
-const MAX_GROUPS: usize = 256;
+pub(super) const MAX_GROUPS: usize = 256;
 
-fn group_error(error: cbrd::cgrp::Error) -> ErrorCode {
+pub(super) fn group_error(error: cbrd::cgrp::Error) -> ErrorCode {
     use cbrd::cgrp::Error;
     match error {
         Error::Invalid => ErrorCode::InvalidRequest,
@@ -523,7 +548,7 @@ async fn attendance<T: clnk::Transport, R, O: CommittedOwner>(
 
 impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
     /// The signed Rulebook's group policy for the current moment.
-    async fn group_policy(&mut self, expires: u64) -> Result<cbrd::PolicyAt> {
+    pub(super) async fn group_policy(&mut self, expires: u64) -> Result<cbrd::PolicyAt> {
         let community = self.inner.board.community().to_owned();
         let board = &self.inner.board;
         let current = &mut self.current;
@@ -658,6 +683,23 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
 {
     fn has_rooms(&self) -> bool {
         self.inner.has_rooms()
+    }
+    fn room_join(
+        &mut self,
+        join: super::RoomJoin,
+        expires: u64,
+    ) -> OwnedFuture<'_, super::RoomJoinStatus> {
+        Box::pin(self.room_join_step(join, expires))
+    }
+    fn room_serve(
+        &mut self,
+        room: super::RoomRef,
+        expires: u64,
+    ) -> OwnedFuture<'_, super::RoomServed> {
+        Box::pin(self.room_serve_step(room, expires))
+    }
+    fn room_forget(&mut self, room: [u8; 16]) {
+        self.joins.forget(room);
     }
     fn execute_room(
         &self,

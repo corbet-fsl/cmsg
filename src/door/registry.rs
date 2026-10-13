@@ -3,7 +3,8 @@ use board::{
     attend as board_attend, depart as board_depart, discovery as board_discovery,
     group_act as board_group_act, group_answer as board_group_answer,
     group_message as board_group_message, group_propose as board_group_propose,
-    group_welcome as board_group_welcome, groups as board_groups, heartbeat as board_heartbeat,
+    group_welcome as board_group_welcome, groups as board_groups,
+    room_join as board_room_join, room_leave as board_room_leave, room_serve as board_room_serve, heartbeat as board_heartbeat,
     profile_publish as board_profile_publish, search as board_search, watch as board_watch,
 };
 use foyer::refresh as foyer_refresh;
@@ -390,6 +391,9 @@ actions! {
     "board.group_message" => board_group_message(board::GroupMessageIn) -> board::GroupInbound, GroupRecord, Board;
     "board.group_answer" => board_group_answer(board::GroupAnswer) -> board::GroupAnswered, GroupRecord, Board;
     "board.group_welcome" => board_group_welcome(board::GroupWelcome) -> board::GroupWelcomes, GroupRecord, Board;
+    "board.room_join" => board_room_join(board::RoomJoin) -> board::RoomJoinStatus, GroupRecord, Board;
+    "board.room_leave" => board_room_leave(board::RoomRef) -> Vec<cbrd::GroupView>, GroupRecord, Board;
+    "board.room_serve" => board_room_serve(board::RoomRef) -> board::RoomServed, GroupRecord, Board;
     "board.profile_publish" => board_profile_publish(board::ProfilePublish) -> board::ProfilePublished, ProfileRecord, Board;
     "board.heartbeat" => board_heartbeat(Empty) -> cbrd::cfrm::LiveOutput, BoardRecord, Board;
     "board.depart" => board_depart(Empty) -> cbrd::cfrm::EmptyOutput, BoardRecord, Board;

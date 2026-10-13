@@ -46,6 +46,7 @@ ctcs = { git = "https://git.corbet.ch/corbet-foss/ctcs.git", branch = "v01" }
 cthr = { git = "https://git.corbet.ch/corbet-foss/cthr.git", branch = "v01" }
 ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "v01", features = ["profile-envelope"] }
 cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "v01" }
+ctnd = { git = "https://git.corbet.ch/corbet-foss/ctnd.git", branch = "v01" }
 schemars = "1"
 url = "2"
 getrandom = "0.3"

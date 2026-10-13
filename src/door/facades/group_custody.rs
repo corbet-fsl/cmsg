@@ -375,6 +375,171 @@ where
     }
 }
 
+/// What a member-room join takes from the member's own devices: the sealed
+/// state a member answered with, and the Groups decision already prepared.
+pub struct RoomJoinTask<'a> {
+    pub room: [u8; 16],
+    pub group: cgrp::Id,
+    pub candidate: cgrp::Candidate,
+    pub evidence: &'a cthr::ParentEvidence,
+    pub policy: &'a dyn cgrp::PolicySource,
+}
+
+impl<B, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
+where
+    B: cwst::backend::Backend,
+    C: ckmg::Clock,
+    E: ckmg::Entropy,
+    A: ckmg::Authority,
+    R: cvlt::Records,
+{
+    /// Ordered external commit into a member room. Keys custody, the Store
+    /// guard and this member's Threads come from the retained Vault; Groups,
+    /// Threads and the Attend checkpoint become visible in ONE Store commit
+    /// (`cthr::JoinSession`). A failed attempt leaves at most the Joining
+    /// checkpoint, which the next attempt discards. The hand-over of profile
+    /// keys is empty until Envelope supplies its content.
+    pub async fn join_room<T, L>(
+        &mut self,
+        board: &cbrd::Board<T, L>,
+        task: RoomJoinTask<'_>,
+    ) -> std::result::Result<Snapshot, ctnd::Error>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let operation = {
+            let mut bytes = [0; 32];
+            getrandom::fill(&mut bytes).map_err(|_| Fail::Unavailable)?;
+            bytes
+        };
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let handle = custody
+            .vault
+            .keys()
+            .key(cnbx::threads_purpose())
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let own = custody
+            .vault
+            .keys()
+            .lineage()
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let storage = custody.vault.storage().clone();
+        let mut store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let mut devices = GroupDevices {
+            own,
+            cache: self.cache.clone(),
+        };
+        let mut port = cnbx::KeyPort {
+            keys: custody.vault.keys(),
+            handle: &handle,
+            devices: &mut devices,
+        };
+        let mut clock = crate::door::custody::SystemClock;
+        let threads =
+            cthr::Threads::load(binding, task.group, &store).map_err(|_| Fail::Storage)?;
+        let mut attend = ctnd::Attend::new();
+        let source = PolicyRef(task.policy);
+        let joined = L::join_room(
+            board,
+            cbrd::RoomJoinInput {
+                attend: &mut attend,
+                member: &self.member,
+                room: task.room,
+                keys: &mut port,
+                clock: &mut clock,
+                store: &mut store,
+                threads: &threads,
+                groups: task.candidate,
+                evidence: task.evidence,
+                source: &source,
+                authority: &self.authority,
+                handover: vec![],
+                operation,
+                attempts: ROOM_CONTEXT_ATTEMPTS,
+                pause: crate::door::rooms::NoPause,
+            },
+        )
+        .await;
+        *self.cache.borrow_mut() = Cache::default();
+        self.open().map_err(|_| Fail::Authority)?;
+        Ok(joined?.snapshot)
+    }
+}
+
+impl<B, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
+where
+    B: cwst::backend::Backend,
+    C: ckmg::Clock,
+    E: ckmg::Entropy,
+    A: ckmg::Authority,
+    R: cvlt::Records,
+{
+    /// A member's public MLS evidence for `group`, exported only when its roster
+    /// and context match the committed Groups record (Threads checks that).
+    pub async fn room_evidence(
+        &mut self,
+        group: cgrp::Id,
+        policy: &dyn cgrp::PolicySource,
+    ) -> std::result::Result<cthr::ParentEvidence, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let handle = custody
+            .vault
+            .keys()
+            .key(cnbx::threads_purpose())
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let own = custody
+            .vault
+            .keys()
+            .lineage()
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let storage = custody.vault.storage().clone();
+        let store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let mut devices = GroupDevices {
+            own,
+            cache: self.cache.clone(),
+        };
+        let mut port = cnbx::KeyPort {
+            keys: custody.vault.keys(),
+            handle: &handle,
+            devices: &mut devices,
+        };
+        let mut clock = crate::door::custody::SystemClock;
+        let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
+        let evidence = threads
+            .parent_evidence(&mut port, &store, &PolicyRef(policy), &mut clock)
+            .await
+            .map_err(|_| Fail::Authority);
+        *self.cache.borrow_mut() = Cache::default();
+        evidence
+    }
+}
+
+/// Reads of the room's traffic per join attempt, for the member's context commit.
+const ROOM_CONTEXT_ATTEMPTS: u8 = 3;
+
 struct StorePersistence<'a, B: cwst::backend::Backend> {
     store: &'a mut cwst::Store<B>,
     version: u64,

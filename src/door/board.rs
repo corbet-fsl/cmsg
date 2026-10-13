@@ -14,6 +14,7 @@ mod group_act;
 mod groups;
 mod handlers;
 mod profile;
+mod rooms;
 pub(super) use group_act::{group_act, group_answer, group_message, group_propose, group_welcome};
 pub use group_act::{
     GroupAct, GroupAnswer, GroupAnswered, GroupInbound, GroupInvite, GroupMessageIn, GroupPropose,
@@ -24,6 +25,8 @@ pub(super) use handlers::{attend, discovery, search, watch};
 pub use handlers::{CommittedOwner, CommittedRead, OwnerFuture, ReadPolicy, SignedAttendance};
 pub(super) use profile::profile_publish;
 pub use profile::{ProfileParts, ProfilePublish, ProfilePublished};
+pub(super) use rooms::{room_join, room_leave, room_serve};
+pub use rooms::{RoomJoin, RoomJoinStatus, RoomRef, RoomServed};
 
 /// Only the user's paging choice crosses the public boundary. Link supplies
 /// the live session/nonce and Vault signs its exact prepared transcript.
@@ -60,7 +63,7 @@ pub struct Configuration {
 /// No owner or attendance authority is created by this preparation.
 #[cfg(any(feature = "native-tor", feature = "browser-tor", test))]
 pub(crate) struct PendingBoard {
-    board: cbrd::Board<Transport>,
+    board: RoomBoard,
     policy: ReadPolicy,
     origin: String,
 }
@@ -155,14 +158,12 @@ fn validate_policy(policy: &ReadPolicy) -> Result<()> {
     Ok(())
 }
 
-fn construct_board(
-    community: &str,
-    origin: &str,
-    config: Configuration,
-    clock: impl clnk::Clock + 'static,
-) -> Result<cbrd::Board<Transport>> {
+/// One Forum transport. The member's presence transport and the anonymous room
+/// transport are two separate instances of it: no cookie, session or circuit
+/// state is shared between them.
+fn forum_transport(config: &Configuration, origin: &str) -> Result<Transport> {
     #[cfg(feature = "ohttp")]
-    let transport = {
+    {
         let forum = url::Url::parse(&config.forum_origin).map_err(|_| ErrorCode::InvalidRequest)?;
         let authority = forum.host_str().ok_or(ErrorCode::InvalidRequest)?;
         let authority = match forum.port() {
@@ -171,23 +172,40 @@ fn construct_board(
         };
         Transport::new(
             config.ohttp.wire(&authority)?,
-            config.forum_origin,
+            config.forum_origin.clone(),
             origin.into(),
             config.maximum_response_bytes,
             std::time::Duration::from_millis(config.timeout_millis.into()),
         )
-        .map_err(before_send)?
-    };
+        .map_err(before_send)
+    }
     #[cfg(not(feature = "ohttp"))]
-    let transport = Transport::new(
-        config.forum_origin,
-        origin.into(),
-        config.maximum_response_bytes,
-        std::time::Duration::from_millis(config.timeout_millis.into()),
-    )
-    .map_err(before_send)?;
-    let link =
-        clnk::Link::at(transport, community.into(), origin.into(), clock).map_err(before_send)?;
+    {
+        Transport::new(
+            config.forum_origin.clone(),
+            origin.into(),
+            config.maximum_response_bytes,
+            std::time::Duration::from_millis(config.timeout_millis.into()),
+        )
+        .map_err(before_send)
+    }
+}
+
+/// The Board every member portal gets: the Forum link plus the anonymous room
+/// transport (see `RoomLink`).
+type RoomBoard = cbrd::Board<Transport, clnk::AnonymousRooms<Transport>>;
+
+fn construct_board(
+    community: &str,
+    origin: &str,
+    config: Configuration,
+    clock: impl clnk::Clock + 'static,
+) -> Result<RoomBoard> {
+    let transport = forum_transport(&config, origin)?;
+    let rooms = forum_transport(&config, origin)?;
+    let link = clnk::Link::at(transport, community.into(), origin.into(), clock)
+        .map_err(before_send)?
+        .with_anonymous_rooms(rooms);
     cbrd::Board::new(community.into(), link)
         .map_err(|_| ErrorCode::InvalidRequest)?
         .with_search(cbrd::ViewLimits {

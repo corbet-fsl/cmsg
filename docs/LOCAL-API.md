@@ -265,6 +265,16 @@ always a fork the members consent to; there are no admins):
   owed (members not yet reported in `delivered`); call it again to retry over
   the same conversation until every member is served. Welcomes are kept for a
   week.
+- Member rooms (anonymous room transport; refused with `unavailable` on a
+  Board without it). `board.room_join {room, group, accept_profile_visibility}`
+  is one step; call it again until `state: "joined"`. First call posts a join
+  request carrying only a fresh ephemeral key (`requested`); then `waiting`
+  until an online member has answered with its evidence sealed to that key.
+  Nothing is ever published in the clear; with no member online the join just
+  waits. `board.room_serve {room, group}` is what a member's device calls while
+  online: it answers the room's pending join requests with its own evidence
+  (once per request). `board.room_leave {room, group}` is the Groups `Leave` of
+  the room's group and drops an open join request for the room.
 
 `board.profile_publish` takes `{"profile": {...}, "rules": [...], "reachability": [...]}`
 and publishes the member's own answers and rules as one signed bundle. The caller

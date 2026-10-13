@@ -8,6 +8,17 @@ use std::{future::Future, pin::Pin};
 
 pub(crate) type RoomFuture<'a, X> = Pin<Box<dyn Future<Output = Result<X, LinkError>> + 'a>>;
 
+pub(crate) type JoinFuture<'a, X> = Pin<Box<dyn Future<Output = Result<X, ctnd::Error>> + 'a>>;
+
+/// Hands out no waiting: a join attempt reads the room's traffic once per
+/// attempt and a missed context commit is a restart, never a sleep in the door.
+pub(crate) struct NoPause;
+impl cbrd::Pause for NoPause {
+    fn pause(&mut self) -> ctnd::PortFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
 pub trait RoomLink: Sized + 'static {
     /// Whether this link carries the anonymous room transport at all.
     const ROOMS: bool = false;
@@ -26,6 +37,23 @@ pub trait RoomLink: Sized + 'static {
         Box::pin(async { Err(LinkError::Rejected) })
     }
     fn close_rooms<T: clnk::Transport>(_board: &mut cbrd::Board<T, Self>) {}
+    /// Join a member room (consent already decided, evidence from a sealed
+    /// member answer): see `cbrd::Board::join_room`.
+    fn join_room<'a, T, K, B, S, A, C, P>(
+        _board: &'a cbrd::Board<T, Self>,
+        _input: cbrd::RoomJoinInput<'a, K, B, S, A, C, P>,
+    ) -> JoinFuture<'a, cbrd::RoomJoined>
+    where
+        T: clnk::Transport,
+        K: cthr::keys::Custody,
+        B: cwst::backend::Backend,
+        S: cbrd::cgrp::PolicySource,
+        A: cbrd::cgrp::Authority,
+        C: ckmg::Clock,
+        P: cbrd::Pause + 'a,
+    {
+        Box::pin(async { Err(ctnd::Error::Unavailable) })
+    }
     /// Post a join request (fresh ephemeral key); returns its relay sequence.
     fn request_room_join<'a, T: clnk::Transport>(
         _board: &'a cbrd::Board<T, Self>,
@@ -80,6 +108,21 @@ impl<R: clnk::Transport + 'static> RoomLink for clnk::AnonymousRooms<R> {
     fn close_rooms<T: clnk::Transport>(board: &mut cbrd::Board<T, Self>) {
         board.close_rooms();
     }
+    fn join_room<'a, T, K, B, S, A, C, P>(
+        board: &'a cbrd::Board<T, Self>,
+        input: cbrd::RoomJoinInput<'a, K, B, S, A, C, P>,
+    ) -> JoinFuture<'a, cbrd::RoomJoined>
+    where
+        T: clnk::Transport,
+        K: cthr::keys::Custody,
+        B: cwst::backend::Backend,
+        S: cbrd::cgrp::PolicySource,
+        A: cbrd::cgrp::Authority,
+        C: ckmg::Clock,
+        P: cbrd::Pause + 'a,
+    {
+        Box::pin(board.join_room(input))
+    }
     fn request_room_join<'a, T: clnk::Transport>(
         board: &'a cbrd::Board<T, Self>,
         room: cmbl::Id,
@@ -122,7 +165,7 @@ mod tests {
                 Err(LinkError::Transport)
             }
         }
-        assert!(!<() as RoomLink>::ROOMS);
-        assert!(<clnk::AnonymousRooms<Nowhere> as RoomLink>::ROOMS);
+        const { assert!(!<() as RoomLink>::ROOMS) };
+        const { assert!(<clnk::AnonymousRooms<Nowhere> as RoomLink>::ROOMS) };
     }
 }
