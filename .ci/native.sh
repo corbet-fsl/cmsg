@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Worker-only native qualification. Browser/coverage gates remain independent.
 set -euo pipefail
+# nix-shell must not resolve bashInteractive through <nixpkgs>, which the worker environment lacks.
+export NIX_BUILD_SHELL=bash
 # Keep actual compiler/test diagnostics in the retained product job stream.
 exec 2>&1
 mkdir -p evidence/native
