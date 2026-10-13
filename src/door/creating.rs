@@ -197,6 +197,14 @@ pub(super) struct Record {
     /// The service's answer, with the claim secret.
     #[serde(default)]
     pub created: Option<Created>,
+    /// The platform runs accounting: this community needs the device's genesis
+    /// proof before it can be created.
+    #[serde(default)]
+    pub proving: bool,
+    /// The finished proof, kept so a restart never proves again; dropped once the
+    /// community exists.
+    #[serde(default)]
+    pub activation: Option<super::accounting::Activation>,
 }
 
 impl Record {
@@ -208,6 +216,7 @@ impl Record {
         if let Some(created) = &mut self.created {
             created.claim.zeroize();
         }
+        self.activation = None;
     }
 }
 
@@ -221,13 +230,16 @@ pub struct Draft {
     pub address: String,
     pub display_name: String,
     pub gates: Vec<String>,
-    /// `chosen`, `token`, `created`: how far the system steps got.
+    /// `chosen`, `proving`, `token`, `created`: how far the system steps got.
     pub stage: String,
 }
 
 fn stage(record: &Record) -> &'static str {
     if record.created.is_some() {
         "created"
+    } else if record.proving && record.activation.is_none() {
+        // The device is preparing the community's accounting in the background.
+        "proving"
     } else if record.token.is_some() {
         "token"
     } else {
@@ -241,6 +253,62 @@ fn token_json(token: &creation_token::Token) -> Value {
         "randomizer": token.randomizer,
         "signature": token.signature,
     })
+}
+
+#[derive(Deserialize)]
+struct WireTerms {
+    accounting: Option<Value>,
+}
+
+/// The accounting genesis step: ask the platform what it must see, start (or poll)
+/// the proof in the background and keep the finished proof in the Vault record.
+/// Returns whether the community can be created now. A platform without
+/// accounting needs nothing. Never blocks the Door; a failed proof starts again.
+async fn activation_step(
+    door: &mut Door,
+    origin: &str,
+    loaded: &mut vouching::Loaded,
+    record: &mut Record,
+) -> Result<bool> {
+    if record.activation.is_some() {
+        return Ok(true);
+    }
+    let binding = door.foyers.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
+    let answer = binding
+        .call_public(
+            "community_terms",
+            serde_json::json!({ "address": record.address }),
+        )
+        .await?;
+    let wire: WireTerms = serde_json::from_value(answer).map_err(|_| ErrorCode::Unavailable)?;
+    let Some(terms) = wire.accounting else {
+        if record.proving {
+            record.proving = false;
+            loaded.book.creation = Some(record.clone());
+            loaded.save(door, origin).await?;
+        }
+        return Ok(true);
+    };
+    if !record.proving {
+        record.proving = true;
+        loaded.book.creation = Some(record.clone());
+        loaded.save(door, origin).await?;
+    }
+    let prover = door
+        .activation_prover
+        .clone()
+        .ok_or(ErrorCode::Unavailable)?;
+    match prover.poll(&record.address, &terms) {
+        super::accounting::ActivationPoll::Ready(activation) => {
+            record.activation = Some(activation);
+            loaded.book.creation = Some(record.clone());
+            loaded.save(door, origin).await?;
+            Ok(true)
+        }
+        super::accounting::ActivationPoll::Pending => Ok(false),
+        // The next call asks again and so starts a new proof.
+        super::accounting::ActivationPoll::Failed => Err(ErrorCode::Reconcile),
+    }
 }
 
 /// Make the community, resuming wherever an earlier call stopped. The body is
@@ -266,6 +334,8 @@ pub(super) async fn community_create(
                 pending: record.pending,
                 token: record.token,
                 created: None,
+                proving: false,
+                activation: None,
             };
             loaded.book.creation = Some(record.clone());
             loaded.save(door, &origin).await?;
@@ -281,6 +351,8 @@ pub(super) async fn community_create(
                 pending: None,
                 token: None,
                 created: None,
+                proving: false,
+                activation: None,
             };
             // Human effort first: nothing below can lose it.
             loaded.book.creation = Some(record.clone());
@@ -292,6 +364,9 @@ pub(super) async fn community_create(
         return Ok((created, vec![]));
     }
     let mut record = record;
+    // Start the accounting proof first: it runs in the background while the token
+    // is obtained, and the person is never held at this step.
+    let mut ready = activation_step(door, &origin, &mut loaded, &mut record).await?;
     if record.token.is_none() {
         let key: WireKey =
             owner(door, &origin, "creation_token_key", serde_json::json!({})).await?;
@@ -328,20 +403,42 @@ pub(super) async fn community_create(
         loaded.save(door, &origin).await?;
     }
     let token = record.token.clone().ok_or(ErrorCode::Unavailable)?;
+    if !ready {
+        ready = activation_step(door, &origin, &mut loaded, &mut record).await?;
+    }
+    if !ready {
+        // Being prepared: ask again (`foyer.community_create` with an empty body
+        // resumes). The person's choices and the token are already kept.
+        return Err(ErrorCode::Reconcile);
+    }
+    let activation = record.activation.clone();
     let binding = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     // A lost answer is asked again with the same token and address: the service
     // answers a repeated creation from the community it already made.
-    let answer = binding
-        .call_public(
-            "community_create",
-            serde_json::json!({
-                "address": record.address,
-                "display_name": record.display_name,
-                "gates": record.gates,
-                "token": token_json(&token),
-            }),
-        )
-        .await?;
+    let mut body = serde_json::json!({
+        "address": record.address,
+        "display_name": record.display_name,
+        "gates": record.gates,
+        "token": token_json(&token),
+    });
+    if let Some(activation) = &activation {
+        body["activation"] = serde_json::json!({
+            "statement": activation.statement,
+            "proof": activation.proof,
+        });
+    }
+    let answer = match binding.call_public("community_create", body).await {
+        Ok(answer) => answer,
+        Err(ErrorCode::InvalidRequest) if activation.is_some() => {
+            // The proof no longer fits the platform's terms (a day passed): it is
+            // system work, so prove again silently.
+            record.activation = None;
+            loaded.book.creation = Some(record.clone());
+            loaded.save(door, &origin).await?;
+            return Err(ErrorCode::Reconcile);
+        }
+        Err(error) => return Err(error),
+    };
     let wire: WireCreated = serde_json::from_value(answer).map_err(|_| ErrorCode::Unavailable)?;
     let created = Created {
         address: record.address.clone(),
@@ -356,6 +453,8 @@ pub(super) async fn community_create(
     };
     record.created = Some(created.clone());
     record.token = None;
+    record.activation = None;
+    record.proving = false;
     loaded.book.creation = Some(record);
     loaded.save(door, &origin).await?;
     Ok((created, vec![]))

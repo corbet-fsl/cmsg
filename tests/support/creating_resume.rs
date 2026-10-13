@@ -2,6 +2,7 @@
 //! in-process HTTP server that answers like the real one (a repeated blinded message
 //! gets the same signature, a repeated creation the same community) and can lose any
 //! answer after acting on the request. The device logic under test is the real one.
+use super::super::accounting;
 use super::super::facades::{BoundVault, OwnedFuture, VaultIdentity};
 use super::*;
 use blind_rsa_signatures::{DefaultRng, KeyPairSha384PSSRandomized as KeyPair};
@@ -24,6 +25,12 @@ struct Service {
     lose: BTreeSet<&'static str>,
     /// Operations the service does not receive at all, once.
     drop: BTreeSet<&'static str>,
+    /// The accounting terms the platform names; `None` is a platform without accounts.
+    terms: Option<Value>,
+    /// Activations `community_create` received.
+    activations: Vec<Value>,
+    /// Refuse the next activation as outdated (a day passed while proving).
+    refuse_activation: bool,
 }
 
 type Shared = Arc<Mutex<Service>>;
@@ -35,6 +42,7 @@ fn answer(service: &Shared, name: &str, body: Value) -> Option<Value> {
         "creation_token_issue",
         "community_create",
         "community_creation_claim",
+        "community_terms",
     ]
     .into_iter()
     .find(|known| *known == name)?;
@@ -55,7 +63,17 @@ fn answer(service: &Shared, name: &str, body: Value) -> Option<Value> {
             }
             json!({"blind_signature": service.signatures[&blinded]})
         }
+        "community_terms" => json!({"accounting": service.terms}),
         "community_create" => {
+            if service.terms.is_some() && body.get("activation").is_none() {
+                return Some(Value::Null);
+            }
+            if let Some(activation) = body.get("activation") {
+                if std::mem::take(&mut service.refuse_activation) {
+                    return Some(Value::Null);
+                }
+                service.activations.push(activation.clone());
+            }
             let message: Vec<u8> =
                 serde_json::from_value(body["token"]["message"].clone()).unwrap();
             if !service.created.contains_key(&message) {
@@ -99,6 +117,12 @@ async fn serve(service: Shared) -> String {
                         let bytes = request.into_body().collect().await.unwrap().to_bytes();
                         let body: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
                         Ok::<_, std::convert::Infallible>(match answer(&service, &name, body) {
+                            // The service's own refusal: HTTP 400 with its fixed error body.
+                            Some(Value::Null) => Response::builder()
+                                .status(400)
+                                .header("content-type", "application/json")
+                                .body(Full::new(Bytes::from(r#"{"error":"invalid"}"#)))
+                                .unwrap(),
                             Some(reply) => Response::builder()
                                 .header("content-type", "application/json")
                                 .body(Full::new(Bytes::from(reply.to_string())))
@@ -213,6 +237,9 @@ fn service() -> Shared {
         key_reads: 0,
         lose: BTreeSet::new(),
         drop: BTreeSet::new(),
+        terms: None,
+        activations: Vec::new(),
+        refuse_activation: false,
     }))
 }
 
@@ -397,4 +424,158 @@ async fn a_claim_is_remembered_until_the_join_is_done() {
 fn draft_claimed(custody: &Arc<Mutex<Option<Vec<u8>>>>) -> Option<String> {
     let held = custody.lock().unwrap().clone()?;
     vouching::Book::decode(Some(&held)).unwrap().claimed.clone()
+}
+
+/// A prover that answers from a script, one poll at a time, and counts its starts.
+struct Scripted {
+    script: Mutex<Vec<accounting::ActivationPoll>>,
+    polls: Mutex<usize>,
+}
+
+impl accounting::ActivationProver for Scripted {
+    fn poll(&self, _address: &str, terms: &Value) -> accounting::ActivationPoll {
+        assert_eq!(terms["observed_at"], 5);
+        *self.polls.lock().unwrap() += 1;
+        let mut script = self.script.lock().unwrap();
+        if script.is_empty() {
+            accounting::ActivationPoll::Pending
+        } else {
+            script.remove(0)
+        }
+    }
+}
+
+fn activation() -> accounting::Activation {
+    accounting::Activation {
+        statement: json!({"community": vec![1u8; 32]}),
+        proof: vec![4, 2],
+    }
+}
+
+fn accounts() -> Value {
+    json!({"observed_at": 5, "ledger_policy": {"account": {}}, "extension_policy": {}})
+}
+
+fn scripted(script: Vec<accounting::ActivationPoll>) -> Arc<Scripted> {
+    Arc::new(Scripted {
+        script: Mutex::new(script),
+        polls: Mutex::new(0),
+    })
+}
+
+#[tokio::test]
+async fn the_accounting_proof_runs_in_the_background_and_nothing_is_asked_again() {
+    let shared = service();
+    shared.lock().unwrap().terms = Some(accounts());
+    let base = serve(shared.clone()).await;
+    let custody = Arc::new(Mutex::new(None));
+    let prover = scripted(vec![
+        accounting::ActivationPoll::Pending,
+        accounting::ActivationPoll::Pending,
+        accounting::ActivationPoll::Failed,
+        accounting::ActivationPoll::Ready(activation()),
+    ]);
+    let mut device = start(&base, &custody);
+    device.door.set_activation_prover(prover.clone());
+    // Being prepared: the call does not wait, the choices and the token are kept.
+    assert_eq!(
+        community_create(&mut device.door, &device.key, chosen())
+            .await
+            .err(),
+        Some(ErrorCode::Reconcile)
+    );
+    let draft = draft(&mut device).await;
+    assert_eq!(draft.stage, "proving");
+    assert_eq!(draft.address, "gardenclub");
+    assert_eq!(shared.lock().unwrap().issuances, 1);
+    // A restart in the middle loses nothing; the failed proof simply starts again.
+    drop(device);
+    let mut device = start(&base, &custody);
+    device.door.set_activation_prover(prover.clone());
+    assert_eq!(
+        community_create(&mut device.door, &device.key, resume())
+            .await
+            .err(),
+        Some(ErrorCode::Reconcile)
+    );
+    let (created, _) = community_create(&mut device.door, &device.key, resume())
+        .await
+        .unwrap();
+    assert_eq!(created.address, "gardenclub");
+    let service = shared.lock().unwrap();
+    assert_eq!(service.creations, 1);
+    assert_eq!(service.issuances, 1);
+    assert_eq!(service.activations.len(), 1);
+    assert_eq!(service.activations[0]["proof"], json!([4, 2]));
+    drop(service);
+    // The proof is not kept once the community exists.
+    let held = custody.lock().unwrap().clone().unwrap();
+    let book = vouching::Book::decode(Some(&held)).unwrap();
+    assert!(book.creation.as_ref().unwrap().activation.is_none());
+    assert_eq!(draft_stage(&mut device).await, "created");
+}
+
+async fn draft_stage(device: &mut Device) -> String {
+    draft(device).await.stage
+}
+
+#[tokio::test]
+async fn an_outdated_proof_is_replaced_silently() {
+    let shared = service();
+    {
+        let mut service = shared.lock().unwrap();
+        service.terms = Some(accounts());
+        service.refuse_activation = true;
+    }
+    let base = serve(shared.clone()).await;
+    let custody = Arc::new(Mutex::new(None));
+    let prover = scripted(vec![
+        accounting::ActivationPoll::Ready(activation()),
+        accounting::ActivationPoll::Ready(activation()),
+    ]);
+    let mut device = start(&base, &custody);
+    device.door.set_activation_prover(prover.clone());
+    // The hub refuses the first proof: a day passed while it was made.
+    assert_eq!(
+        community_create(&mut device.door, &device.key, chosen())
+            .await
+            .err(),
+        Some(ErrorCode::Reconcile)
+    );
+    let (created, _) = community_create(&mut device.door, &device.key, resume())
+        .await
+        .unwrap();
+    assert_eq!(created.address, "gardenclub");
+    assert_eq!(*prover.polls.lock().unwrap(), 2);
+    assert_eq!(shared.lock().unwrap().issuances, 1);
+}
+
+#[tokio::test]
+async fn a_platform_without_accounts_needs_no_proof_and_no_prover() {
+    let shared = service();
+    let base = serve(shared.clone()).await;
+    let custody = Arc::new(Mutex::new(None));
+    let mut device = start(&base, &custody);
+    assert!(
+        community_create(&mut device.door, &device.key, chosen())
+            .await
+            .is_ok()
+    );
+    assert!(shared.lock().unwrap().activations.is_empty());
+}
+
+#[tokio::test]
+async fn a_device_that_cannot_prove_is_unavailable_not_stuck() {
+    let shared = service();
+    shared.lock().unwrap().terms = Some(accounts());
+    let base = serve(shared.clone()).await;
+    let custody = Arc::new(Mutex::new(None));
+    let mut device = start(&base, &custody);
+    assert_eq!(
+        community_create(&mut device.door, &device.key, chosen())
+            .await
+            .err(),
+        Some(ErrorCode::Unavailable)
+    );
+    assert_eq!(shared.lock().unwrap().creations, 0);
 }

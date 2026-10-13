@@ -6,6 +6,7 @@ use cvlt::{CommunityAccountCustody, Records, Vault};
 use cwlt::passport::{self, AuthenticatedCommunity, CommunityId};
 use data_encoding::{BASE64URL_NOPAD as B64, HEXLOWER as HEX};
 use sha2::{Digest, Sha256};
+mod activation;
 mod checkpoint;
 mod custody;
 mod genesis;
@@ -13,6 +14,9 @@ mod genesis;
 mod lifecycle;
 mod pending;
 mod request;
+pub use activation::{Activation, ActivationPoll, ActivationProver};
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub use activation::{prove as prove_activation, NativeActivationProver};
 pub use checkpoint::{CheckpointAcquisition, CurrentEnrollment, SubmittedEnrollment};
 pub use custody::CommunityAccount;
 pub use genesis::PreparedAccount;

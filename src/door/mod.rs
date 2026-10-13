@@ -257,6 +257,9 @@ pub struct Door {
     meshes: BTreeMap<String, facades::BoundMesh>,
     vaults: BTreeMap<String, Box<dyn facades::BoundVault>>,
     accounts: BTreeMap<String, account::AccountActor>,
+    /// Lent by the trusted embedder: proves a new community's accounting genesis
+    /// on this device (see `creating`). Absent in a frontend that cannot prove.
+    activation_prover: Option<std::sync::Arc<dyn accounting::ActivationProver>>,
     /// Vouchers the member may still spend, as last reported by the accounting
     /// owner. `None` until one is known; links are then limited only by the
     /// community's own (alpha) allowance.
@@ -282,6 +285,7 @@ impl Door {
             meshes: BTreeMap::new(),
             vaults: BTreeMap::new(),
             accounts: BTreeMap::new(),
+            activation_prover: None,
             voucher_allowance: None,
             wave_ports: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
@@ -291,6 +295,11 @@ impl Door {
             #[cfg(target_arch = "wasm32")]
             browser_gesture: None,
         }
+    }
+
+    /// Trusted embedding control: lend the prover for new communities' accounting.
+    pub fn set_activation_prover(&mut self, prover: std::sync::Arc<dyn accounting::ActivationProver>) {
+        self.activation_prover = Some(prover);
     }
 
     /// Trusted embedding control: the accounting owner reports how many vouchers

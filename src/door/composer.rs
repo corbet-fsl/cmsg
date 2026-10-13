@@ -1103,6 +1103,11 @@ where
     let public = services.public(Service::Global).await?;
     door.lend_global(community_origin, global_session, public)
         .map_err(step("global session"))?;
+    // A community this device creates needs a genesis proof of its accounting; it is
+    // made in the background with the same retained prover artifacts.
+    door.set_activation_prover(std::sync::Arc::new(
+        super::accounting::NativeActivationProver::new(settings.prover.clone()),
+    ));
     Ok(door)
 }
 

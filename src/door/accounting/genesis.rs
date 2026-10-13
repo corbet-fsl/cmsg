@@ -21,6 +21,40 @@ fn hex<const N: usize>(value: &str) -> Result<[u8; N]> {
         .map_err(|_| ErrorCode::Unauthorized)
 }
 
+/// The wallet engine's view of the community's signed account policy.
+pub(super) fn engine_account_policy(policy: &cblc::accounting::AccountPolicy) -> AccountPolicy {
+    AccountPolicy {
+        initial_credit: policy.initial_credit,
+        maximum_available: policy.maximum_available,
+        outgoing_reservation: policy.outgoing_reservation,
+        incoming_reservation: policy.incoming_reservation,
+        policy_revision: policy.policy_revision,
+        policy_valid_from: policy.policy_valid_from,
+        policy_valid_until: policy.policy_valid_until,
+        newcomer_period: policy.newcomer_period,
+        rate_window: policy.rate_window,
+        newcomer_admissions: policy.newcomer_admissions,
+        maximum_admissions: policy.maximum_admissions,
+        refill_period: policy.refill_period,
+        refill_units: policy.refill_units,
+        abandon_after: policy.abandon_after,
+    }
+}
+
+/// The wallet engine's view of the community's signed extension policy.
+pub(super) fn engine_extension_policy(
+    extension: &cblc::extensions::ExtensionPolicy,
+) -> ExtensionPolicy {
+    ExtensionPolicy {
+        revision: extension.revision,
+        quorum: extension.public_record_quorum,
+        change_cost: extension.change_token_cost,
+        delay: extension.deposit_delay_seconds,
+        batch: extension.minimum_deposit_batch,
+        standing: extension.standing_policy_digest,
+    }
+}
+
 fn context(
     publication: &enrollment::EnrollmentPublication,
     tree: &enrollment::EnrollmentTree,
@@ -42,30 +76,8 @@ fn context(
     Ok(GenesisContext {
         community_id: current.trust.community_id.clone(),
         owner: member,
-        policy: AccountPolicy {
-            initial_credit: policy.initial_credit,
-            maximum_available: policy.maximum_available,
-            outgoing_reservation: policy.outgoing_reservation,
-            incoming_reservation: policy.incoming_reservation,
-            policy_revision: policy.policy_revision,
-            policy_valid_from: policy.policy_valid_from,
-            policy_valid_until: policy.policy_valid_until,
-            newcomer_period: policy.newcomer_period,
-            rate_window: policy.rate_window,
-            newcomer_admissions: policy.newcomer_admissions,
-            maximum_admissions: policy.maximum_admissions,
-            refill_period: policy.refill_period,
-            refill_units: policy.refill_units,
-            abandon_after: policy.abandon_after,
-        },
-        extension: ExtensionPolicy {
-            revision: extension.revision,
-            quorum: extension.public_record_quorum,
-            change_cost: extension.change_token_cost,
-            delay: extension.deposit_delay_seconds,
-            batch: extension.minimum_deposit_batch,
-            standing: extension.standing_policy_digest,
-        },
+        policy: engine_account_policy(policy),
+        extension: engine_extension_policy(extension),
         // The rulebook parameters the community's published digest names. The engine
         // refuses the genesis unless their digest equals `extension.standing`, so a
         // community that tuned them differently is refused, never silently accepted.
