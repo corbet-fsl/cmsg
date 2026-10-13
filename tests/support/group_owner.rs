@@ -5,7 +5,7 @@
 use super::profile_owner_tests::{open_as, ProfileOwner};
 use crate::door::board::CommittedOwner;
 use cbrd::cgrp::Consent;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn member(byte: &str) -> String {
     byte.repeat(48)
@@ -278,4 +278,70 @@ async fn a_key_package_is_made_by_the_real_threads_store_and_never_repeats() {
     if let Ok(second) = second {
         assert_ne!(first, second);
     }
+}
+
+/// Serves one fixed lineage for any asked member, as a hostile or confused
+/// locator target would.
+struct Serves(ckmg::Lineage);
+impl super::super::group_custody::GroupPeers for Serves {
+    fn lineage<'a>(
+        &'a mut self,
+        _: &'a ckmg::Binding,
+        _: &'a [u8],
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<ckmg::Lineage>> + 'a>> {
+        let lineage = self.0.clone();
+        Box::pin(async move { Some(lineage) })
+    }
+}
+
+#[tokio::test]
+async fn a_locator_for_a_co_member_yields_trust_only_for_that_exact_member() {
+    use crate::door::board::CommittedOwner;
+    let (mut other, _, _) = open_as(&member("c"), true).await;
+    other.enable_groups(None).unwrap();
+    let lineage_c = {
+        let mut retained = other.retained.lock().await;
+        retained
+            .as_mut()
+            .unwrap()
+            .vault
+            .keys()
+            .lineage()
+            .await
+            .unwrap()
+    };
+    let (mut me, _, _) = open_as(&member("a"), true).await;
+    me.enable_groups(Some(Box::new(Serves(lineage_c)))).unwrap();
+    let theirs = other.groups().unwrap();
+    let now = theirs.now().unwrap();
+    let mut genuine = consent(&member("c"), now);
+    let signed = theirs
+        .sign_consent(
+            &member("c"),
+            &genuine.signing_bytes().unwrap(),
+            genuine.valid_until,
+        )
+        .await
+        .unwrap();
+    genuine.signature = signed.signature;
+    genuine.authority = signed.authority;
+    // The same signature claimed for another member: its locator leads to
+    // member c's lineage, which does not bind to that member.
+    let mut claimed = genuine.clone();
+    claimed.member = member("b");
+
+    let groups = me.groups().unwrap();
+    groups.provide_handles(BTreeMap::from([
+        (member("b"), b"locator-b".to_vec()),
+        (member("c"), b"locator-c".to_vec()),
+    ]));
+    groups
+        .refresh(
+            &BTreeSet::new(),
+            &BTreeSet::from([member("b"), member("c")]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(groups.authority().consent(&genuine, now), Ok(()));
+    assert!(groups.authority().consent(&claimed, now).is_err());
 }
