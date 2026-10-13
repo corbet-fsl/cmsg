@@ -1,6 +1,8 @@
 //! Private account preparation from the actual current enrollment owner.
 use super::*;
-use ckmg::wallet_engine::account::{AccountPolicy, Enrollment, ExtensionPolicy, GenesisContext};
+use ckmg::wallet_engine::account::{
+    AccountPolicy, Enrollment, ExtensionPolicy, GenesisContext, VoucherBond,
+};
 
 /// Same original private candidate and current enrollment. No private opening,
 /// proof, request, initialized wallet or caller-selected context is exposed.
@@ -61,6 +63,7 @@ fn context(
     index: usize,
     current: &CurrentAdmission,
     prepared_at: Option<u64>,
+    bond: Option<VoucherBond>,
 ) -> Result<GenesisContext> {
     let row = tree.entries().get(index).ok_or(ErrorCode::Unauthorized)?;
     if row.member_id != current.grant.member_id {
@@ -82,9 +85,9 @@ fn context(
         // genesis unless their digest equals `extension.standing`, so a community that
         // tuned them differently is refused, never silently accepted.
         standing: current.standing,
-        // DEBT (asked of sonnet-vacct3): the sponsor bond is not handed in yet; the
-        // vouchee device holds the secret in custody but not the sponsor's member id.
-        bond: None,
+        // Read once from the vouchee's custody at preparation; refreshes compare
+        // against the same value. A founder has none.
+        bond,
         enrollment: Enrollment {
             member,
             key: hex(&row.account_key)?,
@@ -119,10 +122,23 @@ impl<'p> CurrentEnrollment<'p> {
         R: Records,
     {
         self.refresh().await?;
+        // The sponsor's member id and the shared bond secret, when this account
+        // was admitted by a voucher; they live in the Vault beside the link bonds.
+        let bond = account
+            .voucher_custody()
+            .await
+            .ok()
+            .flatten()
+            .and_then(|raw| {
+                super::super::vouching::Book::decode(Some(raw.as_slice()))
+                    .ok()?
+                    .vouchee_bond()
+            })
+            .map(|(sponsor, secret)| VoucherBond { sponsor, secret });
         let (context, material, material_digest, origin, checked) =
             self.with_verified(|publication, tree, index, current| {
                 Ok::<_, ErrorCode>((
-                    context(publication, tree, index, current, None)?,
+                    context(publication, tree, index, current, None, bond.clone())?,
                     current.material.clone(),
                     current.material_digest,
                     current.origin.clone(),
@@ -182,6 +198,7 @@ impl PreparedAccount<'_> {
                     index,
                     current,
                     Some(self.context.checked_at),
+                    self.context.bond.clone(),
                 )?;
                 if observed != self.context
                     || current.material != self.material
@@ -212,6 +229,7 @@ impl PreparedAccount<'_> {
                         index,
                         current,
                         Some(self.context.checked_at),
+                        self.context.bond.clone(),
                     )?;
                     if observed != self.context
                         || current.material != self.material
@@ -360,6 +378,7 @@ mod proven {
                             index,
                             current,
                             Some(self.context.checked_at),
+                        self.context.bond.clone(),
                         )?;
                         if observed != self.context
                             || current.material != self.material

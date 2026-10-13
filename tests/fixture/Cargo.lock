@@ -2070,7 +2070,7 @@ dependencies = [
 [[package]]
 name = "cvch"
 version = "0.2.1"
-source = "git+https://git.corbet.ch/corbet-foss/cvch?branch=main#f9890e024da0d403f46c173ddbc82eec8fc9dbea"
+source = "git+https://git.corbet.ch/corbet-foss/cvch?branch=main#3c52790ed9ef58aa098564e213d22e0b5c3a5043"
 dependencies = [
  "cfbk",
  "csgn",
@@ -2101,7 +2101,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#92d503a82779296c3fe428b7c32f7a60c20089b9"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#0f6cb43a341d728e5625f9be6b0f1b23829a4ec1"
 dependencies = [
  "any_ascii",
  "axum",

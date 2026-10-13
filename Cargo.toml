@@ -38,15 +38,15 @@ ckyh = { git = "https://git.corbet.ch/corbet-foss/ckyh", branch = "main", defaul
 cchr = { git = "https://git.corbet.ch/corbet-foss/cchr.git", branch = "main" }
 cpfl = { git = "https://git.corbet.ch/corbet-foss/cpfl.git", branch = "main" }
 cshm = { git = "https://git.corbet.ch/corbet-foss/cshm", branch = "main" }
-cmmr = { git = "https://git.corbet.ch/corbet-foss/cmmr.git", branch = "v01" }
-cdht = { git = "https://git.corbet.ch/corbet-foss/cdht.git", branch = "v01" }
+cmmr = { git = "https://git.corbet.ch/corbet-foss/cmmr.git", branch = "main" }
+cdht = { git = "https://git.corbet.ch/corbet-foss/cdht.git", branch = "main" }
 cmsh = { git = "https://git.corbet.ch/corbet-libs/cmsh.git", branch = "main" }
 cvlt = { git = "https://git.corbet.ch/corbet-libs/cvlt.git", branch = "main", features = ["wallet"] }
 cnbx = { git = "https://git.corbet.ch/corbet-libs/cnbx.git", branch = "main" }
 ctcs = { git = "https://git.corbet.ch/corbet-foss/ctcs.git", branch = "main" }
 cthr = { git = "https://git.corbet.ch/corbet-foss/cthr.git", branch = "main" }
-ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "v01", features = ["profile-envelope"] }
-cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "v01" }
+ckmg = { git = "https://git.corbet.ch/corbet-foss/ckmg.git", branch = "main", features = ["profile-envelope"] }
+cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "main" }
 ctnd = { git = "https://git.corbet.ch/corbet-foss/ctnd.git", branch = "main" }
 schemars = "1"
 url = "2"
@@ -60,21 +60,21 @@ hpke = { version = "0.14", default-features = false, features = ["alloc", "x2551
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "main", optional = true, features = ["embedded-authenticator"] }
-ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "v01", optional = true }
+ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "main", optional = true }
 arti-client = { version = "0.46", default-features = false, optional = true }
 tor-rtcompat = { version = "0.46", default-features = false, features = ["tokio", "rustls"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 cbrd = { git = "https://git.corbet.ch/corbet-libs/cbrd.git", branch = "main", default-features = false, features = ["http"] }
 cvch = { git = "https://git.corbet.ch/corbet-foss/cvch", branch = "main" }
 futures-util = "0.3"
-cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "v01", default-features = false, features = ["http"] }
+cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "main", default-features = false, features = ["http"] }
 reqwest = { version = "0.13", default-features = false }
 axum = "0.8"
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 cblv = { git = "https://git.corbet.ch/corbet-foss/cblv", branch = "main", features = ["browser"], optional = true }
-ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "v01", default-features = false, optional = true }
+ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "main", default-features = false, optional = true }
 cbrd = { git = "https://git.corbet.ch/corbet-libs/cbrd.git", branch = "main", default-features = false, features = ["browser"] }
 futures-channel = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
@@ -83,7 +83,7 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Window", "Location", "Event", "EventTarget", "MessageEvent", "MessageChannel", "MessagePort"] }
-cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "v01", default-features = false, features = ["browser"] }
+cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "main", default-features = false, features = ["browser"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]

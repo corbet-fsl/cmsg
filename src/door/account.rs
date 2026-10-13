@@ -48,7 +48,7 @@ pub struct Activation {
 }
 
 /// Body of `community_join`. The voucher is the member's own link text (the part
-/// after `#`, `cvch2.` and hex); it is needed only while the community's lobby still asks for it. The handle is the
+/// after `#`, `cvch3.` and hex); it is needed only while the community's lobby still asks for it. The handle is the
 /// member's chosen community handle, reserved once (a repeat with the same handle
 /// is a no-op; a different one than already reserved is refused).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
