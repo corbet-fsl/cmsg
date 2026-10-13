@@ -1460,7 +1460,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#87cdb6c6c838546b1bee4d94c3c0855e0bb737c8"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=v01#4a1af0a0bc74550a2bf3b76cbb50ade209dcb008"
 dependencies = [
  "blake3",
  "cchr",
@@ -2036,7 +2036,7 @@ dependencies = [
 [[package]]
 name = "cnvl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cnvl.git?branch=v01#f873e8621ec4bcc4bcab5a5513a77728869ac196"
+source = "git+https://git.corbet.ch/corbet-foss/cnvl.git?branch=v01#8c1cae0b9a2b0837c6923c52cf833879e8cad036"
 dependencies = [
  "cgrd",
  "chacha20poly1305 0.11.0",
@@ -2595,7 +2595,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#c479cf7b13d8649b81a22eb3c35f7aa7422d1573"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=v01#82f604008ec8206839d3a76fbc2c16fa11bde6d0"
 dependencies = [
  "cchr",
  "cgrp",
@@ -2621,7 +2621,7 @@ dependencies = [
 [[package]]
 name = "ctnd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctnd.git?branch=v01#dd5eed917533dbd7da44d280786cec19f7060cbc"
+source = "git+https://git.corbet.ch/corbet-foss/ctnd.git?branch=v01#fe939e796ca7d78d15a514e95d4378a3296b3948"
 dependencies = [
  "cgrp",
  "schemars 1.2.2",
@@ -3181,7 +3181,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98e02cd118058400797c74550dca132b57cf2e6af0e9ea0672a83eb186fd655e"
 dependencies = [
  "derive-deftly-macros",
- "heck 0.4.1",
+ "heck 0.5.0",
 ]
 
 [[package]]
@@ -3190,14 +3190,14 @@ version = "1.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba91f619216e76a5eb2515783f7ec2e271938b51aadac592f4930517f4626863"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "indexmap 1.9.3",
  "itertools 0.12.1",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
  "sha3 0.12.0",
- "strum 0.25.0",
+ "strum 0.28.0",
  "syn 3.0.9",
  "unicode-ident",
  "void",
