@@ -1,0 +1,207 @@
+//! Wave actions of the Inbox door: send, answer, close and punish a wave, the
+//! messages of the other device, and the two short calls of the background
+//! proof worker. Thin: every fact and mutation is an owner's (Waves, Contacts,
+//! Threads); this module only orders them, and records the member's action
+//! durably before any proof exists. A proof never blocks the member.
+//!
+//! The verifier, policy, G2 and peer-lineage capabilities arrive as a
+//! [`WavePorts`] bundle installed per member origin by the trusted embedding
+//! runtime ([`Door::bind_waves`]); no client can supply or replace them. The
+//! prover is a host component that holds the wallet openings: it calls
+//! `inbox.wave_job_next`, proves WITHOUT holding the Door, and returns the
+//! result through `inbox.wave_job_done`.
+mod desk;
+pub(crate) mod engine;
+mod ports;
+pub mod types;
+pub mod worker;
+
+use super::*;
+pub use ports::{verify_outcome_with, verify_reservation_with, Policy, WavePorts};
+pub use types::*;
+
+/// One request to the bound Vault. The Vault answers with the matching variant.
+pub(super) enum Command {
+    Send(WaveSend),
+    Decide(WaveDecide),
+    Punish(WavePunish),
+    Receive(WaveIncoming),
+    List,
+    Outbox,
+    Delivered(Delivered),
+    NextJob,
+    JobDone(JobDone),
+    Retry([u8; 32]),
+    Recover,
+}
+pub(super) enum Answer {
+    Status(WaveStatus),
+    List(WaveList),
+    Outbox(Outbox),
+    Relation(cnbx::Relation),
+    Job(Box<JobOffer>),
+    Done,
+}
+
+impl Door {
+    /// Trusted embedding control, absent from every callable projection: install
+    /// the wave capabilities of an already configured member origin.
+    pub fn bind_waves(&mut self, origin: &str, ports: Box<dyn WavePorts>) -> Result<()> {
+        if !self
+            .config
+            .origins
+            .get(&Role::Member)
+            .is_some_and(|set| set.contains(origin))
+            || self.wave_ports.contains_key(origin)
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        self.wave_ports.insert(origin.into(), ports);
+        Ok(())
+    }
+}
+
+async fn run(door: &mut Door, key: &[u8; 32], command: Command) -> Result<(Answer, Vec<Event>)> {
+    let grant = door.grants.get(key).ok_or(ErrorCode::Unauthorized)?;
+    let origin = grant.origin.clone();
+    let expires = grant.expires;
+    let mut policy = door.current_policy(&origin)?;
+    let ports = door.wave_ports.get(&origin).ok_or(ErrorCode::Unavailable)?;
+    let vault = door.vaults.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
+    let (answer, completed) = current::read_with(
+        vault.as_mut(),
+        ports.as_ref(),
+        &mut policy,
+        current::Scope {
+            community: &door.config.community,
+            expires,
+            floor: door.clock_floor,
+        },
+        move |vault, ports| vault.waves(command, ports),
+    )
+    .await?;
+    door.observe(completed)?;
+    Ok((answer, vec![]))
+}
+
+fn status(answer: Answer) -> Result<WaveStatus> {
+    match answer {
+        Answer::Status(status) => Ok(status),
+        _ => Err(ErrorCode::Unavailable),
+    }
+}
+
+pub(super) async fn wave_send(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: WaveSend,
+) -> Result<(WaveStatus, Vec<Event>)> {
+    let (answer, events) = run(door, key, Command::Send(request)).await?;
+    Ok((status(answer)?, events))
+}
+
+pub(super) async fn wave_decide(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: WaveDecide,
+) -> Result<(WaveStatus, Vec<Event>)> {
+    let (answer, events) = run(door, key, Command::Decide(request)).await?;
+    Ok((status(answer)?, events))
+}
+
+pub(super) async fn wave_punish(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: WavePunish,
+) -> Result<(cnbx::Relation, Vec<Event>)> {
+    match run(door, key, Command::Punish(request)).await? {
+        (Answer::Relation(relation), events) => Ok((relation, events)),
+        _ => Err(ErrorCode::Unavailable),
+    }
+}
+
+pub(super) async fn wave_receive(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: WaveIncoming,
+) -> Result<(WaveStatus, Vec<Event>)> {
+    let (answer, events) = run(door, key, Command::Receive(request)).await?;
+    Ok((status(answer)?, events))
+}
+
+pub(super) async fn waves(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(WaveList, Vec<Event>)> {
+    match run(door, key, Command::List).await? {
+        (Answer::List(list), events) => Ok((list, events)),
+        _ => Err(ErrorCode::Unavailable),
+    }
+}
+
+pub(super) async fn wave_outbox(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(Outbox, Vec<Event>)> {
+    match run(door, key, Command::Outbox).await? {
+        (Answer::Outbox(outbox), events) => Ok((outbox, events)),
+        _ => Err(ErrorCode::Unavailable),
+    }
+}
+
+pub(super) async fn wave_delivered(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: Delivered,
+) -> Result<(Empty, Vec<Event>)> {
+    match run(door, key, Command::Delivered(request)).await? {
+        (Answer::Done, events) => Ok((Empty {}, events)),
+        _ => Err(ErrorCode::Unavailable),
+    }
+}
+
+pub(super) async fn wave_job_next(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(JobOffer, Vec<Event>)> {
+    match run(door, key, Command::NextJob).await? {
+        (Answer::Job(offer), events) => Ok((*offer, events)),
+        _ => Err(ErrorCode::Unavailable),
+    }
+}
+
+pub(super) async fn wave_job_done(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: JobDone,
+) -> Result<(WaveStatus, Vec<Event>)> {
+    let (answer, events) = run(door, key, Command::JobDone(request)).await?;
+    Ok((status(answer)?, events))
+}
+
+pub(super) async fn wave_job_retry(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: JobRef,
+) -> Result<(Empty, Vec<Event>)> {
+    match run(door, key, Command::Retry(request.id)).await? {
+        (Answer::Done, events) => Ok((Empty {}, events)),
+        _ => Err(ErrorCode::Unavailable),
+    }
+}
+
+/// Host start-up: a restart found the worker gone, so jobs it was proving go
+/// back to the queue.
+pub(super) async fn wave_jobs_recover(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(Empty, Vec<Event>)> {
+    match run(door, key, Command::Recover).await? {
+        (Answer::Done, events) => Ok((Empty {}, events)),
+        _ => Err(ErrorCode::Unavailable),
+    }
+}

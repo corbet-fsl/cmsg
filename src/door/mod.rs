@@ -16,6 +16,7 @@ pub mod facades;
 pub mod foyer;
 mod inbox;
 pub mod inbox_lineage;
+pub mod inbox_waves;
 mod json;
 pub mod login;
 #[cfg(not(target_arch = "wasm32"))]
@@ -244,6 +245,7 @@ pub struct Door {
     meshes: BTreeMap<String, facades::BoundMesh>,
     vaults: BTreeMap<String, Box<dyn facades::BoundVault>>,
     accounts: BTreeMap<String, account::AccountActor>,
+    wave_ports: BTreeMap<String, Box<dyn inbox_waves::WavePorts>>,
     login_configuration: BTreeMap<String, login::Configuration>,
     logins: BTreeMap<[u8; 32], login::session::State>,
     #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
@@ -264,6 +266,7 @@ impl Door {
             meshes: BTreeMap::new(),
             vaults: BTreeMap::new(),
             accounts: BTreeMap::new(),
+            wave_ports: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
             logins: BTreeMap::new(),
             #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
