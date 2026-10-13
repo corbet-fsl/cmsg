@@ -920,4 +920,68 @@ mod tests {
         let accepted = accept(&request, 150);
         assert!(verify_acceptance(&accepted, &request, &policy(), &key()).is_err());
     }
+
+    /// Stay in the flow: each update takes one root and one device admission, both
+    /// local Door admissions released with their guards. Twenty updates in a row
+    /// need no reserve, no replenishing and no user ceremony.
+    #[test]
+    fn twenty_updates_in_a_row_never_need_a_ceremony() {
+        let binding = ckmg::Binding::new("garden", "member").unwrap();
+        let device = ckmg::PublicKey::new(ckmg::VLD0, [1; 32]);
+        let root = ckmg::PublicKey::new(ckmg::VLD0, [2; 32]);
+        let (mut root_admission, mut root_verifier) = ckmg::intent_channel();
+        let (mut device_admission, mut device_verifier) = ckmg::intent_channel();
+        for round in 0..20u64 {
+            let now = 1000 + round;
+            for (admission, verifier, action) in [
+                (
+                    &mut root_admission,
+                    &mut root_verifier,
+                    ckmg::Action::AuthorizeAccountDevice,
+                ),
+                (
+                    &mut device_admission,
+                    &mut device_verifier,
+                    ckmg::Action::SignDeviceEd25519,
+                ),
+            ] {
+                let guard = admission
+                    .admit(
+                        ckmg::AdmittedCommand {
+                            binding: binding.clone(),
+                            origin: "https://garden.example.com".into(),
+                            action,
+                            device,
+                            root: Some(root),
+                            epoch: 3,
+                            target: None,
+                            statement: None,
+                            transcript: Some(vec![round as u8]),
+                            expires: 5000,
+                        },
+                        now,
+                    )
+                    .unwrap();
+                let request = ckmg::Authorization {
+                    binding: &binding,
+                    root: Some(root),
+                    device,
+                    epoch: 3,
+                    action,
+                    target: None,
+                    statement: None,
+                    signing: Some(ckmg::DeviceSigning {
+                        transcript: &[round as u8],
+                        expires: 5000,
+                    }),
+                    now,
+                    evidence: &[],
+                };
+                verifier
+                    .consume(&request, "https://garden.example.com")
+                    .unwrap();
+                drop(guard);
+            }
+        }
+    }
 }
