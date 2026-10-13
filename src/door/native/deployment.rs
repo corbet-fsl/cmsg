@@ -47,6 +47,39 @@ pub struct TorDeployment {
     pub application_payload: NonZeroUsize,
     pub startup_millis: NonZeroU32,
     pub window: budgets::EnvelopeWindow,
+    /// Trusted fixture construction only: a private Tor network (authorities, fallback
+    /// caches) for loopback end-to-end runs. Never read from JSON, never serialized.
+    #[serde(skip)]
+    #[schemars(skip)]
+    private_network: Option<arti_client::config::TorClientConfigBuilder>,
+}
+
+impl TorDeployment {
+    /// Replace the public Tor network with a private one. Only embedding code can call this;
+    /// a deployment file cannot carry network overrides.
+    pub fn with_private_network(mut self, network: arti_client::config::TorClientConfigBuilder) -> Self {
+        self.private_network = Some(network);
+        self
+    }
+}
+
+impl NativeDeployment {
+    /// See [`TorDeployment::with_private_network`]; refused when no native Tor is configured.
+    pub fn with_private_network(
+        mut self,
+        network: arti_client::config::TorClientConfigBuilder,
+    ) -> Result<Self> {
+        let tor = self.native_tor.take().ok_or(ErrorCode::InvalidRequest)?;
+        self.native_tor = Some(tor.with_private_network(network));
+        Ok(self)
+    }
+
+    /// The same from the private-network fixture document (`TOR_FIXTURE_JSON` of the
+    /// ctrn driver), which is a serialized Arti client configuration.
+    pub fn with_private_network_json(self, fixture: &[u8]) -> Result<Self> {
+        let network = serde_json::from_slice(fixture).map_err(|_| ErrorCode::InvalidRequest)?;
+        self.with_private_network(network)
+    }
 }
 
 /// No client watch signer is available. Forced recovery reads use polling;
@@ -101,7 +134,7 @@ impl NativeDeployment {
 
 impl TorDeployment {
     fn composer(
-        self,
+        mut self,
         community: &str,
         board: Option<crate::door::board::PendingBoard>,
     ) -> Result<Box<dyn VaultComposer>> {
@@ -137,6 +170,7 @@ impl TorDeployment {
                 return Err(ErrorCode::Unauthorized);
             }
         }
+        let private = self.private_network.take();
         let messages = ctrn::MessageLimits {
             max_payload: self.messages.max_payload,
             timeout_ms: self.messages.timeout_ms,
@@ -182,7 +216,7 @@ impl TorDeployment {
         Ok(Box::new(
             scenario::restore::Composer::new(scenario::restore::Configuration {
                 network: scenario::network::Configuration {
-                    tor: arti_client::config::TorClientConfigBuilder::default(),
+                    tor: private.unwrap_or_default(),
                     directories: ctrn::arti::Directories {
                         state: self.state_directory,
                         cache: self.cache_directory,
