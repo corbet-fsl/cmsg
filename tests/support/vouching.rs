@@ -209,3 +209,12 @@ fn the_vouchee_keeps_the_sponsor_id_from_the_link_text_beside_the_bond() {
         .unwrap();
     assert_eq!(issuer.vouchee_bond(), None);
 }
+
+#[test]
+fn the_explanation_flag_is_remembered_in_the_book() {
+    let mut book = Book::decode(None).unwrap();
+    assert!(!book.explained);
+    book.explained = true;
+    let again = Book::decode(Some(book.encode().unwrap().as_slice())).unwrap();
+    assert!(again.explained);
+}
