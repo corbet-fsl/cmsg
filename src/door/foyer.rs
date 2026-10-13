@@ -26,6 +26,9 @@ pub enum Scope {
 pub struct Sessions {
     pub(super) primary: Scope,
     pub(super) clients: BTreeMap<Scope, cfyr::Foyer<Transport>>,
+    /// Key feed of the community service's Oblivious HTTP endpoint.
+    #[cfg(feature = "ohttp")]
+    pub(super) feed: Option<std::sync::Arc<cblv::keys::FeedKeys>>,
 }
 
 impl Sessions {
@@ -34,7 +37,16 @@ impl Sessions {
         Self {
             primary,
             clients: BTreeMap::from([(primary, client)]),
+            #[cfg(feature = "ohttp")]
+            feed: None,
         }
+    }
+
+    /// Follow the verified community publications with this key feed.
+    #[cfg(feature = "ohttp")]
+    pub fn with_feed(mut self, feed: std::sync::Arc<cblv::keys::FeedKeys>) -> Self {
+        self.feed = Some(feed);
+        self
     }
 
     /// Attach the other service without reusing or exposing the first session.
@@ -433,7 +445,17 @@ pub(super) async fn refresh(
     result.map_err(trust_error)?;
     drop(trust);
     let now = cbrd::clnk::Clock::now(&board::SystemClock).map_err(|_| ErrorCode::Clock)? / 1000;
-    binding.current(&community, now, |_| Ok(()))?;
+    #[cfg(feature = "ohttp")]
+    let feed = binding.sessions.feed.clone();
+    binding.current(&community, now, |_charter| {
+        // The verified publication carries the Oblivious HTTP keys. An equal
+        // or older revision is refused by the feed and keeps what is installed.
+        #[cfg(feature = "ohttp")]
+        if let Some(feed) = &feed {
+            let _ = feed.install_snapshot(_charter.revision(), _charter.ohttp().cloned());
+        }
+        Ok(())
+    })?;
     door.observe(now)?;
     Ok((Empty {}, vec![]))
 }

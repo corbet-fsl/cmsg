@@ -1410,7 +1410,7 @@ dependencies = [
 [[package]]
 name = "cbcn"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cbcn?branch=main#3ff7de1ccd1744440049bc63f502a3e0e4be2a8e"
+source = "git+https://git.corbet.ch/corbet-foss/cbcn?branch=main#cc7df15f97aa380c08c34eefcc2c5b716046330f"
 dependencies = [
  "csgn",
  "serde",
@@ -1437,7 +1437,7 @@ dependencies = [
 [[package]]
 name = "cblv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cblv?branch=main#1bb82eb44feb4d44fa74c74270c3f6b8b5dd09ab"
+source = "git+https://git.corbet.ch/corbet-foss/cblv?branch=main#8a7d176260a23e669377840ae0b41a6c2543f79c"
 dependencies = [
  "bhttp",
  "getrandom 0.3.4",
@@ -1490,9 +1490,10 @@ dependencies = [
 [[package]]
 name = "cchr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=v01#0afb7792e62b8e556c7f9856c94802c03c4ca771"
+source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=v01#6549a02af9dfd750d83bdc28c84835dbee5dc5d0"
 dependencies = [
  "cbcn",
+ "cblv",
  "cgrd",
  "ckyh",
  "crbk",
@@ -3174,12 +3175,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba91f619216e76a5eb2515783f7ec2e271938b51aadac592f4930517f4626863"
 dependencies = [
  "heck 0.5.0",
- "indexmap 2.14.2",
+ "indexmap 1.9.3",
  "itertools 0.13.0",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "sha3 0.11.0",
+ "sha3 0.10.9",
  "strum 0.28.0",
  "syn 3.0.9",
  "unicode-ident",

@@ -223,7 +223,13 @@ impl Configuration {
         }
         let mut sessions = None;
         let mut other = None;
+        #[cfg(feature = "ohttp")]
+        let mut community_feed = None;
         for service in self.services {
+            #[cfg(feature = "ohttp")]
+            if service.scope == foyer::Scope::Community {
+                community_feed = Some(service.ohttp.feed());
+            }
             let feed_origin = url::Url::parse(&service.base)
                 .map_err(|_| ErrorCode::InvalidRequest)?
                 .origin()
@@ -286,6 +292,10 @@ impl Configuration {
         let mut sessions = sessions.ok_or(ErrorCode::InvalidRequest)?;
         if let Some((scope, client)) = other {
             sessions = sessions.with_service(scope, client)?;
+        }
+        #[cfg(feature = "ohttp")]
+        if let Some(feed) = community_feed {
+            sessions = sessions.with_feed(feed);
         }
         door.bind_foyer(&self.origin, self.role, sessions)?;
         if let Some(login) = self.login {
