@@ -100,6 +100,15 @@ pub trait CommittedOwner {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
 
+    /// Leave a member room in one commit (see `VaultGroupOwner::leave_room`);
+    /// `None` when this device never joined that room through Attend.
+    fn leave_room<'a>(
+        &'a mut self,
+        _task: crate::door::facades::RoomLeaveTask<'a>,
+    ) -> OwnerFuture<'a, Option<cbrd::cgrp::Snapshot>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
     /// This member's evidence for a room it belongs to, for answering joins.
     fn room_evidence<'a>(
         &'a mut self,
@@ -698,8 +707,12 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
     ) -> OwnedFuture<'_, super::RoomServed> {
         Box::pin(self.room_serve_step(room, expires))
     }
-    fn room_forget(&mut self, room: [u8; 16]) {
-        self.joins.forget(room);
+    fn room_leave(
+        &mut self,
+        room: super::RoomRef,
+        expires: u64,
+    ) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
+        Box::pin(self.room_leave_step(room, expires))
     }
     fn execute_room(
         &self,

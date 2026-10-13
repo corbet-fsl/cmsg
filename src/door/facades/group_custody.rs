@@ -381,6 +381,9 @@ pub struct RoomJoinTask<'a> {
     pub room: [u8; 16],
     pub group: cgrp::Id,
     pub candidate: cgrp::Candidate,
+    /// The signed Groups `Join` request: the external commit authenticates it
+    /// and admitting members read the newcomer's consent from it.
+    pub companion: Vec<u8>,
     pub evidence: &'a cthr::ParentEvidence,
     pub policy: &'a dyn cgrp::PolicySource,
 }
@@ -466,6 +469,7 @@ where
                 source: &source,
                 authority: &self.authority,
                 handover: vec![],
+                companion: task.companion,
                 operation,
                 attempts: ROOM_CONTEXT_ATTEMPTS,
                 pause: crate::door::rooms::NoPause,
@@ -534,6 +538,73 @@ where
             .map_err(|_| Fail::Authority);
         *self.cache.borrow_mut() = Cache::default();
         evidence
+    }
+}
+
+/// What leaving a member room takes: the Groups `Leave` already prepared.
+pub struct RoomLeaveTask<'a> {
+    pub group: cgrp::Id,
+    pub candidate: cgrp::Candidate,
+    pub policy: &'a dyn cgrp::PolicySource,
+}
+
+impl<B, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
+where
+    B: cwst::backend::Backend,
+    C: ckmg::Clock,
+    E: ckmg::Entropy,
+    A: ckmg::Authority,
+    R: cvlt::Records,
+{
+    /// Leave a member room in ONE Store commit: Groups, this device's Threads
+    /// state and the Attend withdrawal (`cthr::leave_room`). Returns `None`
+    /// without touching anything when this device holds no Attend record for the
+    /// group (it never joined through a room); the caller then leaves in Groups
+    /// alone.
+    pub async fn leave_room(
+        &mut self,
+        task: RoomLeaveTask<'_>,
+    ) -> std::result::Result<Option<Snapshot>, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let operation = {
+            let mut bytes = [0; 32];
+            getrandom::fill(&mut bytes).map_err(|_| Fail::Unavailable)?;
+            bytes
+        };
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let storage = custody.vault.storage().clone();
+        let mut store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let threads =
+            cthr::Threads::load(binding, task.group, &store).map_err(|_| Fail::Storage)?;
+        let Some(mut attend) = threads.stored_attend(&store).map_err(|_| Fail::Storage)? else {
+            return Ok(None);
+        };
+        let mut clock = crate::door::custody::SystemClock;
+        let source = PolicyRef(task.policy);
+        let left = cthr::leave_room(
+            &mut attend,
+            cthr::LeaveParts {
+                store: &mut store,
+                threads: &threads,
+                groups: task.candidate,
+                source: &source,
+                authority: &self.authority,
+                clock: &mut clock,
+                operation,
+            },
+        )
+        .await;
+        *self.cache.borrow_mut() = Cache::default();
+        self.open().map_err(|_| Fail::Authority)?;
+        left.map(Some)
     }
 }
 

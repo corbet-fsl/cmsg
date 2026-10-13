@@ -8,7 +8,7 @@ pub use pairing_custody::PairApproved;
 mod profile_custody;
 mod shared;
 use cbrd::clnk;
-pub use group_custody::{GroupPeers, RoomJoinTask, VaultGroupOwner, VerifiedPeers};
+pub use group_custody::{GroupPeers, RoomJoinTask, RoomLeaveTask, VaultGroupOwner, VerifiedPeers};
 pub use shared::VaultBoardOwner;
 use std::{future::Future, pin::Pin};
 
@@ -120,8 +120,14 @@ pub(super) trait BoundBoard {
     ) -> OwnedFuture<'_, board::RoomServed> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
-    /// Drop the open join request for a room.
-    fn room_forget(&mut self, _room: [u8; 16]) {}
+    /// Leave a member room (Groups, Threads state, Attend in one commit).
+    fn room_leave(
+        &mut self,
+        _room: board::RoomRef,
+        _expires: u64,
+    ) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     /// Local group views from the committed Groups checkpoint; no Forum traffic.
     fn groups(&mut self, _expires: u64) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
