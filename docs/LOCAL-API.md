@@ -213,6 +213,32 @@ the opaque `cursor` returned in the preceding page's `watch` field. Watch update
 that exact held search window through Board's original delta operation. Both
 return the owner's `DiscoveryPage`, including the next watch cursor.
 `board.discovery` rechecks the held view before returning display entries.
+`board.groups` takes an empty body and returns one `GroupView` per group in the
+committed Groups checkpoint, under the policy projected from the current signed
+Rulebook settings (`groups.*`, `seats.*`, `waves.*`). It is local and read-only:
+no Forum request, consent or membership decision. It refuses unless the retained
+Vault owner and the current Foyer Charter are available.
+`board.group_act` takes `{"intent": {...}, "accept_profile_visibility": bool}` where
+`intent` is one of `create`, `fork`, `join`, `leave` or `describe` (tagged by
+`"intent"`), and returns the group views after the change. The caller never names
+the acting member and never supplies a signature, command or policy: the retained
+owner supplies the local member and signs consents with the device key, Groups
+decides, and nothing changes unless the whole transaction publishes. Joining or
+opening a room requires `accept_profile_visibility: true` (members of the group
+may see your private profile); without it Groups refuses. The action refuses with
+`unavailable` until the retained owner provides the group integration.
+
+`board.profile_publish` takes `{"profile": {...}, "rules": [...], "reachability": [...]}`
+and publishes the member's own answers and rules as one signed bundle. The caller
+never supplies a revision, key, signature, credential or block rule: the next
+revision follows the committed publication, Envelope generates a fresh profile
+key, the credential-authorized device signs both projections, Guard admits them
+against the current Charter, and the Vault commits profile, key and publication
+in one atomic transaction. Block rules come from Contacts only. A restricted-field
+change needs a fresh credential and is refused until admission supplies one. The
+action releases no profile key to anyone and ends the current Forum presence, so
+the member attends again with the committed publication. It refuses with
+`unavailable` until the retained owner provides the profile integration.
 
 Search and watch retain the original signed request through the network wait.
 Before disclosure, they reload the committed Profile under the same Vault and

@@ -2,6 +2,7 @@
 //! no generic accepting domain driver or caller-supplied success is exposed.
 use super::*;
 mod inbox_custody;
+mod profile_custody;
 mod shared;
 use cbrd::clnk;
 pub use shared::VaultBoardOwner;
@@ -44,6 +45,17 @@ pub(super) trait BoundBoard {
     ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    fn group_act(
+        &mut self,
+        _intent: cbrd::GroupIntent,
+        _visible: bool,
+        _expires: u64,
+    ) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    fn profile_publish(&mut self, _edit: cbrd::Edit, _expires: u64) -> OwnedFuture<'_, u64> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn discovery(&mut self, _expires: u64) -> OwnedFuture<'_, Vec<cbrd::Discovery>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
@@ -53,6 +65,10 @@ pub(super) trait BoundBoard {
         _signature: Vec<u8>,
         _expires: u64,
     ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// Local group views from the committed Groups checkpoint; no Forum traffic.
+    fn groups(&mut self, _expires: u64) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
     fn status(&self) -> cbrd::Status;

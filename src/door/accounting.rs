@@ -193,6 +193,12 @@ impl Cohort {
 }
 
 impl AccountAdmission<'_> {
+    /// The signed community credential the server issued with this admission,
+    /// exactly as returned. Public data; the caller stores it in the Vault.
+    pub fn community_credential(&self) -> &[u8] {
+        self.lease.community_credential()
+    }
+
     fn current(&mut self) -> Result<CurrentAdmission> {
         let cohort = &self.cohort;
         self.lease

@@ -1559,10 +1559,11 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#fe0b8f265b2af8d410b6fd7674f7fd5add00bae6"
+source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=v01#d66ba15782ca4e9b453ff342f5f5380e61e2105d"
 dependencies = [
  "cnvy",
  "cpky",
+ "cvch",
  "cvld",
  "futures",
  "serde",
@@ -2268,7 +2269,7 @@ source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=v01#f95c9aee5108
 [[package]]
 name = "cpsd"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpsd?branch=main#3a9c9c13715313620ec8c1a1b8a1f6c8084e56c4"
+source = "git+https://git.corbet.ch/corbet-foss/cpsd?branch=main#907b0a6264be4df6f31898cb89f31a68ad3ef04b"
 dependencies = [
  "ark-bls12-381",
  "ark-ec 0.4.2",
@@ -2674,9 +2675,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cvch"
+version = "0.2.1"
+source = "git+https://git.corbet.ch/corbet-foss/cvch?branch=main#ac292fe9e2eb54e19d592b8926aa12c077d0f2e2"
+dependencies = [
+ "cfbk",
+ "csgn",
+ "ed25519-dalek 3.0.0",
+ "hex",
+ "hmac 0.13.0",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#9ff2738a6d7a760d09ce8ddf9cc53caf4021e719"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#5288e4cdcaf4abb1447281151777bb89fea91455"
 dependencies = [
  "gloo-timers 0.3.0",
  "js-sys",
@@ -2695,7 +2713,7 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#634229fd8c0a63d01ceacc48b12481a64cebd68c"
+source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=v01#4d78db4fffd19b31a1872759398fbe4f85de2650"
 dependencies = [
  "blake3",
  "cchr",
@@ -3370,6 +3388,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29fcf32e6c73d1079f83ab4d782de2d81620346a5f38c6237a86a22f8368980a"
 dependencies = [
+ "serdect 0.4.3",
  "signature 3.0.0",
 ]
 
@@ -3397,6 +3416,7 @@ checksum = "6ebaa1a2bf1290ab3bfe5a7b771d050ebffab2711c19a81691c683a5144a25de"
 dependencies = [
  "curve25519-dalek 5.0.0",
  "ed25519 3.0.0",
+ "serde",
  "sha2 0.11.1",
  "signature 3.0.0",
  "subtle",

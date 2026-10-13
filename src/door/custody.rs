@@ -270,6 +270,15 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
             {
                 true
             }
+            // Profile signer plus Envelope custody: only against a distinct,
+            // single-use admitted command for exactly this action.
+            Action::LendProfileCustody
+                if request.signing.is_none()
+                    && request.statement.is_none()
+                    && self.intent.is_some() =>
+            {
+                true
+            }
             _ => return Err(Error::Unauthorized),
         };
         if request.root.is_none()
