@@ -252,6 +252,25 @@ impl ProgressFile {
     }
 }
 
+/// The resume decision table: where a lineage continues, from its progress marker and
+/// whether its vault checkpoint exists.
+///
+/// | marker            | vault empty | vault held           |
+/// |-------------------|-------------|----------------------|
+/// | Fresh             | Fresh       | Retained (lost marker)|
+/// | Retained..Done    | refused     | the marker's stage   |
+///
+/// A marker that claims durable work over an empty vault is refused: creating again could
+/// register a second identity.
+fn resume_stage(marker: Stage, vault_held: bool) -> Result<Stage, ComposeError> {
+    match (marker, vault_held) {
+        (Stage::Fresh, false) => Ok(Stage::Fresh),
+        (Stage::Fresh, true) => Ok(Stage::Retained),
+        (_, false) => Err(ComposeError::Inconsistent("progress without a vault")),
+        (marker, true) => Ok(marker),
+    }
+}
+
 struct LineageVerifier;
 impl cdht::Verifier for LineageVerifier {
     fn verify(&self, public: &[u8; 32], data: &[u8], signature: &[u8; 64]) -> bool {
@@ -402,16 +421,11 @@ where
 {
     let mut clock = SystemClock;
     let mut entropy = ckmg::SystemEntropy;
-    let mut stage = progress.stage(wallet);
-    if stage == Stage::Fresh
-        && cwst::backend::Backend::read(&backend)
-            .await
-            .map_err(step("vault"))?
-            .is_some()
-    {
-        // The registration tuple landed but the marker did not: continue, never re-register.
-        stage = Stage::Retained;
-    }
+    let vault_held = cwst::backend::Backend::read(&backend)
+        .await
+        .map_err(step("vault"))?
+        .is_some();
+    let mut stage = resume_stage(progress.stage(wallet), vault_held)?;
 
     // Registration (fresh) or reopening of the retained enrollment.
     let mut enrollment: Option<custody::InitialEnrollment<B>> = None;
@@ -883,11 +897,11 @@ where
 
     // 4. Present it to the community and enroll the member there.
     let mut community_api = services.foyer(Service::Community).await?;
-    let fresh = progress.stage(false) == Stage::Fresh
-        && cwst::backend::Backend::read(&storage.community)
-            .await
-            .map_err(step("vault"))?
-            .is_none();
+    let community_held = cwst::backend::Backend::read(&storage.community)
+        .await
+        .map_err(step("vault"))?
+        .is_some();
+    let fresh = resume_stage(progress.stage(false), community_held)? == Stage::Fresh;
     let entry = if fresh {
         let community = cwlt::passport::CommunityId::new(settings.community_name.as_bytes())
             .map_err(step("passport"))?;
@@ -971,4 +985,89 @@ where
     .await
     .map_err(step("bind account"))?;
     Ok(door)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALL: [Stage; 6] = [
+        Stage::Fresh,
+        Stage::Retained,
+        Stage::Finished,
+        Stage::Authorized,
+        Stage::Activated,
+        Stage::Done,
+    ];
+
+    #[test]
+    fn resume_table_covers_every_marker_and_vault_state() {
+        assert_eq!(resume_stage(Stage::Fresh, false).unwrap(), Stage::Fresh);
+        assert_eq!(resume_stage(Stage::Fresh, true).unwrap(), Stage::Retained);
+        for marker in &ALL[1..] {
+            assert!(matches!(
+                resume_stage(*marker, false),
+                Err(ComposeError::Inconsistent(_))
+            ));
+            assert_eq!(resume_stage(*marker, true).unwrap(), *marker);
+        }
+    }
+
+    #[test]
+    fn stages_are_ordered_by_progress() {
+        assert!(ALL.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn progress_survives_a_restart_and_only_moves_by_explicit_advance() {
+        let directory =
+            std::env::temp_dir().join(format!("composer-progress-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("composer.json");
+        let mut file = ProgressFile::open(Some(path.clone())).unwrap();
+        assert_eq!(file.stage(true), Stage::Fresh);
+        assert_eq!(file.stage(false), Stage::Fresh);
+        file.advance(true, Stage::Done).unwrap();
+        file.advance(false, Stage::Authorized).unwrap();
+        let reopened = ProgressFile::open(Some(path.clone())).unwrap();
+        assert_eq!(reopened.stage(true), Stage::Done);
+        assert_eq!(reopened.stage(false), Stage::Authorized);
+        std::fs::write(&path, b"not json").unwrap();
+        assert!(ProgressFile::open(Some(path)).is_err());
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn settings_refuse_the_wallet_scope_for_a_community() {
+        let service = |scope: &str, origin: &str| ServiceSettings {
+            origin: origin.into(),
+            scope: scope.into(),
+            passkey_origin: origin.into(),
+            rp_id: "example.test".into(),
+            trust_key_ring: Value::Null,
+            connect_host: "127.0.0.1".into(),
+            tls_root_files: vec![],
+        };
+        let mut settings = DeviceSettings {
+            global: service("wallet", "https://wallet.example.test"),
+            community: service("omega", "https://omega.example.test"),
+            community_name: "omega".into(),
+            prover: ProverArtifacts {
+                worker_executable: "/x".into(),
+                circuit_file: "/x".into(),
+                keys_file: "/x".into(),
+                srs_g1_file: "/x".into(),
+                srs_g2_file: "/x".into(),
+                timeout_seconds: 1,
+                threads: 1,
+                memory_megabytes: 1,
+            },
+        };
+        assert!(settings.validate().is_ok());
+        settings.community_name = "wallet".into();
+        assert!(settings.validate().is_err());
+        settings.community_name = "omega".into();
+        settings.community.origin = settings.global.origin.clone();
+        assert!(settings.validate().is_err());
+    }
 }
