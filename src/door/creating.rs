@@ -167,7 +167,11 @@ async fn owner<T: serde::de::DeserializeOwned>(
 ) -> Result<T> {
     let operation = foyer::owner_operation(name).ok_or(ErrorCode::Unavailable)?;
     let binding = door.foyers.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
-    let answer = binding.call(operation, body).await?;
+    let answer = if operation.scope_is_global() {
+        binding.call_global(operation, body).await?
+    } else {
+        binding.call(operation, body).await?
+    };
     serde_json::from_value(answer).map_err(|_| ErrorCode::Unavailable)
 }
 
@@ -211,6 +215,8 @@ pub(super) async fn community_create(
             "community_create",
             serde_json::json!({
                 "address": request.address,
+                "display_name": display_name,
+                "gates": gates,
                 "token": {
                     "message": token.message,
                     "randomizer": token.randomizer,

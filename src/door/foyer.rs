@@ -46,6 +46,9 @@ pub struct Sessions {
     /// The global service without any session, for calls that must not be linked
     /// to the member (redeeming a creation token).
     pub(super) public: Option<cfyr::Foyer<Transport>>,
+    /// The global session was lent to a community Door for community creation
+    /// only: no forwarded action may use it (`Binding::call_global` alone does).
+    pub(super) global_creation_only: bool,
     /// Key feed of the community service's Oblivious HTTP endpoint.
     #[cfg(feature = "ohttp")]
     pub(super) feed: Option<std::sync::Arc<cblv::keys::FeedKeys>>,
@@ -58,6 +61,7 @@ impl Sessions {
             primary,
             clients: BTreeMap::from([(primary, client)]),
             public: None,
+            global_creation_only: false,
             #[cfg(feature = "ohttp")]
             feed: None,
         }
@@ -68,6 +72,22 @@ impl Sessions {
     pub fn with_feed(mut self, feed: std::sync::Arc<cblv::keys::FeedKeys>) -> Self {
         self.feed = Some(feed);
         self
+    }
+
+    /// Lend the member's global session and a session-less channel to the global
+    /// service to a community Door. Only community creation may use them.
+    pub(super) fn attach_creation(
+        &mut self,
+        global: Foyer<Transport>,
+        public: Foyer<Transport>,
+    ) -> Result<()> {
+        if self.clients.contains_key(&Scope::Global) || self.public.is_some() {
+            return Err(ErrorCode::InvalidRequest);
+        }
+        self.clients.insert(Scope::Global, global);
+        self.public = Some(public);
+        self.global_creation_only = true;
+        Ok(())
     }
 
     /// Attach the session-less channel to the global service.
@@ -273,7 +293,25 @@ pub(super) fn owner_operation(name: &str) -> Option<&'static Operation> {
     OPERATIONS.iter().find(|op| op.name == name)
 }
 
+impl Operation {
+    pub(super) fn scope_is_global(&self) -> bool {
+        matches!(self.scope, ServiceScope::Exact(Scope::Global))
+    }
+}
+
 impl Binding {
+    /// The two member operations of the global service that community creation
+    /// needs, on a Door whose global session was lent for that purpose.
+    pub async fn call_global(&mut self, operation: &Operation, body: Value) -> Result<Value> {
+        if !matches!(
+            operation.name.as_str(),
+            "creation_token_key" | "creation_token_issue"
+        ) {
+            return Err(ErrorCode::Unauthorized);
+        }
+        self.call_inner(operation, body, true).await
+    }
+
     /// Call a public operation of the global service on the session-less channel.
     /// Same uncertainty latch as `call`: a lost answer is never retried silently.
     pub async fn call_public(&mut self, name: &str, body: Value) -> Result<Value> {
@@ -298,6 +336,15 @@ impl Binding {
     }
 
     pub async fn call(&mut self, operation: &Operation, body: Value) -> Result<Value> {
+        self.call_inner(operation, body, false).await
+    }
+
+    async fn call_inner(
+        &mut self,
+        operation: &Operation,
+        body: Value,
+        creation: bool,
+    ) -> Result<Value> {
         if self.uncertain {
             return Err(ErrorCode::Reconcile);
         }
@@ -318,6 +365,9 @@ impl Binding {
             Access::Root => self.role == Role::Root,
         };
         if !allowed {
+            return Err(ErrorCode::Unauthorized);
+        }
+        if scope == Scope::Global && self.sessions.global_creation_only && !creation {
             return Err(ErrorCode::Unauthorized);
         }
         let client = self
@@ -345,6 +395,31 @@ impl Binding {
 }
 
 impl Door {
+    /// Trusted embedding control for the composed device: move the logged-in global
+    /// session out of the wallet Door, to be lent to the community Door.
+    pub(super) fn take_global(&mut self, origin: &str) -> Result<Foyer<Transport>> {
+        self.foyers
+            .remove(origin)
+            .and_then(|mut binding| binding.sessions.clients.remove(&Scope::Global))
+            .ok_or(ErrorCode::Unavailable)
+    }
+
+    /// Trusted embedding control: lend the member's global session and a
+    /// session-less channel to the global service to this community Door. They serve
+    /// community creation only; no forwarded action can use the session.
+    pub(super) fn lend_global(
+        &mut self,
+        origin: &str,
+        global: Foyer<Transport>,
+        public: Foyer<Transport>,
+    ) -> Result<()> {
+        let binding = self.foyers.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
+        if binding.role != Role::Member {
+            return Err(ErrorCode::Unauthorized);
+        }
+        binding.sessions.attach_creation(global, public)
+    }
+
     fn wallet_foyer(&self, origin: &str) -> Result<&Foyer<Transport>> {
         self.member_origin(origin)?;
         let binding = self.foyers.get(origin).ok_or(ErrorCode::Unavailable)?;

@@ -78,3 +78,41 @@ fn the_raw_creation_operations_are_not_republished_but_the_device_actions_are() 
     }
     assert!(!properties.contains_key("token"));
 }
+
+#[cfg(not(feature = "ohttp"))]
+#[tokio::test]
+async fn a_lent_global_session_serves_creation_and_nothing_else() {
+    use super::super::foyer::{Binding, Scope, Sessions, fixture_transport, owner_operation};
+    let transport = || fixture_transport("http://127.0.0.1:9", "community.test");
+    let mut sessions = Sessions::new(Scope::Community, cfyr::Foyer::new(transport()));
+    sessions
+        .attach_creation(cfyr::Foyer::new(transport()), cfyr::Foyer::new(transport()))
+        .unwrap();
+    // The channels cannot be attached twice.
+    assert!(
+        sessions
+            .attach_creation(cfyr::Foyer::new(transport()), cfyr::Foyer::new(transport()))
+            .is_err()
+    );
+    let mut binding = Binding {
+        role: Role::Member,
+        root_board: false,
+        sessions,
+        uncertain: false,
+    };
+    let issue = owner_operation("creation_token_issue").unwrap();
+    let other = owner_operation("passport_challenge").unwrap();
+    // No forwarded action reaches the lent global session.
+    assert_eq!(
+        binding.call(issue, serde_json::json!({})).await.err(),
+        Some(ErrorCode::Unauthorized)
+    );
+    // And the creation path refuses every other global operation.
+    assert_eq!(
+        binding
+            .call_global(other, serde_json::json!({}))
+            .await
+            .err(),
+        Some(ErrorCode::Unauthorized)
+    );
+}

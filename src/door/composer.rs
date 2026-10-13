@@ -162,6 +162,9 @@ impl DeviceStorage<cwst::native::FileBackend> {
 #[allow(async_fn_in_trait)]
 pub trait Services {
     async fn foyer(&mut self, service: Service) -> Result<Foyer<Transport>, ComposeError>;
+    /// A client of the service that never carries a session or trust (the redemption of a
+    /// creation token must not be linked to the member).
+    async fn public(&mut self, service: Service) -> Result<Foyer<Transport>, ComposeError>;
 }
 
 /// Why a composition stopped. Never contains secrets.
@@ -870,6 +873,25 @@ impl Services for NativeServices<'_> {
         .map_err(step("transport"))?;
         Ok(Foyer::with_trust(client, trust))
     }
+
+    async fn public(&mut self, service: Service) -> Result<Foyer<Transport>, ComposeError> {
+        let settings = match service {
+            Service::Global => &self.0.global,
+            Service::Community => &self.0.community,
+        };
+        let mut roots = Vec::new();
+        for file in &settings.tls_root_files {
+            roots.push(std::fs::read(file).map_err(step("tls roots"))?);
+        }
+        let client = cfyr::HttpClient::with_roots(
+            settings.origin.clone(),
+            settings.connect_host.clone(),
+            None,
+            &roots,
+        )
+        .map_err(step("transport"))?;
+        Ok(Foyer::new(client))
+    }
 }
 
 /// Every start of an already registered native device. Registration happens once through
@@ -938,7 +960,7 @@ where
     // 1-2. The wallet lineage.
     let api = services.foyer(Service::Global).await?;
     let Driven {
-        door: wallet_door,
+        door: mut wallet_door,
         policy,
     } = drive(
         api,
@@ -1073,6 +1095,14 @@ where
     )
     .await
     .map_err(step("bind account"))?;
+    // Community creation needs the member's global session and a session-less
+    // channel to the global service; both are lent to this Door for that use only.
+    let global_session = wallet_door
+        .take_global(global_origin)
+        .map_err(step("global session"))?;
+    let public = services.public(Service::Global).await?;
+    door.lend_global(community_origin, global_session, public)
+        .map_err(step("global session"))?;
     Ok(door)
 }
 
