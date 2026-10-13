@@ -81,9 +81,19 @@ pub(super) async fn open_as(
     member: &str,
     with_intent: bool,
 ) -> (ProfileOwner, ckmg::PublicKey, Rc<Cell<usize>>) {
+    open_with(member, with_intent, 23).await
+}
+
+/// As `open_as`, with the passkey PRF byte chosen so that two members of one
+/// test have different device keys.
+pub(super) async fn open_with(
+    member: &str,
+    with_intent: bool,
+    prf_byte: u8,
+) -> (ProfileOwner, ckmg::PublicKey, Rc<Cell<usize>>) {
     const ORIGIN: &str = "https://member.example.test";
     let binding = ckmg::Binding::new("alpha", member).unwrap();
-    let prf = ckmg::passkey::PrfOutput::from_bytes(&[23; 32]).unwrap();
+    let prf = ckmg::passkey::PrfOutput::from_bytes(&[prf_byte; 32]).unwrap();
     let device = ckmg::passkey::device_public_key(&prf, "alpha").unwrap();
     let root = Rc::new(RefCell::new(None));
     let lends = Rc::new(Cell::new(0));

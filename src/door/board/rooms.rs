@@ -6,6 +6,7 @@
 use super::handlers::{group_error, OwnedBoard, MAX_GROUPS};
 use super::*;
 use crate::door::RoomLink;
+use cbrd::cgrp::PolicySource as _;
 use cbrd::join_seal::{self, JoinKey};
 use std::collections::BTreeMap;
 
@@ -40,6 +41,16 @@ pub enum RoomJoinStatus {
     },
 }
 
+/// What one admission call did: newcomers admitted into the room's group.
+#[derive(Clone, Serialize, JsonSchema)]
+pub struct RoomAdmitted {
+    pub admitted: u32,
+    /// Ordered joins this device refused (unverifiable newcomer or consent).
+    pub refused: u32,
+    /// The room's group as this device now holds it.
+    pub groups: Vec<cbrd::GroupView>,
+}
+
 #[derive(Clone, Serialize, JsonSchema)]
 pub struct RoomServed {
     /// Requests this call answered.
@@ -57,6 +68,8 @@ pub(super) struct RoomJoins {
     open: BTreeMap<[u8; 16], PendingJoin>,
     /// Requests this device already answered (room, relay sequence).
     served: std::collections::BTreeSet<([u8; 16], u64)>,
+    /// How far this device has read each room's ordered joins (relay sequence).
+    admitted_through: BTreeMap<[u8; 16], u64>,
 }
 
 fn link(error: cbrd::clnk::ErrorCode) -> ErrorCode {
@@ -71,6 +84,7 @@ fn link(error: cbrd::clnk::ErrorCode) -> ErrorCode {
 impl RoomJoins {
     pub(super) fn forget(&mut self, room: [u8; 16]) {
         self.open.remove(&room);
+        self.admitted_through.remove(&room);
     }
 }
 
@@ -147,9 +161,9 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         )
         .await
         .map_err(group_error)?;
-        // The signed Join request rides with the ordered commit; members admit
-        // the newcomer only with it.
-        let companion = serde_json::to_vec(&request).map_err(|_| ErrorCode::Unavailable)?;
+        // The signed Join request rides with the ordered commit (the owner adds
+        // the handle of this member's own lineage); members admit the newcomer
+        // only with it.
         let snapshot = self
             .owner
             .join_room(
@@ -158,7 +172,7 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
                     room: join.room,
                     group: join.group,
                     candidate,
-                    companion,
+                    request,
                     evidence,
                     policy: &source,
                 },
@@ -203,6 +217,65 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
                 Ok(views)
             }
         }
+    }
+
+    /// Admit the newcomers whose ordered external commits `room` holds beyond
+    /// this device's cursor. Each is verified from its own evidence (see
+    /// `VaultGroupOwner::admit_room`); a newcomer that fails verification is
+    /// skipped for good, while an unavailable or conflicting attempt keeps the
+    /// cursor so the next call retries it.
+    pub(super) async fn room_admit_step(
+        &mut self,
+        room: RoomRef,
+        expires: u64,
+    ) -> Result<RoomAdmitted> {
+        self.idle()?;
+        if !R::ROOMS || self.owner.groups().is_none() {
+            return Err(ErrorCode::Unavailable);
+        }
+        let after = self
+            .joins
+            .admitted_through
+            .get(&room.room)
+            .copied()
+            .unwrap_or(0);
+        let read = R::room_joins(&self.inner.board, room.room, after)
+            .await
+            .map_err(link)?;
+        let source = self.group_policy(expires).await?;
+        let (mut admitted, mut refused) = (0, 0);
+        let mut retry = false;
+        for frame in &read.joins {
+            let task = crate::door::facades::RoomAdmitTask {
+                room: room.room,
+                group: room.group,
+                frame,
+                max_groups: MAX_GROUPS,
+                policy: &source,
+            };
+            match self.owner.admit_room(&self.inner.board, task).await {
+                Ok(_) => admitted += 1,
+                Err(ErrorCode::Unavailable | ErrorCode::Reconcile) => {
+                    retry = true;
+                    break;
+                }
+                Err(_) => refused += 1,
+            }
+        }
+        if !retry {
+            self.joins.admitted_through.insert(room.room, read.through);
+        }
+        let groups = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+        let snapshot = groups.snapshot().await.map_err(group_error)?;
+        let now = groups.now().map_err(group_error)?;
+        let current = source
+            .current(snapshot.community(), now)
+            .map_err(group_error)?;
+        Ok(RoomAdmitted {
+            admitted,
+            refused,
+            groups: snapshot.views(&current, now).map_err(group_error)?,
+        })
     }
 
     /// Answer the live join requests of `room` with this member's own evidence,
@@ -278,4 +351,13 @@ pub(in crate::door) async fn room_leave(
 ) -> Result<(Vec<cbrd::GroupView>, Vec<Event>)> {
     let (board, expires) = handles(door, key)?;
     Ok((board.room_leave(request, expires).await?, vec![]))
+}
+
+pub(in crate::door) async fn room_admit(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: RoomRef,
+) -> Result<(RoomAdmitted, Vec<Event>)> {
+    let (board, expires) = handles(door, key)?;
+    Ok((board.room_admit(request, expires).await?, vec![]))
 }

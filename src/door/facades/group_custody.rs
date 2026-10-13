@@ -157,9 +157,50 @@ impl cbrd::Contacts for CacheContacts {
     }
 }
 
-struct NoSeeds;
+/// Standing-room authority: refused until the Rulebook evidence exists. Only
+/// tests can open it, to found a room the way the Rulebook eventually will.
+#[derive(Clone, Default)]
+struct NoSeeds(Rc<std::cell::Cell<bool>>);
 impl cbrd::Seeds for NoSeeds {
     fn authorized(&self, _: &str, _: &cgrp::Id, _: u64) -> cgrp::Result<()> {
+        if self.0.get() {
+            Ok(())
+        } else {
+            Err(cgrp::Error::Authority)
+        }
+    }
+}
+
+/// Authority for a newcomer's consent in a member room. The device key is the
+/// one the newcomer's certified MLS leaf credential names; that certificate was
+/// verified against the newcomer's Charter-verified lineage before this value
+/// exists, so the consent counts only when it comes from exactly that member,
+/// is signed by exactly that device key and is unexpired. Contacts and
+/// standing-room seeds are never consulted for rooms.
+struct RoomAuthority {
+    member: String,
+    device: [u8; 32],
+}
+impl cgrp::Authority for RoomAuthority {
+    fn consent(&self, consent: &cgrp::Consent, now: u64) -> cgrp::Result<()> {
+        if consent.valid_until <= now
+            || consent.member != self.member
+            || consent.authority != self.device
+        {
+            return Err(cgrp::Error::Authority);
+        }
+        let signature: [u8; 64] = consent
+            .signature
+            .as_slice()
+            .try_into()
+            .map_err(|_| cgrp::Error::Authority)?;
+        ckmg::verify_ed25519(&self.device, &consent.signing_bytes()?, &signature)
+            .map_err(|_| cgrp::Error::Authority)
+    }
+    fn contact(&self, _: &str, _: &str, _: &str, _: u64) -> cgrp::Result<()> {
+        Err(cgrp::Error::Authority)
+    }
+    fn seed(&self, _: &str, _: &cgrp::Id, _: u64) -> cgrp::Result<()> {
         Err(cgrp::Error::Authority)
     }
 }
@@ -232,6 +273,8 @@ pub struct VaultGroupOwner<B: cwst::backend::Backend, C, E, A, R, W> {
     peers: Option<Rc<Mutex<Box<dyn GroupPeers>>>>,
     cache: Rc<RefCell<Cache>>,
     authority: cbrd::BoardAuthority<CacheDevices, CacheContacts, NoSeeds>,
+    #[cfg_attr(not(test), allow(dead_code))]
+    seed_gate: Rc<std::cell::Cell<bool>>,
     version: u64,
     /// Locators received with an invitation; the own journal wins.
     provided: BTreeMap<String, Vec<u8>>,
@@ -246,14 +289,16 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
         peers: Option<Box<dyn GroupPeers>>,
     ) -> Self {
         let cache = Rc::new(RefCell::new(Cache::default()));
+        let seed_gate = Rc::new(std::cell::Cell::new(false));
         Self {
+            seed_gate: seed_gate.clone(),
             retained,
             lifetime,
             origin,
             authority: cbrd::BoardAuthority::new(
                 CacheDevices(cache.clone()),
                 CacheContacts(cache.clone(), member.clone()),
-                NoSeeds,
+                NoSeeds(seed_gate),
             ),
             member,
             peers: peers.map(|peers| Rc::new(Mutex::new(peers))),
@@ -261,6 +306,11 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
             version: 0,
             provided: BTreeMap::new(),
         }
+    }
+    /// Tests only: found standing rooms as the Rulebook eventually will.
+    #[cfg(test)]
+    pub(super) fn found_rooms(&self) {
+        self.seed_gate.set(true);
     }
     fn open(&self) -> cgrp::Result<()> {
         if self.lifetime.is_closed() {
@@ -381,9 +431,11 @@ pub struct RoomJoinTask<'a> {
     pub room: [u8; 16],
     pub group: cgrp::Id,
     pub candidate: cgrp::Candidate,
-    /// The signed Groups `Join` request: the external commit authenticates it
-    /// and admitting members read the newcomer's consent from it.
-    pub companion: Vec<u8>,
+    /// The signed Groups `Join` request. The owner attaches it, together with
+    /// the lineage-read handle of its OWN certified lineage, as the companion
+    /// the external commit authenticates; admitting members read the newcomer's
+    /// consent from it and its lineage through the handle.
+    pub request: cgrp::Request,
     pub evidence: &'a cthr::ParentEvidence,
     pub policy: &'a dyn cgrp::PolicySource,
 }
@@ -434,6 +486,16 @@ where
             .lineage()
             .await
             .map_err(|_| Fail::Authority)?;
+        // The locator of this member's own certified lineage record: read-only,
+        // never secret material. Admitting members read the lineage through it.
+        let locator = custody
+            .vault
+            .keys()
+            .export_lineage_read_capability()
+            .await
+            .map_err(|_| Fail::Authority)?
+            .as_bytes()
+            .to_vec();
         let storage = custody.vault.storage().clone();
         let mut store = storage.lock().await;
         custody
@@ -454,6 +516,12 @@ where
             cthr::Threads::load(binding, task.group, &store).map_err(|_| Fail::Storage)?;
         let mut attend = ctnd::Attend::new();
         let source = PolicyRef(task.policy);
+        let companion = cbrd::RoomCompanion {
+            request: task.request,
+            handle: locator,
+        }
+        .encode()
+        .ok_or(Fail::Invalid)?;
         let joined = L::join_room(
             board,
             cbrd::RoomJoinInput {
@@ -469,7 +537,7 @@ where
                 source: &source,
                 authority: &self.authority,
                 handover: vec![],
-                companion: task.companion,
+                companion,
                 operation,
                 attempts: ROOM_CONTEXT_ATTEMPTS,
                 pause: crate::door::rooms::NoPause,
@@ -538,6 +606,163 @@ where
             .map_err(|_| Fail::Authority);
         *self.cache.borrow_mut() = Cache::default();
         evidence
+    }
+}
+
+/// What admitting a newcomer to a member room takes: its ordered external
+/// commit with the companion (signed Groups `Join` request and lineage handle).
+pub struct RoomAdmitTask<'a> {
+    pub room: [u8; 16],
+    pub group: cgrp::Id,
+    pub frame: &'a cbrd::JoinFrame,
+    pub max_groups: usize,
+    pub policy: &'a dyn cgrp::PolicySource,
+}
+
+impl<B, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
+where
+    B: cwst::backend::Backend,
+    C: ckmg::Clock,
+    E: ckmg::Entropy,
+    A: ckmg::Authority,
+    R: cvlt::Records,
+{
+    /// Admit one newcomer to a member room as an existing member. The newcomer
+    /// is believed only through evidence this device verifies itself: its
+    /// lineage is read through the handle its companion names, Charter-verified
+    /// and bound to the pseudonym its signed request names (a substituted
+    /// handle reads another member's record or none and the admission is
+    /// refused); its MLS leaf certificate must verify against that lineage; and
+    /// its consent counts only from that certificate's device key.
+    pub async fn admit_room<T, L>(
+        &mut self,
+        board: &cbrd::Board<T, L>,
+        task: RoomAdmitTask<'_>,
+    ) -> std::result::Result<Snapshot, ctnd::Error>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let companion =
+            cbrd::RoomCompanion::decode(&task.frame.companion).ok_or(Fail::Authority)?;
+        let newcomer = companion.request.actor.clone();
+        if newcomer == self.member {
+            return Err(Fail::Authority);
+        }
+        // Read the newcomer's lineage first (a fresh, Charter-verified read
+        // through the locator it supplied); the cache serves only this admission.
+        self.provided = BTreeMap::from([(newcomer.clone(), companion.handle.clone())]);
+        let read = cbrd::GroupOwner::refresh(
+            self,
+            &BTreeSet::new(),
+            &BTreeSet::from([newcomer.clone()]),
+        )
+        .await;
+        self.provided.clear();
+        if read.is_err() {
+            *self.cache.borrow_mut() = Cache::default();
+            return Err(Fail::Unavailable);
+        }
+        let operation = {
+            let mut bytes = [0; 32];
+            getrandom::fill(&mut bytes).map_err(|_| Fail::Unavailable)?;
+            bytes
+        };
+        let admitted = self
+            .admit_verified(board, &task, &companion.request, operation)
+            .await;
+        *self.cache.borrow_mut() = Cache::default();
+        self.open().map_err(|_| Fail::Authority)?;
+        admitted
+    }
+
+    async fn admit_verified<T, L>(
+        &mut self,
+        board: &cbrd::Board<T, L>,
+        task: &RoomAdmitTask<'_>,
+        request: &cgrp::Request,
+        operation: [u8; 32],
+    ) -> std::result::Result<Snapshot, ctnd::Error>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        use ctnd::Error as Fail;
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let handle = custody
+            .vault
+            .keys()
+            .key(cnbx::threads_purpose())
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let own = custody
+            .vault
+            .keys()
+            .lineage()
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let storage = custody.vault.storage().clone();
+        let mut store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let mut devices = GroupDevices {
+            own,
+            cache: self.cache.clone(),
+        };
+        let mut port = cnbx::KeyPort {
+            keys: custody.vault.keys(),
+            handle: &handle,
+            devices: &mut devices,
+        };
+        let mut clock = crate::door::custody::SystemClock;
+        let threads =
+            cthr::Threads::load(binding.clone(), task.group, &store).map_err(|_| Fail::Storage)?;
+        // The leaf credential first, then the consent: Groups decides only on a
+        // newcomer whose certificate this device verified.
+        let credential = threads
+            .room_join_credential(&task.frame.commit, &task.frame.companion)
+            .map_err(|_| Fail::Authority)?;
+        if credential.binding.community() != binding.community()
+            || credential.binding.member() != request.actor
+        {
+            return Err(Fail::Authority);
+        }
+        cthr::keys::Custody::verify(&mut port, &credential)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let authority = RoomAuthority {
+            member: request.actor.clone(),
+            device: *credential.key.value(),
+        };
+        let source = PolicyRef(task.policy);
+        let now = ckmg::Clock::now(&mut clock).map_err(|_| Fail::Unavailable)?;
+        let snapshot = Snapshot::load(binding.community(), &store).map_err(|_| Fail::Storage)?;
+        let groups = cgrp::prepare(&snapshot, request, &source, &authority, now, task.max_groups)
+            .map_err(|_| Fail::Authority)?;
+        let admitted = L::admit_room(
+            board,
+            cbrd::RoomAdmitInput {
+                keys: &mut port,
+                clock: &mut clock,
+                store: &mut store,
+                threads: &threads,
+                groups,
+                frame: task.frame,
+                room: task.room,
+                source: &source,
+                authority: &authority,
+                operation,
+            },
+        )
+        .await?;
+        Ok(admitted.snapshot)
     }
 }
 
