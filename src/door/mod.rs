@@ -34,6 +34,7 @@ pub mod network_native;
 pub mod ohttp;
 pub mod pairing;
 mod pairing_flow;
+pub mod pairing_publish;
 pub mod passport;
 pub mod record;
 mod registry;

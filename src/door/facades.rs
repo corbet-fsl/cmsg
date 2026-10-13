@@ -3,6 +3,7 @@
 use super::*;
 mod group_custody;
 mod inbox_custody;
+mod lineage_custody;
 mod pairing_custody;
 pub use pairing_custody::PairApproved;
 mod profile_custody;
@@ -327,6 +328,16 @@ pub(super) trait BoundVault {
     ) -> OwnedFuture<'a, SignedBoard>;
     /// Existing-device pairing approval: add exactly the proven device named by `request`.
     /// Needs the member's explicit approval and a distinct single-use Pair admission.
+    /// Sign the strictly next lineage record value for the pending approval receipt.
+    fn revision_record<'a>(
+        &'a mut self,
+        _receipt: &'a ckmg::Receipt,
+        _previous: &'a ckmg::Lineage,
+        _canonical_evidence: &'a [u8],
+        _origin: &'a str,
+    ) -> OwnedFuture<'a, cdht::SignedValue> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn pair_device<'a>(
         &'a mut self,
         _request: &'a ckmg::PairingRequest,
@@ -547,6 +558,15 @@ where
         origin: &'a str,
     ) -> OwnedFuture<'a, PairApproved> {
         Box::pin(self.pair_owned(request, origin))
+    }
+    fn revision_record<'a>(
+        &'a mut self,
+        receipt: &'a ckmg::Receipt,
+        previous: &'a ckmg::Lineage,
+        canonical_evidence: &'a [u8],
+        origin: &'a str,
+    ) -> OwnedFuture<'a, cdht::SignedValue> {
+        Box::pin(self.revision_record_owned(receipt, previous, canonical_evidence, origin))
     }
 
     fn lock(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + 'static>> {

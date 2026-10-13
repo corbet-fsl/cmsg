@@ -1,26 +1,26 @@
 //! Separate fresh transport and member checks over the original Foyer/Records.
-use super::{foyer::Transport, Door, ErrorCode};
+use super::{Door, ErrorCode, foyer::Transport};
 use ckmg::{Action, Authorization, Binding, Clock, Error, PublicKey};
 use futures_util::lock::Mutex;
 use std::{cell::Cell, rc::Rc};
 
 mod genesis;
 mod initial_recovery;
-pub use initial_recovery::{complete_initial_recovery, InitialRecoveryAuthority};
+pub use initial_recovery::{InitialRecoveryAuthority, complete_initial_recovery};
 mod initial_restore;
 pub use initial_restore::{
-    prepare_initial_recovery, InitialRecoveredVault, InitialRecoveryOwners, InitialRootVault,
+    InitialRecoveredVault, InitialRecoveryOwners, InitialRootVault, prepare_initial_recovery,
 };
 mod initial;
 pub use genesis::{
-    acknowledge_initial_publication, prepare_initial_publication, reopen_initial_publication,
-    retain_initial_publication, InitialPublicationError,
+    InitialPublicationError, acknowledge_initial_publication, prepare_initial_publication,
+    reopen_initial_publication, retain_initial_publication,
 };
 mod current_member;
 mod recovery;
 pub use initial::{
-    activate_initial, reopen_initial_enrollment, retain_global_initial_enrollment,
-    retain_initial_enrollment, EnrollmentError, InitialEnrollment,
+    EnrollmentError, InitialEnrollment, activate_initial, reopen_initial_enrollment,
+    retain_global_initial_enrollment, retain_initial_enrollment,
 };
 pub use recovery::{RecoveredVault, RecoveryAuthority, RecoveryOwners, RestoredVault};
 
@@ -302,6 +302,16 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
             Action::SignDeviceEd25519
                 if request.signing.is_some()
                     && request.statement.is_none()
+                    && self.intent.is_some() =>
+            {
+                true
+            }
+            // Next lineage record revision for a pending device authorization: only against a
+            // distinct single-use admitted command, and the statement (the previous head's
+            // digest) must be the live selected head, exactly like any other statement.
+            Action::PublishLineage
+                if request.signing.is_none()
+                    && request.statement.is_some()
                     && self.intent.is_some() =>
             {
                 true
