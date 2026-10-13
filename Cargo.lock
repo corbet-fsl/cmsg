@@ -1922,6 +1922,7 @@ dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
  "gloo-timers 0.3.0",
+ "hpke",
  "http-body-util",
  "hyper",
  "hyper-util",
