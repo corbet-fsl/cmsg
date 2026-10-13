@@ -51,10 +51,10 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         {
             return Err(dbg_u(line!()));
         }
-        let now = self.clock.now().map_err(|e| {
-            eprintln!("DIAG-NOW {e:?}");
-            e
-        })?;
+        let now = self
+            .clock
+            .now()
+            .inspect_err(|e| eprintln!("DIAG-NOW {e:?}"))?;
         if now < request.now {
             return Err(dbg_c(line!(), "clock"));
         }
@@ -121,10 +121,10 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         if failed {
             return Err(dbg_c(line!(), "clock"));
         }
-        let completed = self.clock.now().map_err(|e| {
-            eprintln!("DIAG-NOW {e:?}");
-            e
-        })?;
+        let completed = self
+            .clock
+            .now()
+            .inspect_err(|e| eprintln!("DIAG-NOW {e:?}"))?;
         if completed < now {
             return Err(dbg_c(line!(), "clock"));
         }
