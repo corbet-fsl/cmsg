@@ -258,6 +258,29 @@ impl MemberAuthorityBuilder {
         Ok((authority, admission))
     }
 }
+/// A Pair is bound to the lineage it extends: the evidence is that lineage's digest and must be
+/// exactly the live selected head, so a stale or replayed Pair never applies to another one.
+fn pair_base_matches(evidence: &[u8], live: Option<[u8; 32]>) -> bool {
+    live.is_some_and(|digest| evidence == digest.as_slice())
+}
+
+#[cfg(test)]
+mod pair_tests {
+    use super::pair_base_matches;
+
+    #[test]
+    fn a_pair_applies_only_to_the_exact_live_lineage_it_extends() {
+        let base = [7u8; 32];
+        assert!(pair_base_matches(&base, Some(base)));
+        // A later revision (stale base), a different lineage, empty or truncated evidence,
+        // and an unreadable live head all refuse.
+        assert!(!pair_base_matches(&base, Some([8u8; 32])));
+        assert!(!pair_base_matches(&[], Some(base)));
+        assert!(!pair_base_matches(&base[..31], Some(base)));
+        assert!(!pair_base_matches(&base, None));
+    }
+}
+
 impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C, B> {
     async fn check(&mut self, mut request: Authorization<'_>) -> Result<(), Error> {
         self.discard_pending_current();
@@ -354,6 +377,9 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
                         && request
                             .statement
                             .is_some_and(|digest| lineage.digest().ok() != Some(digest)))
+                    // Pair: the statement is the pairing request, so the pre-pairing lineage
+                    // digest travels as the evidence and must equal the live selected head.
+                    || (pair && !pair_base_matches(request.evidence, lineage.digest().ok()))
                 {
                     return Err(Error::Unauthorized);
                 }

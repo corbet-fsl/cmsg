@@ -38,6 +38,7 @@ where
             return Err(ErrorCode::Unauthorized);
         }
         let statement = request.digest().map_err(keys_error)?;
+        let base = lineage.digest().map_err(keys_error)?;
         let device = self
             .vault
             .keys()
@@ -66,7 +67,9 @@ where
         let receipt = self
             .vault
             .keys()
-            .authorize_device(request, &[])
+            // The evidence is the digest of the lineage this pairing extends; the authority
+            // requires it to equal the live head, so a stale or replayed Pair never applies.
+            .authorize_device(request, &base)
             .await
             .map_err(keys_error);
         drop(admitted);
