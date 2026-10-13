@@ -453,7 +453,7 @@ fn activation() -> accounting::Activation {
 }
 
 fn accounts() -> Value {
-    json!({"observed_at": 5, "ledger_policy": {"account": {}}, "extension_policy": {}})
+    json!({"observed_at": 5, "standing": {}, "ledger_policy": {"account": {}}, "extension_policy": {}})
 }
 
 fn scripted(script: Vec<accounting::ActivationPoll>) -> Arc<Scripted> {
