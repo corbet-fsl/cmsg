@@ -1,14 +1,14 @@
 //! Original current HTTPS/Passkeys fixture composition shared by owner journeys.
 use cmsg::door::{
+    Configuration, Door, Role,
     custody::SystemClock,
     foyer::{Scope, Sessions},
-    Configuration, Door, Role,
 };
 use cpky::{
-    software::{SoftwareAuthenticator, TestConfiguration},
     Context,
+    software::{SoftwareAuthenticator, TestConfiguration},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn now() -> u64 {
