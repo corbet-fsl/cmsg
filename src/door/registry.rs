@@ -13,6 +13,9 @@ use inbox_waves::{
     wave_outbox as inbox_wave_outbox, wave_punish as inbox_wave_punish,
     wave_receive as inbox_wave_receive, wave_send as inbox_wave_send, waves as inbox_waves_list,
 };
+use inbox_conversation::{
+    acknowledge as inbox_ack, receive as inbox_receive, retry as inbox_retry, send as inbox_send,
+};
 use login::{cancel as login_cancel, poll as login_poll, start as login_start};
 
 #[derive(
@@ -387,6 +390,10 @@ actions! {
     "inbox.delivery_status" => inbox_delivery(facades::Delivery) -> Option<cnbx::DeliveryStatus>, VaultAccess, Inbox;
     "inbox.blocking_rules" => inbox_blocking_rules(Empty) -> Vec<String>, VaultAccess, Inbox;
     "inbox.contact_act" => inbox_contact_act(inbox::ContactAct) -> cnbx::Relation, InboxRecord, Inbox;
+    "inbox.send" => inbox_send(inbox_conversation::ConversationSend) -> inbox_conversation::Sent, InboxRecord, Inbox;
+    "inbox.receive" => inbox_receive(inbox_conversation::Wired) -> inbox_conversation::Received, InboxRecord, Inbox;
+    "inbox.ack" => inbox_ack(inbox_conversation::Wired) -> inbox_conversation::Acked, InboxRecord, Inbox;
+    "inbox.retry" => inbox_retry(inbox_conversation::ConversationRetry) -> inbox_conversation::Retried, VaultAccess, Inbox;
     "inbox.waves" => inbox_waves_list(Empty) -> inbox_waves::WaveList, VaultAccess, Inbox;
     "inbox.wave_send" => inbox_wave_send(inbox_waves::WaveSend) -> inbox_waves::WaveStatus, InboxRecord, Inbox;
     "inbox.wave_decide" => inbox_wave_decide(inbox_waves::WaveDecide) -> inbox_waves::WaveStatus, InboxRecord, Inbox;

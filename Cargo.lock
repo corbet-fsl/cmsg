@@ -1965,7 +1965,7 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=release-threads#86ff4b4e1b58f20b30f1854c10f8c481e009c02e"
+source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=release-threads#f63c4cfae7799b408f290ff4275035856d484816"
 dependencies = [
  "cdlv",
  "cgrp",
