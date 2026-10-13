@@ -51,12 +51,15 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         {
             return Err(dbg_u(line!()));
         }
-        let now = self.clock.now()?;
+        let now = self.clock.now().map_err(|e| {
+            eprintln!("DIAG-NOW {e:?}");
+            e
+        })?;
         if now < request.now {
-            return Err(Error::Clock);
+            return Err(dbg_c(line!(), "clock"));
         }
         if signing.is_some_and(|signing| now >= signing.expires) {
-            return Err(Error::Expired);
+            return Err(dbg_c(line!(), "expired"));
         }
         let observation = self.initial.observation().map_err(|_| dbg_u(line!()))?;
         if observation.member != request.binding.member()
@@ -93,7 +96,7 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                         .reauthorize(current, &certificate, request.binding.member(), now)
                         .map_err(|_| dbg_u(line!()))?;
                     if signing.is_some_and(|signing| signing.expires > verified.valid_until()) {
-                        return Err(Error::Expired);
+                        return Err(dbg_c(line!(), "expired"));
                     }
                     let lineage = verified.lineage(now).map_err(|_| dbg_u(line!()))?;
                     if &lineage.binding != request.binding
@@ -116,17 +119,20 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                 dbg_u(line!())
             })??;
         if failed {
-            return Err(Error::Clock);
+            return Err(dbg_c(line!(), "clock"));
         }
-        let completed = self.clock.now()?;
+        let completed = self.clock.now().map_err(|e| {
+            eprintln!("DIAG-NOW {e:?}");
+            e
+        })?;
         if completed < now {
-            return Err(Error::Clock);
+            return Err(dbg_c(line!(), "clock"));
         }
         if let Some(signing) = signing {
             if completed >= signing.expires
                 || signing.expires > self.initial.expires().map_err(|_| dbg_u(line!()))?
             {
-                return Err(Error::Expired);
+                return Err(dbg_c(line!(), "expired"));
             }
         }
         Ok(completed)
@@ -336,4 +342,12 @@ pub async fn complete_initial_recovery<B: cwst::backend::Backend, N: cdht::Netwo
 fn dbg_u(line: u32) -> Error {
     eprintln!("DIAG-UNAUTH initial_recovery.rs:{line}");
     Error::Unauthorized
+}
+
+fn dbg_c(line: u32, what: &str) -> Error {
+    eprintln!("DIAG-{what} initial_recovery.rs:{line}");
+    match what {
+        "clock" => Error::Clock,
+        _ => Error::Expired,
+    }
 }
