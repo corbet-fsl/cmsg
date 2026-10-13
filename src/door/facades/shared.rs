@@ -113,6 +113,15 @@ where
             groups.join_room(board, task).await.map_err(room_error)
         })
     }
+    fn leave_room<'a>(
+        &'a mut self,
+        task: super::RoomLeaveTask<'a>,
+    ) -> board::OwnerFuture<'a, Option<cbrd::cgrp::Snapshot>> {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            groups.leave_room(task).await.map_err(room_error)
+        })
+    }
     fn room_evidence<'a>(
         &'a mut self,
         group: cbrd::cgrp::Id,
