@@ -110,8 +110,6 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(owned_browser_coverage)"] 
 
 [features]
 embedded-authenticator = ["dep:cpky"]
-# Former name, kept so existing CI feature lists keep working until they are updated.
-test-authenticator = ["embedded-authenticator"]
 conformance = []
 native-prover = ["cwlt/native-prover", "cvlt/wallet-native-prover", "ckmg/wallet-native-prover"]
 native-tor = ["ckmg/native-tor", "cmsh/tor", "cmsh/tor-records", "dep:ctrn", "dep:arti-client", "dep:tor-rtcompat", "dep:rustls"]
