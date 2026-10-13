@@ -5,7 +5,7 @@ use super::profile_owner_tests::{open_as, ProfileOwner};
 use super::*;
 use crate::door::inbox_waves::{
     Answer, Command, Decision, Delivered, Hello, JobDone, JobResult, Policy, Stage, Terms,
-    WaveDecide, WaveIncoming, WaveMessage, WavePorts, WavePunish, WaveSend,
+    Envelope, WaveDecide, WaveIncoming, WaveMessage, WAVE_VERSION, WavePorts, WavePunish, WaveSend,
 };
 use cwlt::wave::{
     VerifiedWaveOutcome, VerifiedWaveReservation, WaveContext, WaveOutcome, WaveOutcomeStatement,
@@ -105,13 +105,26 @@ async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof()
     assert_eq!((sent.role, sent.stage, sent.pending), (0, Stage::Hello, 1));
     assert_eq!(sent.conversation, None);
     let nonce = sent.nonce;
+    let conversation = {
+        let Answer::Outbox(outbox) = owner.waves(Command::Outbox, &ports).await.unwrap() else {
+            panic!("an outbox")
+        };
+        outbox.messages[0].envelope.conversation
+    };
+    let terms_envelope = |nonce, terms, sender: &str, sequence, conversation| Envelope {
+        version: WAVE_VERSION,
+        conversation,
+        sender: member(sender),
+        sequence,
+        message: WaveMessage::Terms { nonce, terms },
+    };
     // The first message is the queued hello; the host confirms its delivery once.
     let Answer::Outbox(outbox) = owner.waves(Command::Outbox, &ports).await.unwrap() else {
         panic!("an outbox")
     };
     assert!(matches!(
         outbox.messages.as_slice(),
-        [crate::door::inbox_waves::Queued { message: WaveMessage::Hello { .. }, .. }]
+        [crate::door::inbox_waves::Queued { envelope: Envelope { message: WaveMessage::Hello { .. }, .. }, .. }]
     ));
     let delivered = Delivered { nonce, kind: "hello".into() };
     assert!(matches!(
@@ -123,19 +136,30 @@ async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof()
     let terms = Terms { recipient_authority: [5; 32], recipient_challenge: [6; 32] };
     let wrong = WaveIncoming {
         peer: member("ef"),
-        message: WaveMessage::Terms { nonce, terms: terms.clone() },
+        envelope: terms_envelope(nonce, terms.clone(), "ef", 0, conversation),
     };
     assert_eq!(
         status(&mut owner, &ports, Command::Receive(wrong)).await,
         Err(ErrorCode::Refused)
     );
+    // A wrong version, a mis-bound conversation and a stale sequence are refused.
+    for envelope in [
+        Envelope { version: 2, ..terms_envelope(nonce, terms.clone(), PEER, 0, conversation) },
+        terms_envelope(nonce, terms.clone(), PEER, 0, [0xee; 32]),
+    ] {
+        let bad = WaveIncoming { peer: member(PEER), envelope };
+        assert_eq!(
+            status(&mut owner, &ports, Command::Receive(bad)).await,
+            Err(ErrorCode::Refused)
+        );
+    }
     // The right terms record the reservation as work; nothing is proved yet.
     let reserving = status(
         &mut owner,
         &ports,
         Command::Receive(WaveIncoming {
             peer: member(PEER),
-            message: WaveMessage::Terms { nonce, terms: terms.clone() },
+            envelope: terms_envelope(nonce, terms.clone(), PEER, 0, conversation),
         }),
     )
     .await
@@ -147,7 +171,7 @@ async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof()
             &ports,
             Command::Receive(WaveIncoming {
                 peer: member(PEER),
-                message: WaveMessage::Terms { nonce, terms },
+                envelope: terms_envelope(nonce, terms, PEER, 1, conversation),
             }),
         )
         .await,
@@ -213,7 +237,13 @@ async fn a_blocked_peer_is_refused_on_this_device_in_both_directions() {
     };
     let incoming = |peer: &str, nonce: u8| WaveIncoming {
         peer: member(peer),
-        message: WaveMessage::Hello { nonce: [nonce; 32], hello: hello.clone() },
+        envelope: Envelope {
+            version: WAVE_VERSION,
+            conversation: hello.conversation,
+            sender: member(peer),
+            sequence: 0,
+            message: WaveMessage::Hello { nonce: [nonce; 32], hello: hello.clone() },
+        },
     };
     let accepted = status(&mut owner, &ports, Command::Receive(incoming(PEER, 1))).await.unwrap();
     assert_eq!((accepted.role, accepted.stage), (1, Stage::Hello));

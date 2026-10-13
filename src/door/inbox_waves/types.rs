@@ -102,6 +102,26 @@ pub enum WaveMessage {
     },
 }
 
+/// Wire version of the wave exchange. A message of any other version is refused.
+pub const WAVE_VERSION: u8 = 1;
+
+/// Every wave message travels in an envelope bound to the conversation it
+/// belongs to, to its sender and to a per-direction sequence. The envelope adds
+/// no cryptography: it is carried only by the Mesh's authenticated channel (the
+/// host names the authenticated peer), and the conversation itself is protected
+/// by its Threads session keys. Nothing but the version and the routing fields
+/// is in the clear.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Envelope {
+    pub version: u8,
+    pub conversation: [u8; 32],
+    pub sender: String,
+    /// Strictly increasing per wave and direction, from 0.
+    pub sequence: u64,
+    pub message: WaveMessage,
+}
+
 impl WaveMessage {
     pub fn nonce(&self) -> &[u8; 32] {
         match self {
@@ -187,7 +207,7 @@ pub struct WavePunish {
 #[serde(deny_unknown_fields)]
 pub struct WaveIncoming {
     pub peer: String,
-    pub message: WaveMessage,
+    pub envelope: Envelope,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -246,7 +266,7 @@ pub struct Outbox {
 #[serde(deny_unknown_fields)]
 pub struct Queued {
     pub peer: String,
-    pub message: WaveMessage,
+    pub envelope: Envelope,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

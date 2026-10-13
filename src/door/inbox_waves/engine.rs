@@ -248,8 +248,12 @@ where
             key_package: None,
             welcome: None,
             opened: false,
-            outbox: vec![WaveMessage::Hello { nonce, hello }],
+            outbox: vec![],
+            next_out: 0,
+            last_in: None,
         })?;
+        desk.wave_mut(&nonce)?
+            .enqueue(self.binding.member(), WaveMessage::Hello { nonce, hello });
         self.write_desk(&desk, operation(&nonce, "hello")).await?;
         Ok(desk.status(desk.wave(&nonce).ok_or(ErrorCode::Refused)?))
     }
@@ -396,9 +400,9 @@ where
                 .waves
                 .iter()
                 .flat_map(|s| {
-                    s.outbox.iter().map(|message| Queued {
+                    s.outbox.iter().map(|envelope| Queued {
                         peer: s.peer.clone(),
-                        message: message.clone(),
+                        envelope: envelope.clone(),
                     })
                 })
                 .collect(),
@@ -411,7 +415,7 @@ where
         let session = desk.wave_mut(&delivered.nonce)?;
         let before = session.outbox.len();
         let kind = delivered.kind.clone();
-        session.outbox.retain(|m| kind_of(m) != kind);
+        session.outbox.retain(|e| kind_of(&e.message) != kind);
         if session.outbox.len() == before {
             return Err(ErrorCode::Refused);
         }
@@ -424,13 +428,28 @@ where
 
     // ---- messages from the other device -------------------------------------
 
-    pub async fn receive(&mut self, peer: &str, message: WaveMessage) -> Result<WaveStatus> {
+    pub async fn receive(&mut self, peer: &str, envelope: Envelope) -> Result<WaveStatus> {
         self.check_peer(peer).await?;
+        // Unknown versions, a foreign sender and a mis-bound conversation are
+        // refused before anything is read from the message.
+        if envelope.version != WAVE_VERSION || envelope.sender != peer {
+            return Err(ErrorCode::Refused);
+        }
+        let sequence = envelope.sequence;
+        let conversation = envelope.conversation;
+        let message = envelope.message.clone();
         let nonce = *message.nonce();
         let mut desk = Desk::load(self.store)?;
         if let WaveMessage::Hello { hello, .. } = &message {
-            self.on_hello(&mut desk, peer, nonce, hello.clone()).await?;
+            if hello.conversation != conversation {
+                return Err(ErrorCode::Refused);
+            }
+            self.on_hello(&mut desk, peer, nonce, hello.clone(), sequence)
+                .await?;
         } else {
+            if !desk.wave_mut(&nonce)?.admit(peer, &envelope) {
+                return Err(ErrorCode::Refused);
+            }
             let session = desk.wave(&nonce).ok_or(ErrorCode::Refused)?.clone();
             if session.peer != peer {
                 return Err(ErrorCode::Refused);
@@ -476,6 +495,7 @@ where
         peer: &str,
         nonce: [u8; 32],
         hello: Hello,
+        sequence: u64,
     ) -> Result<()> {
         let now = now()?;
         if desk.wave(&nonce).is_some()
@@ -503,8 +523,12 @@ where
             key_package: None,
             welcome: None,
             opened: false,
-            outbox: vec![WaveMessage::Terms { nonce, terms }],
+            outbox: vec![],
+            next_out: 0,
+            last_in: Some(sequence),
         })?;
+        desk.wave_mut(&nonce)?
+            .enqueue(self.binding.member(), WaveMessage::Terms { nonce, terms });
         self.write_desk(desk, operation(&nonce, "hello-in")).await
     }
 
@@ -686,9 +710,10 @@ where
             _ => return Err(ErrorCode::Reconcile),
         };
         next.wave_mut(&nonce)?.welcome = Some(welcome.clone());
-        next.wave_mut(&nonce)?
-            .outbox
-            .push(WaveMessage::Welcome { nonce, welcome });
+        next.wave_mut(&nonce)?.enqueue(
+            self.binding.member(),
+            WaveMessage::Welcome { nonce, welcome },
+        );
         *desk = next;
         self.write_desk(desk, operation(&nonce, "welcome-queued"))
             .await
@@ -967,11 +992,14 @@ where
                 s.receipt_digest = Some(receipt);
                 if s.stage == Stage::Reserving {
                     s.stage = Stage::Offered;
-                    s.outbox.push(WaveMessage::Offer {
-                        nonce,
-                        reservation: proved.blob.clone(),
-                        receipt_digest: receipt,
-                    });
+                    s.enqueue(
+                        self.binding.member(),
+                        WaveMessage::Offer {
+                            nonce,
+                            reservation: proved.blob.clone(),
+                            receipt_digest: receipt,
+                        },
+                    );
                 }
             }
             Work::ReserveRecipient => {
@@ -986,11 +1014,14 @@ where
                 // outcome that follows settles the slot.
                 if s.stage == Stage::Reserving {
                     s.stage = Stage::Reserved;
-                    s.outbox.push(WaveMessage::Reservation {
-                        nonce,
-                        reservation: proved.blob.clone(),
-                        key_package: package,
-                    });
+                    s.enqueue(
+                        self.binding.member(),
+                        WaveMessage::Reservation {
+                            nonce,
+                            reservation: proved.blob.clone(),
+                            key_package: package,
+                        },
+                    );
                 }
             }
             Work::Answer | Work::Close => {
@@ -1029,11 +1060,14 @@ where
                 if job.work == Work::Answer {
                     s.stage = Stage::Answered;
                 }
-                s.outbox.push(WaveMessage::Outcome {
-                    nonce,
-                    decision,
-                    outcome: proved.blob.clone(),
-                });
+                s.enqueue(
+                    self.binding.member(),
+                    WaveMessage::Outcome {
+                        nonce,
+                        decision,
+                        outcome: proved.blob.clone(),
+                    },
+                );
                 if job.work == Work::Answer {
                     self.mark_answered(&session.peer, session.hello.conversation, receipt)
                         .await?;

@@ -51,7 +51,42 @@ pub(super) struct Session {
     pub welcome: Option<Vec<u8>>,
     /// Set once this member's conversation exists on this device.
     pub opened: bool,
-    pub outbox: Vec<WaveMessage>,
+    pub outbox: Vec<Envelope>,
+    /// Sequence of the next queued message.
+    #[serde(default)]
+    pub next_out: u64,
+    /// Sequence of the last accepted message from the other device.
+    #[serde(default)]
+    pub last_in: Option<u64>,
+}
+
+impl Session {
+    /// Queue one message for the other device, bound to this wave's
+    /// conversation, to `sender` and to the next sequence.
+    pub fn enqueue(&mut self, sender: &str, message: WaveMessage) {
+        self.outbox.push(Envelope {
+            version: WAVE_VERSION,
+            conversation: self.hello.conversation,
+            sender: sender.into(),
+            sequence: self.next_out,
+            message,
+        });
+        self.next_out += 1;
+    }
+
+    /// Accept an incoming envelope only if it is of this version, bound to this
+    /// conversation and peer, and strictly newer than the last accepted one.
+    pub fn admit(&mut self, peer: &str, envelope: &Envelope) -> bool {
+        if envelope.version != WAVE_VERSION
+            || envelope.conversation != self.hello.conversation
+            || envelope.sender != peer
+            || self.last_in.is_some_and(|last| envelope.sequence <= last)
+        {
+            return false;
+        }
+        self.last_in = Some(envelope.sequence);
+        true
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,6 +289,8 @@ mod tests {
             welcome: None,
             opened: false,
             outbox: vec![],
+            next_out: 0,
+            last_in: None,
         }
     }
 

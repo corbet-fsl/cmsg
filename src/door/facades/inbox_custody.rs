@@ -107,7 +107,7 @@ where
                     Answer::Relation(env.punish(&request.peer, request.nonce).await?)
                 }
                 Command::Receive(request) => {
-                    Answer::Status(env.receive(&request.peer, request.message).await?)
+                    Answer::Status(env.receive(&request.peer, request.envelope).await?)
                 }
                 Command::List => Answer::List(env.list()?),
                 Command::Outbox => Answer::Outbox(env.outbox()?),
