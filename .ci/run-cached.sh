@@ -14,8 +14,9 @@ fi
 # Branch-keyed cargo target cache: runs on different branches must not share
 # one target dir ("Target cache is in use"). v01 keeps the existing cmsg-v01
 # cache; every other branch gets /caches/cargo/cmsg-<sanitised branch>/target.
-ci_branch=${CI_BRANCH:-$(git symbolic-ref --short -q HEAD 2>/dev/null || true)}
+ci_branch=${CI_COMMIT_BRANCH:-$(git symbolic-ref --short -q HEAD 2>/dev/null || true)}
 ci_branch=${ci_branch:-detached-${CI_COMMIT_SHA:0:12}}
+ls -ld /caches/cargo /caches/cargo/cmsg-v01 2>&1 || true
 case "$ci_branch" in
   v01) export CARGO_TARGET_DIR=/caches/cargo/cmsg-v01/target ;;
   *)
