@@ -1,6 +1,6 @@
 //! Same original HTTPS community source; synchronous borrowing creates no grant.
 use super::super::wallet::*;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub(super) async fn exercise(
     world: &Value,
@@ -44,76 +44,62 @@ pub(super) async fn exercise(
                     )
                     .unwrap();
                 assert_eq!(completed, started + 1);
-                assert!(
-                    lease
-                        .with_community_policy(&mut policy, || started, |_, _, _, _, _| ())
-                        .is_err()
-                );
+                assert!(lease
+                    .with_community_policy(&mut policy, || started, |_, _, _, _, _| ())
+                    .is_err());
             }
             1 => {
                 let mut owner = Some(api);
-                assert!(
-                    lease
-                        .with_community_policy(&mut policy, now, |_, _, _, _, _| {
-                            called.set(true);
-                            drop(owner.take());
-                        })
-                        .is_err()
-                );
+                assert!(lease
+                    .with_community_policy(&mut policy, now, |_, _, _, _, _| {
+                        called.set(true);
+                        drop(owner.take());
+                    })
+                    .is_err());
                 assert!(called.get());
             }
             2 => {
-                assert!(
-                    lease
-                        .with_community_policy(
-                            &mut policy,
-                            || sample.get(),
-                            |_, observed, _, _, _| {
-                                called.set(true);
-                                sample.set(observed.expires);
-                            },
-                        )
-                        .is_err()
-                );
+                assert!(lease
+                    .with_community_policy(
+                        &mut policy,
+                        || sample.get(),
+                        |_, observed, _, _, _| {
+                            called.set(true);
+                            sample.set(observed.expires);
+                        },
+                    )
+                    .is_err());
                 assert!(called.get());
             }
             3 => {
-                assert!(
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        lease.with_community_policy(&mut policy, now, |_, _, _, _, _| {
-                            called.set(true);
-                            panic!("current community callback interrupted");
-                        })
-                    }))
-                    .is_err()
-                );
+                assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    lease.with_community_policy(&mut policy, now, |_, _, _, _, _| {
+                        called.set(true);
+                        panic!("current community callback interrupted");
+                    })
+                }))
+                .is_err());
                 assert!(called.get());
             }
             4 => {
                 let foreign = foyer(world, false).await;
                 let mut foreign_policy = foreign.current_policy();
-                assert!(
-                    lease
-                        .with_community_policy(&mut foreign_policy, now, |_, _, _, _, _| called
-                            .set(true),)
-                        .is_err()
-                );
+                assert!(lease
+                    .with_community_policy(&mut foreign_policy, now, |_, _, _, _, _| called
+                        .set(true),)
+                    .is_err());
                 assert!(!called.get());
             }
             5 => {
-                assert!(
-                    lease
-                        .with_community_policy(&mut policy, now, |_, _, _, _, _| called.set(true),)
-                        .is_err()
-                );
+                assert!(lease
+                    .with_community_policy(&mut policy, now, |_, _, _, _, _| called.set(true),)
+                    .is_err());
                 assert!(!called.get());
             }
             _ => unreachable!(),
         }
-        assert!(
-            lease
-                .with_community_policy(&mut policy, now, |_, _, _, _, _| ())
-                .is_err()
-        );
+        assert!(lease
+            .with_community_policy(&mut policy, now, |_, _, _, _, _| ())
+            .is_err());
     }
 }
