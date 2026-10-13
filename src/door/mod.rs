@@ -8,6 +8,8 @@ pub mod accounting;
 mod actor;
 pub mod board;
 pub mod browser;
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub mod composer;
 mod composition;
 mod current;
 pub use composition::VaultComposer;
