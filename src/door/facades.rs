@@ -54,7 +54,6 @@ pub(super) trait BoundBoard {
     fn group_act(
         &mut self,
         _intent: cbrd::GroupIntent,
-        _visible: bool,
         _expires: u64,
     ) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
@@ -62,7 +61,6 @@ pub(super) trait BoundBoard {
     fn group_propose(
         &mut self,
         _intent: cbrd::GroupIntent,
-        _visible: bool,
         _expires: u64,
     ) -> OwnedFuture<'_, board::GroupProposed> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
@@ -79,7 +77,6 @@ pub(super) trait BoundBoard {
         &mut self,
         _operation: [u8; 32],
         _accept: bool,
-        _visible: bool,
         _expires: u64,
     ) -> OwnedFuture<'_, board::GroupAnswered> {
         Box::pin(async { Err(ErrorCode::Unavailable) })

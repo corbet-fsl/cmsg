@@ -157,26 +157,12 @@ impl cbrd::Contacts for CacheContacts {
     }
 }
 
-/// Standing-room authority: refused until the Rulebook evidence exists. Only
-/// tests can open it, to found a room the way the Rulebook eventually will.
-#[derive(Clone, Default)]
-struct NoSeeds(Rc<std::cell::Cell<bool>>);
-impl cbrd::Seeds for NoSeeds {
-    fn authorized(&self, _: &str, _: &cgrp::Id, _: u64) -> cgrp::Result<()> {
-        if self.0.get() {
-            Ok(())
-        } else {
-            Err(cgrp::Error::Authority)
-        }
-    }
-}
-
 /// Authority for a newcomer's consent in a member room. The device key is the
 /// one the newcomer's certified MLS leaf credential names; that certificate was
 /// verified against the newcomer's Charter-verified lineage before this value
 /// exists, so the consent counts only when it comes from exactly that member,
 /// is signed by exactly that device key and is unexpired. Contacts and
-/// standing-room seeds are never consulted for rooms.
+/// contacts are never consulted for rooms.
 struct RoomAuthority {
     member: String,
     device: [u8; 32],
@@ -198,9 +184,6 @@ impl cgrp::Authority for RoomAuthority {
             .map_err(|_| cgrp::Error::Authority)
     }
     fn contact(&self, _: &str, _: &str, _: &str, _: u64) -> cgrp::Result<()> {
-        Err(cgrp::Error::Authority)
-    }
-    fn seed(&self, _: &str, _: &cgrp::Id, _: u64) -> cgrp::Result<()> {
         Err(cgrp::Error::Authority)
     }
 }
@@ -272,12 +255,13 @@ pub struct VaultGroupOwner<B: cwst::backend::Backend, C, E, A, R, W> {
     member: String,
     peers: Option<Rc<Mutex<Box<dyn GroupPeers>>>>,
     cache: Rc<RefCell<Cache>>,
-    authority: cbrd::BoardAuthority<CacheDevices, CacheContacts, NoSeeds>,
-    #[cfg_attr(not(test), allow(dead_code))]
-    seed_gate: Rc<std::cell::Cell<bool>>,
+    authority: cbrd::BoardAuthority<CacheDevices, CacheContacts>,
     version: u64,
     /// Locators received with an invitation; the own journal wins.
     provided: BTreeMap<String, Vec<u8>>,
+    /// Tests only: contacts the Contacts journal would hold as established.
+    #[cfg(test)]
+    assumed_contacts: BTreeSet<String>,
 }
 
 impl<B: cwst::backend::Backend, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W> {
@@ -289,28 +273,28 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
         peers: Option<Box<dyn GroupPeers>>,
     ) -> Self {
         let cache = Rc::new(RefCell::new(Cache::default()));
-        let seed_gate = Rc::new(std::cell::Cell::new(false));
         Self {
-            seed_gate: seed_gate.clone(),
             retained,
             lifetime,
             origin,
             authority: cbrd::BoardAuthority::new(
                 CacheDevices(cache.clone()),
                 CacheContacts(cache.clone(), member.clone()),
-                NoSeeds(seed_gate),
             ),
             member,
             peers: peers.map(|peers| Rc::new(Mutex::new(peers))),
             cache,
             version: 0,
             provided: BTreeMap::new(),
+            #[cfg(test)]
+            assumed_contacts: BTreeSet::new(),
         }
     }
-    /// Tests only: found standing rooms as the Rulebook eventually will.
+    /// Tests only: treat these members as established contacts, as if the
+    /// Contacts journal held them (the contact exchange is not under test).
     #[cfg(test)]
-    pub(super) fn found_rooms(&self) {
-        self.seed_gate.set(true);
+    pub(super) fn assume_contacts(&mut self, contacts: impl IntoIterator<Item = String>) {
+        self.assumed_contacts.extend(contacts);
     }
     fn open(&self) -> cgrp::Result<()> {
         if self.lifetime.is_closed() {
@@ -437,6 +421,8 @@ pub struct RoomJoinTask<'a> {
     /// consent from it and its lineage through the handle.
     pub request: cgrp::Request,
     pub evidence: &'a cthr::ParentEvidence,
+    /// The room's transport key from the sealed room state.
+    pub transport: &'a cbrd::TransportKey,
     pub policy: &'a dyn cgrp::PolicySource,
 }
 
@@ -530,6 +516,7 @@ where
                 operation,
                 attempts: ROOM_CONTEXT_ATTEMPTS,
                 pause: crate::door::rooms::NoPause,
+                transport: task.transport,
             },
         )
         .await;
@@ -553,7 +540,7 @@ where
         &mut self,
         group: cgrp::Id,
         policy: &dyn cgrp::PolicySource,
-    ) -> std::result::Result<cthr::ParentEvidence, ctnd::Error> {
+    ) -> std::result::Result<cbrd::RoomState, ctnd::Error> {
         use ctnd::Error as Fail;
         self.open().map_err(|_| Fail::Authority)?;
         let mut retained = self.retained.lock().await;
@@ -594,7 +581,33 @@ where
             .await
             .map_err(|_| Fail::Authority);
         *self.cache.borrow_mut() = Cache::default();
-        evidence
+        Ok(cbrd::RoomState {
+            evidence: evidence?,
+            transport: threads.transport_key().map_err(|_| Fail::Authority)?,
+        })
+    }
+
+    /// The transport key of this member's current epoch of `group`: it opens
+    /// the ordered join frames of the newcomers waiting at that epoch.
+    pub async fn room_transport_key(
+        &mut self,
+        group: cgrp::Id,
+    ) -> std::result::Result<cbrd::TransportKey, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let storage = custody.vault.storage().clone();
+        let store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
+        let key = threads.transport_key().map_err(|_| Fail::Authority)?;
+        Ok(cbrd::TransportKey::from_bytes(key))
     }
 }
 
@@ -605,6 +618,8 @@ pub struct RoomAdmitTask<'a> {
     pub group: cgrp::Id,
     pub frame: &'a cbrd::JoinFrame,
     pub max_groups: usize,
+    /// The room's transport key at the epoch the newcomer joins from.
+    pub transport: &'a cbrd::TransportKey,
     pub policy: &'a dyn cgrp::PolicySource,
 }
 
@@ -751,6 +766,7 @@ where
                 source: &source,
                 authority: &authority,
                 operation,
+                transport: task.transport,
             },
         )
         .await?;
@@ -954,6 +970,10 @@ where
                         .relation(peer)
                         .map_err(|_| cgrp::Error::Unavailable)?;
                     if relation.state == ctcs::State::Established && !relation.conflicted {
+                        cache.contacts.insert(peer.clone());
+                    }
+                    #[cfg(test)]
+                    if self.assumed_contacts.contains(peer) {
                         cache.contacts.insert(peer.clone());
                     }
                 }

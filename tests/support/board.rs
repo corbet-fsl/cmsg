@@ -64,7 +64,7 @@ async fn original_board_without_committed_owner_refuses_every_new_action() {
         ),
         (
             "board.group_propose",
-            json!({"intent":{"intent":"leave","group":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"accept_profile_visibility":false}),
+            json!({"intent":{"intent":"leave","group":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}}),
         ),
         ("board.group_message", json!({"from":"m1","text":"{}"})),
         (
@@ -77,7 +77,7 @@ async fn original_board_without_committed_owner_refuses_every_new_action() {
         ),
         (
             "board.group_act",
-            json!({"intent":{"intent":"leave","group":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"accept_profile_visibility":false}),
+            json!({"intent":{"intent":"leave","group":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}}),
         ),
     ] {
         let request = serde_json::to_vec(&Invocation {
