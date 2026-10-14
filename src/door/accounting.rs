@@ -2,7 +2,7 @@
 use super::{custody::SystemClock, foyer::Transport, ErrorCode, Result};
 use cblc::{admission, enrollment};
 use ckmg::{Authority, Clock, Entropy};
-use cvlt::{CommunityAccountCustody, Records, Vault};
+use cvlt::{Records, Vault};
 use cwlt::passport::{self, AuthenticatedCommunity, CommunityId};
 use data_encoding::{BASE64URL_NOPAD as B64, HEXLOWER as HEX};
 use sha2::{Digest, Sha256};
@@ -18,7 +18,7 @@ mod request;
 pub use activation::{prove as prove_activation, NativeActivationProver};
 pub use activation::{Activation, ActivationPoll, ActivationProver};
 pub use checkpoint::{CheckpointAcquisition, CurrentEnrollment, SubmittedEnrollment};
-pub use custody::CommunityAccount;
+pub use custody::{AccountVault, CommunityAccount};
 pub use genesis::PreparedAccount;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub use genesis::{ProvenAccount, StagedRequest};
@@ -86,19 +86,19 @@ fn now() -> u64 {
 /// Use an independently authenticated Foyer for this challenge when community
 /// Keys retain a session lease: the original pending owner refuses a second
 /// lease on that same Foyer before waiting on its session mutex.
-pub async fn issue_account_admission<'p, B, C, E, A, R, G>(
+pub async fn issue_account_admission<'p, GB, GC, GE, GA, GR, G>(
     mut challenge: cfyr::membership::AccountChallenge<'p, Transport>,
-    global: &mut super::passport::GlobalPassport<B, C, E, A, R>,
+    global: &mut super::passport::GlobalPassport<GB, GC, GE, GA, GR>,
     device: [u8; 32],
     rng: &mut G,
     creation: Option<&str>,
 ) -> Result<AccountAdmission<'p>>
 where
-    B: cwst::backend::Backend,
-    C: Clock,
-    E: Entropy,
-    A: Authority,
-    R: Records,
+    GB: cwst::backend::Backend,
+    GC: Clock,
+    GE: Entropy,
+    GA: Authority,
+    GR: Records,
     G: passport::rand::RngCore + passport::rand::CryptoRng,
 {
     // The creator of a community presents the creation id of the claim it made, so
@@ -302,8 +302,7 @@ impl<'p> AccountAdmission<'p> {
     {
         let current = self.current()?;
         let expires = current.expires.min(intents.expires);
-        let plan = account
-            .vault
+        let plan = account.vault().await?
             .keys()
             .prepare_account_device(expires)
             .await
@@ -333,8 +332,7 @@ impl<'p> AccountAdmission<'p> {
             .root
             .admit(command, current.now)
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let authorization = account
-            .vault
+        let authorization = account.vault().await?
             .keys()
             .authorize_account_device(plan)
             .await
@@ -373,8 +371,7 @@ impl<'p> AccountAdmission<'p> {
     {
         let admitted_origin = self.current()?.origin;
         account.check(&admitted_origin).await?;
-        let coordinate = account
-            .vault
+        let coordinate = account.vault().await?
             .account_projection()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
@@ -394,14 +391,12 @@ impl<'p> AccountAdmission<'p> {
         let transcript = delegation
             .signing_bytes()
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let lineage = account
-            .vault
+        let lineage = account.vault().await?
             .keys()
             .lineage()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let device = account
-            .vault
+        let device = account.vault().await?
             .keys()
             .device_public_key()
             .await
@@ -435,8 +430,7 @@ impl<'p> AccountAdmission<'p> {
                 current.now,
             )
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let signature = account
-            .vault
+        let signature = account.vault().await?
             .keys()
             .sign_device_ed25519_current(&transcript, expires)
             .await

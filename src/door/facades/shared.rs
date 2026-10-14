@@ -633,3 +633,63 @@ pub(crate) fn room_error(error: ctnd::Error) -> ErrorCode {
         ctnd::Error::Reconcile | ctnd::Error::Storage => ErrorCode::Reconcile,
     }
 }
+
+/// The community account actor's port on the Door's one Vault. It owns no Vault,
+/// Store or Keys: each use takes the same retained lock as the Board and every
+/// other owner, so the Store has exactly one owner on a device. While a use is
+/// open the member authority spends the account's own signing channels.
+pub struct AccountPort<B: cwst::backend::Backend, C, E, A, R> {
+    retained: Retained<B, C, E, A, R, cvlt::WalletCustody>,
+    lifetime: CustodyLifetime,
+    arm: crate::door::custody::AccountArm,
+}
+
+/// The Door's Vault borrowed through the port for one use.
+pub struct PortVault<'a, B: cwst::backend::Backend, C, E, A, R> {
+    guard: futures_util::lock::MutexGuard<'a, Option<Custody<B, C, E, A, R, cvlt::WalletCustody>>>,
+    _arm: crate::door::custody::ArmGuard,
+}
+
+impl<B: cwst::backend::Backend, C, E, A, R> std::ops::Deref for PortVault<'_, B, C, E, A, R> {
+    type Target = cvlt::Vault<B, C, E, A, R, cvlt::WalletCustody>;
+    fn deref(&self) -> &Self::Target {
+        // Presence is checked when the port hands this out and the lock is held since.
+        &self.guard.as_ref().expect("checked at open").vault
+    }
+}
+impl<B: cwst::backend::Backend, C, E, A, R> std::ops::DerefMut for PortVault<'_, B, C, E, A, R> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.guard.as_mut().expect("checked at open").vault
+    }
+}
+
+impl<B: cwst::backend::Backend, C, E, A, R> AccountPort<B, C, E, A, R> {
+    pub(crate) async fn vault(&mut self) -> Result<PortVault<'_, B, C, E, A, R>> {
+        if self.lifetime.is_closed() {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let guard = self.retained.lock().await;
+        if self.lifetime.is_closed() {
+            return Err(ErrorCode::Unauthorized);
+        }
+        if guard.is_none() {
+            return Err(ErrorCode::Unavailable);
+        }
+        Ok(PortVault {
+            guard,
+            _arm: self.arm.arm(),
+        })
+    }
+}
+
+impl<B: cwst::backend::Backend, C, E, A, R> VaultBoardOwner<B, C, E, A, R, cvlt::WalletCustody> {
+    /// The account actor's port on this Vault. `arm` is the handle the member
+    /// authority of this same Vault gave out with its account channels.
+    pub fn account_port(&self, arm: crate::door::custody::AccountArm) -> AccountPort<B, C, E, A, R> {
+        AccountPort {
+            retained: self.retained.clone(),
+            lifetime: self.lifetime.clone(),
+            arm,
+        }
+    }
+}

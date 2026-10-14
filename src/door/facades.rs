@@ -10,7 +10,7 @@ mod profile_custody;
 mod shared;
 use cbrd::clnk;
 pub use group_custody::{GroupPeers, RoomJoinTask, RoomLeaveTask, VaultGroupOwner, VerifiedPeers};
-pub use shared::VaultBoardOwner;
+pub use shared::{AccountPort, PortVault, VaultBoardOwner};
 use std::{future::Future, pin::Pin};
 
 pub(super) type OwnedFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + 'a>>;

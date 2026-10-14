@@ -468,14 +468,12 @@ impl AccountAdmission<'_> {
         let transcript =
             acct::account_request_bytes(&request).map_err(|_| ErrorCode::Unauthorized)?;
         account.check(&current.origin).await?;
-        let lineage = account
-            .vault
+        let lineage = account.vault().await?
             .keys()
             .lineage()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let device = account
-            .vault
+        let device = account.vault().await?
             .keys()
             .device_public_key()
             .await
@@ -506,8 +504,7 @@ impl AccountAdmission<'_> {
                 current.now,
             )
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let signature = account
-            .vault
+        let signature = account.vault().await?
             .keys()
             .sign_device_ed25519_current(&transcript, expires_at)
             .await

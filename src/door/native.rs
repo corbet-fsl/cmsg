@@ -66,6 +66,37 @@ async fn drain_composer(composer: &mut Option<Box<dyn VaultComposer>>) -> Result
     .unwrap_or(Err(ErrorCode::Reconcile))
 }
 
+/// One courier per bound Mesh of the Door, started after the dispatch that bound
+/// the Mesh (the login) and ended with it.
+#[derive(Default)]
+struct Couriers(Vec<(String, std::rc::Rc<super::courier::Shared>, super::courier::Courier)>);
+
+impl Couriers {
+    async fn sync(&mut self, door: &super::courier::SharedDoor) {
+        let bound = door.lock().await.courier_shareds();
+        self.0.retain(|(origin, shared, _)| {
+            bound
+                .iter()
+                .any(|(o, s)| o == origin && std::rc::Rc::ptr_eq(s, shared))
+        });
+        for (origin, shared) in bound {
+            if self.0.iter().any(|(o, s, _)| *o == origin && std::rc::Rc::ptr_eq(s, &shared)) {
+                continue;
+            }
+            let courier =
+                super::courier::spawn(door.clone(), &origin, super::courier::Config::default());
+            self.0.push((origin, shared, courier));
+        }
+    }
+
+    async fn stop(&mut self, door: &super::courier::SharedDoor) {
+        door.lock().await.stop_couriers();
+        for (_, _, courier) in self.0.drain(..) {
+            let _ = courier.finished().await;
+        }
+    }
+}
+
 impl Owner {
     async fn start<F, Fut, T>(
         initialize: F,
@@ -117,7 +148,7 @@ impl Owner {
                             let initialized = AssertUnwindSafe(async { initialize().await })
                                 .catch_unwind()
                                 .await;
-                            let (mut door, value, retained, mut composer) = match initialized {
+                            let (door, value, retained, mut composer) = match initialized {
                                 Ok(Ok(value)) => value,
                                 Ok(Err(error)) => {
                                     let _ = ready.send(Err(error));
@@ -134,6 +165,9 @@ impl Owner {
                                 door.close_owned().await;
                                 return Err(ErrorCode::Unavailable);
                             }
+                            // The Door is shared with the couriers of its bound Meshes.
+                            let door = std::rc::Rc::new(tokio::sync::Mutex::new(door));
+                            let mut couriers = Couriers::default();
                             let mut failed = false;
                             while let Some(command) = receiver.recv().await {
                                 match command {
@@ -146,8 +180,10 @@ impl Owner {
                                         let checked = if failed {
                                             Err(ErrorCode::Unavailable)
                                         } else {
+                                            let mut guard = door.lock().await;
                                             match std::panic::catch_unwind(AssertUnwindSafe(|| {
-                                                door.authenticate(&origin, &token, clock.now())
+                                                guard
+                                                    .authenticate(&origin, &token, clock.now())
                                                     .map(|_| ())
                                             })) {
                                                 Ok(result) => result,
@@ -184,6 +220,8 @@ impl Owner {
                                                         .map(|request| request.action)
                                                         .unwrap_or_default();
                                                 let mut output = door
+                                                    .lock()
+                                                    .await
                                                     .dispatch(
                                                         &origin,
                                                         token.expose_for_transport(),
@@ -198,7 +236,7 @@ impl Owner {
                                                     };
                                                     let composed = composer
                                                         .after_dispatch(
-                                                            &mut door,
+                                                            &mut *door.lock().await,
                                                             &origin,
                                                             &token,
                                                             &action,
@@ -216,6 +254,7 @@ impl Owner {
                                                         output = Output::Error { error };
                                                     }
                                                 }
+                                                couriers.sync(&door).await;
                                                 output
                                             })
                                             .catch_unwind()
@@ -237,12 +276,16 @@ impl Owner {
                                 }
                             }
                             let drained = drain_composer(&mut composer).await;
+                            couriers.stop(&door).await;
                             if failed {
                                 // Never call domain methods on a panic-fenced owner.
                                 // Dropping its state cannot grant another request access.
                                 return Err(ErrorCode::Reconcile);
                             }
-                            door.close_owned().await;
+                            match std::rc::Rc::try_unwrap(door) {
+                                Ok(door) => door.into_inner().close_owned().await,
+                                Err(_) => return Err(ErrorCode::Reconcile),
+                            }
                             drained
                         })
                         .await;

@@ -4,6 +4,8 @@
 //! Pairing belongs to the trusted embedding runtime; it is not an API action.
 //! Unavailable domain owners cannot be replaced by caller-provided success values.
 pub mod account;
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub mod account_open;
 pub mod accounting;
 mod actor;
 pub mod board;
