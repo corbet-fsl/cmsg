@@ -30,7 +30,8 @@ use login::{cancel as login_cancel, poll as login_poll, start as login_start};
 use vouching::{
     link_create as voucher_link_create, link_revoke as voucher_link_revoke, links as voucher_links,
     signoff_decide as voucher_signoff_decide, signoff_list as voucher_signoff_list,
-    explanation as voucher_explanation, vouched_by as voucher_vouched_by,
+    contacts as voucher_contacts, explanation as voucher_explanation,
+    vouched_by as voucher_vouched_by,
 };
 
 #[derive(
@@ -465,6 +466,7 @@ actions! {
     "foyer.community_creation_claim" => community_creation_claim(creating::Claim) -> creating::Claimed, VaultAccess, Foyer;
     "foyer.voucher_link_create" => voucher_link_create(vouching::LinkCreate) -> vouching::LinkInfo, VaultAccess, Foyer;
     "foyer.voucher_links" => voucher_links(Empty) -> vouching::Links, VaultAccess, Foyer;
+    "foyer.voucher_contacts" => voucher_contacts(Empty) -> vouching::VoucherContacts, VaultAccess, Foyer;
     "foyer.voucher_link_revoke" => voucher_link_revoke(vouching::LinkRef) -> vouching::LinkRevoked, VaultAccess, Foyer;
     "foyer.voucher_signoff_list" => voucher_signoff_list(Empty) -> vouching::Applicants, VaultAccess, Foyer;
     "foyer.voucher_signoff_decide" => voucher_signoff_decide(vouching::Decide) -> vouching::Decided, VaultAccess, Foyer;

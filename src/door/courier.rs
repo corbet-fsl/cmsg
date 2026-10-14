@@ -274,11 +274,25 @@ fn typed<T: serde::de::DeserializeOwned>(value: Value) -> Result<T> {
 /// (peer, conversation) of every wave that has opened a conversation.
 async fn conversations(lease: &Lease, door: &mut Door) -> Result<Vec<(String, [u8; 32])>> {
     let list: super::inbox_waves::WaveList = typed(lease.call(door, "inbox.waves", json!({})).await?)?;
-    Ok(list
+    let mut all: Vec<(String, [u8; 32])> = list
         .waves
         .into_iter()
         .filter_map(|w| w.conversation.map(|c| (w.peer, c)))
-        .collect())
+        .collect();
+    // Contacts made by a vouching have a conversation without a wave.
+    if let Ok(origin) = door
+        .grants
+        .get(&lease.key)
+        .map(|grant| grant.origin.clone())
+        .ok_or(())
+    {
+        if let Ok(found) = super::vouching::contact_list(door, &origin).await {
+            for contact in found {
+                all.push((contact.peer, contact.conversation));
+            }
+        }
+    }
+    Ok(all)
 }
 
 // ---- inbound -------------------------------------------------------------------

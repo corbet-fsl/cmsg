@@ -1175,6 +1175,66 @@ pub(super) async fn endorsement_wire(
     Some((wire, snapshot))
 }
 
+/// One contact a vouching created, with the conversation id both devices derived
+/// from the bond. A frontend cannot compute the id, so it asks for it here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VoucherContact {
+    /// The other member's id.
+    pub peer: String,
+    pub conversation: [u8; 32],
+    /// The sponsor's side: the person this device vouched for. False on the
+    /// newcomer's device, where the peer is the sponsor.
+    pub vouchee: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VoucherContacts {
+    pub contacts: Vec<VoucherContact>,
+}
+
+/// The contacts this device holds from vouchings, read from the custody record.
+pub(super) async fn contact_list(door: &mut Door, origin: &str) -> Result<Vec<VoucherContact>> {
+    let loaded = load(door, origin).await?;
+    let own = {
+        let vault = door.vaults.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
+        vault.current_identity().await?.binding.member().to_owned()
+    };
+    let mut contacts = Vec::new();
+    for bond in &loaded.book.bonds {
+        let (peer, vouchee) = if bond.sponsor {
+            (bond.member.clone(), true)
+        } else {
+            (bond.sponsor_id.clone(), false)
+        };
+        let Some(secret) = from_hex(&bond.bond).and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+        else {
+            continue;
+        };
+        if peer.is_empty() {
+            continue;
+        }
+        let conversation = ctcs::voucher_conversation(&secret, &own, &peer);
+        contacts.push(VoucherContact {
+            peer,
+            conversation,
+            vouchee,
+        });
+    }
+    Ok(contacts)
+}
+
+pub(super) async fn contacts(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(VoucherContacts, Vec<Event>)> {
+    let origin = origin_of(door, key)?;
+    let contacts = contact_list(door, &origin).await?;
+    Ok((VoucherContacts { contacts }, vec![]))
+}
+
 /// Issue a link: generate it on this device, keep it in custody, then register
 /// only its hashes with the community.
 pub(super) async fn link_create(
