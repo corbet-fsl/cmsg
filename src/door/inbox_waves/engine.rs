@@ -915,6 +915,8 @@ where
             sender,
             recipient,
             receipt_digest,
+            // TODO(D5): the counterpart's signature from Terms / Offer (not on the wire yet).
+            contact_signature: None,
         };
         let id = job.id;
         self.write_desk(&desk, operation(&id, &format!("take.{}", job.attempts)))

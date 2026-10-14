@@ -15,6 +15,7 @@ pub(crate) mod engine;
 mod ports;
 pub mod types;
 pub mod production;
+pub mod wallet;
 pub mod worker;
 
 use super::*;

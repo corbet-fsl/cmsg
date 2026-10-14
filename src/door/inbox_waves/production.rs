@@ -472,6 +472,7 @@ mod tests {
             sender: context(0),
             recipient: context(1),
             receipt_digest: None,
+            contact_signature: None,
         }
     }
     #[tokio::test]

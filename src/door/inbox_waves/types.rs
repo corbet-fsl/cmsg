@@ -147,6 +147,9 @@ pub struct ProveJob {
     pub recipient: cnbx::WaveContext,
     /// The receipt digest the Answer settles (recipient Answer only).
     pub receipt_digest: Option<[u8; 32]>,
+    /// The counterpart's contact signature over the pair's transcript (reservations).
+    #[serde(default)]
+    pub contact_signature: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
