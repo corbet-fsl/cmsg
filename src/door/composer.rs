@@ -354,17 +354,17 @@ async fn lease<'p>(
     } else {
         door.live_membership(origin)
     }
-    .map_err(step("lease"))?;
+    .map_err(step("lease_open"))?;
     membership
         .observe_lease(now)
         .await
-        .map_err(step("lease"))?
+        .map_err(step("lease_observe"))?
         .passkey_certificate(policy, now)
         .await
-        .map_err(step("lease"))?
+        .map_err(step("lease_passkey"))?
         .initial_creation(now)
         .await
-        .map_err(step("lease"))
+        .map_err(step("lease_creation"))
 }
 
 /// Fingerprint the community trust of this Foyer is anchored to, if it is.
