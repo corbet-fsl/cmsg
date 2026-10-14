@@ -291,18 +291,24 @@ mod tests {
             challenge: [14; 32],
             opened_at: NOW - 10,
             expires_at: NOW + 500,
-            owner_authority: [0; 32],
-            peer_authority: [0; 32],
+            owner_authority: small(31),
+            peer_authority: small(32),
         }
+    }
+    /// A nonzero value below the field modulus.
+    fn small(n: u8) -> [u8; 32] {
+        let mut value = [0; 32];
+        value[31] = n;
+        value
     }
     fn statement() -> WaveStatement {
         WaveStatement {
             context: context(0),
             state_policy: [7; 32],
             version: 1,
-            state: [0; 32],
+            state: small(33),
             accepted_at: NOW - 5,
-            binding: [0; 32],
+            binding: small(34),
             certificate: vec![0; 64],
         }
     }
@@ -481,5 +487,67 @@ mod tests {
         // A further run finds nothing and hands back nothing.
         let handed = drain(&mut queue, &mut Script(vec![]), false).await.unwrap();
         assert_eq!(handed, 0);
+    }
+
+    /// Sign the accepted-state certificate of `statement` with a throwaway issuer key and
+    /// return the matching trusted policy.
+    fn certified(statement: &mut WaveStatement) -> WavePolicy {
+        use p256::ecdsa::{signature::Signer, Signature, SigningKey};
+        let key = SigningKey::from_slice(&[0x42; 32]).unwrap();
+        let point = key.verifying_key().to_encoded_point(false);
+        let mut policy = wave_policy();
+        policy.certificate_key = point.as_bytes()[1..].to_vec();
+        let body = czkp::certificate::AcceptedState {
+            community: statement.context.community,
+            owner: statement.context.owner,
+            state: statement.state,
+            scope: policy.proof_scope.circuit_digest,
+            version: statement.version,
+            accepted_at: statement.accepted_at,
+        };
+        let signature: Signature = key.sign(&body.bytes());
+        let signature = signature.normalize_s().unwrap_or(signature);
+        statement.certificate = signature.to_bytes().to_vec();
+        policy
+    }
+
+    #[tokio::test]
+    async fn a_certified_reservation_with_a_good_proof_verifies_and_every_tamper_fails() {
+        let calls = Rc::new(RefCell::new(0));
+        let built = Rc::new(RefCell::new(Vec::new()));
+        let mut statement = statement();
+        statement.state = small(21);
+        let policy = certified(&mut statement);
+        let mut t = trust();
+        t.wave = policy;
+        let p = ports(Some(t), Some(NOW), calls.clone(), built);
+        let expected = context(0);
+        let verified = p
+            .verify_reservation(&statement, b"good", &expected, NOW)
+            .await
+            .expect("a certified statement with a good proof verifies");
+        assert_eq!(verified.context(), &expected);
+        assert_eq!(*calls.borrow(), 1);
+        // Every single-field tamper is refused: proof, certificate, state, version, context.
+        assert!(p.verify_reservation(&statement, b"bad", &expected, NOW).await.is_err());
+        let mut forged = statement.clone();
+        forged.certificate[0] ^= 1;
+        assert!(p.verify_reservation(&forged, b"good", &expected, NOW).await.is_err());
+        let mut moved = statement.clone();
+        moved.state = small(22);
+        assert!(p.verify_reservation(&moved, b"good", &expected, NOW).await.is_err());
+        let mut newer = statement.clone();
+        newer.version += 1;
+        assert!(p.verify_reservation(&newer, b"good", &expected, NOW).await.is_err());
+        // The expected context is the caller's, not the statement's: another nonce fails.
+        let mut other = expected.clone();
+        other.nonce = [77; 32];
+        assert!(p.verify_reservation(&statement, b"good", &other, NOW).await.is_err());
+        // Past the original lease the reservation is no longer fresh evidence.
+        assert!(p
+            .verify_reservation(&statement, b"good", &expected, NOW + 500)
+            .await
+            .is_err());
+        assert_eq!(*calls.borrow(), 2, "only the bad proof itself reached the proof check; forged certificate, state, version, context and a stale lease failed before it");
     }
 }

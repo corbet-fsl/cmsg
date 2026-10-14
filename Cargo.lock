@@ -1984,6 +1984,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "js-sys",
+ "p256 0.13.2",
  "reqwest 0.13.5",
  "rustls",
  "schemars 1.2.2",
