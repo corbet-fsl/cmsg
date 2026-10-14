@@ -40,6 +40,7 @@ mod pairing_flow;
 pub mod pairing_host;
 pub mod pairing_publish;
 pub mod passport;
+pub mod portal;
 pub mod record;
 mod registry;
 pub(crate) mod rooms;
