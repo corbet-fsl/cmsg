@@ -3,6 +3,7 @@
 set -euo pipefail
 : "${CI:?CI worker required}" "${CI_COMMIT_SHA:?}"
 : "${CMSG_BROWSER_OUT:?absolute artifact directory required}"
+locked="${CMSG_PACKAGE_LOCKED---locked}"  # empty in the integration workspace, whose lock file is generated
 mode="${1:-ports}"
 case "$mode" in ports|service|assemble) ;; *) echo 'Expected ports, service or assemble' >&2; exit 64 ;; esac
 [[ "$CMSG_BROWSER_OUT" == /* && ! -L "$CMSG_BROWSER_OUT" ]]
@@ -24,7 +25,7 @@ fi
 [[ ! -e "$CMSG_BROWSER_OUT" ]]
 [[ "$CARGO_TARGET_DIR" == /* ]]
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
-[[ "$CARGO_BUILD_JOBS" =~ ^[1-4]$ ]]
+[[ "$CARGO_BUILD_JOBS" =~ ^([1-9]|1[0-6])$ ]]
 for tool in cargo rustc node wasm-bindgen esbuild; do command -v "$tool" >/dev/null; done
 # Dependencies of the original generator must already be provisioned. No tool
 # downloads, npm updates, rustup, cache setup or fallback executables here.
@@ -46,12 +47,12 @@ cp tools/package-lock.json "$out/tools-package-lock.json"
 
 # The parent resolves/retains v01's snapshot. Never reselect first-party sources
 # from an archived candidate list or a child crate's standalone lockfile.
-cargo metadata --locked --format-version 1 --features browser-tor \
+cargo metadata $locked --format-version 1 --features browser-tor \
   --filter-platform wasm32-unknown-unknown > "$out/metadata.json"
 node "$helper" select "$out" "$PWD"
 node "$helper" bindgen "$out" "$(wasm-bindgen --version)"
 
-cargo build --release --locked --target wasm32-unknown-unknown --lib \
+cargo build --release $locked --target wasm32-unknown-unknown --lib \
   --features cmsg/browser-tor -p cmsg -p ctrn -p cfry \
   --message-format=json > "$out/wasm-build.jsonl"
 for port in cmsg ctrn cfry; do
@@ -69,7 +70,7 @@ done
 
 # Original registry and generator, unchanged. The native schema exporter does
 # not need Tor: its browser feature only gates the target-specific owner module.
-cargo run --locked --example registry > "$out/registry.json"
+cargo run $locked --example registry > "$out/registry.json"
 node tools/generate.mjs "$out/registry.json" "$out/generated"
 node tools/check.mjs "$out/registry.json"
 node tools/node_modules/typescript/bin/tsc --outDir "$out/public/cmsg" \
