@@ -1460,7 +1460,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#0d818a7d89f2e2929726077c00227cb24087984a"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#cfe3fc66b1942f16c574ada3c7839ef131ad1c9a"
 dependencies = [
  "blake3",
  "cchr",
@@ -1624,7 +1624,7 @@ dependencies = [
 [[package]]
 name = "cgrd"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrd?branch=main#e639a686dc8356b21d65c653b718dc07abd8e398"
+source = "git+https://git.corbet.ch/corbet-foss/cgrd?branch=main#2aceefc2f98e5381d3f51f83bbcef1dd58473f82"
 dependencies = [
  "bigdecimal",
  "cpns",
@@ -2241,7 +2241,7 @@ dependencies = [
 [[package]]
 name = "cpfl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpfl.git?branch=main#8588f0632d0b4a2ab0422ab5984800bc8a19c528"
+source = "git+https://git.corbet.ch/corbet-foss/cpfl.git?branch=main#8624b917070fdb0b96512dc01c97a69b854179d4"
 dependencies = [
  "blake3",
  "cgrd",
@@ -2743,7 +2743,7 @@ dependencies = [
 [[package]]
 name = "cvch"
 version = "0.2.1"
-source = "git+https://git.corbet.ch/corbet-foss/cvch?branch=main#a0f153cf194f6513cf6e60eefa087d906616fc8f"
+source = "git+https://git.corbet.ch/corbet-foss/cvch?branch=main#41b6d57cf1c48b1bea8c5c6b721aaad4b54c1992"
 dependencies = [
  "cfbk",
  "csgn",
@@ -2762,7 +2762,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#1dac4b53322fb6bc95997c43b95143d6e31407ad"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#a71f8b8860f0e3ea1e45494cb72e552e517d0623"
 dependencies = [
  "any_ascii",
  "blind-rsa-signatures",
