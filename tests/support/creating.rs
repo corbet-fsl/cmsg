@@ -37,8 +37,17 @@ fn a_creation_needs_a_valid_address_a_name_and_the_legal_gate() {
             "{bad:?}"
         );
     }
+    // The bot fence: `legal` alone is refused, one medium gate is not enough.
+    for gates in [&["legal"][..], &["legal", "phone"], &["legal", "captcha"]] {
+        assert_eq!(
+            checked(&request("gardenclub", "Club", gates)).err(),
+            Some(ErrorCode::InvalidRequest),
+            "{gates:?}"
+        );
+    }
+    assert!(checked(&request("gardenclub", "Club", &["legal", "phone", "provider"])).is_ok());
     let many: Vec<String> = (0..17).map(|n| format!("gate{n}")).collect();
-    let mut too_many = request("gardenclub", "Club", &["legal"]);
+    let mut too_many = request("gardenclub", "Club", &["legal", "voucher"]);
     too_many.gates.extend(many);
     assert_eq!(checked(&too_many).err(), Some(ErrorCode::InvalidRequest));
 }

@@ -12,6 +12,7 @@ pub mod browser;
 pub mod composer;
 mod composition;
 mod creating;
+mod ending;
 mod current;
 pub use composition::VaultComposer;
 pub mod custody;
@@ -266,6 +267,9 @@ pub struct Door {
     /// owner. `None` until one is known; links are then limited only by the
     /// community's own (alpha) allowance.
     voucher_allowance: Option<u32>,
+    /// Lent by the trusted embedder: deletes the device's local data of a community
+    /// the platform ended (see `ending`).
+    local_data: Option<Box<dyn identity::LocalData + Send>>,
     wave_ports: BTreeMap<String, Box<dyn inbox_waves::WavePorts>>,
     login_configuration: BTreeMap<String, login::Configuration>,
     logins: BTreeMap<[u8; 32], login::session::State>,
@@ -289,6 +293,7 @@ impl Door {
             accounts: BTreeMap::new(),
             activation_prover: None,
             voucher_allowance: None,
+            local_data: None,
             wave_ports: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
             logins: BTreeMap::new(),

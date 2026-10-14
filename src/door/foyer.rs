@@ -166,10 +166,11 @@ const DEVICE_VOUCHER: [&str; 8] = [
 
 /// Creation operations the device performs itself (`creating`): the token is held
 /// between issuance and redemption, and the redemption must not carry the session.
-const DEVICE_CREATION: [&str; 3] = [
+const DEVICE_CREATION: [&str; 4] = [
     "community_create",
     "community_creation_claim",
     "community_terms",
+    "address_check",
 ];
 
 static OPERATIONS: LazyLock<Vec<Operation>> = LazyLock::new(|| operations(cfyr::contract()));
@@ -556,7 +557,7 @@ impl Binding {
     }
 }
 
-fn trust_error(error: cfyr::trust::Error) -> ErrorCode {
+pub(super) fn trust_error(error: cfyr::trust::Error) -> ErrorCode {
     use cfyr::trust::Error;
     match error {
         Error::Configuration => ErrorCode::InvalidRequest,

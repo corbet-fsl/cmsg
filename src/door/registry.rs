@@ -9,8 +9,9 @@ use board::{
     watch as board_watch,
 };
 use creating::{
-    community_create, community_creation, community_creation_claim, community_creation_finish,
+    address_check, community_create, community_creation, community_creation_claim, community_creation_finish,
 };
+use ending::ending_refresh;
 use foyer::refresh as foyer_refresh;
 use inbox::{blocking_rules as inbox_blocking_rules, contact_act as inbox_contact_act};
 use inbox_conversation::{
@@ -435,6 +436,8 @@ actions! {
     "account_reopen" => account_reopen(Empty) -> account::Opened, VaultAccess, Vault;
     "account_activate" => account_activate(Empty) -> account::Activation, VaultAccess, Vault;
     "community_join" => community_join(account::JoinRequest) -> account::Joined, VaultAccess, Vault;
+    "foyer.ending_refresh" => ending_refresh(Empty) -> ending::Refreshed, FoyerCheck, Foyer;
+    "foyer.address_check" => address_check(creating::AddressQuery) -> creating::AddressReport, VaultAccess, Foyer;
     "foyer.community_create" => community_create(creating::Create) -> creating::Created, VaultAccess, Foyer;
     "foyer.community_creation" => community_creation(Empty) -> creating::Draft, VaultAccess, Foyer;
     "foyer.community_creation_finish" => community_creation_finish(Empty) -> Empty, VaultAccess, Foyer;

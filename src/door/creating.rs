@@ -22,6 +22,10 @@ const NAME_CHARS: usize = 64;
 const MAXIMUM_GATES: usize = 16;
 /// The gate every community has.
 const LEGAL: &str = "legal";
+/// Strong and medium gates of the bot fence; the service enforces the same classes
+/// (`cvld::config::CreationPlan`), the device only refuses early.
+const STRONG: &[&str] = &["voucher", "eid", "id_document", "payment"];
+const MEDIUM: &[&str] = &["phone", "provider"];
 
 /// Body of `foyer.community_create`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -37,6 +41,31 @@ pub struct Create {
     /// Admission gates the creator chose; `legal` is always required.
     #[serde(default)]
     pub gates: Vec<String>,
+}
+
+/// Body of `foyer.address_check`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddressQuery {
+    /// The address as typed so far.
+    pub address: String,
+    /// The display name suggestions are derived from.
+    #[serde(default)]
+    pub display_name: String,
+    /// How many suggestions at most (0 to 8).
+    #[serde(default)]
+    pub suggestions: u8,
+}
+
+/// Answer of `foyer.address_check`. `refusal` is one of `too_short`, `too_long`,
+/// `charset`, `reserved`, `offensive` or `taken`; `light` is `red`, `amber` or `green`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddressReport {
+    pub available: bool,
+    pub refusal: Option<String>,
+    pub light: String,
+    pub suggestions: Vec<String>,
 }
 
 /// What the device keeps from a creation. The claim secret is a bearer: it lets
@@ -151,6 +180,10 @@ fn checked(request: &Create) -> Result<(String, Vec<String>)> {
         gates.push(gate.clone());
     }
     if !gates.iter().any(|gate| gate == LEGAL) {
+        return Err(ErrorCode::InvalidRequest);
+    }
+    let count = |class: &[&str]| gates.iter().filter(|g| class.contains(&g.as_str())).count();
+    if count(STRONG) == 0 && count(MEDIUM) < 2 {
         return Err(ErrorCode::InvalidRequest);
     }
     Ok((name.to_owned(), gates))
@@ -487,6 +520,53 @@ pub(super) async fn community_creation(
         },
         vec![],
     ))
+}
+
+/// Is this address usable and free? The syntax and the length light are decided on
+/// the device; only an address that passes goes to the service, on the session-less
+/// channel so the platform cannot tie the question to a person. Nothing is kept.
+pub(super) async fn address_check(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: AddressQuery,
+) -> Result<(AddressReport, Vec<Event>)> {
+    let origin = origin_of(door, key)?;
+    let light = match address::light(&request.address) {
+        address::Light::Red => "red",
+        address::Light::Amber => "amber",
+        address::Light::Green => "green",
+    };
+    let local = match address::check_syntax(&request.address) {
+        Err(address::Refusal::TooShort) => Some("too_short"),
+        Err(address::Refusal::TooLong) => Some("too_long"),
+        Err(address::Refusal::Charset) => Some("charset"),
+        _ => None,
+    };
+    if let Some(refusal) = local.filter(|_| request.suggestions == 0 || request.display_name.is_empty()) {
+        return Ok((
+            AddressReport {
+                available: false,
+                refusal: Some(refusal.into()),
+                light: light.into(),
+                suggestions: Vec::new(),
+            },
+            vec![],
+        ));
+    }
+    let binding = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
+    let answer = binding
+        .call_public(
+            "address_check",
+            serde_json::json!({
+                "address": request.address,
+                "display_name": request.display_name,
+                "suggestions": request.suggestions.min(8),
+            }),
+        )
+        .await?;
+    let report: AddressReport =
+        serde_json::from_value(answer).map_err(|_| ErrorCode::Unavailable)?;
+    Ok((report, vec![]))
 }
 
 /// The new community is joined: forget the creation.
