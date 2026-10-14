@@ -57,6 +57,7 @@ impl ProfilePublish {
             reachability,
             // A system field: never taken from the request, only from custody.
             vouched_by: None,
+            vouched_snapshot: None,
         })
     }
 }
@@ -121,7 +122,10 @@ pub(in crate::door) async fn profile_publish(
     // A system field: the device's own live Mesh addresses, never request data.
     let reachability = door.reachability(&origin);
     let mut edit = request.edit(reachability)?;
-    edit.vouched_by = super::super::vouching::endorsement_wire(door, &origin).await;
+    if let Some((wire, snapshot)) = super::super::vouching::endorsement_wire(door, &origin).await {
+        edit.vouched_by = Some(wire);
+        edit.vouched_snapshot = snapshot;
+    }
     let board = door.boards.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     board.require_committed()?;
     let version = board.profile_publish(edit, expires).await?;

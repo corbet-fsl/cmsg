@@ -162,7 +162,7 @@ where
         origin: &str,
         now: u64,
         expires: u64,
-    ) -> Result<(Vec<u8>, Vec<u8>)> {
+    ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>)> {
         let signed = self.sign_transcript(message, origin, now, expires).await?;
         drop(signed.admitted);
         let device = self
@@ -171,7 +171,14 @@ where
             .device_public_key()
             .await
             .map_err(keys_error)?;
-        Ok((signed.signature, device.value().to_vec()))
+        let credential = self
+            .vault
+            .community_credential()
+            .await
+            .map_err(credential_error)?
+            .map(|credential| credential.to_vec())
+            .unwrap_or_default();
+        Ok((signed.signature, device.value().to_vec(), credential))
     }
 
     /// Pin the verified chain head of this membership's community in the Vault,

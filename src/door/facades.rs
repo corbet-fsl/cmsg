@@ -291,15 +291,16 @@ pub(super) trait BoundVault {
     ) -> OwnedFuture<'a, ()> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
-    /// Sign an endorsement statement with the device key; the signature and the
-    /// device public key.
+    /// Sign an endorsement statement with the device key; the signature, the
+    /// device public key and this member's signed community credential (the lineage
+    /// evidence that travels with the endorsement; empty when none is held).
     fn sign_endorsement<'a>(
         &'a mut self,
         _message: &'a [u8],
         _origin: &'a str,
         _now: u64,
         _expires: u64,
-    ) -> OwnedFuture<'a, (Vec<u8>, Vec<u8>)> {
+    ) -> OwnedFuture<'a, (Vec<u8>, Vec<u8>, Vec<u8>)> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
     fn contact_act(&mut self, _request: inbox::ContactAct) -> OwnedFuture<'_, cnbx::Relation> {
@@ -533,7 +534,7 @@ where
         origin: &'a str,
         now: u64,
         expires: u64,
-    ) -> OwnedFuture<'a, (Vec<u8>, Vec<u8>)> {
+    ) -> OwnedFuture<'a, (Vec<u8>, Vec<u8>, Vec<u8>)> {
         Box::pin(self.sign_endorsement_owned(message, origin, now, expires))
     }
     fn store_pin(

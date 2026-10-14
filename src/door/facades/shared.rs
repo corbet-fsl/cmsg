@@ -447,7 +447,7 @@ where
         origin: &'a str,
         now: u64,
         expires: u64,
-    ) -> OwnedFuture<'a, (Vec<u8>, Vec<u8>)> {
+    ) -> OwnedFuture<'a, (Vec<u8>, Vec<u8>, Vec<u8>)> {
         Box::pin(async move {
             if self.lifetime.is_closed() || origin != self.origin {
                 return Err(ErrorCode::Unauthorized);

@@ -102,6 +102,10 @@ pub(super) struct Received {
     pub handle: String,
     pub device: String,
     pub signature: String,
+    /// `cvch::link::Snapshot` wire form (hex): the sponsor's credential and when this device
+    /// received it. Lineage evidence for readers once the sponsor has left.
+    #[serde(default)]
+    pub snapshot: Option<String>,
 }
 
 /// A statement the issuer's device signed in visible mode.
@@ -112,6 +116,10 @@ pub(super) struct Endorsement {
     pub handle: String,
     pub device: String,
     pub signature: String,
+    /// The sponsor's signed community credential (hex) at signing time, sent with the
+    /// endorsement as lineage evidence; empty when the vault held none.
+    #[serde(default)]
+    pub credential: String,
     /// Left for the vouchee through the community's sealed relay.
     #[serde(default)]
     pub posted: bool,
@@ -573,7 +581,7 @@ async fn endorse(
     let message = cvch::link::endorsement_bytes(&door.config.community, vouchee, &handle);
     let started = now()?;
     let vault = door.vaults.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
-    let (signature, device) = vault
+    let (signature, device, credential) = vault
         .sign_endorsement(
             &message,
             origin,
@@ -587,6 +595,7 @@ async fn endorse(
         handle,
         device: to_hex(&device),
         signature: to_hex(&signature),
+        credential: to_hex(&credential),
         posted: false,
     });
     Ok(())
@@ -609,8 +618,11 @@ async fn post_endorsements(door: &mut Door, origin: &str, book: &mut Book, id: &
             let bond = Bond::from_bytes(from_hex(&bond.bond)?.try_into().ok()?);
             let device: [u8; 32] = from_hex(&have.device)?.try_into().ok()?;
             let signature: [u8; 64] = from_hex(&have.signature)?.try_into().ok()?;
+            let credential = from_hex(&have.credential).filter(|bytes| !bytes.is_empty());
             let plain = cvch::link::Endorsement::new(&have.handle, device, signature)
-                .and_then(|endorsement| endorsement.to_bytes())
+                .and_then(|endorsement| {
+                    cvch::link::reply_bytes(&endorsement, credential.as_deref())
+                })
                 .ok()?;
             let sealed = bond.seal_reply(&link_id, &plain).ok()?;
             Some((at, sealed, have.vouchee.clone()))
@@ -828,17 +840,26 @@ pub(super) async fn vouched_by(
         // that signs wrongly is no sponsor to show.
         let verified = bond
             .open_reply(&link_id, &sealed)
-            .and_then(|plain| cvch::link::Endorsement::from_bytes(&plain))
-            .and_then(|endorsement| {
+            .and_then(|plain| cvch::link::parse_reply(&plain))
+            .and_then(|(endorsement, credential)| {
                 endorsement.verify(&community, &member)?;
-                Ok(endorsement)
+                Ok((endorsement, credential))
             });
-        if let Ok(endorsement) = verified {
+        if let Ok((endorsement, credential)) = verified {
+            // The receipt time is this device's own clock, never the sponsor's claim.
+            let received_at = now().unwrap_or(0);
+            let snapshot = credential.and_then(|credential| {
+                cvch::link::Snapshot { credential, received_at }
+                    .to_bytes()
+                    .ok()
+                    .map(|bytes| to_hex(&bytes))
+            });
             loaded.book.received.push(Received {
                 link,
                 handle: endorsement.handle,
                 device: to_hex(&endorsement.device),
                 signature: to_hex(&endorsement.signature),
+                snapshot,
             });
         }
     }
@@ -857,15 +878,20 @@ pub(super) async fn vouched_by(
 /// The newcomer's received endorsement in wire form, for the profile's system
 /// field. Only visible-mode admissions ever leave one in custody, so this is
 /// `None` for everyone else and the profile never gains the field retroactively.
-pub(super) async fn endorsement_wire(door: &mut Door, origin: &str) -> Option<Vec<u8>> {
+pub(super) async fn endorsement_wire(
+    door: &mut Door,
+    origin: &str,
+) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
     let loaded = load(door, origin).await.ok()?;
     let have = loaded.book.received.first()?;
     let device: [u8; 32] = from_hex(&have.device)?.try_into().ok()?;
     let signature: [u8; 64] = from_hex(&have.signature)?.try_into().ok()?;
-    cvch::link::Endorsement::new(&have.handle, device, signature)
+    let wire = cvch::link::Endorsement::new(&have.handle, device, signature)
         .ok()?
         .to_bytes()
-        .ok()
+        .ok()?;
+    let snapshot = have.snapshot.as_deref().and_then(from_hex);
+    Some((wire, snapshot))
 }
 
 /// Issue a link: generate it on this device, keep it in custody, then register
