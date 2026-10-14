@@ -11,6 +11,7 @@ pub mod browser;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub mod composer;
 mod composition;
+pub mod courier;
 mod creating;
 mod current;
 pub use composition::VaultComposer;
@@ -35,6 +36,8 @@ pub mod ohttp;
 pub mod pairing;
 pub mod pairing_roles;
 mod pairing_flow;
+#[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
+pub mod pairing_host;
 pub mod pairing_publish;
 pub mod passport;
 pub mod record;
@@ -535,6 +538,22 @@ impl Door {
         }
     }
 
+    /// What is actually bound. The Inbox facade is served from the bound Vault.
+    fn readiness(&self, owner: Family) -> Readiness {
+        let bound = match owner {
+            Family::Vault | Family::Inbox => !self.vaults.is_empty(),
+            Family::Mesh => !self.meshes.is_empty(),
+            Family::Foyer => !self.foyers.is_empty(),
+            Family::Board => !self.boards.is_empty(),
+            _ => false,
+        };
+        if bound {
+            Readiness::Ready
+        } else {
+            Readiness::Unavailable
+        }
+    }
+
     fn status(&self) -> RuntimeStatus {
         RuntimeStatus {
             community: self.config.community.clone(),
@@ -547,7 +566,7 @@ impl Door {
                 Family::Inbox,
             ]
             .into_iter()
-            .map(|owner| (owner, Readiness::Unavailable))
+            .map(|owner| (owner, self.readiness(owner)))
             .collect(),
         }
     }

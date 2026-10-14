@@ -14,6 +14,7 @@ mod desk;
 pub(crate) mod engine;
 mod ports;
 pub mod types;
+pub mod production;
 pub mod worker;
 
 use super::*;

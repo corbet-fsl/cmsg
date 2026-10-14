@@ -14,6 +14,38 @@ where
     A: ckmg::Authority,
     R: cvlt::Records,
 {
+    pub(super) async fn pairing_anchor_owned(&mut self) -> Result<ckmg::Lineage> {
+        let lineage = self.vault.keys().lineage().await.map_err(keys_error)?;
+        if lineage.binding != self.binding {
+            return Err(ErrorCode::Unauthorized);
+        }
+        Ok(lineage)
+    }
+
+    pub(super) async fn retain_pairing_evidence_owned(
+        &mut self,
+        evidence: &cvlt::PreparedLineageEvidence,
+        receipt: &ckmg::Receipt,
+    ) -> Result<()> {
+        let operation = *receipt.operation.as_bytes();
+        self.vault
+            .retain_lineage_evidence(evidence, operation)
+            .await
+            .map(|_| ())
+            .map_err(|_| ErrorCode::Reconcile)
+    }
+
+    pub(super) async fn acknowledge_pairing_owned(
+        &mut self,
+        receipt: &ckmg::Receipt,
+    ) -> Result<()> {
+        self.vault
+            .keys()
+            .acknowledge(receipt.operation)
+            .await
+            .map_err(keys_error)
+    }
+
     pub(super) async fn revision_record_owned(
         &mut self,
         receipt: &ckmg::Receipt,

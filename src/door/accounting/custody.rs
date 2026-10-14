@@ -116,6 +116,46 @@ where
         }
     }
 
+    /// The community credential kept in the Vault, read after fresh original Keys
+    /// authority (public signed data).
+    pub async fn stored_community_credential(&mut self) -> Result<Option<Vec<u8>>> {
+        let origin = self.origin.clone();
+        self.check(&origin).await?;
+        self.vault
+            .community_credential()
+            .await
+            .map(|credential| credential.map(|bytes| bytes.to_vec()))
+            .map_err(|_| ErrorCode::Unavailable)
+    }
+
+    /// The owed account update (exact signed bytes) from its own Vault record,
+    /// read after fresh original Keys authority. `None` when nothing is owed.
+    pub async fn update_outbox(&mut self) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
+        let origin = self.origin.clone();
+        self.check(&origin).await?;
+        self.vault
+            .update_outbox()
+            .await
+            .map_err(|_| ErrorCode::Unavailable)
+    }
+
+    /// Replace the owed update by compare-and-swap against what the caller read
+    /// (empty `outbox` clears it). A lost race writes nothing and is `Reconcile`.
+    pub async fn replace_update_outbox(
+        &mut self,
+        expected: Option<&[u8]>,
+        outbox: &[u8],
+    ) -> Result<()> {
+        let origin = self.origin.clone();
+        self.check(&origin).await?;
+        match self.vault.replace_update_outbox(expected, outbox).await {
+            Ok(_) => Ok(()),
+            Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
+            Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),
+            Err(_) => Err(ErrorCode::Unavailable),
+        }
+    }
+
     /// The voucher custody record (link secrets, bond nonces, bonds), read after
     /// fresh original Keys authority.
     pub async fn voucher_custody(&mut self) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {

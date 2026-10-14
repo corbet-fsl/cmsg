@@ -139,6 +139,9 @@ pub(super) struct Book {
     pub claimed: Option<String>,
     #[serde(default)]
     pub received: Vec<Received>,
+    /// The member read the one-time explanation of vouching and confirmed it.
+    #[serde(default)]
+    pub explained: bool,
 }
 
 impl Drop for Book {
@@ -1074,3 +1077,39 @@ pub(super) async fn signoff_decide(
 #[cfg(test)]
 #[path = "../../tests/support/vouching.rs"]
 mod tests;
+
+/// Whether the one-time explanation of vouching was confirmed on this member's
+/// devices; confirming it is remembered in the Vault so it is never asked twice.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Explanation {
+    /// Set to record the confirmation; absent or false only reads.
+    #[serde(default)]
+    pub confirm: bool,
+}
+
+/// The remembered state of the explanation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Explained {
+    pub confirmed: bool,
+}
+
+pub(super) async fn explanation(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: Explanation,
+) -> Result<(Explained, Vec<Event>)> {
+    let origin = origin_of(door, key)?;
+    let mut loaded = load(door, &origin).await?;
+    if request.confirm && !loaded.book.explained {
+        loaded.book.explained = true;
+        loaded.save(door, &origin).await?;
+    }
+    Ok((
+        Explained {
+            confirmed: loaded.book.explained,
+        },
+        vec![],
+    ))
+}

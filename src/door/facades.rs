@@ -215,8 +215,9 @@ impl<T: clnk::Transport, R: RoomLink> BoundBoard for BoardBinding<T, R> {
 }
 
 pub(super) struct BoundMesh {
-    mesh: cmsh::Mesh,
-    listener: cmsh::Listening,
+    // The Mesh, its listener, the address book and the send queue are shared
+    // with the courier task of this origin (see `courier`).
+    pub(super) shared: std::rc::Rc<courier::Shared>,
     _lifetime: Option<MeshLifetime>,
 }
 /// Retain the actual transport shutdown with Mesh, including failed startup,
@@ -244,11 +245,13 @@ impl BoundMesh {
         self.listener.addresses()
     }
     pub fn view(&self) -> Vec<cmsh::BackendView> {
-        self.mesh.view()
+        self.shared.mesh.view()
     }
-    pub fn close(mut self) {
-        self.listener.close();
-        drop(self.mesh);
+    /// Stop the courier and release the Mesh. The listener (and with it the
+    /// published reachability) ends when the courier drops its handle, which
+    /// it does at its next wake-up.
+    pub fn close(self) {
+        self.shared.close();
     }
 }
 
@@ -347,6 +350,22 @@ pub(super) trait BoundVault {
         _request: &'a ckmg::PairingRequest,
         _origin: &'a str,
     ) -> OwnedFuture<'a, PairApproved> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// The member's current lineage (the anchor a pairing extends).
+    fn pairing_anchor(&mut self) -> OwnedFuture<'_, ckmg::Lineage> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// Retain the prepared evidence of the pending approval receipt, durably.
+    fn retain_pairing_evidence<'a>(
+        &'a mut self,
+        _evidence: &'a cvlt::PreparedLineageEvidence,
+        _receipt: &'a ckmg::Receipt,
+    ) -> OwnedFuture<'a, ()> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// Acknowledge the approval receipt after its revision is published.
+    fn acknowledge_pairing<'a>(&'a mut self, _receipt: &'a ckmg::Receipt) -> OwnedFuture<'a, ()> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
     fn lock(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + 'static>>;
@@ -572,6 +591,19 @@ where
     ) -> OwnedFuture<'a, cdht::SignedValue> {
         Box::pin(self.revision_record_owned(receipt, previous, canonical_evidence, origin))
     }
+    fn pairing_anchor(&mut self) -> OwnedFuture<'_, ckmg::Lineage> {
+        Box::pin(self.pairing_anchor_owned())
+    }
+    fn retain_pairing_evidence<'a>(
+        &'a mut self,
+        evidence: &'a cvlt::PreparedLineageEvidence,
+        receipt: &'a ckmg::Receipt,
+    ) -> OwnedFuture<'a, ()> {
+        Box::pin(self.retain_pairing_evidence_owned(evidence, receipt))
+    }
+    fn acknowledge_pairing<'a>(&'a mut self, receipt: &'a ckmg::Receipt) -> OwnedFuture<'a, ()> {
+        Box::pin(self.acknowledge_pairing_owned(receipt))
+    }
 
     fn lock(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + 'static>> {
         Box::pin(async move {
@@ -713,11 +745,19 @@ impl Door {
             return Err(ErrorCode::InvalidRequest);
         }
         let listener = mesh.listen().await.map_err(|_| ErrorCode::Unavailable)?;
+        // One address must never be published for two memberships of this device:
+        // peers could link the pseudonyms. Production gives every origin its own
+        // onion key (derived per community); refuse a backend that does not.
+        if self.meshes.values().any(|bound| {
+            let own = bound.shared.own.borrow();
+            listener.addresses().iter().any(|a| own.contains(a))
+        }) {
+            return Err(ErrorCode::InvalidRequest);
+        }
         self.meshes.insert(
             origin.into(),
             BoundMesh {
-                mesh,
-                listener,
+                shared: std::rc::Rc::new(courier::Shared::new(mesh, listener)),
                 _lifetime: lifetime,
             },
         );

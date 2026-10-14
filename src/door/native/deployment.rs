@@ -1,8 +1,10 @@
 //! Public native deployment data; actual custody begins only after login.
 use super::{Clock, DeviceConfiguration, Embedded, Pairing};
 use crate::door::{
-    browser::deployment as budgets, catalog, scenario, ErrorCode, Result, Role, VaultComposer,
+    browser::deployment as budgets, catalog, scenario, Door, ErrorCode, Result, Role,
+    VaultComposer,
 };
+use futures_util::future::LocalBoxFuture;
 use cmsh::tor_discovery::TorWatcher;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -22,7 +24,17 @@ pub struct NativeDeployment {
     pub runtime: DeviceConfiguration,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_tor: Option<TorDeployment>,
+    /// Extra DER certificates the deployment trusts for its HTTPS services (a private
+    /// platform's CA). Trusted deployment data, never a request field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tls_root_files: Vec<PathBuf>,
 }
+
+/// Trusted composition that runs on the Door's own thread right after the Door is
+/// built and before the first action: authenticator, global session, prover and ports
+/// that only the embedder can lend. It grants no custody; that still begins at login.
+pub type DeviceSetup =
+    Box<dyn for<'a> FnOnce(&'a mut Door) -> LocalBoxFuture<'a, Result<()>> + Send>;
 
 /// Original public Tor network with explicit resource budgets and local paths.
 /// Private network overrides belong to trusted fixture construction, not JSON.
@@ -112,6 +124,15 @@ impl NativeDeployment {
         lifetime_seconds: u64,
         clock: Arc<dyn Clock>,
     ) -> Result<Embedded> {
+        self.start_with(lifetime_seconds, clock, None).await
+    }
+
+    pub(super) async fn start_with(
+        self,
+        lifetime_seconds: u64,
+        clock: Arc<dyn Clock>,
+        setup: Option<DeviceSetup>,
+    ) -> Result<Embedded> {
         let Some(tor) = self.native_tor else {
             return Embedded::configured(self.runtime, lifetime_seconds, clock).await;
         };
@@ -127,7 +148,23 @@ impl NativeDeployment {
         Embedded::start_composed(
             move || async move {
                 let community = self.runtime.community.clone();
-                let (door, board) = self.runtime.construct_restoring()?;
+                let mut roots = Vec::new();
+                for file in &self.tls_root_files {
+                    roots.push(std::fs::read(file).map_err(|_| ErrorCode::Unavailable)?);
+                }
+                let mut runtime = self.runtime;
+                if runtime.role != Role::Member {
+                    return Err(ErrorCode::Unauthorized);
+                }
+                let board = runtime
+                    .forum
+                    .take()
+                    .map(|forum| forum.prepare(&community, &runtime.origin))
+                    .transpose()?;
+                let mut door = runtime.construct_with_roots(&roots)?;
+                if let Some(setup) = setup {
+                    setup(&mut door).await?;
+                }
                 let composer = tor.composer(&community, board)?;
                 Ok((door, composer))
             },
