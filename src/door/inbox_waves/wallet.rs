@@ -47,6 +47,10 @@ pub trait UpdateSink {
     /// Send the update (idempotent on retry) and return the issuer certificate of the
     /// accepted state.
     async fn apply(&mut self, candidate: &Candidate, proof: Vec<u8>) -> Result<Certificate>;
+    /// The accepted state is durable: the sink may forget what it owed (settle the update).
+    async fn settled(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Checks the counterpart's consent to the transcript.
@@ -123,6 +127,7 @@ where
         let certificate = self.sink.apply(&candidate, proof).await?;
         let accepted = candidate.next.clone().with_certificate(certificate);
         self.state.store(&accepted).await?;
+        self.sink.settled().await?;
         Ok((accepted, candidate))
     }
 

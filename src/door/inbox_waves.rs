@@ -18,6 +18,7 @@ pub mod account_ports;
 pub mod production;
 pub mod types;
 pub mod wallet;
+pub mod witness;
 pub mod worker;
 
 use super::*;
