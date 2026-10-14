@@ -22,6 +22,8 @@ pub(super) fn fake_signature(nonce: &[u8; 32]) -> Vec<u8> {
 
 pub(super) struct Ports {
     pub(super) lineage: ckmg::Lineage,
+    /// Seconds an offer stays open; 0 makes every Terms late.
+    pub(super) lifetime: u64,
 }
 impl WavePorts for Ports {
     fn policy(&self, _: u64) -> Result<Policy> {
@@ -30,7 +32,7 @@ impl WavePorts for Ports {
             contact_policy: [2; 32],
             history: [3; 32],
             authority: [4; 32],
-            lifetime: 3600,
+            lifetime: self.lifetime,
             window: 0,
         })
     }
@@ -40,6 +42,7 @@ impl WavePorts for Ports {
         _: &'a Hello,
         _: &'a str,
         _: u64,
+        _: &'a dyn crate::door::inbox_waves::AccountSigner,
     ) -> facades::OwnedFuture<'a, Terms> {
         let nonce = *nonce;
         Box::pin(async move {
@@ -54,6 +57,7 @@ impl WavePorts for Ports {
         &'a self,
         request: ContactRequest<'a>,
         _: u64,
+        _: &'a dyn crate::door::inbox_waves::AccountSigner,
     ) -> facades::OwnedFuture<'a, Vec<u8>> {
         // The scripted signature of this fixture: the nonce repeated, the same for both roles.
         let nonce = *request.nonce;
@@ -120,7 +124,7 @@ async fn open() -> (ProfileOwner, Ports) {
         .lineage()
         .await
         .unwrap();
-    (owner, Ports { lineage })
+    (owner, Ports { lineage, lifetime: 3600 })
 }
 
 async fn status(
@@ -473,4 +477,81 @@ async fn an_unanswered_wave_gives_no_claim_so_the_pending_conversation_cannot_se
         )
         .await
         .is_err());
+}
+
+#[tokio::test]
+async fn terms_that_come_too_late_replace_the_hello_silently_and_boundedly() {
+    let (mut owner, mut ports) = open().await;
+    ports.lifetime = 0;
+    let first = status(
+        &mut owner,
+        &ports,
+        Command::Send(WaveSend { peer: member(PEER) }),
+    )
+    .await
+    .unwrap();
+    let mut nonce = first.nonce;
+    let mut seen = vec![nonce];
+    for round in 0..3 {
+        let Answer::Outbox(outbox) = owner.waves(Command::Outbox, &ports).await.unwrap() else {
+            panic!("an outbox")
+        };
+        let conversation = outbox.messages.last().unwrap().envelope.conversation;
+        let late = WaveIncoming {
+            peer: member(PEER),
+            envelope: Envelope {
+                version: WAVE_VERSION,
+                conversation,
+                sender: member(PEER),
+                sequence: 0,
+                message: WaveMessage::Terms {
+                    nonce,
+                    terms: Terms {
+                        recipient_authority: [5; 32],
+                        recipient_challenge: [6; 32],
+                        contact_signature: fake_signature(&nonce),
+                    },
+                },
+            },
+        };
+        // The human's wave is kept: one wave, a new Hello, still waiting for terms.
+        let again = status(&mut owner, &ports, Command::Receive(late))
+            .await
+            .unwrap();
+        assert_eq!((again.role, again.stage), (0, Stage::Hello), "round {round}");
+        assert!(!seen.contains(&again.nonce));
+        nonce = again.nonce;
+        seen.push(nonce);
+        let Answer::List(list) = owner.waves(Command::List, &ports).await.unwrap() else {
+            panic!("a list")
+        };
+        assert_eq!(list.waves.len(), 1);
+        assert_eq!(list.stalled, 0);
+    }
+    // The fourth replacement is refused: the retries are bounded.
+    let Answer::Outbox(outbox) = owner.waves(Command::Outbox, &ports).await.unwrap() else {
+        panic!("an outbox")
+    };
+    let conversation = outbox.messages.last().unwrap().envelope.conversation;
+    let late = WaveIncoming {
+        peer: member(PEER),
+        envelope: Envelope {
+            version: WAVE_VERSION,
+            conversation,
+            sender: member(PEER),
+            sequence: 0,
+            message: WaveMessage::Terms {
+                nonce,
+                terms: Terms {
+                    recipient_authority: [5; 32],
+                    recipient_challenge: [6; 32],
+                    contact_signature: fake_signature(&nonce),
+                },
+            },
+        },
+    };
+    assert_eq!(
+        status(&mut owner, &ports, Command::Receive(late)).await,
+        Err(ErrorCode::Refused)
+    );
 }

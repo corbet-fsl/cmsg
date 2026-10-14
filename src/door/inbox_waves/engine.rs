@@ -9,6 +9,7 @@
 use super::super::*;
 use super::desk::{Desk, Session, KEY, OWNER};
 use super::ports::{ContactRequest, Policy, ReceiptRequest, WavePorts};
+use super::signing::EngineSigner;
 
 /// How many times a wave may silently replace a Hello whose Terms came too late.
 const MAX_REHELLOS: u8 = 3;
@@ -310,7 +311,7 @@ where
                     return Err(ErrorCode::Refused);
                 }
                 // The receipt is signed and stored before the Close can carry it.
-                let receipt = self.sign_receipt(&session, 2).await?;
+                let receipt = self.sign_receipt(&mut desk, &session, 2).await?;
                 desk.record(*nonce, Work::Close)?;
                 let closing = desk.wave_mut(nonce)?;
                 closing.resolution = Some(receipt);
@@ -343,14 +344,25 @@ where
     }
 
     /// The recipient's account signs the receipt of its decision (`kind` 1 Answer, 2 Close).
-    async fn sign_receipt(&mut self, session: &Session, kind: u8) -> Result<Receipt> {
+    async fn sign_receipt(
+        &mut self,
+        desk: &mut Desk,
+        session: &Session,
+        kind: u8,
+    ) -> Result<Receipt> {
         if let Some(stored) = &session.resolution {
             return Ok(stored.clone());
         }
         let receipt_digest = session.receipt_digest.ok_or(ErrorCode::Refused)?;
         let issued_at = Self::receipt_time(session);
-        let signature = self
-            .ports
+        let ports = self.ports;
+        let signer = EngineSigner::new(
+            &mut *self.keys,
+            &*self.store,
+            self.binding.community(),
+            desk.ledger.clone(),
+        );
+        let made = ports
             .sign_resolution(
                 ReceiptRequest {
                     contact: Self::contact_of(session),
@@ -360,8 +372,11 @@ where
                     receipt_signature: &[],
                 },
                 now()?,
+                &signer,
             )
-            .await?;
+            .await;
+        desk.ledger = signer.into_ledger();
+        let signature = made?;
         if signature.len() != CONTACT_SIGNATURE_BYTES {
             return Err(ErrorCode::Refused);
         }
@@ -380,7 +395,7 @@ where
         let welcome = session.welcome.clone().ok_or(ErrorCode::Refused)?;
         let conversation = session.hello.conversation;
         // The receipt is signed and stored before the Answer can carry it anywhere.
-        let signed = self.sign_receipt(&session, 1).await?;
+        let signed = self.sign_receipt(desk, &session, 1).await?;
         let me = self.me()?;
         let mut clock = custody::SystemClock;
         let waves = self.inbox.waves(me, self.store).map_err(inbox_error)?;
@@ -623,7 +638,16 @@ where
         {
             return Err(ErrorCode::Refused);
         }
-        let terms = self.ports.terms(&nonce, &hello, peer, now).await?;
+        let ports = self.ports;
+        let signer = EngineSigner::new(
+            &mut *self.keys,
+            &*self.store,
+            self.binding.community(),
+            desk.ledger.clone(),
+        );
+        let made = ports.terms(&nonce, &hello, peer, now, &signer).await;
+        desk.ledger = signer.into_ledger();
+        let terms = made?;
         if terms.contact_signature.len() != CONTACT_SIGNATURE_BYTES {
             return Err(ErrorCode::Refused);
         }
@@ -734,7 +758,16 @@ where
         self.ports
             .verify_contact(request, &terms.contact_signature, now)
             .await?;
-        let own_signature = self.ports.sign_contact(request, now).await?;
+        let ports = self.ports;
+        let signer = EngineSigner::new(
+            &mut *self.keys,
+            &*self.store,
+            self.binding.community(),
+            desk.ledger.clone(),
+        );
+        let made = ports.sign_contact(request, now, &signer).await;
+        desk.ledger = signer.into_ledger();
+        let own_signature = made?;
         if own_signature.len() != CONTACT_SIGNATURE_BYTES {
             return Err(ErrorCode::Refused);
         }
@@ -1097,8 +1130,14 @@ where
         let now = now()?;
         self.check_resolution(&session, &signed, 1, now).await?;
         let receipt_digest = session.receipt_digest.ok_or(ErrorCode::Refused)?;
-        let signature = self
-            .ports
+        let ports = self.ports;
+        let signer = EngineSigner::new(
+            &mut *self.keys,
+            &*self.store,
+            self.binding.community(),
+            desk.ledger.clone(),
+        );
+        let made = ports
             .sign_acknowledgment(
                 ReceiptRequest {
                     contact: Self::contact_of(&session),
@@ -1108,8 +1147,11 @@ where
                     receipt_signature: &signed.signature,
                 },
                 now,
+                &signer,
             )
-            .await?;
+            .await;
+        desk.ledger = signer.into_ledger();
+        let signature = made?;
         if signature.len() != CONTACT_SIGNATURE_BYTES {
             return Err(ErrorCode::Refused);
         }

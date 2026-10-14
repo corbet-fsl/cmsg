@@ -18,7 +18,7 @@
 //! prove it WITHOUT holding the Door, hand the result back, until the queue is empty.
 use super::super::{facades::OwnedFuture, Door, ErrorCode, Result};
 use super::{
-    ports::{verify_outcome_with, verify_reservation_with},
+    ports::{verify_outcome_with, verify_reservation_with, AccountSigner},
     types::{Hello, ProveJob, Proved, Terms},
     worker, ContactRequest, Policy, ReceiptRequest, WavePorts,
 };
@@ -60,7 +60,12 @@ pub trait WaveTerms {
 /// account's key (behind the Keys `SignContact` admission) and the counterpart's signature
 /// checked against its roster key.
 pub trait WaveContact {
-    fn sign<'a>(&'a self, request: ContactRequest<'a>, now: u64) -> OwnedFuture<'a, Vec<u8>>;
+    fn sign<'a>(
+        &'a self,
+        request: ContactRequest<'a>,
+        now: u64,
+        signer: &'a dyn AccountSigner,
+    ) -> OwnedFuture<'a, Vec<u8>>;
     fn verify<'a>(
         &'a self,
         request: ContactRequest<'a>,
@@ -73,6 +78,7 @@ pub trait WaveContact {
         &'a self,
         _request: ReceiptRequest<'a>,
         _now: u64,
+        _signer: &'a dyn AccountSigner,
     ) -> OwnedFuture<'a, Vec<u8>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
@@ -88,6 +94,7 @@ pub trait WaveContact {
         &'a self,
         _request: ReceiptRequest<'a>,
         _now: u64,
+        _signer: &'a dyn AccountSigner,
     ) -> OwnedFuture<'a, Vec<u8>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
@@ -170,6 +177,7 @@ impl<C: ProofCheck + 'static> WavePorts for ProductionPorts<C> {
         hello: &'a Hello,
         peer: &'a str,
         now: u64,
+        signer: &'a dyn AccountSigner,
     ) -> OwnedFuture<'a, Terms> {
         Box::pin(async move {
             let mut terms = self.terms.terms(nonce, hello, now).await?;
@@ -183,6 +191,7 @@ impl<C: ProofCheck + 'static> WavePorts for ProductionPorts<C> {
                         peer,
                     },
                     now,
+                    signer,
                 )
                 .await?;
             Ok(terms)
@@ -192,8 +201,9 @@ impl<C: ProofCheck + 'static> WavePorts for ProductionPorts<C> {
         &'a self,
         request: ContactRequest<'a>,
         now: u64,
+        signer: &'a dyn AccountSigner,
     ) -> OwnedFuture<'a, Vec<u8>> {
-        self.contact.sign(request, now)
+        self.contact.sign(request, now, signer)
     }
     fn verify_contact<'a>(
         &'a self,
@@ -207,8 +217,9 @@ impl<C: ProofCheck + 'static> WavePorts for ProductionPorts<C> {
         &'a self,
         request: ReceiptRequest<'a>,
         now: u64,
+        signer: &'a dyn AccountSigner,
     ) -> OwnedFuture<'a, Vec<u8>> {
-        self.contact.sign_resolution(request, now)
+        self.contact.sign_resolution(request, now, signer)
     }
     fn verify_resolution<'a>(
         &'a self,
@@ -222,8 +233,9 @@ impl<C: ProofCheck + 'static> WavePorts for ProductionPorts<C> {
         &'a self,
         request: ReceiptRequest<'a>,
         now: u64,
+        signer: &'a dyn AccountSigner,
     ) -> OwnedFuture<'a, Vec<u8>> {
-        self.contact.sign_acknowledgment(request, now)
+        self.contact.sign_acknowledgment(request, now, signer)
     }
     fn verify_acknowledgment<'a>(
         &'a self,
@@ -458,8 +470,24 @@ mod tests {
         }
     }
     struct NoContact;
+    struct NoSigner;
+    impl AccountSigner for NoSigner {
+        fn sign<'a>(
+            &'a self,
+            _: ckmg::SigningPhase,
+            _: [u8; 32],
+            _: [u8; 32],
+        ) -> OwnedFuture<'a, [u8; 64]> {
+            Box::pin(async { Err(ErrorCode::Unavailable) })
+        }
+    }
     impl WaveContact for NoContact {
-        fn sign<'a>(&'a self, _: ContactRequest<'a>, _: u64) -> OwnedFuture<'a, Vec<u8>> {
+        fn sign<'a>(
+            &'a self,
+            _: ContactRequest<'a>,
+            _: u64,
+            _: &'a dyn AccountSigner,
+        ) -> OwnedFuture<'a, Vec<u8>> {
             Box::pin(async { Err(ErrorCode::Unavailable) })
         }
         fn verify<'a>(&'a self, _: ContactRequest<'a>, _: &'a [u8], _: u64) -> OwnedFuture<'a, ()> {
@@ -592,7 +620,7 @@ mod tests {
             sender_authority: [4; 32],
             sender_challenge: [5; 32],
         };
-        assert!(p.terms(&[0; 32], &hello, "peer", NOW).await.is_err());
+        assert!(p.terms(&[0; 32], &hello, "peer", NOW, &NoSigner).await.is_err());
     }
 
     /// A scripted job journal: a job stays until it is finished with a proof.

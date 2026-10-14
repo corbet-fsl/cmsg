@@ -38,6 +38,17 @@ pub struct ContactRequest<'a> {
     pub peer: &'a str,
 }
 
+/// Signs exactly one digest per (wave slot, phase) with the account key. The engine
+/// supplies it for the duration of one port call; a port never holds a key.
+pub trait AccountSigner {
+    fn sign<'a>(
+        &'a self,
+        phase: ckmg::SigningPhase,
+        slot: [u8; 32],
+        digest: [u8; 32],
+    ) -> OwnedFuture<'a, [u8; 64]>;
+}
+
 /// One settlement receipt as one account sees it: the wave, the decision and the
 /// receipt's terms. Signing and checking go through the same words.
 #[derive(Clone, Copy, Debug)]
@@ -66,6 +77,7 @@ pub trait WavePorts {
         hello: &'a Hello,
         peer: &'a str,
         now: u64,
+        signer: &'a dyn AccountSigner,
     ) -> OwnedFuture<'a, Terms>;
     /// This account's signature over the contact digest of the wave in `request`
     /// (`request.role` is this account's role). Refuses when custody does not admit it.
@@ -73,6 +85,7 @@ pub trait WavePorts {
         &'a self,
         request: ContactRequest<'a>,
         now: u64,
+        signer: &'a dyn AccountSigner,
     ) -> OwnedFuture<'a, Vec<u8>>;
     /// Check the counterpart's contact signature before anything is reserved or proved.
     fn verify_contact<'a>(
@@ -87,6 +100,7 @@ pub trait WavePorts {
         &'a self,
         _request: ReceiptRequest<'a>,
         _now: u64,
+        _signer: &'a dyn AccountSigner,
     ) -> OwnedFuture<'a, Vec<u8>> {
         Box::pin(async { Err(super::super::ErrorCode::Unavailable) })
     }
@@ -105,6 +119,7 @@ pub trait WavePorts {
         &'a self,
         _request: ReceiptRequest<'a>,
         _now: u64,
+        _signer: &'a dyn AccountSigner,
     ) -> OwnedFuture<'a, Vec<u8>> {
         Box::pin(async { Err(super::super::ErrorCode::Unavailable) })
     }

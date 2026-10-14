@@ -2,12 +2,13 @@
 //! ([`AccountContact`], a [`WaveContact`]) and the recipient's terms ([`AccountTerms`], a
 //! [`WaveTerms`]), both over the member's accepted account witness.
 //!
-//! Neither holds a key. Every signature goes through [`AccountSigner`], which production
-//! backs with the Keys `SignContact`, `SignResolution` and `SignAcknowledgment` admissions
-//! and the persisted `SigningLedger` (one digest per wave slot and phase, a repeat returns
-//! the stored signature). The wave nonce is the slot.
+//! Neither holds a key. Every signature goes through the [`AccountSigner`] the engine lends
+//! for one call (the Keys `SignContact`, `SignResolution` and `SignAcknowledgment`
+//! admissions and the persisted `SigningLedger`; see `signing.rs`). The wave nonce is the
+//! slot.
 use super::production::{WaveContact, WaveTerms};
 use super::types::{Hello, Terms};
+use super::ports::AccountSigner;
 use super::{ContactRequest, ReceiptRequest};
 use super::super::{facades::OwnedFuture, ErrorCode, Result};
 use ckmg::wallet_engine::account::{Account, Acknowledgment, Reserve, Resolution};
@@ -16,16 +17,6 @@ use ckmg::SigningPhase;
 /// The newest accepted account witness, read afresh for each call.
 pub trait AccountView {
     fn current<'a>(&'a self) -> OwnedFuture<'a, Account>;
-}
-
-/// Signs exactly one digest per (slot, phase) with the account key.
-pub trait AccountSigner {
-    fn sign<'a>(
-        &'a self,
-        phase: SigningPhase,
-        slot: [u8; 32],
-        digest: [u8; 32],
-    ) -> OwnedFuture<'a, [u8; 64]>;
 }
 
 fn reserve_of(account: &Account, request: &ContactRequest<'_>) -> Result<Reserve> {
@@ -68,21 +59,23 @@ fn bytes64(signature: &[u8]) -> Result<[u8; 64]> {
     signature.try_into().map_err(|_| ErrorCode::Refused)
 }
 
-pub struct AccountContact<V, G> {
+pub struct AccountContact<V> {
     pub view: V,
-    pub signer: G,
 }
 
-impl<V: AccountView, G: AccountSigner> WaveContact for AccountContact<V, G> {
-    fn sign<'a>(&'a self, request: ContactRequest<'a>, _: u64) -> OwnedFuture<'a, Vec<u8>> {
+impl<V: AccountView> WaveContact for AccountContact<V> {
+    fn sign<'a>(
+        &'a self,
+        request: ContactRequest<'a>,
+        _: u64,
+        signer: &'a dyn AccountSigner,
+    ) -> OwnedFuture<'a, Vec<u8>> {
         Box::pin(async move {
             let account = self.view.current().await?;
             let digest = account
                 .contact_digest(&reserve_of(&account, &request)?)
                 .map_err(|_| ErrorCode::Refused)?;
-            let signature = self
-                .signer
-                .sign(SigningPhase::Contact, *request.nonce, digest)
+            let signature = signer.sign(SigningPhase::Contact, *request.nonce, digest)
                 .await?;
             Ok(signature.to_vec())
         })
@@ -104,6 +97,7 @@ impl<V: AccountView, G: AccountSigner> WaveContact for AccountContact<V, G> {
         &'a self,
         request: ReceiptRequest<'a>,
         _: u64,
+        signer: &'a dyn AccountSigner,
     ) -> OwnedFuture<'a, Vec<u8>> {
         Box::pin(async move {
             let account = self.view.current().await?;
@@ -111,9 +105,7 @@ impl<V: AccountView, G: AccountSigner> WaveContact for AccountContact<V, G> {
             let digest = account
                 .resolution_digest(&reserve, &resolution_of(&request)?)
                 .map_err(|_| ErrorCode::Refused)?;
-            let signature = self
-                .signer
-                .sign(SigningPhase::Resolution, *request.contact.nonce, digest)
+            let signature = signer.sign(SigningPhase::Resolution, *request.contact.nonce, digest)
                 .await?;
             Ok(signature.to_vec())
         })
@@ -138,6 +130,7 @@ impl<V: AccountView, G: AccountSigner> WaveContact for AccountContact<V, G> {
         &'a self,
         request: ReceiptRequest<'a>,
         _: u64,
+        signer: &'a dyn AccountSigner,
     ) -> OwnedFuture<'a, Vec<u8>> {
         Box::pin(async move {
             let account = self.view.current().await?;
@@ -145,9 +138,7 @@ impl<V: AccountView, G: AccountSigner> WaveContact for AccountContact<V, G> {
             let digest = account
                 .acknowledgment_digest(&reserve, &resolution_of(&request)?, request.issued_at)
                 .map_err(|_| ErrorCode::Refused)?;
-            let signature = self
-                .signer
-                .sign(SigningPhase::Acknowledgment, *request.contact.nonce, digest)
+            let signature = signer.sign(SigningPhase::Acknowledgment, *request.contact.nonce, digest)
                 .await?;
             Ok(signature.to_vec())
         })

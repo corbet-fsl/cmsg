@@ -109,6 +109,10 @@ impl Session {
 pub(super) struct Desk {
     pub waves: Vec<Session>,
     pub jobs: Vec<Job>,
+    /// Every account-key signature made for a wave slot, committed with the desk before
+    /// the signature is sent anywhere.
+    #[serde(default)]
+    pub ledger: ckmg::SigningLedger,
 }
 
 impl Desk {
