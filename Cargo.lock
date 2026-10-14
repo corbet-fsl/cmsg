@@ -1460,7 +1460,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#5619511157a752cc3962f157e5538dca2b81fcc0"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#0d818a7d89f2e2929726077c00227cb24087984a"
 dependencies = [
  "blake3",
  "cchr",
