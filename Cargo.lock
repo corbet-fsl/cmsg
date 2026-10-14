@@ -1460,7 +1460,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#603bdbc7244c9abe38f1f45d85ba471f6acdcda0"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#5619511157a752cc3962f157e5538dca2b81fcc0"
 dependencies = [
  "blake3",
  "cchr",
@@ -1475,6 +1475,7 @@ dependencies = [
  "csrh",
  "cthr",
  "ctnd",
+ "cvch",
  "cwst",
  "cxch",
  "hpke",
@@ -1574,7 +1575,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cfrm"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=main#6025933c0350616e0b93ae405279916b78de64fb"
+source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=main#b932fad1288ce8289c2fffcaec3480d052cc57aa"
 dependencies = [
  "cblv",
  "crbk",
@@ -1623,13 +1624,14 @@ dependencies = [
 [[package]]
 name = "cgrd"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrd?branch=main#fabf73fadd927817754b1d2c7d4808a0a9e5a5a2"
+source = "git+https://git.corbet.ch/corbet-foss/cgrd?branch=main#e639a686dc8356b21d65c653b718dc07abd8e398"
 dependencies = [
  "bigdecimal",
  "cpns",
  "crbk",
  "csgn",
  "cshm",
+ "cvch",
  "ed25519-dalek 3.0.0",
  "geographiclib-rs",
  "precis-profiles",
@@ -2239,7 +2241,7 @@ dependencies = [
 [[package]]
 name = "cpfl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpfl.git?branch=main#9013cf411600ea78f9d89ccc54f4c81942f0a944"
+source = "git+https://git.corbet.ch/corbet-foss/cpfl.git?branch=main#8588f0632d0b4a2ab0422ab5984800bc8a19c528"
 dependencies = [
  "blake3",
  "cgrd",
@@ -2551,7 +2553,7 @@ dependencies = [
 [[package]]
 name = "csrh"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/csrh.git?branch=main#d7723a73747c3bc4e598fbbeff45406e7de1cf44"
+source = "git+https://git.corbet.ch/corbet-foss/csrh.git?branch=main#625d57f6e5af8f26f500b3e0ee725a05241382e6"
 dependencies = [
  "cgrd",
  "cpfl",
@@ -2563,7 +2565,7 @@ dependencies = [
 [[package]]
 name = "cswb"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cswb.git?branch=main#667b86a9d7ead3c56a4720fbb11adb0f1095095f"
+source = "git+https://git.corbet.ch/corbet-foss/cswb.git?branch=main#88315c66060e64fe9b4bae2112a1a7b4252c382e"
 dependencies = [
  "cchr",
  "cmmr",
@@ -2599,7 +2601,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#c1d592447778614294a03a2576a09ea7ba375a8b"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#1985062c4e346c9b60a02409ce4bb37e2a669300"
 dependencies = [
  "cchr",
  "cgrp",
@@ -2890,7 +2892,7 @@ dependencies = [
 [[package]]
 name = "cxch"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cxch.git?branch=main#9bf8d200b8116acfbe0c67674e4a734b577e4464"
+source = "git+https://git.corbet.ch/corbet-foss/cxch.git?branch=main#8feee91e0b330171f1cbec746bbccff0112f13a4"
 dependencies = [
  "cgrd",
  "cnvl",
