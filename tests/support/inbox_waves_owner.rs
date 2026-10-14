@@ -4,8 +4,9 @@
 use super::profile_owner_tests::{open_as, ProfileOwner};
 use super::*;
 use crate::door::inbox_waves::{
-    Answer, Command, Decision, Delivered, Envelope, Hello, JobDone, JobResult, Policy, Stage,
-    Terms, WaveDecide, WaveIncoming, WaveMessage, WavePorts, WavePunish, WaveSend, WAVE_VERSION,
+    Answer, Command, ContactRequest, Decision, Delivered, Envelope, Hello, JobDone, JobResult,
+    Policy, Stage, Terms, WaveDecide, WaveIncoming, WaveMessage, WavePorts, WavePunish, WaveSend,
+    WAVE_VERSION,
 };
 use cwlt::wave::{
     VerifiedWaveOutcome, VerifiedWaveReservation, WaveContext, WaveOutcome, WaveOutcomeStatement,
@@ -14,6 +15,10 @@ use cwlt::wave::{
 
 const ME: &str = "ab";
 const PEER: &str = "cd";
+
+pub(super) fn fake_signature(nonce: &[u8; 32]) -> Vec<u8> {
+    [nonce.as_slice(), nonce.as_slice()].concat()
+}
 
 pub(super) struct Ports {
     pub(super) lineage: ckmg::Lineage,
@@ -28,11 +33,39 @@ impl WavePorts for Ports {
             lifetime: 3600,
         })
     }
-    fn terms(&self, _: &[u8; 32], _: u64) -> Result<Terms> {
-        Ok(Terms {
-            recipient_authority: [5; 32],
-            recipient_challenge: [6; 32],
+    fn terms<'a>(
+        &'a self,
+        nonce: &'a [u8; 32],
+        _: &'a Hello,
+        _: &'a str,
+        _: u64,
+    ) -> facades::OwnedFuture<'a, Terms> {
+        let nonce = *nonce;
+        Box::pin(async move {
+            Ok(Terms {
+                recipient_authority: [5; 32],
+                recipient_challenge: [6; 32],
+                contact_signature: fake_signature(&nonce),
+            })
         })
+    }
+    fn sign_contact<'a>(
+        &'a self,
+        request: ContactRequest<'a>,
+        _: u64,
+    ) -> facades::OwnedFuture<'a, Vec<u8>> {
+        // The scripted signature of this fixture: the nonce repeated, the same for both roles.
+        let nonce = *request.nonce;
+        Box::pin(async move { Ok(fake_signature(&nonce)) })
+    }
+    fn verify_contact<'a>(
+        &'a self,
+        request: ContactRequest<'a>,
+        signature: &'a [u8],
+        _: u64,
+    ) -> facades::OwnedFuture<'a, ()> {
+        let ok = signature == fake_signature(request.nonce).as_slice();
+        Box::pin(async move { ok.then_some(()).ok_or(ErrorCode::Refused) })
     }
     fn verify_reservation<'a>(
         &'a self,
@@ -158,6 +191,7 @@ async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof()
     let terms = Terms {
         recipient_authority: [5; 32],
         recipient_challenge: [6; 32],
+        contact_signature: fake_signature(&nonce),
     };
     let wrong = WaveIncoming {
         peer: member("ef"),
@@ -181,6 +215,26 @@ async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof()
         };
         assert_eq!(
             status(&mut owner, &ports, Command::Receive(bad)).await,
+            Err(ErrorCode::Refused)
+        );
+    }
+    // Terms whose contact signature is missing or does not verify are refused before
+    // anything is offered or reserved.
+    for signature in [vec![], vec![0; 64], fake_signature(&nonce)[..63].to_vec()] {
+        let bad = Terms {
+            contact_signature: signature,
+            ..terms.clone()
+        };
+        assert_eq!(
+            status(
+                &mut owner,
+                &ports,
+                Command::Receive(WaveIncoming {
+                    peer: member(PEER),
+                    envelope: terms_envelope(nonce, bad, PEER, 0, conversation),
+                }),
+            )
+            .await,
             Err(ErrorCode::Refused)
         );
     }
@@ -218,6 +272,7 @@ async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof()
         let job = offer.job.expect("the recorded reservation");
         last = job.id;
         assert_eq!((job.sender.role, job.recipient.role), (0, 1));
+        assert_eq!(job.contact_signature, Some(fake_signature(&nonce)));
         assert_eq!(job.sender.owner, job.recipient.peer);
         let kept = status(
             &mut owner,

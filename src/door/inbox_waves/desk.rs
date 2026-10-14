@@ -48,6 +48,12 @@ pub(super) struct Session {
     pub theirs: Option<Blob>,
     pub receipt_digest: Option<[u8; 32]>,
     pub key_package: Option<Vec<u8>>,
+    /// Sender: its own contact signature, stored before the Offer carries it.
+    #[serde(default)]
+    pub own_signature: Option<Vec<u8>>,
+    /// Recipient: the sender's contact signature from the Offer.
+    #[serde(default)]
+    pub peer_signature: Option<Vec<u8>>,
     pub welcome: Option<Vec<u8>>,
     /// Set once this member's conversation exists on this device.
     pub opened: bool,
@@ -282,6 +288,8 @@ mod tests {
                 sender_challenge: [5; 32],
             },
             terms: None,
+            own_signature: None,
+            peer_signature: None,
             own: None,
             theirs: None,
             receipt_digest: None,

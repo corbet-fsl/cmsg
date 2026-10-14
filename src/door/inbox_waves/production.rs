@@ -8,7 +8,8 @@
 //! | Port method | Source |
 //! |---|---|
 //! | `policy`, `verify_*` | [`WaveTrust`]: the verified community material (never unverified configuration or a peer's presentation) |
-//! | `terms` | [`WaveTerms`]: the member's own wallet authority and a fresh one-use challenge |
+//! | `terms` | [`WaveTerms`]: the member's own wallet authority and a fresh one-use challenge; [`WaveContact`] signs the contact digest |
+//! | `sign_contact`, `verify_contact` | [`WaveContact`] |
 //! | `verify_*` | cwlt [`WaveVerifier`] built per call from the trusted policy and window |
 //! | `own_record` (G2) | [`OwnRecordCheck`] |
 //! | `peer_lineage` | [`PeerLineageRead`]: a forced read, never a cache |
@@ -18,8 +19,8 @@
 use super::super::{facades::OwnedFuture, Door, ErrorCode, Result};
 use super::{
     ports::{verify_outcome_with, verify_reservation_with},
-    types::{ProveJob, Proved, Terms},
-    worker, Policy, WavePorts,
+    types::{Hello, ProveJob, Proved, Terms},
+    worker, ContactRequest, Policy, WavePorts,
 };
 use ckmg::{Binding, Lineage};
 use cwlt::wave::{
@@ -44,9 +45,28 @@ pub trait WaveTrust {
     fn current(&self, now: u64) -> Result<Trust>;
 }
 
-/// The recipient's own terms for a wave it was offered.
+/// The recipient's own terms for a wave it was offered: its wallet authority and a fresh
+/// one-use challenge. The contact signature is added by [`WaveContact`].
 pub trait WaveTerms {
-    fn terms(&self, nonce: &[u8; 32], now: u64) -> Result<Terms>;
+    fn terms<'a>(
+        &'a self,
+        nonce: &'a [u8; 32],
+        hello: &'a Hello,
+        now: u64,
+    ) -> OwnedFuture<'a, Terms>;
+}
+
+/// The account side of the contact consent: the wave's contact digest signed by this
+/// account's key (behind the Keys `SignContact` admission) and the counterpart's signature
+/// checked against its roster key.
+pub trait WaveContact {
+    fn sign<'a>(&'a self, request: ContactRequest<'a>, now: u64) -> OwnedFuture<'a, Vec<u8>>;
+    fn verify<'a>(
+        &'a self,
+        request: ContactRequest<'a>,
+        signature: &'a [u8],
+        now: u64,
+    ) -> OwnedFuture<'a, ()>;
 }
 
 /// G2: this member's record matches the newest epoch commitment.
@@ -67,6 +87,7 @@ pub type VerifierFactory<C> = Box<dyn Fn(WavePolicy, u64, u64) -> Result<WaveVer
 pub struct ProductionPorts<C: ProofCheck> {
     trust: Box<dyn WaveTrust>,
     terms: Box<dyn WaveTerms>,
+    contact: Box<dyn WaveContact>,
     record: Box<dyn OwnRecordCheck>,
     lineage: Box<dyn PeerLineageRead>,
     verifier: VerifierFactory<C>,
@@ -77,6 +98,7 @@ impl<C: ProofCheck> ProductionPorts<C> {
     pub fn new(
         trust: Box<dyn WaveTrust>,
         terms: Box<dyn WaveTerms>,
+        contact: Box<dyn WaveContact>,
         record: Box<dyn OwnRecordCheck>,
         lineage: Box<dyn PeerLineageRead>,
         verifier: VerifierFactory<C>,
@@ -85,6 +107,7 @@ impl<C: ProofCheck> ProductionPorts<C> {
         Self {
             trust,
             terms,
+            contact,
             record,
             lineage,
             verifier,
@@ -109,8 +132,44 @@ impl<C: ProofCheck + 'static> WavePorts for ProductionPorts<C> {
     fn policy(&self, now: u64) -> Result<Policy> {
         Ok(self.trust.current(now)?.policy)
     }
-    fn terms(&self, nonce: &[u8; 32], now: u64) -> Result<Terms> {
-        self.terms.terms(nonce, now)
+    fn terms<'a>(
+        &'a self,
+        nonce: &'a [u8; 32],
+        hello: &'a Hello,
+        peer: &'a str,
+        now: u64,
+    ) -> OwnedFuture<'a, Terms> {
+        Box::pin(async move {
+            let mut terms = self.terms.terms(nonce, hello, now).await?;
+            terms.contact_signature = self
+                .contact
+                .sign(
+                    ContactRequest {
+                        nonce,
+                        hello,
+                        role: 1,
+                        peer,
+                    },
+                    now,
+                )
+                .await?;
+            Ok(terms)
+        })
+    }
+    fn sign_contact<'a>(
+        &'a self,
+        request: ContactRequest<'a>,
+        now: u64,
+    ) -> OwnedFuture<'a, Vec<u8>> {
+        self.contact.sign(request, now)
+    }
+    fn verify_contact<'a>(
+        &'a self,
+        request: ContactRequest<'a>,
+        signature: &'a [u8],
+        now: u64,
+    ) -> OwnedFuture<'a, ()> {
+        self.contact.verify(request, signature, now)
     }
     fn verify_reservation<'a>(
         &'a self,
@@ -196,9 +255,16 @@ impl<N: Fn() -> u64> WaveJobs for DoorJobs<'_, N> {
         worker::next(self.door, self.origin, self.token, (self.now)()).await
     }
     async fn finish(&mut self, job: &ProveJob, proved: Option<Proved>) -> Result<()> {
-        worker::finish(self.door, self.origin, self.token, (self.now)(), job, proved)
-            .await
-            .map(|_| ())
+        worker::finish(
+            self.door,
+            self.origin,
+            self.token,
+            (self.now)(),
+            job,
+            proved,
+        )
+        .await
+        .map(|_| ())
     }
 }
 
@@ -246,7 +312,11 @@ mod tests {
         calls: Rc<RefCell<u32>>,
     }
     impl ProofCheck for Fixed {
-        async fn check(&self, _: &[PublicField], proof: &[u8]) -> std::result::Result<(), czkp::Error> {
+        async fn check(
+            &self,
+            _: &[PublicField],
+            proof: &[u8],
+        ) -> std::result::Result<(), czkp::Error> {
             *self.calls.borrow_mut() += 1;
             if proof == b"good" {
                 Ok(())
@@ -321,8 +391,17 @@ mod tests {
     }
     struct NoTerms;
     impl WaveTerms for NoTerms {
-        fn terms(&self, _: &[u8; 32], _: u64) -> Result<Terms> {
-            Err(ErrorCode::Unavailable)
+        fn terms<'a>(&'a self, _: &'a [u8; 32], _: &'a Hello, _: u64) -> OwnedFuture<'a, Terms> {
+            Box::pin(async { Err(ErrorCode::Unavailable) })
+        }
+    }
+    struct NoContact;
+    impl WaveContact for NoContact {
+        fn sign<'a>(&'a self, _: ContactRequest<'a>, _: u64) -> OwnedFuture<'a, Vec<u8>> {
+            Box::pin(async { Err(ErrorCode::Unavailable) })
+        }
+        fn verify<'a>(&'a self, _: ContactRequest<'a>, _: &'a [u8], _: u64) -> OwnedFuture<'a, ()> {
+            Box::pin(async { Err(ErrorCode::Unavailable) })
         }
     }
     struct NoRecord;
@@ -360,6 +439,7 @@ mod tests {
         ProductionPorts::new(
             Box::new(Trusted(trust)),
             Box::new(NoTerms),
+            Box::new(NoContact),
             Box::new(NoRecord),
             Box::new(NoLineage),
             Box::new(move |policy, now, until| {
@@ -368,8 +448,12 @@ mod tests {
                     policy,
                     now,
                     until,
-                    Fixed { calls: calls.clone() },
-                    Fixed { calls: calls.clone() },
+                    Fixed {
+                        calls: calls.clone(),
+                    },
+                    Fixed {
+                        calls: calls.clone(),
+                    },
                 )
                 .map_err(|_| ErrorCode::Unavailable)
             }),
@@ -384,7 +468,9 @@ mod tests {
         let p = ports(Some(trust()), Some(NOW), calls.clone(), built.clone());
         let expected = context(0);
         for proof in [&b"bad"[..], &b""[..], &b"goodx"[..]] {
-            let verdict = p.verify_reservation(&statement(), proof, &expected, NOW).await;
+            let verdict = p
+                .verify_reservation(&statement(), proof, &expected, NOW)
+                .await;
             assert!(verdict.is_err(), "a tampered proof must not verify");
         }
         // A statement for another community is refused even with the "good" proof.
@@ -408,7 +494,9 @@ mod tests {
         for clock in [Some(NOW + 301), Some(NOW - 301), None] {
             let p = ports(Some(trust()), clock, calls.clone(), built.clone());
             assert_eq!(
-                p.verify_reservation(&statement(), b"good", &expected, NOW).await.err(),
+                p.verify_reservation(&statement(), b"good", &expected, NOW)
+                    .await
+                    .err(),
                 Some(ErrorCode::Unavailable)
             );
         }
@@ -416,7 +504,9 @@ mod tests {
         let p = ports(None, Some(NOW), calls.clone(), built.clone());
         assert_eq!(p.policy(NOW).err(), Some(ErrorCode::Unavailable));
         assert_eq!(
-            p.verify_reservation(&statement(), b"good", &expected, NOW).await.err(),
+            p.verify_reservation(&statement(), b"good", &expected, NOW)
+                .await
+                .err(),
             Some(ErrorCode::Unavailable)
         );
         // An expired authority lease: the verifier cannot be built.
@@ -429,7 +519,17 @@ mod tests {
             .is_err());
         assert_eq!(*calls.borrow(), 0, "no proof was ever checked");
         // The default recipient terms and G2 refuse as well.
-        assert!(p.terms(&[0; 32], NOW).is_err());
+        let hello = Hello {
+            conversation: [1; 32],
+            group: [1; 32],
+            contact_policy: [2; 32],
+            history: [3; 32],
+            opened_at: NOW,
+            expires_at: NOW + 100,
+            sender_authority: [4; 32],
+            sender_challenge: [5; 32],
+        };
+        assert!(p.terms(&[0; 32], &hello, "peer", NOW).await.is_err());
     }
 
     /// A scripted job journal: a job stays until it is finished with a proof.
@@ -458,7 +558,10 @@ mod tests {
     impl worker::Prover for Script {
         async fn prove(&mut self, _: &ProveJob) -> Option<Proved> {
             self.0.remove(0).then(|| Proved {
-                blob: Blob { statement: vec![], proof: vec![] },
+                blob: Blob {
+                    statement: vec![],
+                    proof: vec![],
+                },
                 receipt_digest: None,
                 wallet: vec![],
             })
@@ -477,12 +580,20 @@ mod tests {
     }
     #[tokio::test]
     async fn recovery_after_a_crash_resumes_each_job_exactly_once() {
-        let mut queue = Queue { jobs: vec![job(1), job(2)], recovered: 0, done: vec![] };
+        let mut queue = Queue {
+            jobs: vec![job(1), job(2)],
+            recovered: 0,
+            done: vec![],
+        };
         // First run: the build for job 1 fails (crash); nothing is handed back, no spin.
-        let handed = drain(&mut queue, &mut Script(vec![false]), true).await.unwrap();
+        let handed = drain(&mut queue, &mut Script(vec![false]), true)
+            .await
+            .unwrap();
         assert_eq!((handed, queue.jobs.len(), queue.recovered), (0, 2, 1));
         // After the restart the same jobs are offered again, each proved exactly once.
-        let handed = drain(&mut queue, &mut Script(vec![true, true]), true).await.unwrap();
+        let handed = drain(&mut queue, &mut Script(vec![true, true]), true)
+            .await
+            .unwrap();
         assert_eq!((handed, queue.jobs.len(), queue.recovered), (2, 0, 2));
         assert_eq!(queue.done, vec![[1; 32], [2; 32]]);
         // A further run finds nothing and hands back nothing.
@@ -530,20 +641,35 @@ mod tests {
         assert_eq!(verified.context(), &expected);
         assert_eq!(*calls.borrow(), 1);
         // Every single-field tamper is refused: proof, certificate, state, version, context.
-        assert!(p.verify_reservation(&statement, b"bad", &expected, NOW).await.is_err());
+        assert!(p
+            .verify_reservation(&statement, b"bad", &expected, NOW)
+            .await
+            .is_err());
         let mut forged = statement.clone();
         forged.certificate[0] ^= 1;
-        assert!(p.verify_reservation(&forged, b"good", &expected, NOW).await.is_err());
+        assert!(p
+            .verify_reservation(&forged, b"good", &expected, NOW)
+            .await
+            .is_err());
         let mut moved = statement.clone();
         moved.state = small(22);
-        assert!(p.verify_reservation(&moved, b"good", &expected, NOW).await.is_err());
+        assert!(p
+            .verify_reservation(&moved, b"good", &expected, NOW)
+            .await
+            .is_err());
         let mut newer = statement.clone();
         newer.version += 1;
-        assert!(p.verify_reservation(&newer, b"good", &expected, NOW).await.is_err());
+        assert!(p
+            .verify_reservation(&newer, b"good", &expected, NOW)
+            .await
+            .is_err());
         // The expected context is the caller's, not the statement's: another nonce fails.
         let mut other = expected.clone();
         other.nonce = [77; 32];
-        assert!(p.verify_reservation(&statement, b"good", &other, NOW).await.is_err());
+        assert!(p
+            .verify_reservation(&statement, b"good", &other, NOW)
+            .await
+            .is_err());
         // Past the original lease the reservation is no longer fresh evidence.
         assert!(p
             .verify_reservation(&statement, b"good", &expected, NOW + 500)

@@ -52,7 +52,14 @@ pub struct Hello {
 pub struct Terms {
     pub recipient_authority: [u8; 32],
     pub recipient_challenge: [u8; 32],
+    /// The recipient's account-key signature over the wave's contact digest (64 bytes).
+    /// A private witness of the sender's reservation proof, never public input.
+    #[serde(default)]
+    pub contact_signature: Vec<u8>,
 }
+
+/// Length of a contact signature (P-256, r then s).
+pub const CONTACT_SIGNATURE_BYTES: usize = 64;
 
 /// A public statement with its proof, both opaque to the door.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -85,6 +92,9 @@ pub enum WaveMessage {
         nonce: [u8; 32],
         reservation: Blob,
         receipt_digest: [u8; 32],
+        /// The sender's account-key signature over the wave's contact digest (64 bytes).
+        #[serde(default)]
+        contact_signature: Vec<u8>,
     },
     Reservation {
         nonce: [u8; 32],

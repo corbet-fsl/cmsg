@@ -13,13 +13,13 @@
 mod desk;
 pub(crate) mod engine;
 mod ports;
-pub mod types;
 pub mod production;
+pub mod types;
 pub mod wallet;
 pub mod worker;
 
 use super::*;
-pub use ports::{verify_outcome_with, verify_reservation_with, Policy, WavePorts};
+pub use ports::{verify_outcome_with, verify_reservation_with, ContactRequest, Policy, WavePorts};
 pub use types::*;
 
 /// One request to the bound Vault. The Vault answers with the matching variant.

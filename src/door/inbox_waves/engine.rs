@@ -8,7 +8,7 @@
 //! done), so a crash between the two is repaired by running the step again.
 use super::super::*;
 use super::desk::{Desk, Session, KEY, OWNER};
-use super::ports::{Policy, WavePorts};
+use super::ports::{ContactRequest, Policy, WavePorts};
 use super::types::*;
 use ckmg::{Authority, Binding, Clock, Entropy, KeyHandle, Keys, Lineage, SecureStore};
 use cwlt::wave::{WaveOutcome, WaveOutcomeStatement, WaveStatement};
@@ -273,6 +273,8 @@ where
             theirs: None,
             receipt_digest: None,
             key_package: None,
+            own_signature: None,
+            peer_signature: None,
             welcome: None,
             opened: false,
             outbox: vec![],
@@ -489,10 +491,17 @@ where
                 WaveMessage::Offer {
                     reservation,
                     receipt_digest,
+                    contact_signature,
                     ..
                 } => {
-                    self.on_offer(&mut desk, session, reservation, receipt_digest)
-                        .await?
+                    self.on_offer(
+                        &mut desk,
+                        session,
+                        reservation,
+                        receipt_digest,
+                        contact_signature,
+                    )
+                    .await?
                 }
                 WaveMessage::Reservation {
                     reservation,
@@ -536,7 +545,10 @@ where
         {
             return Err(ErrorCode::Refused);
         }
-        let terms = self.ports.terms(&nonce, now)?;
+        let terms = self.ports.terms(&nonce, &hello, peer, now).await?;
+        if terms.contact_signature.len() != CONTACT_SIGNATURE_BYTES {
+            return Err(ErrorCode::Refused);
+        }
         desk.add(Session {
             nonce,
             peer: peer.into(),
@@ -548,6 +560,8 @@ where
             theirs: None,
             receipt_digest: None,
             key_package: None,
+            own_signature: None,
+            peer_signature: None,
             welcome: None,
             opened: false,
             outbox: vec![],
@@ -564,7 +578,27 @@ where
             return Err(ErrorCode::Refused);
         }
         let nonce = session.nonce;
+        let now = now()?;
+        // The recipient's consent is checked before anything is offered or reserved, and
+        // this side's own consent is signed and stored before the Offer can carry it.
+        if terms.contact_signature.len() != CONTACT_SIGNATURE_BYTES {
+            return Err(ErrorCode::Refused);
+        }
+        let request = ContactRequest {
+            nonce: &nonce,
+            hello: &session.hello,
+            role: 0,
+            peer: &session.peer,
+        };
+        self.ports
+            .verify_contact(request, &terms.contact_signature, now)
+            .await?;
+        let own_signature = self.ports.sign_contact(request, now).await?;
+        if own_signature.len() != CONTACT_SIGNATURE_BYTES {
+            return Err(ErrorCode::Refused);
+        }
         let mut next = session;
+        next.own_signature = Some(own_signature);
         next.terms = Some(terms);
         let me = self.me()?;
         let (sender, recipient) = contexts(self.binding, &next, me)?;
@@ -594,12 +628,29 @@ where
         session: Session,
         reservation: Blob,
         receipt_digest: [u8; 32],
+        contact_signature: Vec<u8>,
     ) -> Result<()> {
-        if session.role != 1 || session.stage != Stage::Hello || receipt_digest == [0; 32] {
+        if session.role != 1
+            || session.stage != Stage::Hello
+            || receipt_digest == [0; 32]
+            || contact_signature.len() != CONTACT_SIGNATURE_BYTES
+        {
             return Err(ErrorCode::Refused);
         }
         let nonce = session.nonce;
         let now = now()?;
+        self.ports
+            .verify_contact(
+                ContactRequest {
+                    nonce: &nonce,
+                    hello: &session.hello,
+                    role: 1,
+                    peer: &session.peer,
+                },
+                &contact_signature,
+                now,
+            )
+            .await?;
         let me = self.me()?;
         let (sender, recipient) = contexts(self.binding, &session, me)?;
         // The recipient never countersigns an unverified sender reservation.
@@ -627,6 +678,7 @@ where
         let next = desk.wave_mut(&nonce)?;
         next.theirs = Some(reservation);
         next.receipt_digest = Some(receipt_digest);
+        next.peer_signature = Some(contact_signature);
         next.key_package = Some(package);
         next.stage = Stage::Reserving;
         self.write_desk(desk, operation(&nonce, "offer-recorded"))
@@ -915,8 +967,12 @@ where
             sender,
             recipient,
             receipt_digest,
-            // TODO(D5): the counterpart's signature from Terms / Offer (not on the wire yet).
-            contact_signature: None,
+            // The counterpart's signature, a private witness of the reservation.
+            contact_signature: match job.work {
+                Work::ReserveSender => session.terms.as_ref().map(|t| t.contact_signature.clone()),
+                Work::ReserveRecipient => session.peer_signature.clone(),
+                _ => None,
+            },
         };
         let id = job.id;
         self.write_desk(&desk, operation(&id, &format!("take.{}", job.attempts)))
@@ -1019,6 +1075,7 @@ where
                 let s = desk.wave_mut(&nonce)?;
                 s.own = Some(proved.blob.clone());
                 s.receipt_digest = Some(receipt);
+                let contact_signature = s.own_signature.clone().ok_or(ErrorCode::Refused)?;
                 if s.stage == Stage::Reserving {
                     s.stage = Stage::Offered;
                     s.enqueue(
@@ -1027,6 +1084,7 @@ where
                             nonce,
                             reservation: proved.blob.clone(),
                             receipt_digest: receipt,
+                            contact_signature,
                         },
                     );
                 }

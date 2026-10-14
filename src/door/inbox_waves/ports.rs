@@ -3,7 +3,7 @@
 //! account actor): no client can supply or replace it. Every method either
 //! answers from the real owner or refuses; none has a permissive default.
 use super::super::{facades::OwnedFuture, Result};
-use super::types::Terms;
+use super::types::{Hello, Terms};
 use ckmg::Binding;
 use cwlt::wave::{
     VerifiedWaveOutcome, VerifiedWaveReservation, WaveContext, WaveOutcome, WaveOutcomeStatement,
@@ -23,13 +23,45 @@ pub struct Policy {
     pub lifetime: u64,
 }
 
+/// One wave's contact transcript as one account sees it.
+#[derive(Clone, Copy, Debug)]
+pub struct ContactRequest<'a> {
+    pub nonce: &'a [u8; 32],
+    pub hello: &'a Hello,
+    /// The role of the account that signs or checks (0 sender, 1 recipient).
+    pub role: u8,
+    /// The counterpart's member name.
+    pub peer: &'a str,
+}
+
 /// Methods take `&self`: an implementation keeps its own interior mutability,
 /// so one bundle can serve the verifier, Contacts and Threads adapters at once.
 pub trait WavePorts {
     /// Current policy terms; `Unavailable` if the signed trust is stale.
     fn policy(&self, now: u64) -> Result<Policy>;
-    /// The recipient's own terms for a wave it was offered.
-    fn terms(&self, nonce: &[u8; 32], now: u64) -> Result<Terms>;
+    /// The recipient's own terms for a wave it was offered, including its contact
+    /// signature over the wave's digest. `peer` is the sender's member name.
+    fn terms<'a>(
+        &'a self,
+        nonce: &'a [u8; 32],
+        hello: &'a Hello,
+        peer: &'a str,
+        now: u64,
+    ) -> OwnedFuture<'a, Terms>;
+    /// This account's signature over the contact digest of the wave in `request`
+    /// (`request.role` is this account's role). Refuses when custody does not admit it.
+    fn sign_contact<'a>(
+        &'a self,
+        request: ContactRequest<'a>,
+        now: u64,
+    ) -> OwnedFuture<'a, Vec<u8>>;
+    /// Check the counterpart's contact signature before anything is reserved or proved.
+    fn verify_contact<'a>(
+        &'a self,
+        request: ContactRequest<'a>,
+        signature: &'a [u8],
+        now: u64,
+    ) -> OwnedFuture<'a, ()>;
     /// Counterpart check of a reservation (cwlt `WaveVerifier::verify`).
     fn verify_reservation<'a>(
         &'a self,
