@@ -94,7 +94,7 @@ futures-util = "0.3"
 gloo-net = "0.6"
 gloo-timers = { version = "0.3", features = ["futures"] }
 web-sys = { version = "0.3", features = ["Window", "Location"] }
-browser-coverage-runtime = { path = ".ci/coverage-runtime" }
+browser-coverage-runtime = { package = "browser-coverage-runtime-cmsg", path = ".ci/coverage-runtime" }
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
