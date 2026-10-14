@@ -419,8 +419,15 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
         self.check_scoped_current(request, current_member::Purpose::DeviceSigning)
             .await
     }
+    async fn check_account_signing(&mut self, request: Authorization<'_>) -> Result<(), Error> {
+        self.check_scoped_current(request, current_member::Purpose::AccountSigning)
+            .await
+    }
     fn discard_current_attempt(&mut self) {
         self.discard_pending_current();
+    }
+    fn check_account_signing_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
+        self.finish_scoped_current(request, current_member::Purpose::AccountSigning)
     }
     fn check_record_recipient_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
         self.finish_scoped_current(request, current_member::Purpose::RecordRecipient)

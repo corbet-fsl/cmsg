@@ -5,6 +5,9 @@ use super::*;
 pub(super) enum Purpose {
     RecordRecipient,
     DeviceSigning,
+    /// One account-key signature over an exact digest (`SignContact`, `SignResolution`,
+    /// `SignAcknowledgment`), against single-use intent naming that action and digest.
+    AccountSigning,
 }
 pub(super) struct PendingCurrent {
     lease: cfyr::membership::MembershipLease<Transport>,
@@ -15,6 +18,7 @@ pub(super) struct PendingCurrent {
     epoch: u64,
     purpose: Purpose,
     signing: Option<(Vec<u8>, u64)>,
+    statement: Option<[u8; 32]>,
 }
 
 fn shape(request: &Authorization<'_>, purpose: Purpose) -> Result<(), Error> {
@@ -22,7 +26,7 @@ fn shape(request: &Authorization<'_>, purpose: Purpose) -> Result<(), Error> {
         || request.root.is_none()
         || request.epoch == 0
         || request.target.is_some()
-        || request.statement.is_some()
+        || (request.statement.is_some() != (purpose == Purpose::AccountSigning))
         || !request.evidence.is_empty()
     {
         return Err(Error::Unauthorized);
@@ -33,6 +37,14 @@ fn shape(request: &Authorization<'_>, purpose: Purpose) -> Result<(), Error> {
         }
         Purpose::DeviceSigning
             if request.action == Action::SignDeviceEd25519 && request.signing.is_some() =>
+        {
+            Ok(())
+        }
+        Purpose::AccountSigning
+            if matches!(
+                request.action,
+                Action::SignContact | Action::SignResolution | Action::SignAcknowledgment
+            ) && request.signing.is_none() =>
         {
             Ok(())
         }
@@ -124,7 +136,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
             accepted: false,
         };
         shape(&request, purpose)?;
-        if purpose == Purpose::DeviceSigning && self.intent.is_none() {
+        if purpose != Purpose::RecordRecipient && self.intent.is_none() {
             return Err(Error::Unauthorized);
         }
         self.live.observe(&request).await?;
@@ -199,6 +211,12 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
             let signing = request.signing.ok_or(Error::Unauthorized)?;
             Some((signing.transcript.to_vec(), signing.expires))
         } else {
+            if purpose == Purpose::AccountSigning {
+                self.intent
+                    .as_mut()
+                    .ok_or(Error::Unauthorized)?
+                    .consume(&request, &self.live.origin)?;
+            }
             None
         };
         self.pending_current = Some(PendingCurrent {
@@ -210,6 +228,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
             epoch: request.epoch,
             purpose,
             signing,
+            statement: request.statement,
         });
         // Test-only scheduling notice: the genuine owner has already retained
         // its session. This carries no identity, verdict or authority.
@@ -233,6 +252,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         };
         shape(&request, purpose)?;
         if pending.purpose != purpose
+            || pending.statement != request.statement
             || &pending.binding != request.binding
             || Some(pending.root) != request.root
             || pending.device != request.device
