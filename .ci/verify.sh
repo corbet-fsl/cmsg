@@ -26,6 +26,7 @@ python3 .ci/check-first-party.py
 node --version | grep -q '^v24\.' || { echo 'CI requires Node major 24' >&2; exit 2; }
 # Wasm target on stable is guaranteed by run-cached.sh (helper readiness +
 # exclusive provisioning); no toolchain mutation here under the shared lock.
+bash .ci/update-our-crates.sh
 cargo fmt --all
 git diff -- src tests examples > formatting.patch
 test ! -s formatting.patch
