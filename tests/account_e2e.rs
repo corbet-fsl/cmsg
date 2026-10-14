@@ -65,7 +65,7 @@ fn device(
             srs_g1_file: path("srs_g1_file"),
             srs_g2_file: path("srs_g2_file"),
             wave: None,
-            timeout_seconds: 900,
+            timeout_seconds: 300,
             threads: 2,
             memory_megabytes: 4096,
         },

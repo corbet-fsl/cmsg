@@ -168,7 +168,7 @@ where
     pub async fn stored_community_credential(&mut self) -> Result<Option<Vec<u8>>> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        self.vault
+        self.vault().await?
             .community_credential()
             .await
             .map(|credential| credential.map(|bytes| bytes.to_vec()))
@@ -180,7 +180,7 @@ where
     pub async fn update_outbox(&mut self) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        self.vault
+        self.vault().await?
             .update_outbox()
             .await
             .map_err(|_| ErrorCode::Unavailable)
@@ -195,7 +195,7 @@ where
     ) -> Result<()> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        match self.vault.replace_update_outbox(expected, outbox).await {
+        match self.vault().await?.replace_update_outbox(expected, outbox).await {
             Ok(_) => Ok(()),
             Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
             Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),

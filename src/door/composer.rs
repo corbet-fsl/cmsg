@@ -1265,6 +1265,11 @@ where
         &network,
     )
     .await?;
+    // The companion session outlives this call: the account actor admits through it while
+    // the recovery lease keeps the Door's own session for the Vault.
+    let companion: &'static Foyer<Transport> = Box::leak(Box::new(companion));
+    let actor_membership = companion.live_membership();
+    let actor_policy = companion.current_policy();
     let held = lease(&door, community_origin, false, policy).await?;
     let owners = custody::prepare_initial_recovery(recovered, held, network.clone())
         .await
@@ -1273,6 +1278,8 @@ where
         &mut door,
         community_origin,
         owners,
+        actor_membership,
+        actor_policy,
         network,
         storage.community,
         global,

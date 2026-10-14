@@ -128,9 +128,6 @@ where
                     let request = expected
                         .authenticate(signed, checked)
                         .map_err(|_| ErrorCode::Unauthorized)?;
-                    if request.policy_epoch() != current.policy_epoch() {
-                        return Err(ErrorCode::Unauthorized);
-                    }
                     let expiry = request.epoch_expiry().ok_or(ErrorCode::Unauthorized)?;
                     let gates = request
                         .required_gates()
@@ -153,7 +150,9 @@ where
                             member: member.member.clone(),
                             device,
                             signed: signed.to_vec(),
-                            epoch: request.policy_epoch(),
+                            // The community policy epoch; the request's epoch is the global
+                            // passport policy's (bound by the cohort digest), a different counter.
+                            epoch: current.policy_epoch(),
                             digest,
                         },
                     ))
