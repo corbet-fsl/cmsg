@@ -1426,7 +1426,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#c4e1d39c77da7970084fa2922b6c6a3dd37765e0"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#3a839743f60091e018909b31a59bf26cddfc5161"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -2022,7 +2022,7 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=main#e2f9a6328b55c70aded8470597872b3ae6afb966"
+source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=main#231526369d83c8f01efd4127059e6a27f27ac279"
 dependencies = [
  "cdlv",
  "cgrp",
@@ -2587,7 +2587,7 @@ checksum = "8fd9f3db6f2cfef61c10613071955154ffdc9e515daebff26de4b54e35038fdd"
 [[package]]
 name = "ctcs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=main#1ad76b7a0bb16292bf75023a9df507f2535dff34"
+source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=main#d9d63934ffa3a433491fac61f36eee365f99c424"
 dependencies = [
  "ckmg",
  "cwst",
@@ -2760,7 +2760,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#6d9f701ad502b473fcbb575aff9b0402121dc916"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#1dac4b53322fb6bc95997c43b95143d6e31407ad"
 dependencies = [
  "any_ascii",
  "blind-rsa-signatures",
@@ -2784,7 +2784,7 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=main#89b0d4f6ee887ca5449241649468b3169f331abf"
+source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=main#4a1f3f567860f9b935b597ebdd5863e48fe7e023"
 dependencies = [
  "blake3",
  "cchr",
@@ -2805,7 +2805,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#f26b81d376f91e92d66d81dea8f4be52f4de8ec1"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#1f4e4192571c20ca1daf2291f8990ae077979708"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2824,7 +2824,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#f26b81d376f91e92d66d81dea8f4be52f4de8ec1"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#1f4e4192571c20ca1daf2291f8990ae077979708"
 dependencies = [
  "acvm",
  "barretenberg-rs",
