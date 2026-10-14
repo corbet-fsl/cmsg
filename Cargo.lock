@@ -1426,7 +1426,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#b67be7da6ecd1dac841269503376f7e4775417c3"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#c4e1d39c77da7970084fa2922b6c6a3dd37765e0"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1882,7 +1882,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 [[package]]
 name = "clnk"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/clnk.git?branch=main#5272215674659c3ed2938e6f04a7915131e98169"
+source = "git+https://git.corbet.ch/corbet-foss/clnk.git?branch=main#55fabd6b753b3bc04cf0778851768c2e0071f245"
 dependencies = [
  "cfrm",
  "cmbl",
@@ -2022,7 +2022,7 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=main#de6094bc171cf404750777c79115be3429d312be"
+source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=main#e2f9a6328b55c70aded8470597872b3ae6afb966"
 dependencies = [
  "cdlv",
  "cgrp",
@@ -2039,7 +2039,7 @@ dependencies = [
 [[package]]
 name = "cnvl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cnvl.git?branch=main#c59b635ef17d2c2420b03e297acd38893db3a4ee"
+source = "git+https://git.corbet.ch/corbet-foss/cnvl.git?branch=main#c189819ab8b5a2ca0385afa20fc4ab8f4f5f43fe"
 dependencies = [
  "cgrd",
  "chacha20poly1305 0.11.0",
@@ -2328,7 +2328,7 @@ source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#2c6f3e6ddc5
 [[package]]
 name = "cpsd"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpsd?branch=main#908ceb88a2896baf6e633b30abcada2f25bcbabe"
+source = "git+https://git.corbet.ch/corbet-foss/cpsd?branch=main#c43253b08014f0aecb038055db099c018ae6f037"
 dependencies = [
  "ark-bls12-381",
  "ark-ec 0.4.2",
@@ -2563,7 +2563,7 @@ dependencies = [
 [[package]]
 name = "cswb"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cswb.git?branch=main#bfeb62048ced7b5553b20fd6084e46e55797d651"
+source = "git+https://git.corbet.ch/corbet-foss/cswb.git?branch=main#667b86a9d7ead3c56a4720fbb11adb0f1095095f"
 dependencies = [
  "cchr",
  "cmmr",
@@ -2625,7 +2625,7 @@ dependencies = [
 [[package]]
 name = "ctnd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctnd.git?branch=main#b6a868248fcf22eb84b56c159943754494969ac3"
+source = "git+https://git.corbet.ch/corbet-foss/ctnd.git?branch=main#1fbb83e65e0b6196d1235ce2223d890b917a4e7b"
 dependencies = [
  "cgrp",
  "schemars 1.2.2",
@@ -2760,7 +2760,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#6374a138443c1d8a6e44ec8deffbff694a66b69f"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#6d9f701ad502b473fcbb575aff9b0402121dc916"
 dependencies = [
  "any_ascii",
  "blind-rsa-signatures",
@@ -2784,7 +2784,7 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=main#2d5b2b6270fb77c1c9f699e0e3ad2f5e03de049b"
+source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=main#89b0d4f6ee887ca5449241649468b3169f331abf"
 dependencies = [
  "blake3",
  "cchr",
@@ -2805,7 +2805,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#972cf377c2db0b51add1ad6ee2283a9df05d9df6"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#f26b81d376f91e92d66d81dea8f4be52f4de8ec1"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2824,7 +2824,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#972cf377c2db0b51add1ad6ee2283a9df05d9df6"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#f26b81d376f91e92d66d81dea8f4be52f4de8ec1"
 dependencies = [
  "acvm",
  "barretenberg-rs",
@@ -3200,12 +3200,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba91f619216e76a5eb2515783f7ec2e271938b51aadac592f4930517f4626863"
 dependencies = [
  "heck 0.5.0",
- "indexmap 1.9.3",
+ "indexmap 2.14.2",
  "itertools 0.15.0",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "sha3 0.10.9",
+ "sha3 0.12.0",
  "strum 0.28.0",
  "syn 3.0.6",
  "unicode-ident",

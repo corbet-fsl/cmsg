@@ -27,6 +27,9 @@ pub use lifecycle::{existing_active, has_pending, Activated};
 pub use pending::PendingBinding;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub use request::response_trust;
+#[cfg(test)]
+pub(super) use request::fixtures as update_fixtures;
+pub use request::outbox_request_id;
 pub use request::{AcceptedResponse, ProvenGenesis, ProvenUpdate, SignedApplyExtended};
 
 /// Distinct local intentions reserved by the trusted recovery composer. No

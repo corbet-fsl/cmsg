@@ -17,7 +17,7 @@ use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit};
 #[cfg(feature = "native-tor")]
 pub mod deployment;
 #[cfg(feature = "native-tor")]
-pub use deployment::NativeDeployment;
+pub use deployment::{DeviceSetup, NativeDeployment};
 
 /// Injected trusted clock. Member-controlled request data never supplies time.
 pub trait Clock: Send + Sync {
@@ -425,6 +425,20 @@ pub struct RuntimeHandle {
 pub use super::browser::Configuration as DeviceConfiguration;
 
 impl Embedded {
+    /// Configure an optional dormant native restore composer. Without Tor
+    /// deployment settings this explicitly selects the existing partial host.
+    #[cfg(feature = "native-tor")]
+    pub async fn configured_restore_with(
+        deployment: NativeDeployment,
+        lifetime_seconds: u64,
+        clock: Arc<dyn Clock>,
+        setup: DeviceSetup,
+    ) -> Result<Self> {
+        deployment
+            .start_with(lifetime_seconds, clock, Some(setup))
+            .await
+    }
+
     /// Configure an optional dormant native restore composer. Without Tor
     /// deployment settings this explicitly selects the existing partial host.
     #[cfg(feature = "native-tor")]

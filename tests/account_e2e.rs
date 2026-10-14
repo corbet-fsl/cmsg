@@ -4,7 +4,7 @@
 //! real prover, a lost operator response (reopen re-sends the identical outbox), activate, and
 //! every action repeated on the active account. The operator and its artifacts come from the
 //! assembled G5 configuration (`CMSG_G5_ACCOUNT_CONFIG`); nothing here is a double.
-use cmsg::door::{composer, Output, Role};
+use cmsg::door::{composer, composer::Services as _, Output, Role};
 use serde_json::{json, Value};
 use std::{collections::BTreeSet, time::Duration};
 
@@ -64,16 +64,45 @@ fn device(
             keys_file: path("keys_file"),
             srs_g1_file: path("srs_g1_file"),
             srs_g2_file: path("srs_g2_file"),
+            wave: None,
             timeout_seconds: 900,
             threads: 2,
             memory_megabytes: 4096,
         },
+        forum: None,
     };
     let keys = composer::DeviceKeys {
         global: passkeys(&f["wallet"]),
         community: passkeys(&f["community"]),
     };
     (settings, keys)
+}
+
+/// The fixture platform is a development build: its wallet gate is opened here, never
+/// by the production composer.
+struct Gated<'a>(composer::NativeServices<'a>);
+impl composer::Services for Gated<'_> {
+    async fn foyer(
+        &mut self,
+        service: composer::Service,
+    ) -> Result<cfyr::Foyer<cmsg::door::foyer::Transport>, composer::ComposeError> {
+        self.0.foyer(service).await
+    }
+    async fn public(
+        &mut self,
+        service: composer::Service,
+    ) -> Result<cfyr::Foyer<cmsg::door::foyer::Transport>, composer::ComposeError> {
+        self.0.public(service).await
+    }
+    async fn wallet_authorized(
+        &mut self,
+        api: &mut cfyr::Foyer<cmsg::door::foyer::Transport>,
+    ) -> Result<(), composer::ComposeError> {
+        api.call("development_gate", json!({}))
+            .await
+            .map(|_| ())
+            .map_err(|e| composer::ComposeError::Step("development gate", format!("{e:?}")))
+    }
 }
 
 async fn call(door: &mut cmsg::door::Door, origin: &str, token: &str, action: &str) -> Output {
@@ -103,7 +132,7 @@ async fn enroll_open_lose_the_response_reopen_activate_and_repeat_on_the_real_op
         // community enrollment at the accounting operator and `bind_native_account`.
         let mut door = composer::compose_native_device(
             &settings,
-            &mut composer::NativeServices(&settings),
+            &mut Gated(composer::NativeServices(&settings)),
             &mut keys,
             composer::DeviceStorage {
                 global: cwst::backend::Memory::new(),

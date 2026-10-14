@@ -612,7 +612,27 @@ impl AccountAdmission<'_> {
     }
 }
 
+/// The request identifier inside stored outbox bytes, without any policy: enough
+/// to match a settlement to the stored update.
+pub fn outbox_request_id(outbox: &[u8]) -> Result<[u8; 32]> {
+    if outbox.is_empty() || outbox.len() > pending::MAX_OUTBOX {
+        return Err(ErrorCode::Unauthorized);
+    }
+    match serde_json::from_slice(outbox).map_err(|_| ErrorCode::Unauthorized)? {
+        AccountServiceRequest::ApplyExtended { request, .. } => Ok(request.request_id),
+        _ => Err(ErrorCode::Unauthorized),
+    }
+}
+
 impl AccountAdmission<'_> {
+    /// Rebuild a stored later-update outbox under the CURRENT verified extension
+    /// policy of this admission (never one the caller supplies). The bytes are
+    /// kept exactly; nothing is re-signed.
+    pub fn restore_signed(&mut self, outbox: Vec<u8>) -> Result<SignedApplyExtended> {
+        let current = self.current()?;
+        SignedApplyExtended::from_update_outbox(outbox, &current.material.extension_policy)
+    }
+
     /// Send the exact stored outbox through the held HTTPS owner and verify the
     /// actual response: the operator signature under the pinned key, and the
     /// request identity, digest, statement and scope. Any failure after sending
@@ -665,7 +685,7 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
 
-    fn policy() -> ExtensionPolicy {
+    pub(super) fn policy() -> ExtensionPolicy {
         ExtensionPolicy {
             revision: 1,
             public_record_quorum: 2,
@@ -748,11 +768,11 @@ mod tests {
     }
 
     /// A later (non-genesis) step: version 4 -> 5, consuming one queued obligation.
-    fn later_wire() -> (Vec<u8>, ExtendedUpdate) {
+    pub(super) fn later_wire(n: u8) -> (Vec<u8>, ExtendedUpdate) {
         let mut statement = statement();
         statement.genesis = false;
-        statement.previous_version = 4;
-        statement.next_version = 5;
+        statement.previous_version = 4 + u64::from(n);
+        statement.next_version = 5 + u64::from(n);
         statement.previous_state = [3; 32];
         let mut previous = Inbox::default();
         previous.root[0] = 1;
@@ -765,7 +785,7 @@ mod tests {
         };
         let request = AccountRequest {
             statement,
-            request_id: [0xA2; 32],
+            request_id: [0xA2 + n; 32],
             proof_scope: AccountProofScope {
                 circuit_digest: [0xC3; 32],
                 verifying_key_digest: [0xD4; 32],
@@ -809,7 +829,7 @@ mod tests {
         (serde_json::to_vec(&wire).unwrap(), update)
     }
 
-    fn accept(request: &SignedApplyExtended, accepted_at: u64) -> AccountAcceptance {
+    pub(super) fn accept(request: &SignedApplyExtended, accepted_at: u64) -> AccountAcceptance {
         let mut acceptance = AccountAcceptance {
             statement: request.request.statement.clone(),
             request_id: request.request.request_id,
@@ -896,7 +916,7 @@ mod tests {
 
     #[test]
     fn a_later_update_outbox_is_refused_as_genesis_and_keeps_its_exact_update() {
-        let (bytes, update) = later_wire();
+        let (bytes, update) = later_wire(0);
         assert!(SignedApplyExtended::from_outbox(bytes.clone(), &policy()).is_err());
         let signed = SignedApplyExtended::from_update_outbox(bytes.clone(), &policy()).unwrap();
         assert_eq!(signed.update(), &update);
@@ -914,7 +934,7 @@ mod tests {
     #[test]
     fn the_acceptance_is_checked_against_the_stored_update_not_the_genesis_one() {
         let mut request = signed();
-        let (_, update) = later_wire();
+        let (_, update) = later_wire(0);
         request.update = update;
         // The binding was computed for the genesis update, so it no longer matches.
         let accepted = accept(&request, 150);
@@ -982,6 +1002,45 @@ mod tests {
                     .unwrap();
                 drop(guard);
             }
+        }
+    }
+}
+
+/// Values for the actor tests: a later-update request, its proven form and an
+/// operator acceptance that verifies under the test key.
+#[cfg(test)]
+pub(in crate::door) mod fixtures {
+    use super::*;
+
+    pub fn signed(n: u8) -> SignedApplyExtended {
+        let (bytes, _) = tests::later_wire(n);
+        SignedApplyExtended::from_update_outbox(bytes, &tests::policy()).unwrap()
+    }
+
+    pub fn restore(outbox: Vec<u8>) -> SignedApplyExtended {
+        SignedApplyExtended::from_update_outbox(outbox, &tests::policy()).unwrap()
+    }
+
+    pub fn proven(n: u8) -> ProvenUpdate {
+        let signed = signed(n);
+        ProvenUpdate {
+            statement: signed.statement().clone(),
+            scope: signed.request.proof_scope.clone(),
+            proof: vec![1, 2, 3],
+            update: signed.update().clone(),
+        }
+    }
+
+    pub fn accepted(signed: &SignedApplyExtended, at: u64) -> AcceptedResponse {
+        let acceptance = tests::accept(signed, at);
+        AcceptedResponse {
+            digest: acceptance_digest(&acceptance).unwrap(),
+            certificate: StateCertificate {
+                accepted_at: at,
+                signature: vec![0; 64],
+            },
+            acceptance,
+            ancestry: None,
         }
     }
 }
