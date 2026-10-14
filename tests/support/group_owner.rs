@@ -113,8 +113,6 @@ async fn an_unknown_member_is_no_contact_and_no_lineage_means_no_verification() 
         .authority()
         .contact("alpha", &peer, &me, now)
         .is_err());
-    // Standing rooms are refused until the Rulebook evidence exists.
-    assert!(groups.authority().seed("alpha", &[1; 32], now).is_err());
     // A peer whose lineage could not be read cannot have consented.
     let mut forged = consent(&peer, now);
     forged.signature = vec![0; 64];

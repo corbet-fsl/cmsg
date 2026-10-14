@@ -375,15 +375,34 @@ where
                     matches!(effect.event(), cgrp::Effect::Membership { group: g, .. } if g == &group)
                 })
                 .ok_or(cgrp::Error::Authority)?;
-            match step {
-                MlsStep::Create(packages) => {
+            // A room (a fork that opens, or a public room) is a different MLS
+            // genesis from a hidden group; the level of the decision tells which.
+            let room = matches!(
+                decision.event(),
+                cgrp::Effect::Membership {
+                    level: cgrp::Level::Opening | cgrp::Level::Public,
+                    ..
+                }
+            );
+            match (step, room) {
+                (MlsStep::Create(packages), false) => {
                     threads
                         .create_fork(&mut port, decision, packages, &mut clock)
                         .await
                 }
-                MlsStep::Join(welcome) => {
+                (MlsStep::Create(packages), true) => {
+                    threads
+                        .create_room(&mut port, decision, packages, &mut clock)
+                        .await
+                }
+                (MlsStep::Join(welcome), false) => {
                     threads
                         .join_fork(&mut port, decision, welcome, &mut clock)
+                        .await
+                }
+                (MlsStep::Join(welcome), true) => {
+                    threads
+                        .join_room(&mut port, decision, welcome, &mut clock)
                         .await
                 }
             }
@@ -543,6 +562,22 @@ where
     ) -> std::result::Result<cbrd::RoomState, ctnd::Error> {
         use ctnd::Error as Fail;
         self.open().map_err(|_| Fail::Authority)?;
+        // The roster's current lineages are read first (Charter-verified), so
+        // Threads can certify every leaf of the room against them.
+        let roster = {
+            let mut retained = self.retained.lock().await;
+            let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+            let storage = custody.vault.storage().clone();
+            let store = storage.lock().await;
+            cgrp::Snapshot::load(custody.binding.community(), &store)
+                .map_err(|_| Fail::Storage)?
+                .members(&group)
+                .map_err(|_| Fail::Authority)?
+                .clone()
+        };
+        cbrd::GroupOwner::refresh(self, &BTreeSet::new(), &roster)
+            .await
+            .map_err(|_| Fail::Authority)?;
         let mut retained = self.retained.lock().await;
         self.open().map_err(|_| Fail::Authority)?;
         let custody = retained.as_mut().ok_or(Fail::Unavailable)?;

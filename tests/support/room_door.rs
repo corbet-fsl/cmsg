@@ -20,6 +20,8 @@ use std::{
 const COMMUNITY: &str = "alpha";
 const ROOM: cmbl::Id = [7; 16];
 const GROUP: cgrp::Id = [9; 32];
+const CIRCLE: cgrp::Id = [7; 32];
+const INGROUP: cgrp::Id = [8; 32];
 const NOW_MS: u64 = 2_000_000_000_000;
 
 fn member_id(letter: &str) -> String {
@@ -46,15 +48,16 @@ fn policy() -> Policy {
         epoch: 1,
         valid_until: 4_000_000_000,
         cap: 100,
-        circle_max: 12,
-        ingroup_max: 42,
-        shrink_public: 36,
-        shrink_ingroup: 10,
+        // Toy growth thresholds: three in a circle, four in an in-group.
+        circle_max: 3,
+        ingroup_max: 4,
+        shrink_public: 4,
+        shrink_ingroup: 2,
         open_seconds: 21 * DAY,
         fork_cooldown: 14 * DAY,
         retarget_cooldown: 28 * DAY,
         listing_wait: 72 * 3_600,
-        split_public_min: 43,
+        split_public_min: 5,
         bands: std::array::from_fn(|i| Band {
             lower: edges[i],
             enter_up: edges[i],
@@ -323,7 +326,6 @@ impl GroupPeers for Directory {
 async fn owner(letter: &str, prf: u8, directory: &Directory) -> ProfileOwner {
     let (mut owner, _, _) = open_with(&member_id(letter), true, prf).await;
     owner.enable_groups(Some(Box::new(directory.clone()))).unwrap();
-    owner.groups.as_mut().unwrap().found_rooms();
     owner
 }
 
@@ -369,61 +371,88 @@ fn unix_now() -> u64 {
         .as_secs()
 }
 
-/// The member of the room. A public room needs at least three founding members
-/// who each consent for themselves; the other two only lend their consent and
-/// key package (their devices are not part of the scene afterwards). Fixture
-/// only: the product has no seed rooms, a room grows out of a group.
+/// The member of the room. The product has no seed rooms: the room grows out of
+/// a circle of three (`a`, `x`, `y`), an in-group of four (a fourth, `z`, joins
+/// by consent) and a consent fork that opens the room with the first three, who
+/// each agree to be seen. The others only lend their consent and key package
+/// (their devices are not part of the scene afterwards).
 async fn founder(directory: &Directory) -> ProfileOwner {
     let mut founder = owner("a", 31, directory).await;
-    let id = member_id("a");
     let policy = policy_at();
-    let others = [("x", 34u8), ("y", 35u8)];
-    let mut members = BTreeSet::from([id]);
-    let mut lenders = vec![];
-    for (letter, prf) in others {
+    let mut lenders = BTreeMap::new();
+    for (letter, prf) in [("x", 34u8), ("y", 35u8), ("z", 36u8)] {
         let lender = owner(letter, prf, directory).await;
         let (lineage, handle) = own_lineage(&lender).await;
         directory.0.borrow_mut().insert(handle, lineage);
-        members.insert(member_id(letter));
-        lenders.push((member_id(letter), lender));
+        lenders.insert(member_id(letter), lender);
     }
-    let groups = founder.groups.as_mut().unwrap();
-    let mut proposal = cbrd::propose_group_command(
-        groups,
-        &policy,
+    // The founder is in contact with everyone it creates a group with or adds.
+    founder
+        .groups
+        .as_mut()
+        .unwrap()
+        .assume_contacts([member_id("x"), member_id("y"), member_id("z")]);
+    let ids = |letters: &[&str]| -> BTreeSet<String> {
+        letters.iter().map(|letter| member_id(letter)).collect()
+    };
+    for (step, command) in [
         cgrp::Command::Create {
-            id: GROUP,
-            members,
-            seed: true,
+            id: CIRCLE,
+            members: ids(&["a", "x", "y"]),
         },
-        true,
-    )
-    .await
-    .unwrap();
-    // Each lender answers for itself over an invitation built from the exact
-    // request (a conversation is not part of this scene).
-    let mut open = proposal.request().clone();
-    open.consents.clear();
-    for (member, lender) in &mut lenders {
-        let invitation = cbrd::Invitation::from_bytes(
-            &serde_json::to_vec(&serde_json::json!({
-                "request": open,
-                "community": COMMUNITY,
-                "epoch": 1,
-                "member": member,
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        let reply = invitation
-            .answer(lender.groups.as_mut().unwrap(), true, true)
-            .await
+        cgrp::Command::Fork {
+            id: INGROUP,
+            parents: vec![CIRCLE],
+            members: ids(&["a", "x", "y", "z"]),
+            kind: cgrp::ForkKind::Add,
+        },
+        cgrp::Command::Fork {
+            id: GROUP,
+            parents: vec![INGROUP],
+            members: ids(&["a", "x", "y"]),
+            kind: cgrp::ForkKind::Open,
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let visible = command.exposes_profile();
+        let others: Vec<String> = match &command {
+            cgrp::Command::Create { members, .. } | cgrp::Command::Fork { members, .. } => {
+                members.iter().filter(|m| **m != member_id("a")).cloned().collect()
+            }
+            _ => unreachable!(),
+        };
+        let mut proposal =
+            cbrd::propose_group_command(founder.groups.as_mut().unwrap(), &policy, command, visible)
+                .await
+                .unwrap();
+        // Each lender answers for itself over an invitation built from the exact
+        // request (a conversation is not part of this scene).
+        let mut open = proposal.request().clone();
+        open.consents.clear();
+        for member in others {
+            let lender = lenders.get_mut(&member).unwrap();
+            let invitation = cbrd::Invitation::from_bytes(
+                &serde_json::to_vec(&serde_json::json!({
+                    "request": open,
+                    "community": COMMUNITY,
+                    "epoch": 1,
+                    "member": member,
+                }))
+                .unwrap(),
+            )
             .unwrap();
-        proposal.admit(member, reply, unix_now()).unwrap();
+            let reply = invitation
+                .answer(lender.groups.as_mut().unwrap(), true, visible)
+                .await
+                .unwrap();
+            proposal.admit(&member, reply, unix_now()).unwrap();
+        }
+        cbrd::commit_group_proposal(founder.groups.as_mut().unwrap(), &policy, &proposal, 10)
+            .await
+            .unwrap_or_else(|error| panic!("growth step {step}: {error:?}"));
     }
-    cbrd::commit_group_proposal(founder.groups.as_mut().unwrap(), &policy, &proposal, 10)
-        .await
-        .unwrap();
     founder
 }
 
@@ -432,7 +461,7 @@ async fn founder(directory: &Directory) -> ProfileOwner {
 async fn attempt(
     newcomer: &mut ProfileOwner,
     newcomer_board: &RoomBoard,
-    evidence: &cthr::ParentEvidence,
+    evidence: &cbrd::RoomState,
     member: &mut ProfileOwner,
     member_board: &RoomBoard,
     cursor: &mut u64,
@@ -441,6 +470,7 @@ async fn attempt(
     Vec<Result<cgrp::Snapshot, ctnd::Error>>,
 ) {
     let policy = policy_at();
+    let join_key = cbrd::TransportKey::from_bytes(evidence.transport);
     let groups = newcomer.groups.as_mut().unwrap();
     let (candidate, _, _, request) = cbrd::prepare_group_intent(
         groups,
@@ -461,15 +491,17 @@ async fn attempt(
             group: GROUP,
             candidate,
             request,
-            evidence,
+            evidence: &evidence.evidence,
+            transport: &join_key,
             policy: &policy,
         },
     );
     let admit = async {
         let groups = member.groups.as_mut().unwrap();
+        let transport = groups.room_transport_key(GROUP).await.unwrap();
         let mut results = vec![];
         for _ in 0..400 {
-            let read = member_board.room_joins(ROOM, *cursor).await.unwrap();
+            let read = member_board.room_joins(ROOM, *cursor, &transport).await.unwrap();
             for frame in &read.joins {
                 results.push(
                     groups
@@ -480,6 +512,7 @@ async fn attempt(
                                 group: GROUP,
                                 frame,
                                 max_groups: 10,
+                                transport: &transport,
                                 policy: &policy,
                             },
                         )
