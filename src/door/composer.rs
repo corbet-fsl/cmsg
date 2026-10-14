@@ -811,6 +811,8 @@ impl ProverArtifacts {
         NativeProver::new(NativeProverConfig {
             executable,
             executable_digest,
+            // This is the account update prover; wave and outcome provers come from the same group.
+            program: ckmg::wallet_engine::native_prover::Program::Update,
             scope: cblc::accounting::AccountProofScope {
                 circuit_digest: sha(&circuit),
                 verifying_key_digest: sha(&keys),
