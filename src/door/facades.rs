@@ -240,10 +240,6 @@ impl Drop for MeshLifetime {
     }
 }
 impl BoundMesh {
-    /// The addresses this device's own listener publishes.
-    pub fn addresses(&self) -> &[cmsh::Address] {
-        self.listener.addresses()
-    }
     pub fn view(&self) -> Vec<cmsh::BackendView> {
         self.shared.mesh.view()
     }

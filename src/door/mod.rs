@@ -41,7 +41,6 @@ pub mod pairing_host;
 pub mod pairing_publish;
 pub mod passport;
 pub mod record;
-mod reachability;
 mod registry;
 pub(crate) mod rooms;
 mod vouching;

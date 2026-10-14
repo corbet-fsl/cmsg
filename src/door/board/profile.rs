@@ -119,10 +119,7 @@ pub(in crate::door) async fn profile_publish(
         return Err(ErrorCode::Unavailable);
     }
     // A system field: the device's own live Mesh addresses, never request data.
-    let reachability = match door.meshes.get(&origin) {
-        Some(mesh) => super::super::reachability::encode(mesh.addresses())?,
-        None => Vec::new(),
-    };
+    let reachability = door.reachability(&origin);
     let mut edit = request.edit(reachability)?;
     edit.vouched_by = super::super::vouching::endorsement_wire(door, &origin).await;
     let board = door.boards.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
