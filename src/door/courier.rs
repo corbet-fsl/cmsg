@@ -217,6 +217,9 @@ impl Door {
 
 // ---- internal calls ------------------------------------------------------------
 
+/// Seconds before a vouching sync that failed on both sides runs again.
+const VOUCHER_RETRY: u64 = 10;
+
 /// The actions the courier uses; the lease grants nothing else.
 const ACTIONS: &[&str] = &[
     "inbox.waves",
@@ -235,6 +238,8 @@ const ACTIONS: &[&str] = &[
     "board.group_message",
     "board.room_serve",
     "foyer.refresh",
+    "foyer.voucher_links",
+    "foyer.voucher_vouched_by",
 ];
 
 /// A short-lived internal grant of this origin. It is never handed out; the
@@ -694,6 +699,10 @@ pub struct Config {
     pub scan: u64,
     /// Seconds between room-serving rounds.
     pub serve: u64,
+    /// Seconds between the vouching syncs: the sponsor's (process redemption
+    /// notices, create the direct thread, send the Welcome) and the newcomer's
+    /// (join from the reply, flush the early messages). Both are idempotent.
+    pub voucher: u64,
     /// Rooms this member serves while online.
     pub rooms: Vec<RoomRef>,
 }
@@ -706,6 +715,7 @@ impl Default for Config {
             resend: 20,
             scan: 30,
             serve: 10,
+            voucher: 30,
             rooms: vec![],
         }
     }
@@ -720,6 +730,7 @@ struct State {
     next_refresh: u64,
     next_scan: u64,
     next_serve: u64,
+    next_voucher: u64,
     attended: bool,
     started: bool,
     report: Report,
@@ -780,6 +791,18 @@ async fn gather(
                 )
                 .await;
         }
+    }
+    // Vouching: at start, after the account is usable, then on the interval. A
+    // pass that cannot run yet (no session, no network) is retried soon.
+    if now >= state.next_voucher {
+        let sponsor = lease.call(door, "foyer.voucher_links", json!({})).await;
+        let newcomer = lease.call(door, "foyer.voucher_vouched_by", json!({})).await;
+        state.next_voucher = now
+            + if sponsor.is_ok() || newcomer.is_ok() {
+                config.voucher.max(1)
+            } else {
+                VOUCHER_RETRY
+            };
     }
     let mut out: Vec<Outgoing> = shared.queue.borrow_mut().drain(..).collect();
     // The durable wave outbox: resend until the recipient's ack removed it.

@@ -127,6 +127,17 @@ where
     }
 
     pub(super) async fn chat_send(&mut self, request: ConversationSend) -> Result<Sent> {
+        self.chat_send_releasing(request, None).await
+    }
+
+    /// Send; with `release` the queue record of the voucher thread changes in the
+    /// SAME transaction as the send (the new bytes, empty for a delete), so a
+    /// queued message leaves its queue exactly when it is sent.
+    pub(super) async fn chat_send_releasing(
+        &mut self,
+        request: ConversationSend,
+        release: Option<super::voucher_thread::Release>,
+    ) -> Result<Sent> {
         self.refuse_blocked(&request.peer)?;
         let contacts = self.contacts_journal()?;
         let claim = self.claim_for(&request.peer, &request.conversation)?;
@@ -156,13 +167,18 @@ where
             let pending = view
                 .send(&mut port, &mut authority, request.text.as_bytes())
                 .await?;
+            let companion = match &release {
+                Some(release) => vec![release.change()],
+                None => Vec::new(),
+            };
             pending
-                .commit(
+                .commit_with(
                     &mut port,
                     &mut authority,
                     &mut for_commit,
                     self.store,
                     commit_operation,
+                    companion,
                 )
                 .await
         }
@@ -175,16 +191,13 @@ where
             Err(cnbx::Error::Threads(cthr::Error::State))
                 if self.voucher_waiting(&request.peer, &request.conversation)? =>
             {
-                let message = *ckmg::hash(
-                    &[
-                        b"cmsg.voucher-queued.v1".as_slice(),
-                        &request.conversation,
-                        request.text.as_bytes(),
-                    ]
-                    .concat(),
-                )
-                .value();
-                self.voucher_queue(request.conversation, request.text).await?;
+                // A flush that finds no thread keeps its queue as it is.
+                let message = if release.is_some() {
+                    [0; 32]
+                } else {
+                    self.voucher_queue(request.conversation, request.text)
+                        .await?
+                };
                 return Ok(Sent {
                     message,
                     status: None,

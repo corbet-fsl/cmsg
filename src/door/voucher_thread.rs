@@ -167,18 +167,22 @@ where
         self.voucher_flush(peer, conversation).await
     }
 
-    fn queued(&self, conversation: &[u8; 32]) -> Result<Vec<String>> {
+    fn queued(&self, conversation: &[u8; 32]) -> Result<Vec<Queued>> {
         match self
             .store
             .read(QUEUE_OWNER, conversation)
             .map_err(|_| ErrorCode::Reconcile)?
         {
             None => Ok(Vec::new()),
-            Some(bytes) => serde_json::from_slice(bytes).map_err(|_| ErrorCode::Reconcile),
+            Some(bytes) => {
+                let stored: Vec<Stored> =
+                    serde_json::from_slice(bytes).map_err(|_| ErrorCode::Reconcile)?;
+                stored.into_iter().map(Stored::into_queued).collect()
+            }
         }
     }
 
-    async fn write_queue(&mut self, conversation: &[u8; 32], queue: &[String]) -> Result<()> {
+    async fn write_queue(&mut self, conversation: &[u8; 32], queue: &[Queued]) -> Result<()> {
         let version = self.store.version().map_err(|_| ErrorCode::Reconcile)?;
         let bytes = serde_json::to_vec(queue).map_err(|_| ErrorCode::Unavailable)?;
         let change = if queue.is_empty() {
@@ -201,18 +205,21 @@ where
     }
 
     /// Keep a message for a thread that does not exist yet. It is stored before
-    /// the caller is told, so it survives a restart.
+    /// the caller is told, so it survives a restart. Returns its stable id.
     pub(crate) async fn voucher_queue(
         &mut self,
         conversation: [u8; 32],
         text: String,
-    ) -> Result<()> {
+    ) -> Result<[u8; 32]> {
         let mut queue = self.queued(&conversation)?;
         if queue.len() >= MAXIMUM_QUEUED {
             return Err(ErrorCode::Capacity);
         }
-        queue.push(text);
-        self.write_queue(&conversation, &queue).await
+        let mut id = [0u8; 32];
+        getrandom::fill(&mut id).map_err(|_| ErrorCode::Unavailable)?;
+        queue.push(Queued { id, text });
+        self.write_queue(&conversation, &queue).await?;
+        Ok(id)
     }
 
     /// Whether `conversation` is a voucher contact that has no thread yet, so a
@@ -228,7 +235,9 @@ where
     }
 
     /// Send, oldest first, what waited for the thread. Each message leaves the
-    /// queue as soon as it is sent.
+    /// queue in the same transaction that sends it, so a crash between the two
+    /// can neither lose nor repeat it (the courier's pending scan still delivers
+    /// the wire of a message whose wire did not leave).
     pub(crate) async fn voucher_flush(
         &mut self,
         peer: &str,
@@ -237,22 +246,109 @@ where
         let mut queue = self.queued(&conversation)?;
         let mut wires = Vec::new();
         while !queue.is_empty() {
-            let text = queue[0].clone();
+            let text = queue[0].text.clone();
+            let release = Release::new(conversation, &queue[1..])?;
             let sent = self
-                .chat_send(ConversationSend {
-                    peer: peer.to_owned(),
-                    conversation,
-                    text,
-                })
+                .chat_send_releasing(
+                    ConversationSend {
+                        peer: peer.to_owned(),
+                        conversation,
+                        text,
+                    },
+                    Some(release),
+                )
                 .await?;
             // Still waiting means the thread is not there: keep the rest.
             if sent.queued {
                 break;
             }
-            wires.push(sent.wire);
             queue.remove(0);
-            self.write_queue(&conversation, &queue).await?;
+            #[cfg(test)]
+            if tests_kill::take(sent.message) {
+                return Err(ErrorCode::Reconcile);
+            }
+            wires.push(sent.wire);
         }
         Ok(wires)
+    }
+}
+
+/// The queue record after one message left it.
+pub(crate) struct Release {
+    conversation: [u8; 32],
+    remaining: Vec<u8>,
+}
+impl Release {
+    fn new(conversation: [u8; 32], rest: &[Queued]) -> Result<Self> {
+        let remaining = if rest.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::to_vec(rest).map_err(|_| ErrorCode::Unavailable)?
+        };
+        Ok(Self {
+            conversation,
+            remaining,
+        })
+    }
+    pub(crate) fn change(&self) -> Change<'_> {
+        if self.remaining.is_empty() {
+            Change::Delete {
+                owner: QUEUE_OWNER,
+                key: &self.conversation,
+            }
+        } else {
+            Change::Put {
+                owner: QUEUE_OWNER,
+                key: &self.conversation,
+                value: &self.remaining,
+            }
+        }
+    }
+}
+
+/// One message waiting for the thread, with the id it keeps from the moment it
+/// is written.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct Queued {
+    id: [u8; 32],
+    text: String,
+}
+
+/// A queue entry as stored: the first layout kept bare texts.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum Stored {
+    Entry(Queued),
+    Bare(String),
+}
+impl Stored {
+    fn into_queued(self) -> Result<Queued> {
+        match self {
+            Self::Entry(entry) => Ok(entry),
+            Self::Bare(text) => {
+                let mut id = [0u8; 32];
+                getrandom::fill(&mut id).map_err(|_| ErrorCode::Unavailable)?;
+                Ok(Queued { id, text })
+            }
+        }
+    }
+}
+
+/// Test hook: a kill right after the flushed send committed.
+#[cfg(test)]
+pub(crate) mod tests_kill {
+    use std::cell::Cell;
+    thread_local!(static ARMED: Cell<bool> = const { Cell::new(false) });
+    thread_local!(static SENT: Cell<[u8; 32]> = const { Cell::new([0; 32]) });
+    pub(crate) fn arm() {
+        ARMED.with(|armed| armed.set(true));
+    }
+    /// The id of the message the killed flush sent.
+    pub(crate) fn sent() -> [u8; 32] {
+        SENT.with(Cell::get)
+    }
+    pub(super) fn take(message: [u8; 32]) -> bool {
+        SENT.with(|sent| sent.set(message));
+        ARMED.with(|armed| armed.replace(false))
     }
 }

@@ -165,3 +165,82 @@ async fn sponsor_and_newcomer_chat_right_after_the_admission() {
     .await;
     assert_eq!(text, b"thank you");
 }
+
+/// A kill between the flushed send and the queue delete: the entry finds its own
+/// message in the thread after the restart, so the early message is written
+/// once, and its wire still goes out through the pending retry.
+#[tokio::test]
+async fn a_kill_between_the_flushed_send_and_the_queue_delete_sends_once() {
+    let (sponsor_id, newcomer_id) = (member("ab"), member("cd"));
+    let (mut sponsor, _, _) = open_as(&sponsor_id, false).await;
+    let (mut newcomer, _, _) = open_as(&newcomer_id, false).await;
+    let sponsor_ports = Ports {
+        lineage: lineage_of(&newcomer).await,
+    };
+    let newcomer_ports = Ports {
+        lineage: lineage_of(&sponsor).await,
+    };
+    let bond = [9; 32];
+    let conversation = sponsor.contact_by_voucher(&newcomer_id, bond).await.unwrap();
+    newcomer.contact_by_voucher(&sponsor_id, bond).await.unwrap();
+    let package = newcomer
+        .voucher_key_package(conversation, &newcomer_ports)
+        .await
+        .unwrap();
+    let early = say(&mut newcomer, &newcomer_ports, &sponsor_id, conversation, "once only").await;
+    assert!(early.queued);
+    let welcome = sponsor
+        .voucher_create(&newcomer_id, conversation, &package, &sponsor_ports)
+        .await
+        .unwrap();
+
+    // The process dies after the send was committed and before the queue entry
+    // was deleted.
+    crate::door::voucher_thread::tests_kill::arm();
+    assert!(newcomer
+        .voucher_join(&sponsor_id, conversation, &welcome, &newcomer_ports)
+        .await
+        .is_err());
+    // The queue entry left in the same transaction as the send. After the
+    // restart the join repeats: nothing is written a second time.
+    assert!(newcomer
+        .voucher_join(&sponsor_id, conversation, &welcome, &newcomer_ports)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // The one message is still Pending and leaves through the retry.
+    let Answer::Retried(retried) = newcomer
+        .conversation(
+            Command::Retry(crate::door::inbox_conversation::ConversationRetry {
+                peer: sponsor_id.clone(),
+                conversation,
+                message: crate::door::voucher_thread::tests_kill::sent(),
+            }),
+            &newcomer_ports,
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("a retried message")
+    };
+    let text = deliver(
+        (&mut newcomer, &newcomer_ports, &newcomer_id),
+        (&mut sponsor, &sponsor_ports, &sponsor_id),
+        conversation,
+        retried.wire,
+    )
+    .await;
+    assert_eq!(text, b"once only");
+    let received = sponsor
+        .history(crate::door::facades::Conversation { conversation })
+        .await
+        .unwrap();
+    assert_eq!(received.len(), 1);
+    // Another restart changes nothing.
+    assert!(newcomer
+        .voucher_join(&sponsor_id, conversation, &welcome, &newcomer_ports)
+        .await
+        .unwrap()
+        .is_empty());
+}
