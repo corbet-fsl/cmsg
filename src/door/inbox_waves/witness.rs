@@ -130,3 +130,35 @@ impl<T: UpdateTransport> UpdateSink for DoorUpdateSink<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::bridge;
+
+    /// A statement the witness crate produced (golden vector, same bytes the TypeScript
+    /// builders emit) is read by the accounting owner's wire type; an unknown field would
+    /// be refused, so a drift between the two spellings fails here.
+    #[test]
+    fn the_witness_statement_is_the_accounting_wire() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../../tests/fixture/witness-statement.json"))
+                .unwrap();
+        let parsed: cblc::accounting::AccountStatement =
+            bridge(&fixture["statement"]).expect("the accounting wire");
+        assert_eq!(parsed.protocol_version, 2);
+        let mut extra = fixture["statement"].clone();
+        extra["unexpected"] = serde_json::json!(1);
+        assert!(bridge::<_, cblc::accounting::AccountStatement>(&extra).is_err());
+    }
+
+    #[test]
+    fn the_effect_spellings_agree() {
+        let update = serde_json::json!({
+            "previousInbox": {"root": vec![1u8; 32]},
+            "inbox": {"root": vec![2u8; 32]},
+            "effect": {"kind": "consume", "obligation": vec![3u8; 32]},
+        });
+        let parsed: cblc::extensions::ExtendedUpdate = bridge(&update).unwrap();
+        assert_eq!(parsed.inbox.root, [2; 32]);
+    }
+}
