@@ -7,8 +7,12 @@
 //! in flight (the Door dispatcher is `&mut`), the actor ends with its grant,
 //! logout or shutdown, and no secret crosses a message: commands carry nothing
 //! and replies carry only counters and times.
+use super::accounting::ProvenUpdate;
 use super::actor::Actor;
 use super::*;
+
+mod update;
+pub use update::{Applied, Shared};
 
 /// Where the current common checkpoint stands for this member.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -109,6 +113,12 @@ pub(super) enum Command {
     /// Remember the creation id of the claim this member made; the next admission
     /// presents it. Carries the id only, which is bound to the claimed member.
     Creation(String),
+    /// Send a proven update through the held account (trusted embedding only).
+    Update(Shared<ProvenUpdate>),
+    /// Finish the update that is still owed, if any.
+    Resume,
+    /// The caller applied the acceptance of this request: forget the stored bytes.
+    Settle([u8; 32]),
 }
 
 /// Typed answer of one command.
@@ -125,6 +135,12 @@ pub(super) enum Answer {
     Gate(Gate),
     /// The creation id was noted for the next admission.
     Noted,
+    /// The operator accepted the update.
+    Updated(Shared<Applied>),
+    /// The acceptance of the owed update, or nothing was owed.
+    Owed(Option<Shared<Applied>>),
+    /// The stored update was forgotten.
+    Settled,
 }
 
 macro_rules! accessor {
@@ -143,6 +159,8 @@ impl Answer {
     accessor!(reopened, Reopened, Opened);
     accessor!(activated, Activated, Activation);
     accessor!(gate, Gate, Gate);
+    accessor!(updated, Updated, Shared<Applied>);
+    accessor!(owed, Owed, Option<Shared<Applied>>);
 
     /// The open step answers `Opened`, or `Reopened` when a pending request was
     /// resumed; either way the request is accepted.
@@ -189,6 +207,14 @@ pub(super) enum Repeat {
     allow(dead_code)
 )]
 pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repeat {
+    // Updates have their own path, and the lobby is asked again on every join:
+    // an active member whose community changed its gates is held there.
+    if matches!(
+        command,
+        Command::Update(_) | Command::Resume | Command::Settle(_) | Command::Join(_)
+    ) {
+        return Repeat::As(command);
+    }
     if let Some(active) = state.active().await {
         return Repeat::Answer(match command {
             Command::Enroll => Answer::Enrolled(Enrolled {
@@ -201,11 +227,10 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
                 accepted_at: active.accepted_at,
             }),
             Command::Activate => Answer::Activated(active),
-            Command::Join(_) => Answer::Gate(Gate {
-                ready: true,
-                steps: Vec::new(),
-            }),
             Command::Creation(_) => Answer::Noted,
+            Command::Join(_) | Command::Update(_) | Command::Resume | Command::Settle(_) => {
+                unreachable!("returned above")
+            }
         });
     }
     match command {
@@ -215,6 +240,30 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
         Command::Open if state.pending().await => Repeat::As(Command::Reopen),
         other => Repeat::As(other),
     }
+}
+
+/// The lobby of the community, as far as a join needs it.
+#[cfg_attr(
+    not(all(feature = "native-prover", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+pub(super) trait Lobby {
+    async fn gate(&mut self, join: &JoinRequest) -> Result<Gate>;
+}
+
+/// Pass the gates. The lobby is asked every time, also for an active account: a
+/// member whose community changed its gates is held there (`ready` false) until
+/// the new steps are done, and then continues through the same resumable steps.
+/// This fails CLOSED when the lobby cannot be read: the server does not enforce
+/// the current gates on later sessions or actions (cvld `authenticate_current`
+/// -> cmbr `session_is_active` checks passkey, legal restriction and terminal
+/// state only), so the lobby read is the only gate check.
+#[cfg_attr(
+    not(all(feature = "native-prover", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+pub(super) async fn join<L: Lobby>(lobby: &mut L, request: &JoinRequest) -> Result<Answer> {
+    lobby.gate(request).await.map(Answer::Gate)
 }
 
 /// Whether the lobby still lists an unsatisfied admission condition. A lobby
@@ -298,13 +347,14 @@ mod run {
         accounting::{
             existing_active, has_pending, issue_account_admission, AccountAdmission,
             AccountingIntents, CheckpointAcquisition, CommunityAccount, CurrentEnrollment,
-            SubmittedEnrollment,
+            SubmittedEnrollment, AcceptedResponse, SignedApplyExtended,
         },
         actor::Mailbox,
         custody::SystemClock,
         foyer::{map_error, Transport},
         passport::GlobalPassport,
     };
+    use super::update::{self, Credentials, UpdateStore, UpdateWire};
     use super::*;
     use ckmg::{Authority, Clock, Entropy};
     use cvlt::Records;
@@ -358,6 +408,199 @@ mod run {
             .replace_voucher_custody(raw.as_deref().map(Vec::as_slice), &encoded)
             .await?;
         Ok(Some(encoded))
+    }
+
+    /// The owed update lives in its own Vault record (never the voucher book),
+    /// written by compare-and-swap like every other custody change.
+    struct Custodian<'a, B: cwst::backend::Backend, C, E, A, R>(
+        &'a mut CommunityAccount<B, C, E, A, R>,
+    );
+
+    impl<B, C, E, A, R> UpdateStore for Custodian<'_, B, C, E, A, R>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
+        async fn stored(&mut self) -> Result<Option<Vec<u8>>> {
+            Ok(self.0.update_outbox().await?.map(|bytes| bytes.to_vec()))
+        }
+        async fn persist(&mut self, outbox: &[u8]) -> Result<()> {
+            if outbox.is_empty() {
+                return Err(ErrorCode::Refused);
+            }
+            let current = self.0.update_outbox().await?;
+            self.0
+                .replace_update_outbox(current.as_deref().map(Vec::as_slice), outbox)
+                .await
+        }
+        async fn clear(&mut self) -> Result<()> {
+            let current = self.0.update_outbox().await?;
+            self.0
+                .replace_update_outbox(current.as_deref().map(Vec::as_slice), &[])
+                .await
+        }
+    }
+
+    /// One fresh admission with the account and the single-use intents: the
+    /// whole update protocol for one call.
+    struct Live<'a, 'p, B: cwst::backend::Backend, C, E, A, R> {
+        admission: &'a mut AccountAdmission<'p>,
+        account: &'a mut CommunityAccount<B, C, E, A, R>,
+        intents: &'a mut AccountingIntents,
+    }
+
+    impl<B, C, E, A, R> UpdateStore for Live<'_, '_, B, C, E, A, R>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
+        async fn stored(&mut self) -> Result<Option<Vec<u8>>> {
+            Custodian(&mut *self.account).stored().await
+        }
+        async fn persist(&mut self, outbox: &[u8]) -> Result<()> {
+            Custodian(&mut *self.account).persist(outbox).await
+        }
+        async fn clear(&mut self) -> Result<()> {
+            Custodian(&mut *self.account).clear().await
+        }
+    }
+
+    impl<B, C, E, A, R> UpdateWire for Live<'_, '_, B, C, E, A, R>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
+        async fn sign(&mut self, proven: &ProvenUpdate) -> Result<SignedApplyExtended> {
+            self.admission
+                .sign_update_request(self.account, proven, self.intents)
+                .await
+        }
+        async fn restore(&mut self, outbox: Vec<u8>) -> Result<SignedApplyExtended> {
+            self.admission.restore_signed(outbox)
+        }
+        async fn send(&mut self, signed: &SignedApplyExtended) -> Result<AcceptedResponse> {
+            self.admission.send_signed(signed).await
+        }
+    }
+
+    /// The lobby through the held member lease.
+    struct Asking<'a, B: cwst::backend::Backend, C, E, A, R> {
+        membership: &'a mut cfyr::membership::LiveMembership<Transport>,
+        account: &'a mut CommunityAccount<B, C, E, A, R>,
+    }
+
+    impl<B, C, E, A, R> Lobby for Asking<'_, B, C, E, A, R>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
+        async fn gate(&mut self, request: &JoinRequest) -> Result<Gate> {
+            gate(self.membership, self.account, request).await
+        }
+    }
+
+    /// Everything one fresh admission needs.
+    struct Fresh<'a, B: cwst::backend::Backend, C, E, A, R, G> {
+        membership: &'a mut cfyr::membership::LiveMembership<Transport>,
+        policy: &'a mut cfyr::policy::CurrentPolicy<Transport>,
+        account: &'a mut CommunityAccount<B, C, E, A, R>,
+        global: &'a mut GlobalPassport<B, C, E, A, R>,
+        device: [u8; 32],
+        rng: &'a mut G,
+        creation: Option<&'a str>,
+    }
+
+    impl<B, C, E, A, R, G> Credentials for Fresh<'_, B, C, E, A, R, G>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+        G: cwlt::passport::rand::RngCore + cwlt::passport::rand::CryptoRng,
+    {
+        async fn stored(&mut self) -> Result<Option<Vec<u8>>> {
+            self.account.stored_community_credential().await
+        }
+        async fn renew(&mut self) -> Result<()> {
+            let admission = admit(
+                self.membership,
+                self.policy,
+                self.global,
+                self.device,
+                self.rng,
+                self.creation,
+            )
+            .await?;
+            self.account
+                .store_community_credential(admission.community_credential())
+                .await
+        }
+    }
+
+    /// What an update call asks of one fresh admission.
+    enum Task<'a> {
+        Apply(&'a ProvenUpdate),
+        Resume,
+    }
+
+    /// Run an update task through a fresh admission (signed once, stored before
+    /// the send, re-sent unchanged on retry).
+    async fn update_flow<B, C, E, A, R, G>(
+        task: Task<'_>,
+        parts: &mut Fresh<'_, B, C, E, A, R, G>,
+        intents: &mut AccountingIntents,
+    ) -> Result<Option<Shared<Applied>>>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+        G: cwlt::passport::rand::RngCore + cwlt::passport::rand::CryptoRng,
+    {
+        if matches!(task, Task::Resume) && Custodian(&mut *parts.account).stored().await?.is_none()
+        {
+            return Ok(None);
+        }
+        let mut admission = admit(
+            &mut *parts.membership,
+            &mut *parts.policy,
+            &mut *parts.global,
+            parts.device,
+            &mut *parts.rng,
+            parts.creation,
+        )
+        .await?;
+        parts
+            .account
+            .store_community_credential(admission.community_credential())
+            .await?;
+        let mut live = Live {
+            admission: &mut admission,
+            account: &mut *parts.account,
+            intents,
+        };
+        match task {
+            Task::Apply(proven) => update::apply(&mut live, proven)
+                .await
+                .map(|applied| Some(Shared::new(applied))),
+            Task::Resume => update::resume(&mut live)
+                .await
+                .map(|applied| applied.map(Shared::new)),
+        }
     }
 
     /// The actor's view of the enrollment while one admission is held.
@@ -593,6 +836,8 @@ mod run {
         } = parts;
         let mut carried = None;
         let mut creation: Option<String> = None;
+        // The accepted update whose settlement the caller has not confirmed.
+        let mut owed: Option<Shared<Applied>> = None;
         loop {
             let first = match carried.take() {
                 Some(command) => command,
@@ -603,17 +848,96 @@ mod run {
                 mailbox.reply(Ok(Answer::Noted));
                 continue;
             }
-            if let Command::Join(join) = &first {
-                // The gates come before any admission: an active account is
-                // already through them, otherwise the lobby decides.
-                let reply = match repeat(first.clone(), &mut account).await {
-                    Repeat::Answer(answer) => Ok(answer),
-                    Repeat::As(_) => gate(&mut membership, &mut account, join)
-                        .await
-                        .map(Answer::Gate),
-                };
+            if let Command::Join(request) = &first {
+                // The gates come before any admission, and the lobby decides
+                // every time, also for an active member whose gates changed.
+                let mut reply = join(
+                    &mut Asking {
+                        membership: &mut membership,
+                        account: &mut account,
+                    },
+                    request,
+                )
+                .await;
+                let through = matches!(&reply, Ok(Answer::Gate(Gate { ready: true, .. })))
+                    && existing_active(&mut account).await.is_some();
+                if through {
+                    // Login chores of an active member: a credential about to
+                    // end is renewed, and an update whose answer was lost is
+                    // finished (its acceptance waits for `Resume`).
+                    let mut parts = Fresh {
+                        membership: &mut membership,
+                        policy: &mut policy,
+                        account: &mut account,
+                        global: &mut global,
+                        device,
+                        rng: &mut rng,
+                        creation: creation.as_deref(),
+                    };
+                    if let Err(error) = update::renew_on_login(&mut parts, clock()).await {
+                        reply = Err(error);
+                    } else if owed.is_none() {
+                        owed = update_flow(Task::Resume, &mut parts, &mut intents)
+                            .await
+                            .ok()
+                            .flatten();
+                    }
+                }
                 mailbox.reply(reply);
                 continue;
+            }
+            match &first {
+                Command::Update(proven) => {
+                    let mut parts = Fresh {
+                        membership: &mut membership,
+                        policy: &mut policy,
+                        account: &mut account,
+                        global: &mut global,
+                        device,
+                        rng: &mut rng,
+                        creation: creation.as_deref(),
+                    };
+                    let reply = update_flow(Task::Apply(proven), &mut parts, &mut intents)
+                        .await
+                        .and_then(|applied| applied.ok_or(ErrorCode::Unavailable))
+                        .map(|applied| {
+                            owed = Some(applied.clone());
+                            Answer::Updated(applied)
+                        });
+                    mailbox.reply(reply);
+                    continue;
+                }
+                Command::Resume => {
+                    let reply = match owed.clone() {
+                        Some(done) => Ok(Some(done)),
+                        None => {
+                            let mut parts = Fresh {
+                                membership: &mut membership,
+                                policy: &mut policy,
+                                account: &mut account,
+                                global: &mut global,
+                                device,
+                                rng: &mut rng,
+                                creation: creation.as_deref(),
+                            };
+                            update_flow(Task::Resume, &mut parts, &mut intents).await
+                        }
+                    };
+                    if let Ok(done) = &reply {
+                        owed = done.clone();
+                    }
+                    mailbox.reply(reply.map(Answer::Owed));
+                    continue;
+                }
+                Command::Settle(id) => {
+                    let reply = update::settle(&mut Custodian(&mut account), *id).await;
+                    if reply.is_ok() && owed.as_ref().is_some_and(|done| done.request_id() == *id) {
+                        owed = None;
+                    }
+                    mailbox.reply(reply.map(|()| Answer::Settled));
+                    continue;
+                }
+                _ => {}
             }
             let admission = match admit(
                 &mut membership,
@@ -792,7 +1116,11 @@ mod run {
                     Err(error) => (Err(error), Next::Restart),
                 }
             }
-            Command::Join(_) | Command::Creation(_) => (Err(ErrorCode::Unavailable), Next::Carry),
+            Command::Join(_)
+            | Command::Creation(_)
+            | Command::Update(_)
+            | Command::Resume
+            | Command::Settle(_) => (Err(ErrorCode::Unavailable), Next::Carry),
             Command::Activate => {
                 let Some(admission) = stage.admission() else {
                     return (Err(ErrorCode::Unavailable), Next::Carry);
@@ -946,7 +1274,7 @@ mod tests {
             pending: true,
             probes: 0,
         };
-        for command in all() {
+        for command in all().into_iter().filter(|c| !matches!(c, Command::Join(_))) {
             let first = block(repeat(command.clone(), &mut state));
             let second = block(repeat(command, &mut state));
             assert_eq!(first, second);
@@ -1015,31 +1343,118 @@ mod tests {
         assert!(state.probes > 0);
     }
 
+    /// A scripted lobby: the standing of the account and what the lobby answers.
+    struct Hall {
+        active: bool,
+        asked: usize,
+        answer: Result<Gate>,
+    }
+    impl Lobby for Hall {
+        async fn gate(&mut self, _: &JoinRequest) -> Result<Gate> {
+            self.asked += 1;
+            match &self.answer {
+                Ok(gate) => Ok(Gate {
+                    ready: gate.ready,
+                    steps: gate.steps.clone(),
+                }),
+                Err(error) => Err(*error),
+            }
+        }
+    }
+    fn step() -> GateStep {
+        GateStep {
+            gate: "pow".into(),
+            provider: "local".into(),
+            id: "solve".into(),
+        }
+    }
+
     #[test]
-    fn an_active_account_is_through_the_gates_and_a_first_run_asks_the_lobby() {
-        let mut active = Fake {
-            active: Some(done()),
-            pending: false,
-            probes: 0,
+    fn every_join_asks_the_lobby_also_for_an_active_account() {
+        for command in [Command::Join(JoinRequest::default())] {
+            for pending in [true, false] {
+                let mut state = Fake {
+                    active: Some(done()),
+                    pending,
+                    probes: 0,
+                };
+                assert_eq!(
+                    block(repeat(command.clone(), &mut state)),
+                    Repeat::As(command.clone())
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_active_member_whose_gates_changed_is_held_in_the_lobby() {
+        let mut hall = Hall {
+            active: true,
+            asked: 0,
+            answer: Ok(Gate {
+                ready: false,
+                steps: vec![step()],
+            }),
         };
         assert_eq!(
-            block(repeat(Command::Join(JoinRequest::default()), &mut active)),
-            Repeat::Answer(Answer::Gate(Gate {
+            block(join(&mut hall, &JoinRequest::default())),
+            Ok(Answer::Gate(Gate {
+                ready: false,
+                steps: vec![step()]
+            }))
+        );
+        assert_eq!(hall.asked, 1);
+        // Once the member supplied the step the lobby is satisfied and the same
+        // resumable steps run again (an active account answers them from state).
+        hall.answer = Ok(Gate {
+            ready: true,
+            steps: Vec::new(),
+        });
+        assert_eq!(
+            block(join(&mut hall, &JoinRequest::default())),
+            Ok(Answer::Gate(Gate {
                 ready: true,
                 steps: Vec::new()
             }))
         );
-        let mut fresh = Fake {
-            active: None,
+        let mut state = Fake {
+            active: Some(done()),
+            pending: false,
+            probes: 0,
+        };
+        assert!(matches!(
+            block(repeat(Command::Open, &mut state)),
+            Repeat::Answer(Answer::Opened(_))
+        ));
+    }
+
+    #[test]
+    fn an_unreachable_or_refusing_lobby_never_reads_as_ready() {
+        for active in [true, false] {
+            for error in [ErrorCode::Unavailable, ErrorCode::Reconcile, ErrorCode::Refused] {
+                let mut hall = Hall {
+                    active,
+                    asked: 0,
+                    answer: Err(error),
+                };
+                assert_eq!(block(join(&mut hall, &JoinRequest::default())), Err(error));
+            }
+        }
+    }
+
+    #[test]
+    fn updates_take_their_own_path() {
+        let mut state = Fake {
+            active: Some(done()),
             pending: true,
             probes: 0,
         };
-        // A durable pending request does not skip the gates: only an active
-        // account does, because the lobby is the server's to answer.
-        assert_eq!(
-            block(repeat(Command::Join(JoinRequest::default()), &mut fresh)),
-            Repeat::As(Command::Join(JoinRequest::default()))
-        );
+        for command in [Command::Resume, Command::Settle([1; 32])] {
+            assert_eq!(
+                block(repeat(command.clone(), &mut state)),
+                Repeat::As(command)
+            );
+        }
     }
 
     #[test]

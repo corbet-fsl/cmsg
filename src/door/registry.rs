@@ -223,21 +223,29 @@ pub(super) async fn account_call(
     command: account::Command,
 ) -> Result<account::Answer> {
     let origin = origin(door, key)?.to_owned();
+    account_call_at(door, &origin, command).await
+}
+
+async fn account_call_at(
+    door: &mut Door,
+    origin: &str,
+    command: account::Command,
+) -> Result<account::Answer> {
     let actor = door
         .accounts
-        .get_mut(&origin)
+        .get_mut(origin)
         .ok_or(ErrorCode::Unavailable)?;
     if actor.expired(door.clock_floor) {
-        door.accounts.remove(&origin);
+        door.accounts.remove(origin);
         return Err(ErrorCode::Unavailable);
     }
     let answer = actor.call(command).await;
     if door
         .accounts
-        .get(&origin)
+        .get(origin)
         .is_some_and(|actor| actor.expired(0))
     {
-        door.accounts.remove(&origin);
+        door.accounts.remove(origin);
     }
     answer
 }
@@ -479,4 +487,44 @@ pub fn catalog() -> Vec<ActionDescription> {
         })
         .chain(foyer::catalog())
         .collect()
+}
+
+/// Account updates for the trusted embedder (the proof worker of the wallet). They
+/// carry proof material and are therefore not callable actions.
+impl Door {
+    /// Send a proven update. It is signed once, stored before the send and, on a
+    /// retry after any failure, re-sent unchanged; the operator then answers
+    /// with the original acceptance. Keep the answer until the new state is
+    /// durable, then call `account_settle`.
+    pub async fn account_update(
+        &mut self,
+        origin: &str,
+        proven: accounting::ProvenUpdate,
+    ) -> Result<account::Shared<account::Applied>> {
+        account_call_at(
+            self,
+            origin,
+            account::Command::Update(account::Shared::new(proven)),
+        )
+        .await?
+        .updated()
+    }
+
+    /// The acceptance of an update whose answer was lost (re-sent unchanged), or
+    /// `None` when none is owed. Call after every login before building the next proof.
+    pub async fn account_resume(
+        &mut self,
+        origin: &str,
+    ) -> Result<Option<account::Shared<account::Applied>>> {
+        account_call_at(self, origin, account::Command::Resume)
+            .await?
+            .owed()
+    }
+
+    /// The caller made the acceptance of `request_id` durable: forget the stored update.
+    pub async fn account_settle(&mut self, origin: &str, request_id: [u8; 32]) -> Result<()> {
+        account_call_at(self, origin, account::Command::Settle(request_id))
+            .await
+            .map(|_| ())
+    }
 }
