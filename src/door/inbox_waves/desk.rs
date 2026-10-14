@@ -55,6 +55,15 @@ pub(super) struct Session {
     #[serde(default)]
     pub peer_signature: Option<Vec<u8>>,
     pub welcome: Option<Vec<u8>>,
+    /// The recipient's signed receipt: signed here (recipient) or checked on arrival (sender).
+    #[serde(default)]
+    pub resolution: Option<Receipt>,
+    /// The sender's acknowledgment: signed here (sender) or checked on arrival (recipient).
+    #[serde(default)]
+    pub acknowledgment: Option<Receipt>,
+    /// Silent re-Hellos this wave already went through (bounded).
+    #[serde(default)]
+    pub rehellos: u8,
     /// Set once this member's conversation exists on this device.
     pub opened: bool,
     pub outbox: Vec<Envelope>,
@@ -151,6 +160,12 @@ impl Desk {
         Ok(())
     }
 
+    /// Drop a wave and its recorded jobs (a replaced Hello).
+    pub fn remove(&mut self, nonce: &[u8; 32]) {
+        self.waves.retain(|wave| &wave.nonce != nonce);
+        self.jobs.retain(|job| &job.nonce != nonce);
+    }
+
     pub fn job_id(nonce: &[u8; 32], work: Work) -> [u8; 32] {
         let mut hash = Sha256::new();
         hash.update(b"cmsg.wave-job.v1");
@@ -178,12 +193,17 @@ impl Desk {
         Ok(id)
     }
 
-    /// The oldest recorded job; the host worker takes it.
+    /// The oldest recorded job that can run now; the host worker takes it. An Answer waits
+    /// for the sender's acknowledgment, which the proof carries as a private witness.
     pub fn take(&mut self) -> Option<Job> {
-        let job = self
-            .jobs
-            .iter_mut()
-            .find(|job| job.stage == JobStage::Recorded)?;
+        let waves = &self.waves;
+        let job = self.jobs.iter_mut().find(|job| {
+            job.stage == JobStage::Recorded
+                && (job.work != Work::Answer
+                    || waves
+                        .iter()
+                        .any(|wave| wave.nonce == job.nonce && wave.acknowledgment.is_some()))
+        })?;
         job.stage = JobStage::Proving;
         job.attempts += 1;
         Some(job.clone())
@@ -295,6 +315,9 @@ mod tests {
             receipt_digest: None,
             key_package: None,
             welcome: None,
+            resolution: None,
+            acknowledgment: None,
+            rehellos: 0,
             opened: false,
             outbox: vec![],
             next_out: 0,
@@ -332,6 +355,12 @@ mod tests {
         let mut desk = Desk::default();
         desk.add(session(1)).unwrap();
         let id = desk.record([1; 32], Work::Answer).unwrap();
+        // The Answer waits for the sender's acknowledgment.
+        assert!(desk.take().is_none());
+        desk.wave_mut(&[1; 32]).unwrap().acknowledgment = Some(Receipt {
+            issued_at: 1,
+            signature: vec![0; 64],
+        });
         desk.take().unwrap();
         assert!(desk.take().is_none());
         desk.recover();

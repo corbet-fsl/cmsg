@@ -20,7 +20,7 @@ use super::super::{facades::OwnedFuture, Door, ErrorCode, Result};
 use super::{
     ports::{verify_outcome_with, verify_reservation_with},
     types::{Hello, ProveJob, Proved, Terms},
-    worker, ContactRequest, Policy, WavePorts,
+    worker, ContactRequest, Policy, ReceiptRequest, WavePorts,
 };
 use ckmg::{Binding, Lineage};
 use cwlt::wave::{
@@ -67,6 +67,38 @@ pub trait WaveContact {
         signature: &'a [u8],
         now: u64,
     ) -> OwnedFuture<'a, ()>;
+    /// The receipt and acknowledgment signatures, behind the Keys `SignResolution` and
+    /// `SignAcknowledgment` admissions. They refuse unless an implementation supplies them.
+    fn sign_resolution<'a>(
+        &'a self,
+        _request: ReceiptRequest<'a>,
+        _now: u64,
+    ) -> OwnedFuture<'a, Vec<u8>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    fn verify_resolution<'a>(
+        &'a self,
+        _request: ReceiptRequest<'a>,
+        _signature: &'a [u8],
+        _now: u64,
+    ) -> OwnedFuture<'a, ()> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    fn sign_acknowledgment<'a>(
+        &'a self,
+        _request: ReceiptRequest<'a>,
+        _now: u64,
+    ) -> OwnedFuture<'a, Vec<u8>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    fn verify_acknowledgment<'a>(
+        &'a self,
+        _request: ReceiptRequest<'a>,
+        _signature: &'a [u8],
+        _now: u64,
+    ) -> OwnedFuture<'a, ()> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
 }
 
 /// G2: this member's record matches the newest epoch commitment.
@@ -170,6 +202,36 @@ impl<C: ProofCheck + 'static> WavePorts for ProductionPorts<C> {
         now: u64,
     ) -> OwnedFuture<'a, ()> {
         self.contact.verify(request, signature, now)
+    }
+    fn sign_resolution<'a>(
+        &'a self,
+        request: ReceiptRequest<'a>,
+        now: u64,
+    ) -> OwnedFuture<'a, Vec<u8>> {
+        self.contact.sign_resolution(request, now)
+    }
+    fn verify_resolution<'a>(
+        &'a self,
+        request: ReceiptRequest<'a>,
+        signature: &'a [u8],
+        now: u64,
+    ) -> OwnedFuture<'a, ()> {
+        self.contact.verify_resolution(request, signature, now)
+    }
+    fn sign_acknowledgment<'a>(
+        &'a self,
+        request: ReceiptRequest<'a>,
+        now: u64,
+    ) -> OwnedFuture<'a, Vec<u8>> {
+        self.contact.sign_acknowledgment(request, now)
+    }
+    fn verify_acknowledgment<'a>(
+        &'a self,
+        request: ReceiptRequest<'a>,
+        signature: &'a [u8],
+        now: u64,
+    ) -> OwnedFuture<'a, ()> {
+        self.contact.verify_acknowledgment(request, signature, now)
     }
     fn verify_reservation<'a>(
         &'a self,
@@ -425,6 +487,7 @@ mod tests {
                 history: [3; 32],
                 authority: [4; 32],
                 lifetime: 3600,
+                window: 0,
             },
             wave: wave_policy(),
             authority_until: NOW + 500,
@@ -576,6 +639,8 @@ mod tests {
             recipient: context(1),
             receipt_digest: None,
             contact_signature: None,
+            resolution: None,
+            acknowledgment: None,
         }
     }
     #[tokio::test]

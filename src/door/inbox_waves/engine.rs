@@ -8,7 +8,10 @@
 //! done), so a crash between the two is repaired by running the step again.
 use super::super::*;
 use super::desk::{Desk, Session, KEY, OWNER};
-use super::ports::{ContactRequest, Policy, WavePorts};
+use super::ports::{ContactRequest, Policy, ReceiptRequest, WavePorts};
+
+/// How many times a wave may silently replace a Hello whose Terms came too late.
+const MAX_REHELLOS: u8 = 3;
 use super::types::*;
 use ckmg::{Authority, Binding, Clock, Entropy, KeyHandle, Keys, Lineage, SecureStore};
 use cwlt::wave::{WaveOutcome, WaveOutcomeStatement, WaveStatement};
@@ -276,6 +279,9 @@ where
             own_signature: None,
             peer_signature: None,
             welcome: None,
+            resolution: None,
+            acknowledgment: None,
+            rehellos: 0,
             opened: false,
             outbox: vec![],
             next_out: 0,
@@ -303,8 +309,12 @@ where
                 ) {
                     return Err(ErrorCode::Refused);
                 }
+                // The receipt is signed and stored before the Close can carry it.
+                let receipt = self.sign_receipt(&session, 2).await?;
                 desk.record(*nonce, Work::Close)?;
-                desk.wave_mut(nonce)?.stage = Stage::Closed;
+                let closing = desk.wave_mut(nonce)?;
+                closing.resolution = Some(receipt);
+                closing.stage = Stage::Closed;
                 self.write_desk(&desk, operation(nonce, "close")).await?;
             }
             Decision::Answer => {
@@ -317,6 +327,50 @@ where
         Ok(desk.status(desk.wave(nonce).ok_or(ErrorCode::Refused)?))
     }
 
+    /// The receipt and acknowledgment time. It is the lease start, so a retry after a crash
+    /// signs the identical digest and the signing ledger returns the stored signature.
+    fn receipt_time(session: &Session) -> u64 {
+        session.hello.opened_at
+    }
+
+    fn contact_of(session: &Session) -> ContactRequest<'_> {
+        ContactRequest {
+            nonce: &session.nonce,
+            hello: &session.hello,
+            role: session.role,
+            peer: &session.peer,
+        }
+    }
+
+    /// The recipient's account signs the receipt of its decision (`kind` 1 Answer, 2 Close).
+    async fn sign_receipt(&mut self, session: &Session, kind: u8) -> Result<Receipt> {
+        if let Some(stored) = &session.resolution {
+            return Ok(stored.clone());
+        }
+        let receipt_digest = session.receipt_digest.ok_or(ErrorCode::Refused)?;
+        let issued_at = Self::receipt_time(session);
+        let signature = self
+            .ports
+            .sign_resolution(
+                ReceiptRequest {
+                    contact: Self::contact_of(session),
+                    kind,
+                    issued_at,
+                    receipt_digest: &receipt_digest,
+                    receipt_signature: &[],
+                },
+                now()?,
+            )
+            .await?;
+        if signature.len() != CONTACT_SIGNATURE_BYTES {
+            return Err(ErrorCode::Refused);
+        }
+        Ok(Receipt {
+            issued_at,
+            signature,
+        })
+    }
+
     /// The Answer: ONE checkpoint opens the member's conversation (Waves claim,
     /// Contacts Begin, Threads join) and records the Answer as work. The proof
     /// never blocks it.
@@ -325,6 +379,8 @@ where
         let receipt = session.receipt_digest.ok_or(ErrorCode::Refused)?;
         let welcome = session.welcome.clone().ok_or(ErrorCode::Refused)?;
         let conversation = session.hello.conversation;
+        // The receipt is signed and stored before the Answer can carry it anywhere.
+        let signed = self.sign_receipt(&session, 1).await?;
         let me = self.me()?;
         let mut clock = custody::SystemClock;
         let waves = self.inbox.waves(me, self.store).map_err(inbox_error)?;
@@ -338,6 +394,14 @@ where
             let s = next.wave_mut(&nonce)?;
             s.stage = Stage::Claimed;
             s.opened = true;
+            s.resolution = Some(signed.clone());
+            s.enqueue(
+                self.binding.member(),
+                WaveMessage::Resolution {
+                    nonce,
+                    receipt: signed,
+                },
+            );
         }
         let carried = cnbx::WalletChange::new(OWNER.into(), KEY.to_vec(), next.encode()?);
         let mut devices = self.devices().await?;
@@ -515,14 +579,28 @@ where
                     self.on_welcome(&mut desk, session, welcome).await?
                 }
                 WaveMessage::Outcome {
-                    decision, outcome, ..
+                    decision,
+                    outcome,
+                    receipt,
+                    ..
                 } => {
-                    self.on_outcome(&mut desk, session, decision, outcome)
+                    self.on_outcome(&mut desk, session, decision, outcome, receipt)
                         .await?
+                }
+                WaveMessage::Resolution { receipt, .. } => {
+                    self.on_resolution(&mut desk, session, receipt).await?
+                }
+                WaveMessage::Acknowledgment { receipt, .. } => {
+                    self.on_acknowledgment(&mut desk, session, receipt).await?
                 }
             }
         }
-        Ok(desk.status(desk.wave(&nonce).ok_or(ErrorCode::Refused)?))
+        // A replaced Hello leaves the peer's newest wave in its place.
+        let shown = desk
+            .wave(&nonce)
+            .or_else(|| desk.waves.iter().rev().find(|s| s.peer == peer))
+            .ok_or(ErrorCode::Refused)?;
+        Ok(desk.status(shown))
     }
 
     async fn on_hello(
@@ -563,6 +641,9 @@ where
             own_signature: None,
             peer_signature: None,
             welcome: None,
+            resolution: None,
+            acknowledgment: None,
+            rehellos: 0,
             opened: false,
             outbox: vec![],
             next_out: 0,
@@ -573,12 +654,72 @@ where
         self.write_desk(desk, operation(&nonce, "hello-in")).await
     }
 
+    /// Replace the Hello of a wave whose Terms came too late with a fresh one.
+    async fn rehello(&mut self, desk: &mut Desk, session: Session, now: u64) -> Result<()> {
+        if session.rehellos >= MAX_REHELLOS {
+            return Err(ErrorCode::Refused);
+        }
+        self.check_peer(&session.peer).await?;
+        let policy = self.ports.policy(now)?;
+        let nonce = random()?;
+        let hello = Hello {
+            conversation: random()?,
+            group: policy.group,
+            contact_policy: policy.contact_policy,
+            history: policy.history,
+            opened_at: now,
+            expires_at: now
+                .checked_add(policy.lifetime)
+                .ok_or(ErrorCode::InvalidRequest)?,
+            sender_authority: policy.authority,
+            sender_challenge: random()?,
+        };
+        let old = session.nonce;
+        let rehellos = session.rehellos + 1;
+        desk.remove(&old);
+        desk.add(Session {
+            nonce,
+            peer: session.peer,
+            role: 0,
+            stage: Stage::Hello,
+            hello: hello.clone(),
+            terms: None,
+            own: None,
+            theirs: None,
+            receipt_digest: None,
+            key_package: None,
+            own_signature: None,
+            peer_signature: None,
+            welcome: None,
+            resolution: None,
+            acknowledgment: None,
+            rehellos,
+            opened: false,
+            outbox: vec![],
+            next_out: 0,
+            last_in: None,
+        })?;
+        desk.wave_mut(&nonce)?
+            .enqueue(self.binding.member(), WaveMessage::Hello { nonce, hello });
+        self.write_desk(desk, operation(&nonce, "rehello")).await
+    }
+
     async fn on_terms(&mut self, desk: &mut Desk, session: Session, terms: Terms) -> Result<()> {
         if session.role != 0 || session.stage != Stage::Hello || session.terms.is_some() {
             return Err(ErrorCode::Refused);
         }
         let nonce = session.nonce;
         let now = now()?;
+        // The reservation proof is dated at the Hello's opening. Terms that arrive after
+        // the lease or in a later issuer window cannot be proved: open a fresh Hello as a
+        // system step. The human's wave is kept; the retries are bounded.
+        let window = self.ports.policy(now)?.window;
+        let hello = &session.hello;
+        let late = now >= hello.expires_at
+            || (window > 0 && now / window != hello.opened_at / window);
+        if late {
+            return self.rehello(desk, session, now).await;
+        }
         // The recipient's consent is checked before anything is offered or reserved, and
         // this side's own consent is signed and stored before the Offer can carry it.
         if terms.contact_signature.len() != CONTACT_SIGNATURE_BYTES {
@@ -851,6 +992,7 @@ where
         session: Session,
         decision: Decision,
         outcome: Blob,
+        signed: Option<Receipt>,
     ) -> Result<()> {
         // Only the sender learns the recipient's decision.
         if session.role != 0 || !matches!(session.stage, Stage::Released | Stage::Offered) {
@@ -859,6 +1001,20 @@ where
         let nonce = session.nonce;
         let receipt = session.receipt_digest.ok_or(ErrorCode::Refused)?;
         let now = now()?;
+        // The outcome settles under the recipient's signed receipt: the one an Answer
+        // announced earlier (and was acknowledged), or the Close's own.
+        let signed = signed.ok_or(ErrorCode::Refused)?;
+        let kind_code = if decision == Decision::Answer { 1 } else { 2 };
+        match &session.resolution {
+            Some(stored) if *stored == signed => {}
+            Some(_) => return Err(ErrorCode::Refused),
+            None if decision == Decision::Answer => return Err(ErrorCode::Refused),
+            None => {
+                self.check_resolution(&session, &signed, kind_code, now)
+                    .await?
+            }
+        }
+        desk.wave_mut(&nonce)?.resolution = Some(signed);
         let me = self.me()?;
         let (_, recipient) = contexts(self.binding, &session, me)?;
         let statement: WaveOutcomeStatement = blob_statement(&outcome)?;
@@ -893,6 +1049,121 @@ where
                 .await?;
         }
         Ok(())
+    }
+
+    async fn check_resolution(
+        &mut self,
+        session: &Session,
+        signed: &Receipt,
+        kind: u8,
+        now: u64,
+    ) -> Result<()> {
+        let receipt_digest = session.receipt_digest.ok_or(ErrorCode::Refused)?;
+        if signed.signature.len() != CONTACT_SIGNATURE_BYTES
+            || signed.issued_at != Self::receipt_time(session)
+        {
+            return Err(ErrorCode::Refused);
+        }
+        self.ports
+            .verify_resolution(
+                ReceiptRequest {
+                    contact: Self::contact_of(session),
+                    kind,
+                    issued_at: signed.issued_at,
+                    receipt_digest: &receipt_digest,
+                    receipt_signature: &[],
+                },
+                &signed.signature,
+                now,
+            )
+            .await
+    }
+
+    /// Sender: the recipient answered. Check its receipt, sign the acknowledgment and store
+    /// it before it is queued; the recipient's outcome proof waits for it.
+    async fn on_resolution(
+        &mut self,
+        desk: &mut Desk,
+        session: Session,
+        signed: Receipt,
+    ) -> Result<()> {
+        if session.role != 0
+            || !matches!(session.stage, Stage::Released | Stage::Offered)
+            || session.resolution.is_some()
+        {
+            return Err(ErrorCode::Refused);
+        }
+        let nonce = session.nonce;
+        let now = now()?;
+        self.check_resolution(&session, &signed, 1, now).await?;
+        let receipt_digest = session.receipt_digest.ok_or(ErrorCode::Refused)?;
+        let signature = self
+            .ports
+            .sign_acknowledgment(
+                ReceiptRequest {
+                    contact: Self::contact_of(&session),
+                    kind: 1,
+                    issued_at: signed.issued_at,
+                    receipt_digest: &receipt_digest,
+                    receipt_signature: &signed.signature,
+                },
+                now,
+            )
+            .await?;
+        if signature.len() != CONTACT_SIGNATURE_BYTES {
+            return Err(ErrorCode::Refused);
+        }
+        let ack = Receipt {
+            issued_at: signed.issued_at,
+            signature,
+        };
+        let next = desk.wave_mut(&nonce)?;
+        next.resolution = Some(signed);
+        next.acknowledgment = Some(ack.clone());
+        next.enqueue(
+            self.binding.member(),
+            WaveMessage::Acknowledgment {
+                nonce,
+                receipt: ack,
+            },
+        );
+        self.write_desk(desk, operation(&nonce, "resolution-in"))
+            .await
+    }
+
+    /// Recipient: the sender acknowledged the Answer receipt. The Answer proof can now run.
+    async fn on_acknowledgment(
+        &mut self,
+        desk: &mut Desk,
+        session: Session,
+        ack: Receipt,
+    ) -> Result<()> {
+        let (Some(signed), true) = (&session.resolution, session.acknowledgment.is_none()) else {
+            return Err(ErrorCode::Refused);
+        };
+        if session.role != 1
+            || signed.issued_at != ack.issued_at
+            || ack.signature.len() != CONTACT_SIGNATURE_BYTES
+        {
+            return Err(ErrorCode::Refused);
+        }
+        let receipt_digest = session.receipt_digest.ok_or(ErrorCode::Refused)?;
+        let nonce = session.nonce;
+        self.ports
+            .verify_acknowledgment(
+                ReceiptRequest {
+                    contact: Self::contact_of(&session),
+                    kind: 1,
+                    issued_at: ack.issued_at,
+                    receipt_digest: &receipt_digest,
+                    receipt_signature: &signed.signature,
+                },
+                &ack.signature,
+                now()?,
+            )
+            .await?;
+        desk.wave_mut(&nonce)?.acknowledgment = Some(ack);
+        self.write_desk(desk, operation(&nonce, "ack-in")).await
     }
 
     /// Contacts `Answered`, a later checkpoint backed by the committed link.
@@ -971,6 +1242,19 @@ where
             contact_signature: match job.work {
                 Work::ReserveSender => session.terms.as_ref().map(|t| t.contact_signature.clone()),
                 Work::ReserveRecipient => session.peer_signature.clone(),
+                // A punishment re-presents the counterpart's contact consent.
+                Work::Punish if session.role == 0 => {
+                    session.terms.as_ref().map(|t| t.contact_signature.clone())
+                }
+                Work::Punish => session.peer_signature.clone(),
+                _ => None,
+            },
+            resolution: match job.work {
+                Work::Answer | Work::Close => session.resolution.clone(),
+                _ => None,
+            },
+            acknowledgment: match job.work {
+                Work::Answer => session.acknowledgment.clone(),
                 _ => None,
             },
         };
@@ -1153,6 +1437,7 @@ where
                         nonce,
                         decision,
                         outcome: proved.blob.clone(),
+                        receipt: session.resolution.clone(),
                     },
                 );
                 if job.work == Work::Answer {
@@ -1211,6 +1496,8 @@ pub(crate) fn kind_of(message: &WaveMessage) -> String {
         WaveMessage::Reservation { .. } => "reservation",
         WaveMessage::Welcome { .. } => "welcome",
         WaveMessage::Outcome { .. } => "outcome",
+        WaveMessage::Resolution { .. } => "resolution",
+        WaveMessage::Acknowledgment { .. } => "acknowledgment",
     }
     .into()
 }

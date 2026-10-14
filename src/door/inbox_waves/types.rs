@@ -61,6 +61,16 @@ pub struct Terms {
 /// Length of a contact signature (P-256, r then s).
 pub const CONTACT_SIGNATURE_BYTES: usize = 64;
 
+/// An account-key signature over a settlement digest with the time it was issued: the
+/// recipient's receipt (Resolution) or the sender's Acknowledgment of an Answer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Receipt {
+    pub issued_at: u64,
+    /// 64 bytes, P-256 r then s.
+    pub signature: Vec<u8>,
+}
+
 /// A public statement with its proof, both opaque to the door.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -109,6 +119,20 @@ pub enum WaveMessage {
         nonce: [u8; 32],
         decision: Decision,
         outcome: Blob,
+        /// The recipient's signed receipt this outcome settles under.
+        #[serde(default)]
+        receipt: Option<Receipt>,
+    },
+    /// Recipient to sender: the signed Answer receipt, sent when the member answers so the
+    /// sender can acknowledge it. The outcome proof follows once the acknowledgment is in.
+    Resolution {
+        nonce: [u8; 32],
+        receipt: Receipt,
+    },
+    /// Sender to recipient: the acknowledgment of the Answer receipt.
+    Acknowledgment {
+        nonce: [u8; 32],
+        receipt: Receipt,
     },
 }
 
@@ -140,7 +164,9 @@ impl WaveMessage {
             | Self::Offer { nonce, .. }
             | Self::Reservation { nonce, .. }
             | Self::Welcome { nonce, .. }
-            | Self::Outcome { nonce, .. } => nonce,
+            | Self::Outcome { nonce, .. }
+            | Self::Resolution { nonce, .. }
+            | Self::Acknowledgment { nonce, .. } => nonce,
         }
     }
 }
@@ -160,6 +186,12 @@ pub struct ProveJob {
     /// The counterpart's contact signature over the pair's transcript (reservations).
     #[serde(default)]
     pub contact_signature: Option<Vec<u8>>,
+    /// The recipient's signed receipt (Answer and Close).
+    #[serde(default)]
+    pub resolution: Option<Receipt>,
+    /// The sender's acknowledgment (Answer only).
+    #[serde(default)]
+    pub acknowledgment: Option<Receipt>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
