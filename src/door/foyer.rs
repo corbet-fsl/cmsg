@@ -310,6 +310,42 @@ impl Operation {
 }
 
 impl Binding {
+    /// Ask the community service for a device-session nonce (public, no session needed).
+    pub(super) async fn begin_device_session(&mut self) -> Result<cfyr::device_session::Challenge> {
+        if self.uncertain {
+            return Err(ErrorCode::Reconcile);
+        }
+        self.community_client()?
+            .begin_device_session()
+            .await
+            .map_err(map_error)
+    }
+
+    /// Install the community session the signed nonce opens, replacing any earlier one.
+    pub(super) async fn finish_device_session(
+        &mut self,
+        nonce: [u8; 32],
+        user: &str,
+        device_key: [u8; 32],
+        signature: Vec<u8>,
+    ) -> Result<u64> {
+        if self.uncertain {
+            return Err(ErrorCode::Reconcile);
+        }
+        self.community_client()?
+            .finish_device_session(nonce, user, device_key, signature)
+            .await
+            .map(|info| info.expires)
+            .map_err(map_error)
+    }
+
+    fn community_client(&mut self) -> Result<&mut Foyer<Transport>> {
+        self.sessions
+            .clients
+            .get_mut(&Scope::Community)
+            .ok_or(ErrorCode::Unavailable)
+    }
+
     /// The two member operations of the global service that community creation
     /// needs, on a Door whose global session was lent for that purpose.
     pub async fn call_global(&mut self, operation: &Operation, body: Value) -> Result<Value> {
