@@ -215,8 +215,9 @@ impl<T: clnk::Transport, R: RoomLink> BoundBoard for BoardBinding<T, R> {
 }
 
 pub(super) struct BoundMesh {
-    mesh: cmsh::Mesh,
-    listener: cmsh::Listening,
+    // The Mesh, its listener, the address book and the send queue are shared
+    // with the courier task of this origin (see `courier`).
+    pub(super) shared: std::rc::Rc<courier::Shared>,
     _lifetime: Option<MeshLifetime>,
 }
 /// Retain the actual transport shutdown with Mesh, including failed startup,
@@ -240,11 +241,13 @@ impl Drop for MeshLifetime {
 }
 impl BoundMesh {
     pub fn view(&self) -> Vec<cmsh::BackendView> {
-        self.mesh.view()
+        self.shared.mesh.view()
     }
-    pub fn close(mut self) {
-        self.listener.close();
-        drop(self.mesh);
+    /// Stop the courier and release the Mesh. The listener (and with it the
+    /// published reachability) ends when the courier drops its handle, which
+    /// it does at its next wake-up.
+    pub fn close(self) {
+        self.shared.close();
     }
 }
 
@@ -712,8 +715,7 @@ impl Door {
         self.meshes.insert(
             origin.into(),
             BoundMesh {
-                mesh,
-                listener,
+                shared: std::rc::Rc::new(courier::Shared::new(mesh, listener)),
                 _lifetime: lifetime,
             },
         );
