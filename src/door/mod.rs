@@ -77,6 +77,9 @@ pub enum ErrorCode {
     Clock,
     Reconcile,
     Refused,
+    /// The server holds this member in the lobby: the gates now in force are
+    /// not passed. Clients show the lobby.
+    HeldInLobby,
 }
 
 impl ErrorCode {
@@ -86,7 +89,7 @@ impl ErrorCode {
     pub const fn exit_code(self) -> u8 {
         match self {
             Self::InvalidRequest | Self::UnsupportedAction | Self::UnsupportedVersion => 64,
-            Self::Unauthorized | Self::Refused => 77,
+            Self::Unauthorized | Self::Refused | Self::HeldInLobby => 77,
             Self::Unavailable => 69,
             Self::Capacity | Self::Clock | Self::Reconcile => 75,
         }

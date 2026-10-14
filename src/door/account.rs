@@ -254,16 +254,27 @@ pub(super) trait Lobby {
 /// Pass the gates. The lobby is asked every time, also for an active account: a
 /// member whose community changed its gates is held there (`ready` false) until
 /// the new steps are done, and then continues through the same resumable steps.
-/// This fails CLOSED when the lobby cannot be read: the server does not enforce
-/// the current gates on later sessions or actions (cvld `authenticate_current`
-/// -> cmbr `session_is_active` checks passkey, legal restriction and terminal
-/// state only), so the lobby read is the only gate check.
+/// When the lobby cannot be reached an ACTIVE account keeps working: the server
+/// is the authority (it refuses every non-lobby action of a member held in the
+/// lobby with `HeldInLobby`), so an unreachable lobby must not lock active
+/// members out. A new account still needs the lobby, so it fails closed.
 #[cfg_attr(
     not(all(feature = "native-prover", not(target_arch = "wasm32"))),
     allow(dead_code)
 )]
-pub(super) async fn join<L: Lobby>(lobby: &mut L, request: &JoinRequest) -> Result<Answer> {
-    lobby.gate(request).await.map(Answer::Gate)
+pub(super) async fn join<L: Lobby>(
+    lobby: &mut L,
+    request: &JoinRequest,
+    active: bool,
+) -> Result<Answer> {
+    match lobby.gate(request).await {
+        Ok(gate) => Ok(Answer::Gate(gate)),
+        Err(ErrorCode::Unavailable) if active => Ok(Answer::Gate(Gate {
+            ready: true,
+            steps: Vec::new(),
+        })),
+        Err(error) => Err(error),
+    }
 }
 
 /// Whether the lobby still lists an unsatisfied admission condition. A lobby
@@ -851,12 +862,14 @@ mod run {
             if let Command::Join(request) = &first {
                 // The gates come before any admission, and the lobby decides
                 // every time, also for an active member whose gates changed.
+                let active_account = existing_active(&mut account).await.is_some();
                 let mut reply = join(
                     &mut Asking {
                         membership: &mut membership,
                         account: &mut account,
                     },
                     request,
+                    active_account,
                 )
                 .await;
                 let through = matches!(&reply, Ok(Answer::Gate(Gate { ready: true, .. })))
@@ -1397,7 +1410,7 @@ mod tests {
             }),
         };
         assert_eq!(
-            block(join(&mut hall, &JoinRequest::default())),
+            block(join(&mut hall, &JoinRequest::default(), true)),
             Ok(Answer::Gate(Gate {
                 ready: false,
                 steps: vec![step()]
@@ -1411,7 +1424,7 @@ mod tests {
             steps: Vec::new(),
         });
         assert_eq!(
-            block(join(&mut hall, &JoinRequest::default())),
+            block(join(&mut hall, &JoinRequest::default(), true)),
             Ok(Answer::Gate(Gate {
                 ready: true,
                 steps: Vec::new()
@@ -1429,7 +1442,11 @@ mod tests {
     }
 
     #[test]
-    fn an_unreachable_or_refusing_lobby_never_reads_as_ready() {
+    fn an_unreachable_lobby_keeps_an_active_member_working_and_stops_a_new_one() {
+        let ready = Ok(Answer::Gate(Gate {
+            ready: true,
+            steps: Vec::new(),
+        }));
         for active in [true, false] {
             for error in [ErrorCode::Unavailable, ErrorCode::Reconcile, ErrorCode::Refused] {
                 let mut hall = Hall {
@@ -1437,7 +1454,14 @@ mod tests {
                     asked: 0,
                     answer: Err(error),
                 };
-                assert_eq!(block(join(&mut hall, &JoinRequest::default())), Err(error));
+                let reply = block(join(&mut hall, &JoinRequest::default(), active));
+                if active && error == ErrorCode::Unavailable {
+                    assert_eq!(reply, ready);
+                } else {
+                    // Only "unreachable" opens for an active member; a refusal or an
+                    // uncertain outcome never reads as ready.
+                    assert_eq!(reply, Err(error));
+                }
             }
         }
     }

@@ -653,8 +653,20 @@ pub(super) fn map_error(error: cfyr::Error) -> ErrorCode {
         }
         cfyr::Error::Throttled => ErrorCode::Capacity,
         cfyr::Error::Refused => ErrorCode::Refused,
+        cfyr::Error::HeldInLobby => ErrorCode::HeldInLobby,
         cfyr::Error::Unavailable => ErrorCode::Unavailable,
         cfyr::Error::Reconcile => ErrorCode::Reconcile,
+    }
+}
+
+#[cfg(test)]
+mod held_tests {
+    use super::*;
+
+    #[test]
+    fn the_servers_lobby_hold_reaches_the_client_as_its_own_code() {
+        assert_eq!(map_error(cfyr::Error::HeldInLobby), ErrorCode::HeldInLobby);
+        assert_eq!(ErrorCode::HeldInLobby.exit_code(), 77);
     }
 }
 
