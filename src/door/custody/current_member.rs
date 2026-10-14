@@ -8,6 +8,8 @@ pub(super) enum Purpose {
     /// One account-key signature over an exact digest (`SignContact`, `SignResolution`,
     /// `SignAcknowledgment`), against single-use intent naming that action and digest.
     AccountSigning,
+    /// Root authorization of the fixed account device (account actor only).
+    AccountDevice,
 }
 pub(super) struct PendingCurrent {
     lease: cfyr::membership::MembershipLease<Transport>,
@@ -45,6 +47,11 @@ fn shape(request: &Authorization<'_>, purpose: Purpose) -> Result<(), Error> {
                 request.action,
                 Action::SignContact | Action::SignResolution | Action::SignAcknowledgment
             ) && request.signing.is_none() =>
+        {
+            Ok(())
+        }
+        Purpose::AccountDevice
+            if request.action == Action::AuthorizeAccountDevice && request.signing.is_some() =>
         {
             Ok(())
         }
@@ -136,8 +143,14 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
             accepted: false,
         };
         shape(&request, purpose)?;
-        if purpose != Purpose::RecordRecipient && self.intent.is_none() {
-            return Err(Error::Unauthorized);
+        let account_armed = self.account.as_ref().is_some_and(|a| a.armed.get());
+        match purpose {
+            Purpose::DeviceSigning if self.intent.is_none() && !account_armed => {
+                return Err(Error::Unauthorized)
+            }
+            Purpose::AccountSigning if self.intent.is_none() => return Err(Error::Unauthorized),
+            Purpose::AccountDevice if !account_armed => return Err(Error::Unauthorized),
+            _ => {}
         }
         self.live.observe(&request).await?;
         // The node transport can check its own owner while this forced read
@@ -203,11 +216,31 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
             return Err(Error::Expired);
         }
         request.now = completed;
-        let signing = if purpose == Purpose::DeviceSigning {
-            self.intent
-                .as_mut()
-                .ok_or(Error::Unauthorized)?
-                .consume(&request, &self.live.origin)?;
+        let signing = if purpose == Purpose::DeviceSigning || purpose == Purpose::AccountDevice
+        {
+            let origin = self.live.origin.clone();
+            match (&mut self.account, account_armed) {
+                // The account actor armed its own channels: root authorization, then the
+                // delegation (spent by its attempt whatever the outcome), then the request.
+                (Some(account), true) => {
+                    let verifier = if purpose == Purpose::AccountDevice {
+                        // A new root authorization starts a new delegation round.
+                        account.delegation_spent = false;
+                        &mut account.root
+                    } else if account.delegation_spent {
+                        &mut account.request
+                    } else {
+                        account.delegation_spent = true;
+                        &mut account.delegation
+                    };
+                    verifier.consume(&request, &origin)?;
+                }
+                _ => self
+                    .intent
+                    .as_mut()
+                    .ok_or(Error::Unauthorized)?
+                    .consume(&request, &origin)?,
+            }
             let signing = request.signing.ok_or(Error::Unauthorized)?;
             Some((signing.transcript.to_vec(), signing.expires))
         } else {

@@ -43,7 +43,10 @@ where
     A: Authority,
     R: Records,
 {
-    account.vault.reopen_pending_genesis(now()).await.is_ok()
+    match account.vault().await {
+        Ok(mut vault) => vault.reopen_pending_genesis(now()).await.is_ok(),
+        Err(_) => false,
+    }
 }
 
 impl AccountAdmission<'_> {
@@ -61,8 +64,7 @@ impl AccountAdmission<'_> {
         R: Records,
     {
         let current = self.current()?;
-        let opened = account
-            .vault
+        let opened = account.vault().await?
             .reopen_pending_genesis(now())
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
@@ -106,8 +108,7 @@ impl AccountAdmission<'_> {
         let response = self.send_signed(&signed).await?;
         let trust = response_trust(&self.current().map_err(|_| ErrorCode::Reconcile)?.material)
             .map_err(|_| ErrorCode::Reconcile)?;
-        account
-            .vault
+        account.vault().await?
             .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
             .await
             .map_err(|_| ErrorCode::Reconcile)?;
@@ -126,13 +127,11 @@ impl AccountAdmission<'_> {
         A: Authority,
         R: Records,
     {
-        let accepted = account
-            .vault
+        let accepted = account.vault().await?
             .restore_accepted_account()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let outbox_settled = account
-            .vault
+        let outbox_settled = account.vault().await?
             .settle_account_outbox(operation()?)
             .await
             .unwrap_or(false);
@@ -168,8 +167,7 @@ impl AccountAdmission<'_> {
             return Err(ErrorCode::Unavailable);
         }
         let trust = response_trust(&current.material)?;
-        let activation = account
-            .vault
+        let activation = account.vault().await?
             .begin_account_activation(&trust, now())
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
@@ -186,8 +184,7 @@ impl AccountAdmission<'_> {
         account
             .check_pending(&pending, before.material_digest, &opened.outbox)
             .await?;
-        let activated = account
-            .vault
+        let activated = account.vault().await?
             .commit_account_activation(activation, operation()?, operation()?)
             .await
             .map_err(|_| ErrorCode::Reconcile)?;

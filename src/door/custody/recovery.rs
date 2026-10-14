@@ -14,6 +14,16 @@ pub struct RecoveryOwners<'attempt, N: cdht::Network> {
     pub recovery: cvlt::PreparedRecovery<'attempt>,
     pub authority: MemberAuthority<SystemClock, cvlt::TorLineageRecord<'static, N>>,
     pub intent: ckmg::IntentAdmission,
+    pub account: AccountWiring,
+}
+
+/// What the account actor of this member session is lent besides the Door's Vault:
+/// its three one-use signing channels and the arm that selects them on the member
+/// authority of that same Vault. Consumed by `account_open::bind_member_account`.
+pub struct AccountWiring {
+    pub(crate) intents: super::super::accounting::AccountingIntents,
+    pub(crate) request: ckmg::IntentAdmission,
+    pub(crate) arm: AccountArm,
 }
 
 /// Original recovered Vault with concrete fresh authority and Tor Records.
@@ -30,6 +40,7 @@ pub type RecoveredVault<B, N> = cvlt::Vault<
 pub struct RestoredVault<B: cwst::backend::Backend, N: cdht::Network> {
     pub vault: RecoveredVault<B, N>,
     pub intent: ckmg::IntentAdmission,
+    pub account: AccountWiring,
     /// The exact same session lifetime checked by this Vault's member authority.
     pub lifetime: CustodyLifetime,
 }
@@ -89,6 +100,7 @@ impl<N: cdht::Network + Clone> RecoveryOwners<'_, N> {
         Ok(RestoredVault {
             vault,
             intent: self.intent,
+            account: self.account,
             lifetime,
         })
     }
@@ -132,6 +144,7 @@ impl MemberAuthorityBuilder {
             policy,
             records,
             intent,
+            account: _,
             pending_current,
             #[cfg(all(test, not(target_arch = "wasm32")))]
                 reached_current: _,
@@ -157,12 +170,18 @@ impl MemberAuthorityBuilder {
         let record = cdht::runtime::Record::new(backend).map_err(|_| ErrorCode::Unavailable)?;
         let records =
             cvlt::LineageRecords::new(vec![record]).map_err(|_| ErrorCode::Unavailable)?;
-        let (authority, intent) = builder.bind_with_intent(records, SystemClock)?;
+        let (authority, intent, intents, request, arm) =
+            builder.bind_with_account_intents(records, SystemClock)?;
         guard.accepted = true;
         Ok(RecoveryOwners {
             recovery,
             authority,
             intent,
+            account: AccountWiring {
+                intents,
+                request,
+                arm,
+            },
         })
     }
 

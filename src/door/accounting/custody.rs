@@ -1,15 +1,57 @@
 //! Original community account paired with its authenticated recovery origin.
 use super::*;
+use crate::door::facades::{AccountPort, PortVault};
+use cvlt::WalletCustody;
 
 /// Receipt-restored community account under its original certified lineage and
 /// HTTPS origin. No caller routing value or replaceable Vault constructs this
 /// owner. The retained public identity grants nothing without fresh Keys Use.
 pub struct CommunityAccount<B: cwst::backend::Backend, C, E, A, R> {
-    pub(super) vault: Vault<B, C, E, A, R, CommunityAccountCustody>,
+    vault: AccountVault<B, C, E, A, R>,
     origin: String,
     lineage: ckmg::Lineage,
     device: ckmg::PublicKey,
     credential: Vec<u8>,
+}
+
+impl<B: cwst::backend::Backend, C, E, A, R> AccountVault<B, C, E, A, R> {
+    pub(super) async fn open(&mut self) -> Result<VaultRef<'_, B, C, E, A, R>> {
+        Ok(match self {
+            Self::Owned(vault) => VaultRef::Owned(vault),
+            Self::Port(port) => VaultRef::Port(port.vault().await?),
+        })
+    }
+}
+
+/// Where the account's Vault lives: an owned one (the registration composer, which
+/// has no Door yet) or the Door's own Vault through a port. The port is the only
+/// form on a running device: the Door's Vault stays the one owner of its Store.
+pub enum AccountVault<B: cwst::backend::Backend, C, E, A, R> {
+    Owned(Vault<B, C, E, A, R, WalletCustody>),
+    Port(AccountPort<B, C, E, A, R>),
+}
+
+/// The account's Vault borrowed for one use.
+pub(super) enum VaultRef<'a, B: cwst::backend::Backend, C, E, A, R> {
+    Owned(&'a mut Vault<B, C, E, A, R, WalletCustody>),
+    Port(PortVault<'a, B, C, E, A, R>),
+}
+impl<B: cwst::backend::Backend, C, E, A, R> std::ops::Deref for VaultRef<'_, B, C, E, A, R> {
+    type Target = Vault<B, C, E, A, R, WalletCustody>;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Owned(vault) => vault,
+            Self::Port(vault) => vault,
+        }
+    }
+}
+impl<B: cwst::backend::Backend, C, E, A, R> std::ops::DerefMut for VaultRef<'_, B, C, E, A, R> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::Owned(vault) => vault,
+            Self::Port(vault) => vault,
+        }
+    }
 }
 
 impl<B, C, E, A, R> CommunityAccount<B, C, E, A, R>
@@ -24,9 +66,12 @@ where
     // opening the actual winner and restoring its existing account capsule.
     pub(crate) async fn recovered(
         origin: String,
-        mut vault: Vault<B, C, E, A, R, CommunityAccountCustody>,
+        vault: AccountVault<B, C, E, A, R>,
     ) -> Result<Self> {
-        let lineage = vault
+        let mut vault = vault;
+        let (lineage, credential, device) = {
+            let mut vault = vault.open().await?;
+            let lineage = vault
             .keys()
             .lineage()
             .await
@@ -43,6 +88,8 @@ where
             .device_public_key()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
+            (lineage, credential, device)
+        };
         if lineage.binding.community() == "wallet"
             || credential.is_empty()
             || !lineage.devices.contains(&device)
@@ -61,24 +108,26 @@ where
         Ok(result)
     }
 
+    /// The account's Vault for one use: the Door's own Vault through the port.
+    pub(super) async fn vault(&mut self) -> Result<VaultRef<'_, B, C, E, A, R>> {
+        self.vault.open().await
+    }
+
     pub(super) async fn check(&mut self, origin: &str) -> Result<()> {
         if origin != self.origin {
             return Err(ErrorCode::Unauthorized);
         }
-        let lineage = self
-            .vault
+        let lineage = self.vault().await?
             .keys()
             .lineage()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let reference = self
-            .vault
+        let reference = self.vault().await?
             .keys()
             .device_info()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let device = self
-            .vault
+        let device = self.vault().await?
             .keys()
             .device_public_key()
             .await
@@ -99,13 +148,11 @@ where
     pub async fn store_community_credential(&mut self, credential: &[u8]) -> Result<()> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        let current = self
-            .vault
+        let current = self.vault().await?
             .community_credential()
             .await
             .map_err(|_| ErrorCode::Unavailable)?;
-        match self
-            .vault
+        match self.vault().await?
             .replace_community_credential(current.as_ref().map(|c| c.as_slice()), credential)
             .await
         {
@@ -161,7 +208,7 @@ where
     pub async fn voucher_custody(&mut self) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        self.vault
+        self.vault().await?
             .voucher_custody()
             .await
             .map_err(|_| ErrorCode::Unavailable)
@@ -176,7 +223,7 @@ where
     ) -> Result<()> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        match self.vault.replace_voucher_custody(expected, custody).await {
+        match self.vault().await?.replace_voucher_custody(expected, custody).await {
             Ok(_) => Ok(()),
             Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
             Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),

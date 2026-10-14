@@ -22,7 +22,9 @@ pub use initial::{
     EnrollmentError, InitialEnrollment, activate_initial, reopen_initial_enrollment,
     retain_global_initial_enrollment, retain_initial_enrollment,
 };
-pub use recovery::{RecoveredVault, RecoveryAuthority, RecoveryOwners, RestoredVault};
+pub use recovery::{
+    AccountWiring, RecoveredVault, RecoveryAuthority, RecoveryOwners, RestoredVault,
+};
 
 /// Shared negative state for one unlocked custody session. Observed removal,
 /// explicit lock or a cancelled check invalidates both authority paths. There is
@@ -206,10 +208,39 @@ pub struct MemberAuthority<C, B: cdht::runtime::Backend> {
     policy: cfyr::policy::CurrentPolicy<Transport>,
     records: cvlt::LineageRecords<B>,
     intent: Option<ckmg::IntentVerifier>,
+    /// The account actor's own one-use channels; never shared with `intent`.
+    account: Option<AccountVerifiers>,
     pending_current: Option<current_member::PendingCurrent>,
     #[cfg(all(test, not(target_arch = "wasm32")))]
     reached_current: Option<tokio::sync::oneshot::Sender<()>>,
 }
+struct AccountVerifiers {
+    root: ckmg::IntentVerifier,
+    delegation: ckmg::IntentVerifier,
+    request: ckmg::IntentVerifier,
+    delegation_spent: bool,
+    armed: Rc<Cell<bool>>,
+}
+
+/// Held by the account port around each of its Vault calls: while armed, the
+/// member owner spends the account channels instead of the Board's.
+#[derive(Clone)]
+pub struct AccountArm(Rc<Cell<bool>>);
+impl AccountArm {
+    /// Arm until the returned guard drops.
+    pub fn arm(&self) -> ArmGuard {
+        self.0.set(true);
+        ArmGuard(self.0.clone())
+    }
+}
+/// Disarms on drop.
+pub struct ArmGuard(Rc<Cell<bool>>);
+impl Drop for ArmGuard {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
+}
+
 /// Retained original Foyer ports for constructing member authority after Tor
 /// starts and Records handles exist. No root, accepted lineage or grant is held.
 /// Its temporary recovery authority admits only the provisional lineage read.
@@ -241,10 +272,52 @@ impl MemberAuthorityBuilder {
             policy: self.policy,
             records,
             intent: None,
+            account: None,
             pending_current: None,
             #[cfg(all(test, not(target_arch = "wasm32")))]
             reached_current: None,
         })
+    }
+    /// Like [`Self::bind_with_intent`], plus the THREE distinct single-use channels
+    /// of the account actor (root authorization, device delegation, account
+    /// request) and the arm that selects them. They are consumed only while the
+    /// account port holds the arm around its own Vault call, so the Board's
+    /// signing channel is never spent by the account and the reverse.
+    pub fn bind_with_account_intents<C: Clock, B: cdht::runtime::Backend>(
+        self,
+        records: cvlt::LineageRecords<B>,
+        clock: C,
+    ) -> super::Result<(
+        MemberAuthority<C, B>,
+        ckmg::IntentAdmission,
+        super::accounting::AccountingIntents,
+        ckmg::IntentAdmission,
+        AccountArm,
+    )> {
+        let (mut authority, board) = self.bind_with_intent(records, clock)?;
+        let (root, root_verifier) = ckmg::intent_channel();
+        let (device, device_verifier) = ckmg::intent_channel();
+        let (request, request_verifier) = ckmg::intent_channel();
+        let armed = Rc::new(Cell::new(false));
+        authority.account = Some(AccountVerifiers {
+            root: root_verifier,
+            delegation: device_verifier,
+            request: request_verifier,
+            delegation_spent: false,
+            armed: armed.clone(),
+        });
+        Ok((
+            authority,
+            board,
+            super::accounting::AccountingIntents {
+                root,
+                device,
+                // The actor lives as long as the member session (the custody lifetime).
+                expires: u64::MAX,
+            },
+            request,
+            AccountArm(armed),
+        ))
     }
     /// Construct exact local signing admission with this same member owner.
     pub fn bind_with_intent<C: Clock, B: cdht::runtime::Backend>(
@@ -283,6 +356,11 @@ mod pair_tests {
 
 impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C, B> {
     async fn check(&mut self, mut request: Authorization<'_>) -> Result<(), Error> {
+        if request.action == Action::AuthorizeAccountDevice {
+            return self
+                .check_scoped_current(request, current_member::Purpose::AccountDevice)
+                .await;
+        }
         self.discard_pending_current();
         self.live.lifetime.check(&request)?;
         let pair = request.action == Action::Pair;
@@ -434,6 +512,9 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
     }
     fn check_device_signing_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
         self.finish_scoped_current(request, current_member::Purpose::DeviceSigning)
+    }
+    fn check_account_device_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
+        self.finish_scoped_current(request, current_member::Purpose::AccountDevice)
     }
 }
 

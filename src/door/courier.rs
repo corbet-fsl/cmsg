@@ -210,6 +210,21 @@ impl Door {
             .unwrap_or_default()
     }
 
+    /// Every bound Mesh with its shared courier state.
+    pub(super) fn courier_shareds(&self) -> Vec<(String, Rc<Shared>)> {
+        self.meshes
+            .iter()
+            .map(|(origin, mesh)| (origin.clone(), mesh.shared.clone()))
+            .collect()
+    }
+
+    /// Ask every courier to end; the Meshes stay bound until the Door closes.
+    pub(super) fn stop_couriers(&self) {
+        for mesh in self.meshes.values() {
+            mesh.shared.close();
+        }
+    }
+
     pub(super) fn courier_shared(&self, origin: &str) -> Option<Rc<Shared>> {
         self.meshes.get(origin).map(|mesh| mesh.shared.clone())
     }
