@@ -35,6 +35,8 @@ pub mod ohttp;
 pub mod pairing;
 pub mod pairing_roles;
 mod pairing_flow;
+#[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
+pub mod pairing_host;
 pub mod pairing_publish;
 pub mod passport;
 pub mod record;

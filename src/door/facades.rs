@@ -345,6 +345,22 @@ pub(super) trait BoundVault {
     ) -> OwnedFuture<'a, PairApproved> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    /// The member's current lineage (the anchor a pairing extends).
+    fn pairing_anchor(&mut self) -> OwnedFuture<'_, ckmg::Lineage> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// Retain the prepared evidence of the pending approval receipt, durably.
+    fn retain_pairing_evidence<'a>(
+        &'a mut self,
+        _evidence: &'a cvlt::PreparedLineageEvidence,
+        _receipt: &'a ckmg::Receipt,
+    ) -> OwnedFuture<'a, ()> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// Acknowledge the approval receipt after its revision is published.
+    fn acknowledge_pairing<'a>(&'a mut self, _receipt: &'a ckmg::Receipt) -> OwnedFuture<'a, ()> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn lock(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + 'static>>;
 }
 
@@ -567,6 +583,19 @@ where
         origin: &'a str,
     ) -> OwnedFuture<'a, cdht::SignedValue> {
         Box::pin(self.revision_record_owned(receipt, previous, canonical_evidence, origin))
+    }
+    fn pairing_anchor(&mut self) -> OwnedFuture<'_, ckmg::Lineage> {
+        Box::pin(self.pairing_anchor_owned())
+    }
+    fn retain_pairing_evidence<'a>(
+        &'a mut self,
+        evidence: &'a cvlt::PreparedLineageEvidence,
+        receipt: &'a ckmg::Receipt,
+    ) -> OwnedFuture<'a, ()> {
+        Box::pin(self.retain_pairing_evidence_owned(evidence, receipt))
+    }
+    fn acknowledge_pairing<'a>(&'a mut self, receipt: &'a ckmg::Receipt) -> OwnedFuture<'a, ()> {
+        Box::pin(self.acknowledge_pairing_owned(receipt))
     }
 
     fn lock(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + 'static>> {
