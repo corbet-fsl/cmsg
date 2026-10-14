@@ -519,6 +519,10 @@ pub(super) async fn chat_send(
     let origin = origin_of(door, key)?;
     let (peer, conversation) = (request.peer.clone(), request.conversation);
     let (sent, events) = super::inbox_conversation::send(door, key, request).await?;
+    // A message that waits for its thread has no wire yet.
+    if sent.queued {
+        return Ok((sent, events));
+    }
     if let Some(shared) = door.courier_shared(&origin) {
         shared.push(
             &peer,
