@@ -1426,7 +1426,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#f349f41d03a6f6240a0c6217005071ba3698e991"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#7f8e86f3888e7aa6c4f4928187eab0893afefdbe"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1575,7 +1575,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cfrm"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=main#b932fad1288ce8289c2fffcaec3480d052cc57aa"
+source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=main#c613ac64bcdfc8ff28d89a2dfb54c145dc320794"
 dependencies = [
  "cblv",
  "crbk",
@@ -1884,7 +1884,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 [[package]]
 name = "clnk"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/clnk.git?branch=main#d810da006f12e3285e6e5423efb3f2bc0ba1116a"
+source = "git+https://git.corbet.ch/corbet-foss/clnk.git?branch=main#d6761db26f34555f8534bf596cc945df18f8e5d5"
 dependencies = [
  "cfrm",
  "cmbl",
@@ -2763,7 +2763,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#6f43fdb22c2f9acde4b4cba3eb4cdf7ee29cc012"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#69355c53844a22e7a64b49c4d32204e4e4c949c9"
 dependencies = [
  "any_ascii",
  "blind-rsa-signatures",
@@ -2808,11 +2808,12 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#c6702e7ecc066d816246cf1abd00f2557eaec47e"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#df6510745e9bf9d0ce2ff28c117f520129e83c69"
 dependencies = [
  "blake3",
  "ckmg",
  "cpsd",
+ "cwlt-engine",
  "cwst",
  "czkp",
  "js-sys",
@@ -2827,7 +2828,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#c6702e7ecc066d816246cf1abd00f2557eaec47e"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#df6510745e9bf9d0ce2ff28c117f520129e83c69"
 dependencies = [
  "acvm",
  "barretenberg-rs",
