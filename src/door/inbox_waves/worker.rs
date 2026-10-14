@@ -80,3 +80,17 @@ pub async fn finish(
         .map_err(|_| ErrorCode::InvalidRequest)?;
     call(door, origin, token, now, "inbox.wave_job_done", body).await
 }
+
+/// Offer every job a restart interrupted again. Call once when the worker starts.
+pub async fn recover(door: &mut Door, origin: &str, token: &str, now: u64) -> Result<()> {
+    let _: serde_json::Value = call(
+        door,
+        origin,
+        token,
+        now,
+        "inbox.wave_jobs_recover",
+        serde_json::json!({}),
+    )
+    .await?;
+    Ok(())
+}
