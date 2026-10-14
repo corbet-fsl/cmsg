@@ -712,6 +712,15 @@ impl Door {
             return Err(ErrorCode::InvalidRequest);
         }
         let listener = mesh.listen().await.map_err(|_| ErrorCode::Unavailable)?;
+        // One address must never be published for two memberships of this device:
+        // peers could link the pseudonyms. Production gives every origin its own
+        // onion key (derived per community); refuse a backend that does not.
+        if self.meshes.values().any(|bound| {
+            let own = bound.shared.own.borrow();
+            listener.addresses().iter().any(|a| own.contains(a))
+        }) {
+            return Err(ErrorCode::InvalidRequest);
+        }
         self.meshes.insert(
             origin.into(),
             BoundMesh {
