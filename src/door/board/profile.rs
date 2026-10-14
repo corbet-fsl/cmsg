@@ -57,6 +57,8 @@ impl ProfilePublish {
             profile,
             rules,
             reachability: self.reachability,
+            // A system field: never taken from the request, only from custody.
+            vouched_by: None,
         })
     }
 }
@@ -118,7 +120,8 @@ pub(in crate::door) async fn profile_publish(
     if !door.vaults.contains_key(&origin) {
         return Err(ErrorCode::Unavailable);
     }
-    let edit = request.edit()?;
+    let mut edit = request.edit()?;
+    edit.vouched_by = super::super::vouching::endorsement_wire(door, &origin).await;
     let board = door.boards.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     board.require_committed()?;
     let version = board.profile_publish(edit, expires).await?;
