@@ -31,6 +31,7 @@ impl WavePorts for Ports {
             history: [3; 32],
             authority: [4; 32],
             lifetime: 3600,
+            window: 0,
         })
     }
     fn terms<'a>(
