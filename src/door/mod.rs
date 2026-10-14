@@ -11,6 +11,7 @@ pub mod browser;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub mod composer;
 mod composition;
+pub mod courier;
 mod creating;
 mod current;
 pub use composition::VaultComposer;

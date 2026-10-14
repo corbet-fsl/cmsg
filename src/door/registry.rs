@@ -1,9 +1,12 @@
 use super::*;
+use courier::{
+    chat_retry as courier_chat_retry, chat_send as courier_chat_send,
+    group_answer as courier_group_answer, group_message as courier_group_message,
+    group_propose as courier_group_propose, group_welcome as courier_group_welcome,
+};
 use board::{
     attend as board_attend, depart as board_depart, discovery as board_discovery,
-    group_act as board_group_act, group_answer as board_group_answer,
-    group_message as board_group_message, group_propose as board_group_propose,
-    group_welcome as board_group_welcome, groups as board_groups, heartbeat as board_heartbeat,
+    group_act as board_group_act, groups as board_groups, heartbeat as board_heartbeat,
     profile_publish as board_profile_publish, room_join as board_room_join,
     room_leave as board_room_leave, room_serve as board_room_serve, search as board_search,
     watch as board_watch,
@@ -14,7 +17,7 @@ use creating::{
 use foyer::refresh as foyer_refresh;
 use inbox::{blocking_rules as inbox_blocking_rules, contact_act as inbox_contact_act};
 use inbox_conversation::{
-    acknowledge as inbox_ack, receive as inbox_receive, retry as inbox_retry, send as inbox_send,
+    acknowledge as inbox_ack, receive as inbox_receive,
 };
 use inbox_waves::{
     wave_decide as inbox_wave_decide, wave_delivered as inbox_wave_delivered,
@@ -395,10 +398,10 @@ actions! {
     "board.discovery" => board_discovery(Empty) -> Vec<cbrd::Discovery>, VaultAccess, Board;
     "board.groups" => board_groups(Empty) -> Vec<cbrd::GroupView>, VaultAccess, Board;
     "board.group_act" => board_group_act(board::GroupAct) -> Vec<cbrd::GroupView>, GroupRecord, Board;
-    "board.group_propose" => board_group_propose(board::GroupPropose) -> board::GroupProposed, GroupRecord, Board;
-    "board.group_message" => board_group_message(board::GroupMessageIn) -> board::GroupInbound, GroupRecord, Board;
-    "board.group_answer" => board_group_answer(board::GroupAnswer) -> board::GroupAnswered, GroupRecord, Board;
-    "board.group_welcome" => board_group_welcome(board::GroupWelcome) -> board::GroupWelcomes, GroupRecord, Board;
+    "board.group_propose" => courier_group_propose(board::GroupPropose) -> board::GroupProposed, GroupRecord, Board;
+    "board.group_message" => courier_group_message(board::GroupMessageIn) -> board::GroupInbound, GroupRecord, Board;
+    "board.group_answer" => courier_group_answer(board::GroupAnswer) -> board::GroupAnswered, GroupRecord, Board;
+    "board.group_welcome" => courier_group_welcome(board::GroupWelcome) -> board::GroupWelcomes, GroupRecord, Board;
     "board.room_join" => board_room_join(board::RoomJoin) -> board::RoomJoinStatus, GroupRecord, Board;
     "board.room_leave" => board_room_leave(board::RoomRef) -> Vec<cbrd::GroupView>, GroupRecord, Board;
     "board.room_serve" => board_room_serve(board::RoomRef) -> board::RoomServed, GroupRecord, Board;
@@ -412,10 +415,10 @@ actions! {
     "inbox.delivery_status" => inbox_delivery(facades::Delivery) -> Option<cnbx::DeliveryStatus>, VaultAccess, Inbox;
     "inbox.blocking_rules" => inbox_blocking_rules(Empty) -> Vec<String>, VaultAccess, Inbox;
     "inbox.contact_act" => inbox_contact_act(inbox::ContactAct) -> cnbx::Relation, InboxRecord, Inbox;
-    "inbox.send" => inbox_send(inbox_conversation::ConversationSend) -> inbox_conversation::Sent, InboxRecord, Inbox;
+    "inbox.send" => courier_chat_send(inbox_conversation::ConversationSend) -> inbox_conversation::Sent, InboxRecord, Inbox;
     "inbox.receive" => inbox_receive(inbox_conversation::Wired) -> inbox_conversation::Received, InboxRecord, Inbox;
     "inbox.ack" => inbox_ack(inbox_conversation::Wired) -> inbox_conversation::Acked, InboxRecord, Inbox;
-    "inbox.retry" => inbox_retry(inbox_conversation::ConversationRetry) -> inbox_conversation::Retried, VaultAccess, Inbox;
+    "inbox.retry" => courier_chat_retry(inbox_conversation::ConversationRetry) -> inbox_conversation::Retried, VaultAccess, Inbox;
     "inbox.waves" => inbox_waves_list(Empty) -> inbox_waves::WaveList, VaultAccess, Inbox;
     "inbox.wave_send" => inbox_wave_send(inbox_waves::WaveSend) -> inbox_waves::WaveStatus, InboxRecord, Inbox;
     "inbox.wave_decide" => inbox_wave_decide(inbox_waves::WaveDecide) -> inbox_waves::WaveStatus, InboxRecord, Inbox;
