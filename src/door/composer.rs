@@ -81,12 +81,23 @@ pub struct ProverArtifacts {
     pub keys_file: PathBuf,
     pub srs_g1_file: PathBuf,
     pub srs_g2_file: PathBuf,
+    /// Circuit and verification key of the wave update, when the platform distributes
+    /// them. The native prover is single-circuit today; this slot only carries the
+    /// files to the device so the wave prover can take them as a parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wave: Option<CircuitFiles>,
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u64,
     #[serde(default = "default_threads")]
     pub threads: usize,
     #[serde(default = "default_memory")]
     pub memory_megabytes: usize,
+}
+/// One extension circuit and its verification key (the SRS and worker are shared).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CircuitFiles {
+    pub circuit_file: PathBuf,
+    pub keys_file: PathBuf,
 }
 fn default_timeout() -> u64 {
     900
@@ -106,6 +117,10 @@ pub struct DeviceSettings {
     /// Community name: Door label, vault scope, passport community id and seed binding.
     pub community_name: String,
     pub prover: ProverArtifacts,
+    /// Forum (Board) configuration of the community as the deployment serves it
+    /// (`board::Configuration` JSON). It is copied into the device deployment on open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forum: Option<Value>,
 }
 
 impl DeviceSettings {
@@ -165,6 +180,16 @@ pub trait Services {
     /// A client of the service that never carries a session or trust (the redemption of a
     /// creation token must not be linked to the member).
     async fn public(&mut self, service: Service) -> Result<Foyer<Transport>, ComposeError>;
+    /// Called once with the logged-in wallet client right after its first device was
+    /// authorized. The production composer does nothing here: the global uniqueness
+    /// gate of a passport is the platform's decision. Only a test harness for a
+    /// development build of the platform enables its development gate in this hook.
+    async fn wallet_authorized(
+        &mut self,
+        _api: &mut Foyer<Transport>,
+    ) -> Result<(), ComposeError> {
+        Ok(())
+    }
 }
 
 /// Why a composition stopped. Never contains secrets.
@@ -377,7 +402,8 @@ async fn login<A: cfyr::passkeys::Authenticator>(
 }
 
 /// A fresh user-verifying assertion for exactly one action (`step_up`).
-async fn authorize_device<A: cfyr::passkeys::Authenticator>(
+async fn authorize_device<A: cfyr::passkeys::Authenticator, S: Services>(
+    services: &mut S,
     api: &mut Foyer<Transport>,
     keys: &mut Client<A>,
     wallet: bool,
@@ -409,9 +435,7 @@ async fn authorize_device<A: cfyr::passkeys::Authenticator>(
         .await
         .map_err(step("device authorize"))?;
     if wallet {
-        api.call("development_gate", json!({}))
-            .await
-            .map_err(step("development gate"))?;
+        services.wallet_authorized(api).await?;
     }
     Ok(())
 }
@@ -435,7 +459,8 @@ struct Driven {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn drive<A, B, N>(
+async fn drive<A, B, N, S>(
+    services: &mut S,
     mut api: Foyer<Transport>,
     wallet: bool,
     scope: &str,
@@ -450,6 +475,7 @@ where
     A: cfyr::passkeys::Authenticator,
     B: cwst::backend::Backend + Clone,
     N: cdht::Network + Clone,
+    S: Services,
 {
     let mut clock = SystemClock;
     let mut entropy = ckmg::SystemEntropy;
@@ -501,7 +527,7 @@ where
         login(&mut api, keys).await?;
     }
     if let (Some(retained), Stage::Finished) = (&enrollment, stage) {
-        authorize_device(&mut api, keys, wallet, &retained.device()).await?;
+        authorize_device(services, &mut api, keys, wallet, &retained.device()).await?;
         progress.advance(wallet, Stage::Authorized)?;
         stage = Stage::Authorized;
     }
@@ -894,23 +920,16 @@ impl Services for NativeServices<'_> {
     }
 }
 
-/// Every start of an already registered native device. Registration happens once through
-/// `compose_native_device`; afterwards each start calls this instead: it checks that both
-/// registration markers are `Done`, that the deployment belongs to these settings, and then
-/// starts the restoring composer (`scenario::restore::Composer`) through
-/// `Embedded::start_composed`. Custody opens only after the login action: login, then the
-/// login-recovery lease, then the Board, verified groups and the Mesh are bound.
+/// The registration markers and the deployment must belong to this device. A device that
+/// never finished registration is refused: starting it must never register a second identity.
 #[cfg(feature = "native-tor")]
-pub async fn open_native_device(
+fn check_open(
     settings: &DeviceSettings,
-    progress: &Path,
-    deployment: super::native::NativeDeployment,
-    lifetime_seconds: u64,
-    clock: std::sync::Arc<dyn super::native::Clock>,
-) -> Result<super::native::Embedded, ComposeError> {
+    deployment: &mut super::native::NativeDeployment,
+    registered: bool,
+) -> Result<(), ComposeError> {
     settings.validate()?;
-    let marker = ProgressFile::open(Some(progress.to_owned()))?;
-    if marker.stage(true) != Stage::Done || marker.stage(false) != Stage::Done {
+    if !registered {
         return Err(ComposeError::Config(
             "the device is not registered: run compose_native_device first".into(),
         ));
@@ -925,7 +944,165 @@ pub async fn open_native_device(
             "deployment does not match the device settings".into(),
         ));
     }
+    // The forum travels with the device settings; a deployment that names another one
+    // is refused rather than silently preferred.
+    if let Some(forum) = &settings.forum {
+        let forum: super::board::Configuration = serde_json::from_value(forum.clone())
+            .map_err(|e| ComposeError::Config(format!("forum: {e}")))?;
+        match &deployment.runtime.forum {
+            None => deployment.runtime.forum = Some(forum),
+            Some(held)
+                if serde_json::to_value(held).ok() == serde_json::to_value(&forum).ok() => {}
+            Some(_) => {
+                return Err(ComposeError::Config(
+                    "deployment forum differs from the device settings".into(),
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "native-tor")]
+fn registered(progress: &Path) -> Result<bool, ComposeError> {
+    let marker = ProgressFile::open(Some(progress.to_owned()))?;
+    Ok(marker.stage(true) == Stage::Done && marker.stage(false) == Stage::Done)
+}
+
+/// Every start of an already registered native device. Registration happens once through
+/// `compose_native_device`; afterwards each start calls this instead: it checks that both
+/// registration markers are `Done`, that the deployment belongs to these settings, and then
+/// starts the restoring composer (`scenario::restore::Composer`) through
+/// `Embedded::start_composed`. Custody opens only after the login action: login, then the
+/// login-recovery lease, then the Board, verified groups and the Mesh are bound.
+///
+/// This variant lends the Door nothing: use [`open_native_device_with`] for a device that
+/// must create communities, join and prove.
+#[cfg(feature = "native-tor")]
+pub async fn open_native_device(
+    settings: &DeviceSettings,
+    progress: &Path,
+    mut deployment: super::native::NativeDeployment,
+    lifetime_seconds: u64,
+    clock: std::sync::Arc<dyn super::native::Clock>,
+) -> Result<super::native::Embedded, ComposeError> {
+    check_open(settings, &mut deployment, registered(progress)?)?;
     super::native::Embedded::configured_restore(deployment, lifetime_seconds, clock)
+        .await
+        .map_err(step("open"))
+}
+
+/// Clients of the two HTTPS services that own their settings, so they can move into the
+/// Door's thread.
+#[cfg(all(feature = "native-tor", not(any(feature = "ohttp", target_arch = "wasm32"))))]
+pub struct OwnedNativeServices(pub DeviceSettings);
+
+#[cfg(all(feature = "native-tor", not(any(feature = "ohttp", target_arch = "wasm32"))))]
+impl Services for OwnedNativeServices {
+    async fn foyer(&mut self, service: Service) -> Result<Foyer<Transport>, ComposeError> {
+        NativeServices(&self.0).foyer(service).await
+    }
+    async fn public(&mut self, service: Service) -> Result<Foyer<Transport>, ComposeError> {
+        NativeServices(&self.0).public(service).await
+    }
+}
+
+/// What the embedder lends a reopened device: the services, a source of the member's
+/// authenticator per service (a fresh instance per ceremony; it must keep its credential
+/// across process restarts), and an optional last step on the Door.
+#[cfg(all(
+    feature = "native-tor",
+    feature = "native-prover",
+    feature = "embedded-authenticator",
+    not(target_arch = "wasm32")
+))]
+pub struct OpenParts<S, F> {
+    pub services: S,
+    /// One authenticator per service; called for every ceremony.
+    pub authenticators: F,
+    /// Runs on the Door's thread after everything else is lent (for example
+    /// `bind_waves`). It cannot replace what the composer lent.
+    pub finish: Option<super::native::DeviceSetup>,
+}
+
+/// Open an already registered device and lend its Door everything a restart must restore
+/// that custody does not: the embedded authenticator for the community login (so the login
+/// action works without a human), the member's global session and the session-less global
+/// channel (community creation), and the activation prover. Custody itself still opens at
+/// the login action, exactly as in [`open_native_device`].
+#[cfg(all(
+    feature = "native-tor",
+    feature = "native-prover",
+    feature = "embedded-authenticator",
+    not(target_arch = "wasm32")
+))]
+pub async fn open_native_device_with<A, S, F>(
+    settings: &DeviceSettings,
+    progress: &Path,
+    mut deployment: super::native::NativeDeployment,
+    lifetime_seconds: u64,
+    clock: std::sync::Arc<dyn super::native::Clock>,
+    parts: OpenParts<S, F>,
+) -> Result<super::native::Embedded, ComposeError>
+where
+    A: cfyr::passkeys::Authenticator + cpky::Authenticator + 'static,
+    S: Services + Send + 'static,
+    F: Fn(Service) -> A + Clone + Send + 'static,
+{
+    check_open(settings, &mut deployment, registered(progress)?)?;
+    let settings = settings.clone();
+    let OpenParts {
+        mut services,
+        authenticators,
+        finish,
+    } = parts;
+    let setup: super::native::DeviceSetup = Box::new(move |door: &mut Door| {
+        Box::pin(async move {
+            let global_origin = settings.global.origin.as_str();
+            let community_origin = settings.community.origin.as_str();
+            let log = |e: ComposeError| {
+                eprintln!("device setup: {e}");
+                super::ErrorCode::Unavailable
+            };
+            // The member's global session: the wallet login, once per start.
+            let context = cpky::Context::new(
+                &settings.global.passkey_origin,
+                &settings.global.rp_id,
+            )
+            .map_err(|_| super::ErrorCode::InvalidRequest)?;
+            let mut keys = Client::new(context, authenticators(Service::Global));
+            let mut api = services.foyer(Service::Global).await.map_err(log)?;
+            login(&mut api, &mut keys).await.map_err(log)?;
+            let mut wallet_door =
+                bound("wallet", global_origin, Scope::Global, api).map_err(log)?;
+            let session = wallet_door.take_global(global_origin)?;
+            let public = services.public(Service::Global).await.map_err(log)?;
+            door.lend_global(community_origin, session, public)?;
+            door.set_activation_prover(std::sync::Arc::new(
+                super::accounting::NativeActivationProver::new(settings.prover.clone()),
+            ));
+            // The community login (vault unlock) runs on the embedded authenticator.
+            let login_configuration = super::login::Configuration {
+                page: format!("{}/login", settings.community.passkey_origin),
+                origin: settings.community.passkey_origin.clone(),
+                relying_party: settings.community.rp_id.clone(),
+            };
+            login_configuration
+                .context()
+                .map_err(|_| super::ErrorCode::InvalidRequest)?;
+            door.login_configuration
+                .insert(community_origin.to_owned(), login_configuration);
+            let make = authenticators.clone();
+            door.bind_authenticator(community_origin, Role::Member, move || {
+                make(Service::Community)
+            })?;
+            if let Some(finish) = finish {
+                finish(door).await?;
+            }
+            Ok(())
+        })
+    });
+    super::native::Embedded::configured_restore_with(deployment, lifetime_seconds, clock, setup)
         .await
         .map_err(step("open"))
 }
@@ -963,6 +1140,7 @@ where
         door: mut wallet_door,
         policy,
     } = drive(
+        services,
         api,
         true,
         "wallet",
@@ -1065,6 +1243,7 @@ where
         None
     };
     let Driven { mut door, policy } = drive(
+        services,
         community_api,
         false,
         &settings.community_name,
@@ -1290,10 +1469,12 @@ mod tests {
                 keys_file: "/x".into(),
                 srs_g1_file: "/x".into(),
                 srs_g2_file: "/x".into(),
+                wave: None,
                 timeout_seconds: 1,
                 threads: 1,
                 memory_megabytes: 1,
             },
+            forum: None,
         };
         assert!(settings.validate().is_ok());
         settings.community_name = "wallet".into();

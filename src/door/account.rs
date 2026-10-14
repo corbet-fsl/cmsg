@@ -327,6 +327,15 @@ mod run {
         SystemClock.now().unwrap_or(u64::MAX)
     }
 
+    /// Name the step that refused (error codes only, never request data) on stderr
+    /// of the embedding process, so an `unavailable` answer says where it came from.
+    fn trace(step: &'static str) -> impl FnOnce(ErrorCode) -> ErrorCode {
+        move |error| {
+            eprintln!("account actor: {step}: {error:?}");
+            error
+        }
+    }
+
     /// Write the voucher custody when it changed; the compare-and-swap value for
     /// the next write is returned.
     async fn save_book<B, C, E, A, R>(
@@ -618,7 +627,7 @@ mod run {
             {
                 Ok(admission) => admission,
                 Err(error) => {
-                    mailbox.reply(Err(error));
+                    mailbox.reply(Err(trace("admission")(error)));
                     continue;
                 }
             };
@@ -628,7 +637,7 @@ mod run {
                 .store_community_credential(admission.community_credential())
                 .await
             {
-                mailbox.reply(Err(error));
+                mailbox.reply(Err(trace("community credential")(error)));
                 continue;
             }
             let mut stage = Stage::Admitted(admission);
@@ -709,9 +718,17 @@ mod run {
             Command::Enroll => match std::mem::replace(stage, Stage::Spent) {
                 Stage::Admitted(admission) => {
                     let result = async {
-                        let prepared = admission.delegate(account, intents).await?;
-                        let submitted = prepared.submit_for_initialization().await?;
-                        checkpoint(stage, submitted).await
+                        let prepared = admission
+                            .delegate(account, intents)
+                            .await
+                            .map_err(trace("delegate"))?;
+                        let submitted = prepared
+                            .submit_for_initialization()
+                            .await
+                            .map_err(trace("submit"))?;
+                        checkpoint(stage, submitted)
+                            .await
+                            .map_err(trace("checkpoint"))
                     }
                     .await;
                     (
