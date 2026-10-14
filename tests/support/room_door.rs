@@ -472,13 +472,30 @@ async fn attempt(
     let policy = policy_at();
     let join_key = cbrd::TransportKey::from_bytes(evidence.transport);
     let groups = newcomer.groups.as_mut().unwrap();
-    let (candidate, _, _, request) = cbrd::prepare_group_intent(
+    // A relay that swaps the state next to genuine MLS evidence is refused
+    // before anything is prepared, signed or sent.
+    let mut swapped = cthr::ParentEvidence {
+        state: evidence.evidence.state.clone(),
+        group_info: evidence.evidence.group_info.clone(),
+        ratchet_tree: evidence.evidence.ratchet_tree.clone(),
+    };
+    *swapped.state.last_mut().unwrap() ^= 1;
+    assert!(
+        groups
+            .verify_room_state(GROUP, &swapped, &evidence.handles)
+            .await
+            .is_err()
+    );
+    let verified = groups
+        .verify_room_state(GROUP, &evidence.evidence, &evidence.handles)
+        .await
+        .unwrap();
+    let (candidate, _, _, request) = cbrd::prepare_join_from_state(
         groups,
         &policy,
-        cbrd::GroupIntent::Join {
-            group: GROUP,
-            vouches: Default::default(),
-        },
+        GROUP,
+        Default::default(),
+        &verified,
         true,
         10,
     )
@@ -492,6 +509,7 @@ async fn attempt(
             candidate,
             request,
             evidence: &evidence.evidence,
+            parent: &verified,
             transport: &join_key,
             policy: &policy,
         },
@@ -535,7 +553,12 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
     let router = router();
     let directory = Directory::default();
     let mut member = founder(&directory).await;
-    let (member_lineage, _) = own_lineage(&member).await;
+    let (member_lineage, member_handle) = own_lineage(&member).await;
+    // The room's members publish their lineage records under their handles.
+    directory
+        .0
+        .borrow_mut()
+        .insert(member_handle, member_lineage.clone());
     let member_board = board(&router, 0, true).await;
     let evidence = member
         .groups

@@ -440,6 +440,8 @@ pub struct RoomJoinTask<'a> {
     /// consent from it and its lineage through the handle.
     pub request: cgrp::Request,
     pub evidence: &'a cthr::ParentEvidence,
+    /// The state `verify_room_state` authenticated: the only parent this Join may name.
+    pub parent: &'a cgrp::GroupState,
     /// The room's transport key from the sealed room state.
     pub transport: &'a cbrd::TransportKey,
     pub policy: &'a dyn cgrp::PolicySource,
@@ -453,6 +455,65 @@ where
     A: ckmg::Authority,
     R: cvlt::Records,
 {
+    /// Newcomer: authenticate the delivered room state against its MLS evidence
+    /// (same group, state commitment carried in the authenticated GroupInfo
+    /// context, roster certified) before anything is prepared, sent or stored.
+    pub async fn verify_room_state(
+        &mut self,
+        group: cgrp::Id,
+        evidence: &cthr::ParentEvidence,
+        handles: &BTreeMap<String, Vec<u8>>,
+    ) -> std::result::Result<cgrp::GroupState, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        // The handles are locators only; every lineage they yield is read and
+        // Charter-verified, and must bind to the roster member asked for. The
+        // state decoded here only selects whom to read; Threads authenticates it.
+        let roster = cgrp::GroupState::decode(&evidence.state)
+            .map_err(|_| Fail::Authority)?
+            .members()
+            .clone();
+        cbrd::GroupOwner::provide_handles(self, handles.clone());
+        cbrd::GroupOwner::refresh(self, &BTreeSet::new(), &roster)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let handle = custody
+            .vault
+            .keys()
+            .key(cnbx::threads_purpose())
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let own = custody
+            .vault
+            .keys()
+            .lineage()
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let storage = custody.vault.storage().clone();
+        let store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let mut devices = GroupDevices {
+            own,
+            cache: self.cache.clone(),
+        };
+        let mut port = cnbx::KeyPort {
+            keys: custody.vault.keys(),
+            handle: &handle,
+            devices: &mut devices,
+        };
+        let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
+        let state = threads.verify_room_state(&mut port, evidence).await;
+        *self.cache.borrow_mut() = Cache::default();
+        state.map_err(|_| Fail::Authority)
+    }
+
     /// Ordered external commit into a member room. Keys custody, the Store
     /// guard and this member's Threads come from the retained Vault; Groups,
     /// Threads and the Attend checkpoint become visible in ONE Store commit
@@ -529,7 +590,7 @@ where
                 groups: task.candidate,
                 evidence: task.evidence,
                 source: &source,
-                authority: &self.authority,
+                authority: &cbrd::JoinParent::new(&self.authority, task.parent),
                 handover: vec![],
                 companion,
                 operation,
@@ -564,17 +625,33 @@ where
         self.open().map_err(|_| Fail::Authority)?;
         // The roster's current lineages are read first (Charter-verified), so
         // Threads can certify every leaf of the room against them.
-        let roster = {
+        let (roster, mut handles) = {
             let mut retained = self.retained.lock().await;
             let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
             let storage = custody.vault.storage().clone();
             let store = storage.lock().await;
-            cgrp::Snapshot::load(custody.binding.community(), &store)
+            let roster = cgrp::Snapshot::load(custody.binding.community(), &store)
                 .map_err(|_| Fail::Storage)?
                 .members(&group)
                 .map_err(|_| Fail::Authority)?
-                .clone()
+                .clone();
+            // Lineage-read handles of the roster this member holds: a locator
+            // for the newcomer, who reads and Charter-verifies each lineage itself.
+            let journal = custody.inbox.contacts(&store).map_err(|_| Fail::Storage)?;
+            let mut handles = BTreeMap::new();
+            for peer in roster.iter().filter(|peer| **peer != self.member) {
+                if let Some(handle) = self.provided.get(peer) {
+                    handles.insert(peer.clone(), handle.clone());
+                } else if let Some(handle) = journal.handle(peer).map_err(|_| Fail::Storage)? {
+                    handles.insert(peer.clone(), handle);
+                }
+            }
+            (roster, handles)
         };
+        let own_handle = cbrd::GroupOwner::own_handle(self)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        handles.insert(self.member.clone(), own_handle);
         cbrd::GroupOwner::refresh(self, &BTreeSet::new(), &roster)
             .await
             .map_err(|_| Fail::Authority)?;
@@ -619,6 +696,7 @@ where
         Ok(cbrd::RoomState {
             evidence: evidence?,
             transport: threads.transport_key().map_err(|_| Fail::Authority)?,
+            handles,
         })
     }
 

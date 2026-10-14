@@ -102,6 +102,17 @@ pub trait CommittedOwner {
 
     /// Leave a member room in one commit (see `VaultGroupOwner::leave_room`);
     /// `None` when this device never joined that room through Attend.
+    /// Authenticate a delivered room state against its MLS evidence, writing
+    /// nothing. Owners without Threads custody refuse.
+    fn verify_room_state<'a>(
+        &'a mut self,
+        _group: cbrd::cgrp::Id,
+        _evidence: &'a cthr::ParentEvidence,
+        _handles: &'a std::collections::BTreeMap<String, Vec<u8>>,
+    ) -> OwnerFuture<'a, cbrd::cgrp::GroupState> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
     fn leave_room<'a>(
         &'a mut self,
         _task: crate::door::facades::RoomLeaveTask<'a>,
