@@ -30,7 +30,9 @@ pub const PREFIX: &str = "cvpr1.";
 pub const MAX_LINK_CHARS: usize = 768;
 /// Largest sealed message in either direction (a grant carries a lineage).
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
-/// Seconds an offer stays open (the pairing request itself lives five minutes).
+/// Seconds an offer stays open when the caller names no window. The composer passes the
+/// community rulebook's pairing window instead; the offer, the pairing request and any
+/// server-side pending state all derive from that one value.
 pub const OFFER_SECONDS: u64 = 300;
 
 const VERSION: u8 = 1;
@@ -272,6 +274,15 @@ impl Offer {
     /// Open an offer for `address` until `now + OFFER_SECONDS`; returns it with
     /// the link text to show locally.
     pub fn new(address: &cmsh::Address, now: u64) -> Result<(Self, String)> {
+        Self::with_window(address, now, OFFER_SECONDS)
+    }
+
+    /// As [`Self::new`] with the offer open for `window` seconds (positive, at most the
+    /// hard bound of a pairing request).
+    pub fn with_window(address: &cmsh::Address, now: u64, window: u64) -> Result<(Self, String)> {
+        if window == 0 || window > ckmg::MAX_PAIRING_SECONDS {
+            return Err(ErrorCode::InvalidRequest);
+        }
         let secret = Zeroizing::new(random::<32>()?);
         let id = random::<16>()?;
         let (private, public) = <Kem as KemTrait>::derive_keypair(&random::<32>()?);
@@ -296,7 +307,7 @@ impl Offer {
                 secret,
                 id,
                 private,
-                expires: now.checked_add(OFFER_SECONDS).ok_or(ErrorCode::Clock)?,
+                expires: now.checked_add(window).ok_or(ErrorCode::Clock)?,
                 done: 0,
                 answered: Vec::new(),
             },
@@ -415,6 +426,15 @@ mod tests {
             offer.open_round(&message, 1_100).err(),
             Some(ErrorCode::Refused)
         );
+    }
+
+    #[test]
+    fn the_offer_window_is_chosen_and_bounded() {
+        let (offer, _) = Offer::with_window(&address(), 1_000, 600).unwrap();
+        assert_eq!(offer.expires(), 1_600);
+        for window in [0, ckmg::MAX_PAIRING_SECONDS + 1] {
+            assert!(Offer::with_window(&address(), 1_000, window).is_err());
+        }
     }
 
     #[test]
