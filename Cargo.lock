@@ -1416,7 +1416,6 @@ dependencies = [
 [[package]]
 name = "cbcn"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cbcn?branch=main#2a2dbbadabde75225fecc73e8975eff1576bbe2d"
 dependencies = [
  "csgn",
  "serde",
@@ -1426,7 +1425,6 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#b67be7da6ecd1dac841269503376f7e4775417c3"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1443,7 +1441,6 @@ dependencies = [
 [[package]]
 name = "cblv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cblv?branch=main#a6be186aba379b6fcbd8800164dcbf9ef14971d7"
 dependencies = [
  "bhttp",
  "getrandom 0.3.4",
@@ -1460,7 +1457,6 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#603bdbc7244c9abe38f1f45d85ba471f6acdcda0"
 dependencies = [
  "blake3",
  "cchr",
@@ -1475,6 +1471,7 @@ dependencies = [
  "csrh",
  "cthr",
  "ctnd",
+ "cvch",
  "cwst",
  "cxch",
  "hpke",
@@ -1498,7 +1495,6 @@ dependencies = [
 [[package]]
 name = "cchr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=main#93bf2e915212e65679b8959051aedd3b10cb7bf2"
 dependencies = [
  "cbcn",
  "cblv",
@@ -1517,7 +1513,6 @@ dependencies = [
 [[package]]
 name = "cdht"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdht.git?branch=main#1485731a7ec541a04ad1fa4929e0ad31e26b7159"
 dependencies = [
  "blake3",
  "capnp",
@@ -1534,7 +1529,6 @@ dependencies = [
 [[package]]
 name = "cdlv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=main#1db57a779fffdf7268d3ba2e7954d1410b904b03"
 dependencies = [
  "ckmg",
  "ctcs",
@@ -1557,7 +1551,6 @@ dependencies = [
 [[package]]
 name = "cfbk"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cfbk?branch=main#e03ed80f037b02dcedac1657c4fd23615bae3815"
 
 [[package]]
 name = "cfg-if"
@@ -1574,7 +1567,6 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cfrm"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=main#6025933c0350616e0b93ae405279916b78de64fb"
 dependencies = [
  "cblv",
  "crbk",
@@ -1594,7 +1586,6 @@ dependencies = [
 [[package]]
 name = "cfry"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cfry.git?branch=main#5b0bccdeb098041d2ddd17f636a0c3bcc1f34587"
 dependencies = [
  "bytes",
  "futures",
@@ -1609,7 +1600,6 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=main#626578b91a8f90513dc5824e87f1990b2d871408"
 dependencies = [
  "cnvy",
  "cpky",
@@ -1623,13 +1613,13 @@ dependencies = [
 [[package]]
 name = "cgrd"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrd?branch=main#6ed9485f32e55cd3efc78f36bbad1e4678989688"
 dependencies = [
  "bigdecimal",
  "cpns",
  "crbk",
  "csgn",
  "cshm",
+ "cvch",
  "ed25519-dalek 3.0.0",
  "geographiclib-rs",
  "precis-profiles",
@@ -1643,7 +1633,6 @@ dependencies = [
 [[package]]
 name = "cgrp"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=main#4d4c4db8052107e8e6ea86582d84ede918a37ec0"
 dependencies = [
  "ckmg",
  "cmbl",
@@ -1775,7 +1764,6 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=main#bccc59ea411cfc4deab7bd385d3da5866c2656a3"
 dependencies = [
  "arti-client",
  "blake3",
@@ -1809,7 +1797,6 @@ dependencies = [
 [[package]]
 name = "ckyh"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckyh?branch=main#745d661d97cd80cdd3f12fb71e65d0c8abb1447a"
 dependencies = [
  "ciborium",
  "crlt",
@@ -1882,7 +1869,6 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 [[package]]
 name = "clnk"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/clnk.git?branch=main#5272215674659c3ed2938e6f04a7915131e98169"
 dependencies = [
  "cfrm",
  "cmbl",
@@ -1906,7 +1892,6 @@ dependencies = [
 [[package]]
 name = "cmbl"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=main#87995601f9e9373cd8d31777e6e40a6ef1f3024c"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
@@ -1925,7 +1910,6 @@ dependencies = [
 [[package]]
 name = "cmmr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmmr.git?branch=main#4e7a53703ccdf75a760af9ad6f4a4b9f429c952e"
 dependencies = [
  "serde",
 ]
@@ -2006,7 +1990,6 @@ dependencies = [
 [[package]]
 name = "cmsh"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmsh.git?branch=main#6dea4901930a53e30c828b5275bffabc99e4c88d"
 dependencies = [
  "async-trait",
  "cdht",
@@ -2021,7 +2004,6 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=main#de6094bc171cf404750777c79115be3429d312be"
 dependencies = [
  "cdlv",
  "cgrp",
@@ -2038,7 +2020,6 @@ dependencies = [
 [[package]]
 name = "cnvl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cnvl.git?branch=main#c59b635ef17d2c2420b03e297acd38893db3a4ee"
 dependencies = [
  "cgrd",
  "chacha20poly1305 0.11.0",
@@ -2054,7 +2035,6 @@ dependencies = [
 [[package]]
 name = "cnvy"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cnvy.git?branch=main#3cbcc575696ca3026f5c53f8dc4c5f20d73034b3"
 dependencies = [
  "cchr",
  "futures-util",
@@ -2238,7 +2218,6 @@ dependencies = [
 [[package]]
 name = "cpfl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpfl.git?branch=main#9013cf411600ea78f9d89ccc54f4c81942f0a944"
 dependencies = [
  "blake3",
  "cgrd",
@@ -2259,7 +2238,6 @@ dependencies = [
 [[package]]
 name = "cpky"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpky.git?branch=main#bfcf4d4f2112d9abf5d849ff456b1bf354d4b4c4"
 dependencies = [
  "async-trait",
  "axum",
@@ -2295,7 +2273,6 @@ dependencies = [
 [[package]]
 name = "cpns"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpns?branch=main#9470e80c458c7769a0ddc33fb1c25fc4fa6113b1"
 dependencies = [
  "getrandom 0.4.3",
  "sha2 0.11.0",
@@ -2306,7 +2283,6 @@ dependencies = [
 [[package]]
 name = "cprz"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#2c6f3e6ddc52c9316776b2cc7a547b197d1c5ccb"
 dependencies = [
  "cprz-blob",
 ]
@@ -2314,7 +2290,6 @@ dependencies = [
 [[package]]
 name = "cprz-blob"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#2c6f3e6ddc52c9316776b2cc7a547b197d1c5ccb"
 dependencies = [
  "brotli",
 ]
@@ -2322,12 +2297,10 @@ dependencies = [
 [[package]]
 name = "cprz-pad"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#2c6f3e6ddc52c9316776b2cc7a547b197d1c5ccb"
 
 [[package]]
 name = "cpsd"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpsd?branch=main#908ceb88a2896baf6e633b30abcada2f25bcbabe"
 dependencies = [
  "ark-bls12-381",
  "ark-ec 0.4.2",
@@ -2386,7 +2359,6 @@ dependencies = [
 [[package]]
 name = "crbk"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#fd5af1caa6b903dd6cbf0e5064510861ab772a5f"
 dependencies = [
  "czkp",
  "semver",
@@ -2407,7 +2379,6 @@ dependencies = [
 [[package]]
 name = "crlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/crlt?branch=main#3db630da2dfd176bc665d1617b89a7c0c4ebb2c9"
 dependencies = [
  "deadpool",
  "libsql",
@@ -2525,7 +2496,6 @@ dependencies = [
 [[package]]
 name = "csgn"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/csgn?branch=main#71357f023972eea8c90951da05303eabd9d7e0a2"
 dependencies = [
  "ciborium-ll",
  "coset 0.4.2",
@@ -2538,7 +2508,6 @@ dependencies = [
 [[package]]
 name = "cshm"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cshm?branch=main#088595f28f82734e449780eb20e75efd67e985c7"
 dependencies = [
  "bigdecimal",
  "jsonschema",
@@ -2550,7 +2519,6 @@ dependencies = [
 [[package]]
 name = "csrh"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/csrh.git?branch=main#d7723a73747c3bc4e598fbbeff45406e7de1cf44"
 dependencies = [
  "cgrd",
  "cpfl",
@@ -2562,7 +2530,6 @@ dependencies = [
 [[package]]
 name = "cswb"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cswb.git?branch=main#bfeb62048ced7b5553b20fd6084e46e55797d651"
 dependencies = [
  "cchr",
  "cmmr",
@@ -2586,7 +2553,6 @@ checksum = "8fd9f3db6f2cfef61c10613071955154ffdc9e515daebff26de4b54e35038fdd"
 [[package]]
 name = "ctcs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=main#1ad76b7a0bb16292bf75023a9df507f2535dff34"
 dependencies = [
  "ckmg",
  "cwst",
@@ -2598,7 +2564,6 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#c1d592447778614294a03a2576a09ea7ba375a8b"
 dependencies = [
  "cchr",
  "cgrp",
@@ -2624,7 +2589,6 @@ dependencies = [
 [[package]]
 name = "ctnd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctnd.git?branch=main#b6a868248fcf22eb84b56c159943754494969ac3"
 dependencies = [
  "cgrp",
  "schemars 1.2.2",
@@ -2654,7 +2618,6 @@ dependencies = [
 [[package]]
 name = "ctrn"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctrn.git?branch=main#68eda79a699b99314f70baf5ba651783ca0542df"
 dependencies = [
  "arti-client",
  "async-trait",
@@ -2740,7 +2703,6 @@ dependencies = [
 [[package]]
 name = "cvch"
 version = "0.2.1"
-source = "git+https://git.corbet.ch/corbet-foss/cvch?branch=main#a0f153cf194f6513cf6e60eefa087d906616fc8f"
 dependencies = [
  "cfbk",
  "csgn",
@@ -2759,7 +2721,6 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#208e922655d145d2dae57bc478a9e5e260c8ce4c"
 dependencies = [
  "any_ascii",
  "blind-rsa-signatures",
@@ -2783,7 +2744,6 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=main#2d5b2b6270fb77c1c9f699e0e3ad2f5e03de049b"
 dependencies = [
  "blake3",
  "cchr",
@@ -2804,7 +2764,6 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#972cf377c2db0b51add1ad6ee2283a9df05d9df6"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2823,7 +2782,6 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#972cf377c2db0b51add1ad6ee2283a9df05d9df6"
 dependencies = [
  "acvm",
  "barretenberg-rs",
@@ -2849,7 +2807,6 @@ dependencies = [
 [[package]]
 name = "cwst"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwst.git?branch=main#e15a512f2a304e149864dcd90c86aaa25441c604"
 dependencies = [
  "atomicwrites",
  "blake3",
@@ -2872,7 +2829,6 @@ dependencies = [
 [[package]]
 name = "cwvs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwvs.git?branch=main#08d1fba72449cda838569ed2a5042732bb31c094"
 dependencies = [
  "cdlv",
  "ckmg",
@@ -2889,7 +2845,6 @@ dependencies = [
 [[package]]
 name = "cxch"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cxch.git?branch=main#9bf8d200b8116acfbe0c67674e4a734b577e4464"
 dependencies = [
  "cgrd",
  "cnvl",
@@ -2903,7 +2858,6 @@ dependencies = [
 [[package]]
 name = "czkp"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#f776a8b96304c87eed6c2c050ee31ac9be05a0f4"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
@@ -11930,3 +11884,183 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "cvtl"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cssr"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "clkp"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cmsg-foyer-fixture"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cblc-private-accounting-fixture"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cmbx"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-audio"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-delta"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-image"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-structured"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-text"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cprz-video"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "csrn"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cnrl"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cvlk"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cfyr-browser-tests"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cmeet"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cmeet-e2e"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "clbs"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "crgs"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cvln"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cvfy"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cpmt"
+version = "0.2.0"
+
+[[patch.unused]]
+name = "cthl"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cphn"
+version = "0.1.1"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "crpt"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cgbl"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cmty"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cgth"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "browser-coverage-runtime"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cplc"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cgts"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cpsd-fuzz"
+version = "0.0.0"
+
+[[patch.unused]]
+name = "cmbr"
+version = "0.0.0"

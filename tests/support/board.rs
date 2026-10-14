@@ -61,7 +61,7 @@ async fn original_board_without_committed_owner_refuses_every_new_action() {
         ("board.groups", json!({})),
         (
             "board.profile_publish",
-            json!({"profile":{"community":"fixture","schema_version":1,"public":{},"private":{}},"rules":[],"reachability":[]}),
+            json!({"profile":{"community":"fixture","schema_version":1,"public":{},"private":{}},"rules":[]}),
         ),
         (
             "board.group_propose",

@@ -1,5 +1,5 @@
 //! Publish the member's own profile and rules as one signed bundle. The caller
-//! names answers, rules and an opaque reachability descriptor only: the next
+//! names answers and rules only: the reachability descriptor is the device's own Mesh addresses, and the next
 //! revision, the profile key, every signature and the admission decision come
 //! from the retained owner and the original Profile, Envelope and Guard owners.
 //! Profile keys go only to members the rules allow, and only person to person
@@ -31,8 +31,6 @@ pub struct ProfilePublish {
     /// Personal rules (`{"op":"number_range",...}` and the other Guard rules).
     #[serde(default)]
     pub rules: Vec<serde_json::Value>,
-    #[serde(default)]
-    pub reachability: Vec<u8>,
 }
 
 #[derive(Clone, Serialize, JsonSchema)]
@@ -42,7 +40,7 @@ pub struct ProfilePublished {
 }
 
 impl ProfilePublish {
-    fn edit(self) -> Result<cbrd::Edit> {
+    fn edit(self, reachability: Vec<u8>) -> Result<cbrd::Edit> {
         if self.rules.len() > cbrd::cgrd::MAX_ITEMS {
             return Err(ErrorCode::InvalidRequest);
         }
@@ -56,7 +54,7 @@ impl ProfilePublish {
         Ok(cbrd::Edit {
             profile,
             rules,
-            reachability: self.reachability,
+            reachability,
             // A system field: never taken from the request, only from custody.
             vouched_by: None,
         })
@@ -120,7 +118,12 @@ pub(in crate::door) async fn profile_publish(
     if !door.vaults.contains_key(&origin) {
         return Err(ErrorCode::Unavailable);
     }
-    let mut edit = request.edit()?;
+    // A system field: the device's own live Mesh addresses, never request data.
+    let reachability = match door.meshes.get(&origin) {
+        Some(mesh) => super::super::reachability::encode(mesh.addresses())?,
+        None => Vec::new(),
+    };
+    let mut edit = request.edit(reachability)?;
     edit.vouched_by = super::super::vouching::endorsement_wire(door, &origin).await;
     let board = door.boards.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     board.require_committed()?;
