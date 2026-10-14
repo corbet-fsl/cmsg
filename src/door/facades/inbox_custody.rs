@@ -44,10 +44,38 @@ where
         next.relation(&request.peer).map_err(contact_error)
     }
 
+    /// Establish the contact a voucher admission created, on this device, and
+    /// return its conversation id. Idempotent: an Established contact with the
+    /// same conversation writes nothing, so every sync may call it again.
+    pub(super) async fn contact_by_voucher_owned(
+        &mut self,
+        peer: &str,
+        bond: [u8; 32],
+    ) -> Result<[u8; 32]> {
+        let own = self.binding.member().to_owned();
+        let conversation = ctcs::voucher_conversation(&bond, &own, peer);
+        let handle = cnbx::Contacts::key(self.vault.keys())
+            .await
+            .map_err(contact_error)?;
+        let storage = self.vault.storage().clone();
+        let mut store = storage.lock().await;
+        self.check_scope(&store).await?;
+        let contacts = self.inbox.contacts(&store).map_err(contact_error)?;
+        let have = contacts.relation(peer).map_err(contact_error)?;
+        if have.state == ctcs::State::Established && have.conversation == Some(conversation) {
+            return Ok(conversation);
+        }
+        contacts
+            .establish_by_voucher(&own, peer, &bond, self.vault.keys(), &handle, &mut store)
+            .await
+            .map_err(contact_error)?;
+        Ok(conversation)
+    }
+
     /// Run `act` against the Inbox owners with this member's purpose keys. The
     /// keys are obtained BEFORE the Store lock: creating a key checkpoints
     /// through that same Store.
-    async fn with_env<T, F>(&mut self, ports: &dyn inbox_waves::WavePorts, act: F) -> Result<T>
+    pub(super) async fn with_env<T, F>(&mut self, ports: &dyn inbox_waves::WavePorts, act: F) -> Result<T>
     where
         F: for<'e> AsyncFnOnce(
             &mut inbox_waves::engine::Env<'e, cvlt::KeyStore<B>, C, E, A, B>,

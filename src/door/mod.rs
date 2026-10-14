@@ -44,6 +44,7 @@ pub mod portal;
 pub mod record;
 mod registry;
 pub(crate) mod rooms;
+mod voucher_thread;
 mod vouching;
 pub use rooms::RoomLink;
 #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]

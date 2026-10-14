@@ -47,6 +47,11 @@ pub struct Sent {
     pub message: [u8; 32],
     pub status: Option<cnbx::DeliveryStatus>,
     pub wire: Vec<u8>,
+    /// True when the thread does not exist yet (a vouching whose Welcome has not
+    /// arrived): the message is kept on this device and sent as soon as the
+    /// thread forms. `wire` is then empty and `status` absent.
+    #[serde(default)]
+    pub queued: bool,
 }
 
 /// A received message and the signed receipt to send back.
@@ -85,7 +90,7 @@ pub(crate) enum Answer {
     Retried(Retried),
 }
 
-fn operation() -> Result<[u8; 32]> {
+pub(super) fn operation() -> Result<[u8; 32]> {
     let mut bytes = [0; 32];
     Entropy::fill(&mut ckmg::SystemEntropy, &mut bytes).map_err(|_| ErrorCode::Unavailable)?;
     Ok(bytes)
@@ -121,7 +126,7 @@ where
         })
     }
 
-    async fn chat_send(&mut self, request: ConversationSend) -> Result<Sent> {
+    pub(super) async fn chat_send(&mut self, request: ConversationSend) -> Result<Sent> {
         self.refuse_blocked(&request.peer)?;
         let contacts = self.contacts_journal()?;
         let claim = self.claim_for(&request.peer, &request.conversation)?;
@@ -141,7 +146,8 @@ where
             Some(claim) => cnbx::ContactAuthority::with_claim(&contacts, &mut for_authority, claim),
             None => cnbx::ContactAuthority::new(&contacts, &mut for_authority),
         };
-        let published = {
+        let commit_operation = operation()?;
+        let attempt: std::result::Result<_, cnbx::Error> = async {
             let mut port = cnbx::KeyPort {
                 keys: self.keys,
                 handle: self.threads,
@@ -149,18 +155,44 @@ where
             };
             let pending = view
                 .send(&mut port, &mut authority, request.text.as_bytes())
-                .await
-                .map_err(inbox_error)?;
+                .await?;
             pending
                 .commit(
                     &mut port,
                     &mut authority,
                     &mut for_commit,
                     self.store,
-                    operation()?,
+                    commit_operation,
                 )
                 .await
-                .map_err(inbox_error)?
+        }
+        .await;
+        let published = match attempt {
+            Ok(published) => published,
+            // A voucher contact whose thread has not formed yet: keep the
+            // message on this device (stored before we answer) and send it when
+            // the Welcome has been joined.
+            Err(cnbx::Error::Threads(cthr::Error::State))
+                if self.voucher_waiting(&request.peer, &request.conversation)? =>
+            {
+                let message = *ckmg::hash(
+                    &[
+                        b"cmsg.voucher-queued.v1".as_slice(),
+                        &request.conversation,
+                        request.text.as_bytes(),
+                    ]
+                    .concat(),
+                )
+                .value();
+                self.voucher_queue(request.conversation, request.text).await?;
+                return Ok(Sent {
+                    message,
+                    status: None,
+                    wire: Vec::new(),
+                    queued: true,
+                });
+            }
+            Err(error) => return Err(inbox_error(error)),
         };
         let message = *published
             .outgoing_ids()
@@ -181,6 +213,7 @@ where
             message,
             status: published.delivery_status(&message),
             wire: wire.bytes().to_vec(),
+            queued: false,
         })
     }
 

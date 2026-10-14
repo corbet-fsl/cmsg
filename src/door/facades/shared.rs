@@ -515,6 +515,86 @@ where
             self.after_wait(result)
         })
     }
+    fn contact_by_voucher<'a>(
+        &'a mut self,
+        peer: &'a str,
+        bond: [u8; 32],
+    ) -> OwnedFuture<'a, [u8; 32]> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .contact_by_voucher(peer, bond)
+                .await;
+            self.after_wait(result)
+        })
+    }
+    fn voucher_key_package<'a>(
+        &'a mut self,
+        conversation: [u8; 32],
+        ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, Vec<u8>> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .voucher_key_package(conversation, ports)
+                .await;
+            self.after_wait(result)
+        })
+    }
+    fn voucher_create<'a>(
+        &'a mut self,
+        peer: &'a str,
+        conversation: [u8; 32],
+        package: &'a [u8],
+        ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, Vec<u8>> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .voucher_create(peer, conversation, package, ports)
+                .await;
+            self.after_wait(result)
+        })
+    }
+    fn voucher_join<'a>(
+        &'a mut self,
+        peer: &'a str,
+        conversation: [u8; 32],
+        welcome: &'a [u8],
+        ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, Vec<Vec<u8>>> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .voucher_join(peer, conversation, welcome, ports)
+                .await;
+            self.after_wait(result)
+        })
+    }
     fn delivery(&mut self, request: Delivery) -> OwnedFuture<'_, Option<cnbx::DeliveryStatus>> {
         Box::pin(async move {
             if self.lifetime.is_closed() {

@@ -104,6 +104,81 @@ pub(super) async fn run_op(door: &mut Door, key: &[u8; 32], op: Op) -> Result<Re
     Ok(reply)
 }
 
+/// What a thread step returns.
+pub(super) enum ThreadOut {
+    /// A key package or a Welcome.
+    Bytes(Vec<u8>),
+    /// The wires of messages the join sent.
+    Wires(Vec<Vec<u8>>),
+}
+
+impl ThreadOut {
+    pub(super) fn bytes(self) -> Result<Vec<u8>> {
+        match self {
+            Self::Bytes(bytes) => Ok(bytes),
+            Self::Wires(_) => Err(ErrorCode::Unavailable),
+        }
+    }
+}
+
+/// One step of a vouching's direct thread.
+pub(super) enum ThreadStep {
+    KeyPackage { conversation: [u8; 32] },
+    Create { peer: String, conversation: [u8; 32], package: Vec<u8> },
+    Join { peer: String, conversation: [u8; 32], welcome: Vec<u8> },
+}
+
+/// Run one thread step for `origin` inside the same current-policy and clock
+/// bracket as every other Inbox action. Returns the key package or the Welcome
+/// (empty for a join).
+pub(super) async fn run_thread(door: &mut Door, origin: &str, step: ThreadStep) -> Result<ThreadOut> {
+    let expires = door
+        .grants
+        .values()
+        .filter(|grant| grant.origin == origin)
+        .map(|grant| grant.expires)
+        .max()
+        .ok_or(ErrorCode::Unauthorized)?;
+    let mut policy = door.current_policy(origin)?;
+    let ports = door.wave_ports.get(origin).ok_or(ErrorCode::Unavailable)?;
+    let vault = door.vaults.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
+    let (reply, completed) = current::read_with(
+        vault.as_mut(),
+        ports.as_ref(),
+        &mut policy,
+        current::Scope {
+            community: &door.config.community,
+            expires,
+            floor: door.clock_floor,
+        },
+        move |vault, ports| match step {
+            ThreadStep::KeyPackage { conversation } => {
+                Box::pin(async move {
+                    vault
+                        .voucher_key_package(conversation, ports)
+                        .await
+                        .map(ThreadOut::Bytes)
+                })
+            }
+            ThreadStep::Create { peer, conversation, package } => Box::pin(async move {
+                vault
+                    .voucher_create(&peer, conversation, &package, ports)
+                    .await
+                    .map(ThreadOut::Bytes)
+            }),
+            ThreadStep::Join { peer, conversation, welcome } => Box::pin(async move {
+                vault
+                    .voucher_join(&peer, conversation, &welcome, ports)
+                    .await
+                    .map(ThreadOut::Wires)
+            }),
+        },
+    )
+    .await?;
+    door.observe(completed)?;
+    Ok(reply)
+}
+
 async fn run(door: &mut Door, key: &[u8; 32], command: Command) -> Result<(Answer, Vec<Event>)> {
     match run_op(door, key, Op::Waves(Box::new(command))).await? {
         Reply::Waves(answer) => Ok((answer, vec![])),

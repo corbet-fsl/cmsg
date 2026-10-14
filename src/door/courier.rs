@@ -517,6 +517,22 @@ pub(super) async fn chat_send(
     Ok((sent, events))
 }
 
+/// Hand wires that were made without a client call (a joined vouching thread
+/// that flushed its waiting messages) to the courier.
+pub(super) fn push_wires(
+    door: &Door,
+    origin: &str,
+    peer: &str,
+    conversation: [u8; 32],
+    wires: Vec<Vec<u8>>,
+) {
+    if let Some(shared) = door.courier_shared(origin) {
+        for wire in wires {
+            shared.push(peer, Body::Chat { conversation, wire });
+        }
+    }
+}
+
 /// `inbox.retry`: same, for a wire the client asks to send again.
 pub(super) async fn chat_retry(
     door: &mut Door,

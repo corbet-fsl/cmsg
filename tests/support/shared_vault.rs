@@ -5,6 +5,8 @@ mod current_tests;
 mod group_owner_tests;
 #[path = "inbox_waves_owner.rs"]
 mod inbox_waves_tests;
+#[path = "voucher_thread_owner.rs"]
+mod voucher_thread_tests;
 #[path = "profile_owner.rs"]
 mod profile_owner_tests;
 use super::*;

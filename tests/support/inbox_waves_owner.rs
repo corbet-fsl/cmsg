@@ -15,8 +15,8 @@ use cwlt::wave::{
 const ME: &str = "ab";
 const PEER: &str = "cd";
 
-struct Ports {
-    lineage: ckmg::Lineage,
+pub(super) struct Ports {
+    pub(super) lineage: ckmg::Lineage,
 }
 impl WavePorts for Ports {
     fn policy(&self, _: u64) -> Result<Policy> {
@@ -69,7 +69,7 @@ impl WavePorts for Ports {
     }
 }
 
-fn member(byte: &str) -> String {
+pub(super) fn member(byte: &str) -> String {
     byte.repeat(48)
 }
 

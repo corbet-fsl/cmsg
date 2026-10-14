@@ -86,6 +86,7 @@ fn both_devices_derive_the_same_bond() {
         member: "member-1".into(),
         nonce,
         handle: Some("@new".into()),
+        key_package: vec![5; 20],
     };
     let sealed = to_hex(&parsed.seal(&notice).unwrap());
     let vouchee_bond = parsed.bond("member-1", &nonce);
@@ -99,6 +100,7 @@ fn both_devices_derive_the_same_bond() {
     assert_eq!(opened.len(), 1);
     assert_eq!(opened[0].member, "member-1");
     assert_eq!(opened[0].token_bond.as_bytes(), vouchee_bond.as_bytes());
+    assert_eq!(opened[0].package, vec![5; 20]);
     assert_eq!(newcomer.bonds.len(), 1);
     assert!(!newcomer.bonds[0].sponsor);
 
@@ -135,6 +137,7 @@ fn a_bond_is_recorded_once_per_person() {
         member: "m".into(),
         bond: "aa".into(),
         sponsor_id: String::new(),
+        ..BondEntry::default()
     };
     assert!(book.add_bond(entry.clone()).unwrap());
     let mut second = entry;
@@ -205,6 +208,7 @@ fn the_vouchee_keeps_the_sponsor_id_from_the_link_text_beside_the_bond() {
             member: "m".into(),
             bond: "aa".repeat(32),
             sponsor_id: String::new(),
+            ..BondEntry::default()
         })
         .unwrap();
     assert_eq!(issuer.vouchee_bond(), None);

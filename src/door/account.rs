@@ -783,7 +783,7 @@ mod run {
             let nonce = book.nonce_for(code)?;
             let mut written = save_book(account, raw, &book).await?;
             let redeemed = lease
-                .submit_voucher(code, join.handle.as_deref(), nonce, clock)
+                .submit_voucher(code, join.handle.as_deref(), nonce, &book.package_for(code), clock)
                 .await
                 .map_err(map_error)?;
             book.add_vouchee_bond(code, &redeemed.bond)?;

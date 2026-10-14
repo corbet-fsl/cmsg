@@ -304,6 +304,14 @@ async fn community_join(
     }
     // A restarted device presents the creation id it kept for this community.
     creating::rearm(door, key).await?;
+    if let Some(code) = request.voucher.as_deref() {
+        // The key package for the direct thread goes into the sealed notice.
+        // Made and stored once; a device that cannot make one redeems without.
+        match vouching::prepare_package(door, key, code).await {
+            Ok(()) | Err(ErrorCode::Unavailable) => {}
+            Err(error) => return Err(error),
+        }
+    }
     let gate = account_call(door, key, account::Command::Join(request))
         .await?
         .gate()?;
@@ -325,6 +333,11 @@ async fn community_join(
         .await?
         .activated()?;
     creating::settle(door, key).await?;
+    // The contact with the sponsor exists from the first moment of membership.
+    // A step that cannot run now is repeated by the next join or `vouched_by`.
+    if let Ok(origin) = door.grants.get(key).map(|grant| grant.origin.clone()).ok_or(()) {
+        let _ = vouching::settle_vouchee(door, &origin).await;
+    }
     Ok((
         account::Joined::Active {
             version: done.version,

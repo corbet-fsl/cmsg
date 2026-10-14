@@ -10,7 +10,8 @@
 //! The newcomer's side lives in the account lifecycle (`account`): it keeps the
 //! per-link bond nonce and the bond in the same custody record (`Book`).
 use super::*;
-use cvch::link::{Bond, IssuerSecret, LinkId, Notice, Token, NONCE_BYTES};
+use super::inbox_waves::{run_thread, ThreadOut, ThreadStep};
+use cvch::link::{Bond, IssuerSecret, LinkId, Notice, Reply, Token, NONCE_BYTES};
 use zeroize::Zeroize;
 
 /// Custody schema version inside the opaque record.
@@ -69,7 +70,7 @@ pub(super) struct Issued {
 }
 
 /// One bond this device holds, from either side of a vouching.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct BondEntry {
     /// True for the member who issued the link.
     pub sponsor: bool,
@@ -81,6 +82,26 @@ pub(super) struct BondEntry {
     /// read from the link text. Empty on the issuer's device.
     #[serde(default)]
     pub sponsor_id: String,
+    /// Sponsor: the key package of the vouchee's notice (hex), kept so the
+    /// thread can be created again after any interruption.
+    #[serde(default)]
+    pub package: String,
+    /// Sponsor: the Welcome of the thread created for the vouchee. Vouchee: the
+    /// Welcome received in the reply (hex), kept until the join is done.
+    #[serde(default)]
+    pub welcome: String,
+    /// Vouchee: the thread was joined from `welcome`.
+    #[serde(default)]
+    pub joined: bool,
+    /// Sponsor: the sealed reply last composed (hex), stored before it is posted
+    /// and posted unchanged until its content changes.
+    #[serde(default)]
+    pub reply: String,
+    /// Which parts `reply` carries: 1 endorsement, 2 welcome.
+    #[serde(default)]
+    pub reply_has: u8,
+    #[serde(default)]
+    pub reply_posted: bool,
 }
 
 /// The bond nonce a newcomer chose for a link, kept until the bond exists.
@@ -91,6 +112,10 @@ pub(super) struct NonceEntry {
     /// The link text, kept to read the issuer's reply after admission.
     #[serde(default)]
     pub fragment: String,
+    /// The single-use key package offered in the notice (hex), stored before the
+    /// notice is sent and resent unchanged after a restart.
+    #[serde(default)]
+    pub package: String,
 }
 
 /// An endorsement received from a sponsor whose signature was checked for this
@@ -242,8 +267,30 @@ impl Book {
             link: id,
             nonce: to_hex(&nonce),
             fragment: token.fragment().to_string(),
+            package: String::new(),
         });
         Ok(nonce)
+    }
+
+    /// The key package stored for the link with this id, empty when none.
+    pub(super) fn package_for_id(&self, id: &str) -> Vec<u8> {
+        self.nonces
+            .iter()
+            .find(|entry| entry.link == id)
+            .and_then(|entry| from_hex(&entry.package))
+            .unwrap_or_default()
+    }
+
+    /// The key package stored for `link` (the part after `#`), empty when none.
+    pub(super) fn package_for(&self, link: &str) -> Vec<u8> {
+        let Ok(token) = Token::parse(link.trim().trim_start_matches('#')) else {
+            return Vec::new();
+        };
+        self.nonces
+            .iter()
+            .find(|entry| entry.link == token.id().as_str())
+            .and_then(|entry| from_hex(&entry.package))
+            .unwrap_or_default()
     }
 
     /// The newcomer's device keeps the bond it derived at redemption and drops
@@ -258,6 +305,7 @@ impl Book {
             member: String::new(),
             bond: to_hex(bond.as_bytes()),
             sponsor_id: to_hex(&token.sponsor()),
+            ..BondEntry::default()
         })?;
         Ok(())
     }
@@ -300,6 +348,7 @@ impl Book {
                 opened.push(Opened {
                     member: entry.member.clone(),
                     token_bond: token.bond(&notice.member, &notice.nonce),
+                    package: notice.key_package,
                 });
             }
         }
@@ -311,6 +360,8 @@ impl Book {
 struct Opened {
     member: String,
     token_bond: Bond,
+    /// The newcomer's single-use key package; empty when none was offered.
+    package: Vec<u8>,
 }
 
 // Wire shapes of the community's answers.
@@ -601,71 +652,245 @@ async fn endorse(
     Ok(())
 }
 
-/// Leave every signed endorsement of `id` that is not yet with the community in
-/// the sealed relay, sealed with the bond so the community cannot read it.
-async fn post_endorsements(door: &mut Door, origin: &str, book: &mut Book, id: &str) -> Result<()> {
+/// Leave, for every person `id` admitted, the sealed reply with what the
+/// sponsor has to say: the signed endorsement and the Welcome of the direct
+/// thread. A reply is stored before it is posted and posted unchanged until its
+/// content grows; a later reply replaces the earlier one at the community.
+async fn post_replies(door: &mut Door, origin: &str, loaded: &mut Loaded, id: &str) -> Result<()> {
     let link_id = LinkId::parse(id).map_err(|_| ErrorCode::Unavailable)?;
-    let waiting: Vec<(usize, Vec<u8>, String)> = book
-        .endorsements
-        .iter()
-        .enumerate()
-        .filter(|(_, have)| have.link == id && !have.posted)
-        .filter_map(|(at, have)| {
-            let bond = book
-                .bonds
-                .iter()
-                .find(|bond| bond.sponsor && bond.link == id && bond.member == have.vouchee)?;
-            let bond = Bond::from_bytes(from_hex(&bond.bond)?.try_into().ok()?);
-            let device: [u8; 32] = from_hex(&have.device)?.try_into().ok()?;
-            let signature: [u8; 64] = from_hex(&have.signature)?.try_into().ok()?;
-            let credential = from_hex(&have.credential).filter(|bytes| !bytes.is_empty());
-            let plain = cvch::link::Endorsement::new(&have.handle, device, signature)
-                .and_then(|endorsement| {
-                    cvch::link::reply_bytes(&endorsement, credential.as_deref())
-                })
-                .ok()?;
-            let sealed = bond.seal_reply(&link_id, &plain).ok()?;
-            Some((at, sealed, have.vouchee.clone()))
-        })
-        .collect();
-    for (at, sealed, vouchee) in waiting {
-        let mut body = manage_body(book, id)?;
-        body["member"] = Value::String(vouchee);
-        body["reply"] = Value::String(to_hex(&sealed));
+    let mut changed = false;
+    let count = loaded.book.bonds.len();
+    for at in 0..count {
+        let entry = loaded.book.bonds[at].clone();
+        if !entry.sponsor || entry.link != id {
+            continue;
+        }
+        let endorsement = loaded
+            .book
+            .endorsements
+            .iter()
+            .find(|have| have.link == id && have.vouchee == entry.member)
+            .cloned();
+        let has = u8::from(endorsement.is_some()) | (u8::from(!entry.welcome.is_empty()) << 1);
+        if has == 0 {
+            continue;
+        }
+        if entry.reply.is_empty() || entry.reply_has != has {
+            let Some(bond) = from_hex(&entry.bond)
+                .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+                .map(Bond::from_bytes)
+            else {
+                continue;
+            };
+            let credential_of = endorsement.as_ref().map(|have| have.credential.clone());
+            let endorsement = endorsement.and_then(|have| {
+                let device: [u8; 32] = from_hex(&have.device)?.try_into().ok()?;
+                let signature: [u8; 64] = from_hex(&have.signature)?.try_into().ok()?;
+                cvch::link::Endorsement::new(&have.handle, device, signature).ok()
+            });
+            let credential = credential_of
+                .and_then(|hex| from_hex(&hex))
+                .filter(|bytes| !bytes.is_empty());
+            let reply = Reply {
+                endorsement,
+                credential,
+                welcome: from_hex(&entry.welcome).filter(|bytes| !bytes.is_empty()),
+            };
+            let Some(sealed) = reply
+                .to_bytes()
+                .and_then(|plain| bond.seal_reply(&link_id, &plain))
+                .ok()
+            else {
+                continue;
+            };
+            let stored = &mut loaded.book.bonds[at];
+            stored.reply = to_hex(&sealed);
+            stored.reply_has = has;
+            stored.reply_posted = false;
+            changed = true;
+        }
+    }
+    // Stored before anything is sent.
+    if changed {
+        loaded.save(door, origin).await?;
+    }
+    for at in 0..count {
+        let entry = loaded.book.bonds[at].clone();
+        if !entry.sponsor || entry.link != id || entry.reply.is_empty() || entry.reply_posted {
+            continue;
+        }
+        let mut body = manage_body(&loaded.book, id)?;
+        body["member"] = Value::String(entry.member.clone());
+        body["reply"] = Value::String(entry.reply.clone());
         let _: Value = owner(door, origin, "voucher_reply_post", body).await?;
-        book.endorsements[at].posted = true;
+        loaded.book.bonds[at].reply_posted = true;
+        for have in &mut loaded.book.endorsements {
+            if have.link == id && have.vouchee == entry.member && entry.reply_has & 1 != 0 {
+                have.posted = true;
+            }
+        }
     }
     Ok(())
 }
 
-/// Establish the bond (and the endorsement) for everyone `link` admitted.
+/// Establish, on this device, the contact a vouching created with `peer`. A
+/// system step: it may simply run again after any interruption.
+async fn establish_contact(
+    door: &mut Door,
+    origin: &str,
+    peer: &str,
+    bond: &[u8; 32],
+) -> Result<[u8; 32]> {
+    let vault = door.vaults.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
+    vault.contact_by_voucher(peer, *bond).await
+}
+
+/// The newcomer's device establishes the contact with the sponsor named in the
+/// link text, from the bond it derived at redemption. Nothing to do for a member
+/// who was not vouched for. Run after the account is active and on every
+/// `vouched_by` read, so a lost step is simply repeated. Returns the sponsor and
+/// the conversation id.
+pub(super) async fn settle_vouchee(
+    door: &mut Door,
+    origin: &str,
+) -> Result<Option<(String, [u8; 32])>> {
+    let loaded = load(door, origin).await?;
+    let Some((sponsor, bond)) = loaded.book.vouchee_bond() else {
+        return Ok(None);
+    };
+    let peer = to_hex(&sponsor);
+    let conversation = establish_contact(door, origin, &peer, &bond).await?;
+    Ok(Some((peer, conversation)))
+}
+
+/// Before a newcomer redeems a link: make the single-use key package for the
+/// direct thread with the sponsor and keep it beside the bond nonce, both
+/// stored before the notice is sent. A device that cannot make one (no ports
+/// yet) redeems without; the contact then exists but the thread does not.
+pub(super) async fn prepare_package(door: &mut Door, key: &[u8; 32], code: &str) -> Result<()> {
+    let origin = origin_of(door, key)?;
+    let token =
+        Token::parse(code.trim().trim_start_matches('#')).map_err(|_| ErrorCode::InvalidRequest)?;
+    let id = token.id().as_str().to_owned();
+    let mut loaded = load(door, &origin).await?;
+    if loaded.book.bonds.iter().any(|bond| !bond.sponsor && bond.link == id)
+        || loaded
+            .book
+            .nonces
+            .iter()
+            .any(|entry| entry.link == id && !entry.package.is_empty())
+    {
+        return Ok(());
+    }
+    let nonce = loaded.book.nonce_for(code)?;
+    loaded.save(door, &origin).await?;
+    let member = {
+        let vault = door.vaults.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
+        vault.current_identity().await?.binding.member().to_owned()
+    };
+    let bond = token.bond(&member, &nonce);
+    let conversation =
+        ctcs::voucher_conversation(bond.as_bytes(), &member, &to_hex(&token.sponsor()));
+    let package = match run_thread(door, &origin, ThreadStep::KeyPackage { conversation })
+        .await
+        .and_then(|out| out.bytes())
+    {
+        Ok(package) => package,
+        Err(ErrorCode::Unavailable) => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if let Some(entry) = loaded.book.nonces.iter_mut().find(|entry| entry.link == id) {
+        entry.package = to_hex(&package);
+    }
+    loaded.save(door, &origin).await
+}
+
+/// The sponsor's device creates the direct thread for a person whose notice
+/// carried a key package, once; the Welcome is kept in the record.
+async fn create_thread(
+    door: &mut Door,
+    origin: &str,
+    loaded: &mut Loaded,
+    id: &str,
+    member: &str,
+    conversation: [u8; 32],
+) -> Result<()> {
+    let Some(entry) = loaded
+        .book
+        .bonds
+        .iter()
+        .find(|bond| bond.sponsor && bond.link == id && bond.member == member)
+    else {
+        return Ok(());
+    };
+    let Some(package) = from_hex(&entry.package).filter(|bytes| !bytes.is_empty()) else {
+        return Ok(());
+    };
+    if !entry.welcome.is_empty() {
+        return Ok(());
+    }
+    let welcome = run_thread(
+        door,
+        origin,
+        ThreadStep::Create {
+            peer: member.to_owned(),
+            conversation,
+            package,
+        },
+    )
+    .await?
+    .bytes()?;
+    if let Some(entry) = loaded
+        .book
+        .bonds
+        .iter_mut()
+        .find(|bond| bond.sponsor && bond.link == id && bond.member == member)
+    {
+        entry.welcome = to_hex(&welcome);
+    }
+    Ok(())
+}
+
+/// Establish the bond, the contact, the thread and the reply for everyone
+/// `link` admitted. Every step is repeated by the next sync until it holds.
 async fn settle_admitted(
     door: &mut Door,
     origin: &str,
-    book: &mut Book,
+    loaded: &mut Loaded,
     id: &str,
     admitted: &[WireEntry],
 ) -> Result<()> {
-    for person in book.absorb(id, admitted)? {
-        book.add_bond(BondEntry {
+    let tolerated = |result: Result<()>| match result {
+        Ok(()) | Err(ErrorCode::Unavailable | ErrorCode::Refused) => Ok(()),
+        Err(error) => Err(error),
+    };
+    for person in loaded.book.absorb(id, admitted)? {
+        loaded.book.add_bond(BondEntry {
             sponsor: true,
             link: id.into(),
             member: person.member.clone(),
             bond: to_hex(person.token_bond.as_bytes()),
-            sponsor_id: String::new(),
+            package: to_hex(&person.package),
+            ..BondEntry::default()
         })?;
+        // The contact exists at once on this device (Voucher action, not
+        // reachable from the frontend).
+        let conversation =
+            establish_contact(door, origin, &person.member, person.token_bond.as_bytes()).await;
+        let conversation = match conversation {
+            Ok(conversation) => Some(conversation),
+            Err(ErrorCode::Unavailable | ErrorCode::Refused) => None,
+            Err(error) => return Err(error),
+        };
         // A failed signature leaves the bond in place; the endorsement is
         // retried on every sync until it exists.
-        match endorse(door, origin, book, id, &person.member).await {
-            Ok(()) | Err(ErrorCode::Unavailable | ErrorCode::Refused) => {}
-            Err(error) => return Err(error),
+        tolerated(endorse(door, origin, &mut loaded.book, id, &person.member).await)?;
+        if let Some(conversation) = conversation {
+            tolerated(create_thread(door, origin, loaded, id, &person.member, conversation).await)?;
         }
     }
     // Retried on every sync until the community holds the sealed reply.
-    match post_endorsements(door, origin, book, id).await {
-        Ok(()) | Err(ErrorCode::Unavailable | ErrorCode::Refused) => Ok(()),
-        Err(error) => Err(error),
-    }
+    tolerated(post_replies(door, origin, loaded, id).await)
 }
 
 fn counts(view: &WireView) -> (u32, u32) {
@@ -723,7 +948,7 @@ async fn sync(door: &mut Door, origin: &str, loaded: &mut Loaded) -> Result<Vec<
                 continue;
             }
         };
-        settle_admitted(door, origin, &mut loaded.book, &id, &view.admitted).await?;
+        settle_admitted(door, origin, loaded, &id, &view.admitted).await?;
         let link = loaded.book.issued_mut(&id).ok_or(ErrorCode::Unavailable)?;
         link.pending = false;
         link.revoked = view.revoked;
@@ -784,6 +1009,8 @@ pub(super) async fn vouched_by(
     _: Empty,
 ) -> Result<(VouchedBy, Vec<Event>)> {
     let origin = origin_of(door, key)?;
+    // A lost contact step is repeated here; a failure never hides the read.
+    let settled = settle_vouchee(door, &origin).await.ok().flatten();
     let mut loaded = load(door, &origin).await?;
     let lobby: Value = owner(door, &origin, "lobby", serde_json::json!({})).await?;
     let member = lobby
@@ -798,11 +1025,15 @@ pub(super) async fn vouched_by(
         .iter()
         .filter(|bond| !bond.sponsor)
         .filter(|bond| {
+            // Until the endorsement arrived, and until the thread is joined when
+            // a key package was offered: a later reply replaces an earlier one.
+            let offered = !loaded.book.package_for_id(&bond.link).is_empty();
             !loaded
                 .book
                 .received
                 .iter()
                 .any(|have| have.link == bond.link)
+                || (offered && !bond.joined)
         })
         .filter_map(|bond| {
             let fragment = loaded
@@ -838,32 +1069,82 @@ pub(super) async fn vouched_by(
         let link_id = LinkId::parse(&link).map_err(|_| ErrorCode::Unavailable)?;
         // Anything that does not open, parse or verify is ignored: a sponsor
         // that signs wrongly is no sponsor to show.
-        let verified = bond
+        let Ok(reply) = bond
             .open_reply(&link_id, &sealed)
-            .and_then(|plain| cvch::link::parse_reply(&plain))
-            .and_then(|(endorsement, credential)| {
-                endorsement.verify(&community, &member)?;
-                Ok((endorsement, credential))
-            });
-        if let Ok((endorsement, credential)) = verified {
-            // The receipt time is this device's own clock, never the sponsor's claim.
-            let received_at = now().unwrap_or(0);
-            let snapshot = credential.and_then(|credential| {
-                cvch::link::Snapshot { credential, received_at }
+            .and_then(|plain| Reply::from_bytes(&plain))
+        else {
+            continue;
+        };
+        if let Some(endorsement) = reply
+            .endorsement
+            .filter(|endorsement| endorsement.verify(&community, &member).is_ok())
+        {
+            if !loaded.book.received.iter().any(|have| have.link == link) {
+                // The receipt time is this device's own clock, never the sponsor's claim.
+                let received_at = now().unwrap_or(0);
+                let snapshot = reply.credential.clone().and_then(|credential| {
+                    cvch::link::Snapshot {
+                        credential,
+                        received_at,
+                    }
                     .to_bytes()
                     .ok()
                     .map(|bytes| to_hex(&bytes))
-            });
-            loaded.book.received.push(Received {
-                link,
-                handle: endorsement.handle,
-                device: to_hex(&endorsement.device),
-                signature: to_hex(&endorsement.signature),
-                snapshot,
-            });
+                });
+                loaded.book.received.push(Received {
+                    link: link.clone(),
+                    handle: endorsement.handle,
+                    device: to_hex(&endorsement.device),
+                    signature: to_hex(&endorsement.signature),
+                    snapshot,
+                });
+            }
+        }
+        // The Welcome is stored before the join, and kept unchanged.
+        if let Some(welcome) = reply.welcome {
+            if let Some(entry) = loaded
+                .book
+                .bonds
+                .iter_mut()
+                .find(|bond| !bond.sponsor && bond.link == link && bond.welcome.is_empty())
+            {
+                entry.welcome = to_hex(&welcome);
+            }
         }
     }
     loaded.save(door, &origin).await?;
+    // The newcomer joins from the Welcome as soon as it is here; a failure is
+    // repeated by the next read and never hides the endorsement.
+    if let Some((peer, conversation)) = settled {
+        let waiting: Vec<(String, Vec<u8>)> = loaded
+            .book
+            .bonds
+            .iter()
+            .filter(|bond| !bond.sponsor && !bond.joined && !bond.welcome.is_empty())
+            .filter_map(|bond| Some((bond.link.clone(), from_hex(&bond.welcome)?)))
+            .collect();
+        for (link, welcome) in waiting {
+            let step = ThreadStep::Join {
+                peer: peer.clone(),
+                conversation,
+                welcome,
+            };
+            if let Ok(ThreadOut::Wires(wires)) = run_thread(door, &origin, step).await {
+                // What the newcomer wrote before the thread existed now goes to the
+                // courier; the durable Pending wires are also found by its scan.
+                super::courier::push_wires(door, &origin, &peer, conversation, wires);
+                if let Some(bond) = loaded
+                    .book
+                    .bonds
+                    .iter_mut()
+                    .find(|bond| !bond.sponsor && bond.link == link)
+                {
+                    bond.joined = true;
+                }
+                loaded.save(door, &origin).await?;
+            }
+        }
+    }
     let shown = loaded.book.received.first();
     Ok((
         VouchedBy {
@@ -994,7 +1275,7 @@ pub(super) async fn link_revoke(
     let started = now()?;
     let view_body = manage_body(&loaded.book, &request.id)?;
     let view: WireView = owner(door, &origin, "voucher_link_view", view_body).await?;
-    settle_admitted(door, &origin, &mut loaded.book, &request.id, &view.admitted).await?;
+    settle_admitted(door, &origin, &mut loaded, &request.id, &view.admitted).await?;
     let link = loaded
         .book
         .issued_mut(&request.id)
@@ -1087,7 +1368,7 @@ pub(super) async fn signoff_decide(
     });
     let decision: WireDecision = owner(door, &origin, "voucher_signoff_decide", body).await?;
     if decision.admitted {
-        settle_admitted(door, &origin, &mut loaded.book, &link, &[entry]).await?;
+        settle_admitted(door, &origin, &mut loaded, &link, &[entry]).await?;
         loaded.save(door, &origin).await?;
     }
     let requests = waiting_all(door, &origin, &loaded).await?;

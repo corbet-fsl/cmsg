@@ -306,6 +306,45 @@ pub(super) trait BoundVault {
     fn contact_act(&mut self, _request: inbox::ContactAct) -> OwnedFuture<'_, cnbx::Relation> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    /// Establish the contact a voucher admission created with `peer`, derived
+    /// from the shared bond secret; returns the conversation id. Idempotent.
+    fn contact_by_voucher<'a>(
+        &'a mut self,
+        _peer: &'a str,
+        _bond: [u8; 32],
+    ) -> OwnedFuture<'a, [u8; 32]> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// The newcomer's single-use Threads key package for the thread of `conversation`.
+    fn voucher_key_package<'a>(
+        &'a mut self,
+        _conversation: [u8; 32],
+        _ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, Vec<u8>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// The sponsor's device creates the direct thread for `package` and returns
+    /// its Welcome (the stored one when it already exists).
+    fn voucher_create<'a>(
+        &'a mut self,
+        _peer: &'a str,
+        _conversation: [u8; 32],
+        _package: &'a [u8],
+        _ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, Vec<u8>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// The newcomer's device joins the thread from the Welcome and sends what
+    /// waited for it; returns the wires of those messages for the courier.
+    fn voucher_join<'a>(
+        &'a mut self,
+        _peer: &'a str,
+        _conversation: [u8; 32],
+        _welcome: &'a [u8],
+        _ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, Vec<Vec<u8>>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     /// One wave action over the member's Waves, Contacts and Threads. The ports
     /// are the Door-held capabilities of this member origin.
     fn waves<'a>(
@@ -561,6 +600,44 @@ where
     }
     fn contact_act(&mut self, request: inbox::ContactAct) -> OwnedFuture<'_, cnbx::Relation> {
         Box::pin(self.contact_act_owned(request))
+    }
+    fn contact_by_voucher<'a>(
+        &'a mut self,
+        peer: &'a str,
+        bond: [u8; 32],
+    ) -> OwnedFuture<'a, [u8; 32]> {
+        Box::pin(self.contact_by_voucher_owned(peer, bond))
+    }
+    fn voucher_key_package<'a>(
+        &'a mut self,
+        conversation: [u8; 32],
+        ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, Vec<u8>> {
+        Box::pin(self.with_env(ports, async move |env| {
+            env.voucher_key_package(conversation).await
+        }))
+    }
+    fn voucher_create<'a>(
+        &'a mut self,
+        peer: &'a str,
+        conversation: [u8; 32],
+        package: &'a [u8],
+        ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, Vec<u8>> {
+        Box::pin(self.with_env(ports, async move |env| {
+            env.voucher_create(peer, conversation, package).await
+        }))
+    }
+    fn voucher_join<'a>(
+        &'a mut self,
+        peer: &'a str,
+        conversation: [u8; 32],
+        welcome: &'a [u8],
+        ports: &'a dyn inbox_waves::WavePorts,
+    ) -> OwnedFuture<'a, Vec<Vec<u8>>> {
+        Box::pin(self.with_env(ports, async move |env| {
+            env.voucher_join(peer, conversation, welcome).await
+        }))
     }
     fn sign_board<'a>(
         &'a mut self,
