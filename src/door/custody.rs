@@ -9,7 +9,8 @@ mod initial_recovery;
 pub use initial_recovery::{InitialRecoveryAuthority, complete_initial_recovery};
 mod initial_restore;
 pub use initial_restore::{
-    InitialRecoveredVault, InitialRecoveryOwners, InitialRootVault, prepare_initial_recovery,
+    ComposedMemberVault, InitialRecoveredVault, InitialRecoveryOwners, InitialRootVault,
+    prepare_initial_recovery,
 };
 mod initial;
 pub use genesis::{

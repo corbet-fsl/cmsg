@@ -41,6 +41,37 @@ where
 {
     let membership = door.live_membership(origin)?;
     let policy = door.current_policy(origin)?;
+    bind_member_account_with(
+        door, origin, owner, wiring, membership, policy, global, device, prover,
+    )
+    .await
+}
+
+/// Like [`bind_member_account`], but the actor admits through its own community
+/// session (`membership`, `policy`): a composed device lends it a companion session
+/// because the Door's session is held by the Vault's recovery lease.
+#[allow(clippy::too_many_arguments)]
+pub async fn bind_member_account_with<B, A, R, GB, GC, GE, GA, GR>(
+    door: &mut Door,
+    origin: &str,
+    owner: &VaultBoardOwner<B, SystemClock, ckmg::SystemEntropy, A, R, cvlt::WalletCustody>,
+    wiring: AccountWiring,
+    membership: cfyr::membership::LiveMembership<super::foyer::Transport>,
+    policy: cfyr::policy::CurrentPolicy<super::foyer::Transport>,
+    global: GlobalPassport<GB, GC, GE, GA, GR>,
+    device: [u8; 32],
+    prover: ckmg::wallet_engine::native_prover::NativeProver,
+) -> Result<()>
+where
+    B: cwst::backend::Backend + 'static,
+    A: Authority + 'static,
+    R: Records + 'static,
+    GB: cwst::backend::Backend + 'static,
+    GC: Clock + 'static,
+    GE: Entropy + 'static,
+    GA: Authority + 'static,
+    GR: Records + 'static,
+{
     let account = CommunityAccount::recovered(
         origin.to_owned(),
         AccountVault::Port(owner.account_port(wiring.arm)),

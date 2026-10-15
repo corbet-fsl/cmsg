@@ -1276,14 +1276,28 @@ where
     let owners = custody::prepare_initial_recovery(recovered, held, network.clone())
         .await
         .map_err(step("community recovery"))?;
-    super::account::bind_native_account(
+    // One owner per Store: the Door holds the community Vault (voucher custody,
+    // community creation, ...) and the account actor works through its port.
+    let custody::ComposedMemberVault {
+        vault,
+        intent,
+        account,
+        lifetime,
+    } = owners
+        .open_member_vault(network, storage.community)
+        .await
+        .map_err(step("community vault"))?;
+    let owner = door
+        .bind_vault_with_board_owner(community_origin, vault, intent, lifetime)
+        .await
+        .map_err(step("bind vault"))?;
+    super::account_open::bind_member_account_with(
         &mut door,
         community_origin,
-        owners,
+        &owner,
+        account,
         actor_membership,
         actor_policy,
-        network,
-        storage.community,
         global,
         *device.value(),
         prover,

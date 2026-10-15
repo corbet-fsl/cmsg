@@ -25,6 +25,18 @@ pub type InitialRootVault<'a, 'p, B, N> = cvlt::Vault<
     (),
 >;
 
+/// The Door's one Vault of a freshly composed member device: the community Store
+/// with its account-only custody, the account actor's channels for
+/// `account_open::bind_member_account` and this custody session's lifetime.
+pub struct ComposedMemberVault<'a, 'p, B: cwst::backend::Backend, N: cdht::Network> {
+    pub vault: InitialRecoveredVault<'a, 'p, B, N>,
+    /// Board signing intent. The initial authority admits no Board signing, so its
+    /// verifier is not kept: a Board signature on this Vault is refused.
+    pub intent: ckmg::IntentAdmission,
+    pub account: AccountWiring,
+    pub lifetime: CustodyLifetime,
+}
+
 /// Current original owners retained until actual Store and network recovery
 /// agree. This preparation is neither a Vault nor a runtime readiness signal.
 pub struct InitialRecoveryOwners<'a, 'p, N: cdht::Network> {
@@ -257,6 +269,50 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
             super::super::accounting::AccountVault::Owned(vault),
         )
         .await
+    }
+
+    /// Open the community Store ONCE for the Door (single owner per Store): the
+    /// account-only custody, plus the three account channels the actor spends
+    /// through its port. The initial authority spends those channels by itself,
+    /// so the port's arm selects nothing here.
+    pub async fn open_member_vault<B: cwst::backend::Backend>(
+        self,
+        network: N,
+        backend: B,
+    ) -> super::super::Result<ComposedMemberVault<'a, 'p, B, N>> {
+        let (owners, intents, request) = self.with_accounting_intents()?;
+        let mut vault = owners
+            .open_root(network, backend)
+            .await?
+            .restore_account_only_custody()
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?;
+        let binding = vault
+            .keys()
+            .lineage()
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?
+            .binding;
+        let device = vault
+            .keys()
+            .device_public_key()
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?;
+        let (intent, _) = ckmg::intent_channel();
+        Ok(ComposedMemberVault {
+            vault,
+            intent,
+            account: AccountWiring {
+                intents,
+                request,
+                arm: AccountArm(std::rc::Rc::new(std::cell::Cell::new(false))),
+            },
+            lifetime: CustodyLifetime {
+                binding,
+                device,
+                closed: std::rc::Rc::new(std::cell::Cell::new(false)),
+            },
+        })
     }
 
     /// Restore both original existing Wallet owners after the complete root
