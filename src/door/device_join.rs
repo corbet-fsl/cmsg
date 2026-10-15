@@ -22,43 +22,54 @@ fn now() -> u64 {
 }
 
 /// Domain tag of the message whose device signature derives a join's stamp salt.
-const SALT_TAG: &[u8] = b"cmsg.device-join.salt.v1\0";
+pub const SALT_TAG: &[u8] = b"cmsg.device-join.salt.v1\0";
 
-/// The community's stamp scope: its founding-document fingerprint (the anchored trust, else
-/// the published founding document), or the tagged id of a community without one. A wrong
-/// value only makes the community refuse the stamp.
-async fn scope(community: &mut Foyer<Transport>, name: &str) -> Result<StampScope> {
+/// The community's stamp scope: its founding fingerprint as the current verified Charter
+/// reports it (the identity U_c uses), or the tagged id of a community without a founding
+/// document. A founded community whose Charter is not anchored on its founding fingerprint is
+/// refused here: its scope cannot be computed from verified data. A wrong value would only
+/// make the community refuse the stamp.
+pub async fn stamp_scope(community: &mut Foyer<Transport>, name: &str) -> Result<StampScope> {
     let id = CommunityId::new(name.as_bytes()).map_err(|_| ErrorCode::Unavailable)?;
-    let anchored = community
-        .trust()
-        .ok()
-        .and_then(|trust| trust.fingerprint().copied());
-    let fingerprint = match anchored {
-        Some(fingerprint) => fingerprint,
-        None => {
-            let feed = community
-                .call("trust_feed", json!({}))
-                .await
-                .map_err(|_| ErrorCode::Unavailable)?;
-            match feed.get("genesis").filter(|genesis| !genesis.is_null()) {
-                Some(genesis) => {
-                    let genesis: Vec<u8> = serde_json::from_value(genesis.clone())
-                        .map_err(|_| ErrorCode::Unavailable)?;
-                    Sha256::digest(genesis).into()
-                }
-                None => {
-                    let mut hasher = Sha256::new();
-                    hasher.update(cfyr::device_session::UNFOUNDED_FINGERPRINT_TAG);
-                    hasher.update(name.as_bytes());
-                    hasher.finalize().into()
-                }
-            }
+    let founding = community
+        .current_policy()
+        .with_current(now(), |current| current.fingerprint().copied())
+        .map_err(|_| ErrorCode::Unavailable)?;
+    if founding.is_none() {
+        let feed = community
+            .call("trust_feed", json!({}))
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?;
+        if feed.get("genesis").is_some_and(|genesis| !genesis.is_null()) {
+            return Err(ErrorCode::Unavailable);
         }
-    };
+    }
     Ok(StampScope::new(
         id,
-        CommunityFingerprint::from_bytes(fingerprint),
+        CommunityFingerprint::from_bytes(cfyr::device_session::scope_fingerprint(
+            name,
+            founding.as_ref(),
+        )),
     ))
+}
+
+/// A stamp salt the wallet cannot guess and this device can rebuild after any restart:
+/// SHA-256 of the device key's signature over `tag`, the community and the key.
+pub async fn derived_salt<S, SFut>(
+    name: &str,
+    device: &ckmg::PublicKey,
+    tag: &[u8],
+    sign: &mut S,
+) -> Result<[u8; 32]>
+where
+    S: FnMut(Vec<u8>) -> SFut,
+    SFut: Future<Output = Result<Vec<u8>>>,
+{
+    let mut salted = tag.to_vec();
+    salted.extend_from_slice(&(name.len() as u16).to_be_bytes());
+    salted.extend_from_slice(name.as_bytes());
+    salted.extend_from_slice(device.value());
+    Ok(Sha256::digest(sign(salted).await?).into())
 }
 
 /// Join `name` through `community` (a session-less Foyer of that community) and return the
@@ -67,6 +78,10 @@ async fn scope(community: &mut Foyer<Transport>, name: &str) -> Result<StampScop
 /// * `wallet_api`/`wallet_origin`: the wallet's authenticated Foyer, for the one stamp.
 /// * `sign`: the community device key's ed25519 signature over the given bytes (Vault).
 /// * `assertion`: the ONE wallet-passkey assertion for the options it receives.
+/// * `seed`: the Keys creation receipt's seed commitment (nonzero), made locally first; the
+///   join's stamp covers it and the community keeps it for `initial_creation`.
+/// * `also`: further actions of this same community the same stamp must cover (the lineage
+///   genesis), presented later by their owner with `present_stamp`.
 ///
 /// Resumable without a second confirmation: the stamp salt is derived from the device key's
 /// signature, so after an interruption the retained stamp still covers the join and the
@@ -79,6 +94,8 @@ pub async fn join<B, C, E, A, R, S, SFut, F, Fut>(
     wallet_origin: &str,
     wallet: &mut GlobalPassport<B, C, E, A, R>,
     device: &ckmg::PublicKey,
+    seed: [u8; 32],
+    also: &[StampAction],
     mut sign: S,
     assertion: F,
 ) -> Result<String>
@@ -93,21 +110,28 @@ where
     F: FnOnce(Value) -> Fut,
     Fut: Future<Output = Result<Value>>,
 {
+    if seed == [0; 32] {
+        return Err(ErrorCode::Unavailable);
+    }
     let key: [u8; 32] = *device.value();
-    let scope = scope(community, name).await?;
+    let scope = stamp_scope(community, name).await?;
     // Unguessable for the wallet, stable across restarts of this device.
-    let mut salted = SALT_TAG.to_vec();
-    salted.extend_from_slice(&(name.len() as u16).to_be_bytes());
-    salted.extend_from_slice(name.as_bytes());
-    salted.extend_from_slice(&key);
-    let salt: [u8; 32] = Sha256::digest(sign(salted).await?).into();
+    let salt = derived_salt(name, device, SALT_TAG, &mut sign).await?;
     let action = StampAction::new(
         ActionKind::new(cfyr::device_session::JOIN_ACTION).map_err(|_| ErrorCode::Unavailable)?,
-        PayloadDigest::from_bytes(key),
+        PayloadDigest::from_bytes(cfyr::device_session::join_payload(&key, &seed)),
         StampSalt::from_bytes(salt),
     );
+    let actions: Vec<(StampScope, StampAction)> = std::iter::once(&action)
+        .chain(also)
+        .map(|action| (scope.clone(), action.clone()))
+        .collect();
     let covered = wallet
-        .with_global_passport(|holder| holder.stamp_covers(&scope, &action, now()))
+        .with_global_passport(|holder| {
+            actions
+                .iter()
+                .all(|(scope, action)| holder.stamp_covers(scope, action, now()))
+        })
         .await?;
     if !covered {
         let issuance = wallet_api
@@ -121,7 +145,7 @@ where
         request_stamp(
             issuance,
             wallet,
-            &[(scope.clone(), action.clone())],
+            &actions,
             assertion,
             &mut passport::rand::rngs::OsRng,
         )
@@ -168,6 +192,7 @@ where
                 "stamp": stamp,
                 "salt": salt,
                 "device_key": key,
+                "seed": seed,
                 "signature": signature,
             }),
         )
