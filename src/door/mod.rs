@@ -52,6 +52,7 @@ pub use rooms::RoomLink;
 #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
 pub mod scenario;
 pub mod surface;
+pub mod unlock_once;
 
 use data_encoding::BASE64URL_NOPAD;
 pub use registry::{catalog, ActionDescription, Authority, Effect, Family};

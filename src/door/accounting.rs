@@ -109,6 +109,7 @@ where
     if let Some(id) = creation {
         challenge = challenge.with_creation(id.to_owned());
     }
+    let started = now();
     let (proof, cohort) = global
         .with_global_passport(|holder| {
             challenge
@@ -180,9 +181,15 @@ where
     let lease = challenge
         .finish(proof, device, now)
         .await
-        .map_err(|_| ErrorCode::Reconcile)?;
+        .map_err(|error| {
+            eprintln!("account actor: admission finish after {}s: {error:?}", now().saturating_sub(started));
+            ErrorCode::Reconcile
+        })?;
     let mut result = AccountAdmission { lease, cohort };
-    result.current().map_err(|_| ErrorCode::Reconcile)?;
+    result.current().map_err(|error| {
+        eprintln!("account actor: admission current: {error:?}");
+        ErrorCode::Reconcile
+    })?;
     Ok(result)
 }
 
