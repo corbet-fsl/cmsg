@@ -16,6 +16,8 @@ mod composition;
 pub mod courier;
 mod creating;
 mod device_session;
+pub mod device_join;
+pub mod stamp;
 mod current;
 pub use composition::VaultComposer;
 pub mod custody;

@@ -167,6 +167,86 @@ where
     }
 }
 
+impl<B, C, E, A, R> GlobalPassport<B, C, E, A, R>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+{
+    /// The stamp continuation must come from this same wallet: origin, account and passkey.
+    pub(super) async fn same_stamp_wallet(
+        &mut self,
+        issuance: &mut cfyr::membership::GlobalStampIssuance<Transport>,
+    ) -> Result<()> {
+        if issuance.origin(now).map_err(|_| ErrorCode::Unauthorized)? != self.origin {
+            return Err(ErrorCode::Unauthorized);
+        }
+        self.current().await?;
+        issuance
+            .with_current(now, |user, key, _, _, _| {
+                if self.lineage.binding.member() != user || self.credential != key {
+                    return Err(ErrorCode::Unauthorized);
+                }
+                Ok(())
+            })
+            .map_err(|_| ErrorCode::Unauthorized)??;
+        Ok(())
+    }
+
+    /// The wallet passkey credential this holder's lineage is bound to.
+    pub(super) fn credential(&self) -> &[u8] {
+        &self.credential
+    }
+
+    /// Durably begin one stamp; the request is released only after its opening committed.
+    pub(super) async fn begin_stamp<G>(
+        &mut self,
+        rng: &mut G,
+        issuer: &passport::StampPublicKey,
+        challenge: &IssuanceChallenge,
+        actions: &[(passport::StampScope, passport::StampAction)],
+    ) -> Result<passport::StampIssuanceRequest>
+    where
+        G: passport::rand::RngCore + passport::rand::CryptoRng,
+    {
+        self.current().await?;
+        self.vault
+            .begin_global_stamp(operation()?, rng, issuer, challenge, actions, now())
+            .await
+            .map_err(|_| ErrorCode::Reconcile)
+    }
+
+    /// Retain the wallet's answer after Wallet verified its signature.
+    pub(super) async fn finish_stamp<G>(
+        &mut self,
+        rng: &mut G,
+        blind: &passport::BlindStamp,
+    ) -> Result<()>
+    where
+        G: passport::rand::RngCore + passport::rand::CryptoRng,
+    {
+        self.current().await?;
+        self.vault
+            .finish_global_stamp(operation()?, rng, blind, now())
+            .await
+            .map_err(|_| ErrorCode::Reconcile)
+    }
+
+    /// Drop a pending stamp request (an earlier attempt whose outcome is settled).
+    pub(super) async fn cancel_stamp<G>(&mut self, rng: &mut G) -> Result<()>
+    where
+        G: passport::rand::RngCore + passport::rand::CryptoRng,
+    {
+        self.current().await?;
+        self.vault
+            .cancel_global_stamp(operation()?, rng)
+            .await
+            .map_err(|_| ErrorCode::Reconcile)
+    }
+}
+
 fn operation() -> Result<[u8; 32]> {
     let mut operation = [0; 32];
     getrandom::fill(&mut operation).map_err(|_| ErrorCode::Unavailable)?;
