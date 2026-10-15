@@ -48,17 +48,23 @@ impl DeviceUnlock {
         self.wallet.wallet().map_err(|_| ErrorCode::Refused)
     }
 
-    /// One community vault's opening, without any ceremony.
-    pub fn community_opening(&self, scope: &str) -> Result<cvlt::PreparedOpen> {
+    /// One community vault's opening, without any ceremony. `fingerprint` is the
+    /// community's identity (founding-key fingerprint, as the vault pins it), never
+    /// its address; `scope` is the address the vault's Store is named by.
+    pub fn community_opening(
+        &self,
+        fingerprint: &[u8; 32],
+        scope: &str,
+    ) -> Result<cvlt::PreparedOpen> {
         self.wallet
-            .community(scope)
+            .community(fingerprint, scope)
             .map_err(|_| ErrorCode::InvalidRequest)
     }
 
     /// The community device key (lineage device) this device presents in `scope`:
     /// what the community's device-key registry binds at join.
-    pub fn community_device(&self, scope: &str) -> Result<ckmg::PublicKey> {
-        self.community_opening(scope)?
+    pub fn community_device(&self, fingerprint: &[u8; 32], scope: &str) -> Result<ckmg::PublicKey> {
+        self.community_opening(fingerprint, scope)?
             .device()
             .map_err(|_| ErrorCode::InvalidRequest)
     }
@@ -110,26 +116,42 @@ mod tests {
     fn one_wallet_confirmation_serves_every_community() {
         futures_executor::block_on(async {
             let mut client = wallet_passkey().await;
-            let (_credential, unlock) = DeviceUnlock::sign_in(&mut client, options()).await.unwrap();
+            let (_credential, unlock) =
+                DeviceUnlock::sign_in(&mut client, options()).await.unwrap();
             drop(client); // no further ceremony is possible
-            let garden = unlock.community_device("garden").unwrap();
-            let orchard = unlock.community_device("orchard").unwrap();
+            let garden = unlock.community_device(&[1; 32], "garden").unwrap();
+            let orchard = unlock.community_device(&[2; 32], "orchard").unwrap();
             assert_ne!(garden.value(), orchard.value());
             // Repeated community operations derive the same device, still without a prompt.
-            assert_eq!(unlock.community_device("garden").unwrap().value(), garden.value());
+            assert_eq!(
+                unlock.community_device(&[1; 32], "garden").unwrap().value(),
+                garden.value()
+            );
+            // A new community at a reused address is another identity: another device.
+            assert_ne!(
+                unlock.community_device(&[3; 32], "garden").unwrap().value(),
+                garden.value()
+            );
             assert!(unlock.wallet_opening().is_ok());
-            assert_eq!(unlock.community_opening("wallet").err(), Some(ErrorCode::InvalidRequest));
+            assert_eq!(
+                unlock.community_opening(&[1; 32], "wallet").err(),
+                Some(ErrorCode::InvalidRequest)
+            );
         });
     }
 
     #[test]
     fn another_wallet_passkey_derives_other_community_devices() {
         futures_executor::block_on(async {
-            let (_, mine) = DeviceUnlock::sign_in(&mut wallet_passkey().await, options()).await.unwrap();
-            let (_, other) = DeviceUnlock::sign_in(&mut wallet_passkey().await, options()).await.unwrap();
+            let (_, mine) = DeviceUnlock::sign_in(&mut wallet_passkey().await, options())
+                .await
+                .unwrap();
+            let (_, other) = DeviceUnlock::sign_in(&mut wallet_passkey().await, options())
+                .await
+                .unwrap();
             assert_ne!(
-                mine.community_device("garden").unwrap().value(),
-                other.community_device("garden").unwrap().value()
+                mine.community_device(&[1; 32], "garden").unwrap().value(),
+                other.community_device(&[1; 32], "garden").unwrap().value()
             );
         });
     }
