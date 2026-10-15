@@ -10,8 +10,8 @@ use cfyr::Foyer;
 use ckmg::{Authority, Clock, Entropy};
 use cvlt::Records;
 use cwlt::passport::{
-    self, ActionKind, AuthenticatedCommunity, CommunityFingerprint, CommunityId, PayloadDigest,
-    StampAction, StampSalt, StampScope,
+    self, ActionKind, AuthenticatedCommunity, CommunityId, PayloadDigest, StampAction, StampSalt,
+    StampScope,
 };
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -47,13 +47,7 @@ pub async fn stamp_scope(community: &mut Foyer<Transport>, name: &str) -> Result
             return Err(ErrorCode::Unavailable);
         }
     }
-    Ok(StampScope::new(
-        id,
-        CommunityFingerprint::from_bytes(cfyr::device_session::scope_fingerprint(
-            name,
-            founding.as_ref(),
-        )),
-    ))
+    Ok(StampScope::of_community(id, founding.as_ref()))
 }
 
 /// A stamp salt the wallet cannot guess and this device can rebuild after any restart:
