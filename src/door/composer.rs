@@ -1158,8 +1158,9 @@ where
     .await?;
 
     // 3. Restore the global holder and make sure it holds one real passport.
-    let mut companion = services.foyer(Service::Global).await?;
-    let (_, recovered) = restore(&mut companion, &mut keys.global, "wallet", &network).await?;
+    let mut global_companion = services.foyer(Service::Global).await?;
+    let (_, recovered) =
+        restore(&mut global_companion, &mut keys.global, "wallet", &network).await?;
     let held = lease(&wallet_door, global_origin, true, policy).await?;
     let owners = custody::prepare_initial_recovery(recovered, held, network.clone())
         .await
@@ -1176,7 +1177,7 @@ where
         Ok(true)
     );
     if !holds {
-        let issuance = companion
+        let issuance = global_companion
             .live_global_wallet(global_origin.into())
             .observe_lease(now)
             .await
@@ -1306,11 +1307,16 @@ where
     .map_err(step("bind account"))?;
     // Community creation needs the member's global session and a session-less
     // channel to the global service; both are lent to this Door for that use only.
-    let global_session = wallet_door
-        .take_global(global_origin)
-        .map_err(step("global session"))?;
+    // The wallet Door's own session is locked by the global passport's recovery
+    // lease for the device's life (it must outlive this call), so creation gets the
+    // independent companion session that signed in for the wallet restore.
+    Box::leak(Box::new(
+        wallet_door
+            .take_global(global_origin)
+            .map_err(step("global session"))?,
+    ));
     let public = services.public(Service::Global).await?;
-    door.lend_global(community_origin, global_session, public)
+    door.lend_global(community_origin, global_companion, public)
         .map_err(step("global session"))?;
     // A community this device creates needs a genesis proof of its accounting; it is
     // made in the background with the same retained prover artifacts.
