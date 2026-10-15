@@ -14,8 +14,8 @@
 //! lineage from Keys, peer lineage through the injected [`GroupPeers`] port,
 //! contact relations from the Contacts journal) and clears afterwards. A
 //! consent counts only if its device key is in that member's freshly read,
-//! Charter-verified lineage. Standing-room (seed) authority and vouches by
-//! other members' contacts are refused until their evidence exists.
+//! Charter-verified lineage. Vouches by other members' contacts are refused
+//! until their evidence exists.
 use super::*;
 use crate::door::inbox_lineage::{
     CharterView, HandleOpener, PeerLineage, PeerUnavailable, StoredHandleRecords,
@@ -157,13 +157,6 @@ impl cbrd::Contacts for CacheContacts {
     }
 }
 
-struct NoSeeds;
-impl cbrd::Seeds for NoSeeds {
-    fn authorized(&self, _: &str, _: &cgrp::Id, _: u64) -> cgrp::Result<()> {
-        Err(cgrp::Error::Authority)
-    }
-}
-
 /// Current lineages for Threads: this member's own and the peers' lineages the
 /// last `refresh` read (Charter-verified, fresh). Anything else is unavailable.
 struct GroupDevices {
@@ -231,7 +224,7 @@ pub struct VaultGroupOwner<B: cwst::backend::Backend, C, E, A, R, W> {
     member: String,
     peers: Option<Rc<Mutex<Box<dyn GroupPeers>>>>,
     cache: Rc<RefCell<Cache>>,
-    authority: cbrd::BoardAuthority<CacheDevices, CacheContacts, NoSeeds>,
+    authority: cbrd::BoardAuthority<CacheDevices, CacheContacts>,
     version: u64,
     /// Locators received with an invitation; the own journal wins.
     provided: BTreeMap<String, Vec<u8>>,
@@ -253,7 +246,6 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
             authority: cbrd::BoardAuthority::new(
                 CacheDevices(cache.clone()),
                 CacheContacts(cache.clone(), member.clone()),
-                NoSeeds,
             ),
             member,
             peers: peers.map(|peers| Rc::new(Mutex::new(peers))),
