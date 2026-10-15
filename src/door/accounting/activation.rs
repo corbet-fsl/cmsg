@@ -97,9 +97,19 @@ pub fn prove(
         policy: account.clone(),
     };
     cblc::accounting::statement_bytes(&statement).map_err(|_| ErrorCode::Unauthorized)?;
+    // The ledger verifies an activation as an extension update bundle: one genesis
+    // step from the empty inbox to the statement's state, the proof in lower hex.
+    let bundle = serde_json::json!({
+        "version": 1,
+        "proofs": [{
+            "state": statement.next_state,
+            "inbox": cblc::extensions::Inbox::default().root,
+            "proof": data_encoding::HEXLOWER.encode(&proven.proof),
+        }],
+    });
     Ok(Activation {
         statement: serde_json::to_value(&statement).map_err(|_| ErrorCode::Unavailable)?,
-        proof: proven.proof,
+        proof: serde_json::to_vec(&bundle).map_err(|_| ErrorCode::Unavailable)?,
     })
 }
 
