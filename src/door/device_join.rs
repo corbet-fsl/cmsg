@@ -40,7 +40,10 @@ pub async fn stamp_scope(community: &mut Foyer<Transport>, name: &str) -> Result
             .call("trust_feed", json!({}))
             .await
             .map_err(|_| ErrorCode::Unavailable)?;
-        if feed.get("genesis").is_some_and(|genesis| !genesis.is_null()) {
+        if feed
+            .get("genesis")
+            .is_some_and(|genesis| !genesis.is_null())
+        {
             return Err(ErrorCode::Unavailable);
         }
     }
@@ -202,4 +205,48 @@ where
         .as_str()
         .map(str::to_owned)
         .ok_or(ErrorCode::Reconcile)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    fn signer(seed: u8) -> impl FnMut(Vec<u8>) -> std::future::Ready<Result<Vec<u8>>> {
+        use ed25519_dalek::Signer as _;
+        let key = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
+        move |message: Vec<u8>| std::future::ready(Ok(key.sign(&message).to_bytes().to_vec()))
+    }
+
+    #[tokio::test]
+    async fn the_salt_is_rebuilt_after_a_restart_and_separates_tags_communities_and_keys() {
+        let device = ckmg::PublicKey::new(ckmg::VLD0, [7; 32]);
+        let first = derived_salt("alpha", &device, SALT_TAG, &mut signer(1))
+            .await
+            .unwrap();
+        // The same device key after a restart: the same salt, so a retained stamp still covers.
+        let again = derived_salt("alpha", &device, SALT_TAG, &mut signer(1))
+            .await
+            .unwrap();
+        assert_eq!(first, again);
+        let other_tag = derived_salt("alpha", &device, b"other\0", &mut signer(1))
+            .await
+            .unwrap();
+        let other_community = derived_salt("beta", &device, SALT_TAG, &mut signer(1))
+            .await
+            .unwrap();
+        let other_key = derived_salt(
+            "alpha",
+            &ckmg::PublicKey::new(ckmg::VLD0, [8; 32]),
+            SALT_TAG,
+            &mut signer(1),
+        )
+        .await
+        .unwrap();
+        let other_signer = derived_salt("alpha", &device, SALT_TAG, &mut signer(2))
+            .await
+            .unwrap();
+        for salt in [other_tag, other_community, other_key, other_signer] {
+            assert_ne!(salt, first);
+        }
+    }
 }
