@@ -3,7 +3,7 @@ use super::{custody::SystemClock, foyer::Transport, ErrorCode, Result};
 use cblc::publication::PublicVerifierMaterial;
 use cfyr::membership::{CommonRecordLease, Observation};
 use ckmg::{Authority, Clock, Entropy};
-use cvlt::{CommunityAccountCustody, Records, Vault};
+use cvlt::{AccountSlot, Records, Vault};
 use data_encoding::{BASE64URL_NOPAD as B64, HEXLOWER as HEX};
 use sha2::{Digest, Sha256};
 
@@ -131,8 +131,8 @@ impl CurrentRecord {
     }
 }
 
-async fn account<B, C, E, A, R>(
-    vault: &mut Vault<B, C, E, A, R, CommunityAccountCustody>,
+async fn account<B, C, E, A, R, W>(
+    vault: &mut Vault<B, C, E, A, R, W>,
     expected: &CurrentRecord,
 ) -> Result<(
     ckmg::Lineage,
@@ -145,6 +145,7 @@ where
     E: Entropy,
     A: Authority,
     R: Records,
+    W: AccountSlot,
 {
     let projection = vault
         .account_projection()
@@ -181,9 +182,9 @@ where
 /// Keys' retained lineage owner cannot re-lock its own held session guard.
 /// No caller descriptor, owner hash, resource URL, private key or ciphertext
 /// selector is accepted. This does not initialize an account or admit a proof.
-pub async fn receive_common_record<B, C, E, A, R>(
+pub async fn receive_common_record<B, C, E, A, R, W>(
     mut source: CommonRecordLease<'_, Transport>,
-    vault: &mut Vault<B, C, E, A, R, CommunityAccountCustody>,
+    vault: &mut Vault<B, C, E, A, R, W>,
     configuration: &RecordConfiguration,
 ) -> Result<ckmg::wallet_engine::ReceivedRecord>
 where
@@ -192,6 +193,7 @@ where
     E: Entropy,
     A: Authority,
     R: Records,
+    W: AccountSlot,
 {
     let expected = source
         .with_current(now, |charter, member, credential, origin, checked| {

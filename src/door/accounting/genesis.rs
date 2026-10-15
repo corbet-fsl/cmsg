@@ -146,8 +146,7 @@ impl<'p> CurrentEnrollment<'p> {
                 ))
             })??;
         account.check(&origin).await?;
-        let candidate = account
-            .vault
+        let candidate = account.vault().await?
             .prepare_community_genesis(context.clone(), checked)
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
@@ -210,8 +209,7 @@ impl PreparedAccount<'_> {
                 Ok::<_, ErrorCode>(current.now)
             })??;
         account.check(&self.origin).await?;
-        account
-            .vault
+        account.vault().await?
             .check_community_genesis(&self.candidate, &self.context, checked)
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
@@ -336,8 +334,7 @@ mod proven {
                 origin,
                 ..
             } = self;
-            let proof = account
-                .vault
+            let proof = account.vault().await?
                 .prove_community_genesis(candidate, &context, prover, || Ok(now()))
                 .await
                 .map_err(|_| ErrorCode::Unauthorized)?;
@@ -411,8 +408,7 @@ mod proven {
             let checked = self.refresh(account).await?;
             let policy = self.material.policy.account.clone();
             let genesis = {
-                let material = account
-                    .vault
+                let material = account.vault().await?
                     .community_genesis_material(&self.proof, &self.context, checked)
                     .await
                     .map_err(|_| ErrorCode::Unauthorized)?;
@@ -431,8 +427,7 @@ mod proven {
                 response: None,
                 upper: pending.encode()?,
             };
-            account
-                .vault
+            account.vault().await?
                 .stage_pending_genesis(
                     &self.proof,
                     &binding,
@@ -466,8 +461,7 @@ mod proven {
                 .with_verified(|_, _, _, current| response_trust(&current.material))
                 .map_err(|_| ErrorCode::Reconcile)?
                 .map_err(|_| ErrorCode::Reconcile)?;
-            account
-                .vault
+            account.vault().await?
                 .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
                 .await
                 .map_err(|_| ErrorCode::Reconcile)?;

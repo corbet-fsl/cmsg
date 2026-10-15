@@ -349,7 +349,7 @@ impl AccountActor {
 }
 
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
-pub use run::{bind_native_account, AccountParts};
+pub use run::{bind_account_actor, bind_native_account, AccountParts};
 
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 mod run {
@@ -372,11 +372,11 @@ mod run {
 
     /// Everything the trusted embedder lends the actor. Single-use intents are
     /// reserved up front by the recovery composer and are consumed by use.
-    pub struct AccountParts<B: cwst::backend::Backend, C, E, A, R, G> {
+    pub struct AccountParts<B: cwst::backend::Backend, C, E, A, R, GB: cwst::backend::Backend, GC, GE, GA, GR, G> {
         pub membership: cfyr::membership::LiveMembership<Transport>,
         pub policy: cfyr::policy::CurrentPolicy<Transport>,
         pub account: CommunityAccount<B, C, E, A, R>,
-        pub global: GlobalPassport<B, C, E, A, R>,
+        pub global: GlobalPassport<GB, GC, GE, GA, GR>,
         pub device: [u8; 32],
         pub intents: AccountingIntents,
         pub request_intent: ckmg::IntentAdmission,
@@ -523,23 +523,28 @@ mod run {
     }
 
     /// Everything one fresh admission needs.
-    struct Fresh<'a, B: cwst::backend::Backend, C, E, A, R, G> {
+    struct Fresh<'a, B: cwst::backend::Backend, C, E, A, R, GB: cwst::backend::Backend, GC, GE, GA, GR, G> {
         membership: &'a mut cfyr::membership::LiveMembership<Transport>,
         policy: &'a mut cfyr::policy::CurrentPolicy<Transport>,
         account: &'a mut CommunityAccount<B, C, E, A, R>,
-        global: &'a mut GlobalPassport<B, C, E, A, R>,
+        global: &'a mut GlobalPassport<GB, GC, GE, GA, GR>,
         device: [u8; 32],
         rng: &'a mut G,
         creation: Option<&'a str>,
     }
 
-    impl<B, C, E, A, R, G> Credentials for Fresh<'_, B, C, E, A, R, G>
+    impl<B, C, E, A, R, GB, GC, GE, GA, GR, G> Credentials for Fresh<'_, B, C, E, A, R, GB, GC, GE, GA, GR, G>
     where
         B: cwst::backend::Backend,
         C: Clock,
         E: Entropy,
         A: Authority,
         R: Records,
+        GB: cwst::backend::Backend,
+        GC: Clock,
+        GE: Entropy,
+        GA: Authority,
+        GR: Records,
         G: cwlt::passport::rand::RngCore + cwlt::passport::rand::CryptoRng,
     {
         async fn stored(&mut self) -> Result<Option<Vec<u8>>> {
@@ -569,9 +574,9 @@ mod run {
 
     /// Run an update task through a fresh admission (signed once, stored before
     /// the send, re-sent unchanged on retry).
-    async fn update_flow<B, C, E, A, R, G>(
+    async fn update_flow<B, C, E, A, R, GB, GC, GE, GA, GR, G>(
         task: Task<'_>,
-        parts: &mut Fresh<'_, B, C, E, A, R, G>,
+        parts: &mut Fresh<'_, B, C, E, A, R, GB, GC, GE, GA, GR, G>,
         intents: &mut AccountingIntents,
     ) -> Result<Option<Shared<Applied>>>
     where
@@ -580,6 +585,11 @@ mod run {
         E: Entropy,
         A: Authority,
         R: Records,
+        GB: cwst::backend::Backend,
+        GC: Clock,
+        GE: Entropy,
+        GA: Authority,
+        GR: Records,
         G: cwlt::passport::rand::RngCore + cwlt::passport::rand::CryptoRng,
     {
         if matches!(task, Task::Resume) && Custodian(&mut *parts.account).stored().await?.is_none()
@@ -667,13 +677,21 @@ mod run {
     impl AccountActor {
         /// Start the actor future. Nothing runs until the first action; it ends
         /// at `expires`, or when the Door drops it.
-        pub fn start<B, C, E, A, R, G>(parts: AccountParts<B, C, E, A, R, G>, expires: u64) -> Self
+        pub fn start<B, C, E, A, R, GB, GC, GE, GA, GR, G>(
+            parts: AccountParts<B, C, E, A, R, GB, GC, GE, GA, GR, G>,
+            expires: u64,
+        ) -> Self
         where
             B: cwst::backend::Backend + 'static,
             C: Clock + 'static,
             E: Entropy + 'static,
             A: Authority + 'static,
             R: Records + 'static,
+            GB: cwst::backend::Backend + 'static,
+            GC: Clock + 'static,
+            GE: Entropy + 'static,
+            GA: Authority + 'static,
+            GR: Records + 'static,
             G: cwlt::passport::rand::RngCore + cwlt::passport::rand::CryptoRng + 'static,
         {
             Self {
@@ -681,6 +699,40 @@ mod run {
                 expires,
             }
         }
+    }
+
+    /// Start the actor from complete parts and bind it to the member origin.
+    pub fn bind_account_actor<B, C, E, A, R, GB, GC, GE, GA, GR>(
+        door: &mut super::super::Door,
+        origin: &str,
+        parts: AccountParts<
+            B,
+            C,
+            E,
+            A,
+            R,
+            GB,
+            GC,
+            GE,
+            GA,
+            GR,
+            cwlt::passport::rand::rngs::OsRng,
+        >,
+        expires: u64,
+    ) -> super::super::Result<()>
+    where
+        B: cwst::backend::Backend + 'static,
+        C: Clock + 'static,
+        E: Entropy + 'static,
+        A: Authority + 'static,
+        R: Records + 'static,
+        GB: cwst::backend::Backend + 'static,
+        GC: Clock + 'static,
+        GE: Entropy + 'static,
+        GA: Authority + 'static,
+        GR: Records + 'static,
+    {
+        door.bind_account(origin, AccountActor::start(parts, expires))
     }
 
     /// Production composer of the native path: recover the community account
@@ -694,6 +746,10 @@ mod run {
         door: &mut super::super::Door,
         origin: &str,
         owners: super::super::custody::InitialRecoveryOwners<'static, 'static, N>,
+        // The actor's own authenticated community session. The recovery lease holds the
+        // Door's session for the Vault's whole life; admissions need an independent one.
+        membership: cfyr::membership::LiveMembership<Transport>,
+        policy: cfyr::policy::CurrentPolicy<Transport>,
         network: N,
         backend: B,
         global: GlobalPassport<
@@ -710,8 +766,6 @@ mod run {
         B: cwst::backend::Backend + 'static,
         N: cdht::Network + Clone + 'static,
     {
-        let membership = door.live_membership(origin)?;
-        let policy = door.current_policy(origin)?;
         let (owners, intents, request_intent) = owners.with_accounting_intents()?;
         let account = owners.open_community_account(network, backend).await?;
         let expires = intents.expires;
@@ -796,42 +850,53 @@ mod run {
         })
     }
 
-    async fn admit<'p, B, C, E, A, R, G>(
+    async fn admit<'p, GB, GC, GE, GA, GR, G>(
         membership: &mut cfyr::membership::LiveMembership<Transport>,
         policy: &'p mut cfyr::policy::CurrentPolicy<Transport>,
-        global: &mut GlobalPassport<B, C, E, A, R>,
+        global: &mut GlobalPassport<GB, GC, GE, GA, GR>,
         device: [u8; 32],
         rng: &mut G,
         creation: Option<&str>,
     ) -> Result<AccountAdmission<'p>>
     where
-        B: cwst::backend::Backend,
-        C: Clock,
-        E: Entropy,
-        A: Authority,
-        R: Records,
+        GB: cwst::backend::Backend,
+        GC: Clock,
+        GE: Entropy,
+        GA: Authority,
+        GR: Records,
         G: cwlt::passport::rand::RngCore + cwlt::passport::rand::CryptoRng,
     {
         let lease = membership
             .observe_lease(clock)
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|error| {
+                eprintln!("account actor: lease observe: {error:?}");
+                ErrorCode::Unavailable
+            })?;
         let challenge = lease
             .account_challenge(policy, clock)
             .await
-            .map_err(|_| ErrorCode::Reconcile)?;
+            .map_err(|error| {
+                eprintln!("account actor: account challenge: {error:?}");
+                ErrorCode::Reconcile
+            })?;
         issue_account_admission(challenge, global, device, rng, creation).await
     }
 
-    async fn run<B, C, E, A, R, G>(
+    async fn run<B, C, E, A, R, GB, GC, GE, GA, GR, G>(
         mailbox: Mailbox<Command, Reply>,
-        parts: AccountParts<B, C, E, A, R, G>,
+        parts: AccountParts<B, C, E, A, R, GB, GC, GE, GA, GR, G>,
     ) where
         B: cwst::backend::Backend,
         C: Clock,
         E: Entropy,
         A: Authority,
         R: Records,
+        GB: cwst::backend::Backend,
+        GC: Clock,
+        GE: Entropy,
+        GA: Authority,
+        GR: Records,
         G: cwlt::passport::rand::RngCore + cwlt::passport::rand::CryptoRng,
     {
         let AccountParts {

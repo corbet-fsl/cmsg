@@ -249,10 +249,14 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
         let vault = self
             .open_root(network, backend)
             .await?
-            .restore_community_account()
+            .restore_account_only_custody()
             .await
             .map_err(|_| ErrorCode::Unavailable)?;
-        super::super::accounting::CommunityAccount::recovered(origin, vault).await
+        super::super::accounting::CommunityAccount::recovered(
+            origin,
+            super::super::accounting::AccountVault::Owned(vault),
+        )
+        .await
     }
 
     /// Restore both original existing Wallet owners after the complete root
