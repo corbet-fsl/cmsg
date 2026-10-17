@@ -313,10 +313,11 @@ where
     if failed {
         return Err(cvlt::InitialError::Keys(Error::Clock).into());
     }
-    let now = clock.now().map_err(cvlt::InitialError::Keys)?;
+    // Presented at the genesis time, not now: a restart after the stamp's cohort ended
+    // re-presents the same genesis (the server re-confirms only that recorded digest).
     let presentation = wallet
         .with_global_passport(|holder| {
-            holder.present_stamp(&mut cwlt::passport::rand::rngs::OsRng, &scope, &action, now)
+            holder.present_stamp(&mut cwlt::passport::rand::rngs::OsRng, &scope, &action, at)
         })
         .await
         .map_err(|_| refused())?
