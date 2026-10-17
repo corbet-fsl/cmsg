@@ -140,6 +140,17 @@ impl DeviceSettings {
         if self.global.scope != "wallet" || self.global.origin == self.community.origin {
             return Err(ComposeError::Config("service scopes".into()));
         }
+        // A device-key member's vault and stamp scope derive from the community's verified
+        // founding fingerprint: settings without it would fail only later, at the join.
+        match self.community.fingerprint.as_deref() {
+            Some(hex) if identity::Fingerprint::from_hex(hex).is_some() => {}
+            Some(_) => return Err(ComposeError::Config("community fingerprint".into())),
+            None => {
+                return Err(ComposeError::Config(
+                    "the community settings must carry its founding fingerprint".into(),
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -1797,9 +1808,11 @@ mod tests {
                 serde_json::json!({"origin":origin,"scope":scope,"passkey_origin":origin,
                     "rp_id":"example.test","trust_key_ring":null,"connect_host":"example.test"})
             };
+            let mut community = service("omega", "https://omega.example.test");
+            community["fingerprint"] = serde_json::json!("abababababababababababababababababababababababababababababababab");
             serde_json::from_value(serde_json::json!({
                 "global": service("wallet", "https://wallet.example.test"),
-                "community": service("omega", "https://omega.example.test"),
+                "community": community,
                 "community_name": "omega",
                 "prover": {"worker_executable":"/w","circuit_file":"/c","keys_file":"/k",
                     "srs_g1_file":"/1","srs_g2_file":"/2","timeout_seconds":1,"threads":1,
@@ -1898,6 +1911,11 @@ mod tests {
             },
             forum: None,
         };
+        // Without its founding fingerprint (or with a malformed one) the community is refused.
+        assert!(settings.validate().is_err());
+        settings.community.fingerprint = Some("ab".into());
+        assert!(settings.validate().is_err());
+        settings.community.fingerprint = Some("abababababababababababababababababababababababababababababababab".into());
         assert!(settings.validate().is_ok());
         settings.community_name = "wallet".into();
         assert!(settings.validate().is_err());
