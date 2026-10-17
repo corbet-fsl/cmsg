@@ -400,6 +400,16 @@ mod tests {
         }
     }
 
+    /// Uncompressed affine coordinates (no SEC1 prefix) of a test issuer key.
+    fn issuer_point(seed: u8) -> Vec<u8> {
+        p256::ecdsa::SigningKey::from_slice(&[seed; 32])
+            .unwrap()
+            .verifying_key()
+            .to_encoded_point(false)
+            .as_bytes()[1..]
+            .to_vec()
+    }
+
     fn wave_policy() -> WavePolicy {
         WavePolicy {
             community: [1; 32],
@@ -415,7 +425,12 @@ mod tests {
                 circuit_digest: [3; 32],
                 verifying_key_digest: [4; 32],
             },
-            certificate_key: vec![5; 64],
+            certificate_keys: vec![czkp::issuer_keys::CertificateKeyPeriod {
+                public_key: issuer_point(0x42),
+                valid_from: 1,
+                valid_until: None,
+            }],
+            community_identity: [8; 32],
             manifest_sha256: [6; 32],
             state_policy: [7; 32],
             valid_from: NOW - 1000,
@@ -699,11 +714,10 @@ mod tests {
     fn certified(statement: &mut WaveStatement) -> WavePolicy {
         use p256::ecdsa::{signature::Signer, Signature, SigningKey};
         let key = SigningKey::from_slice(&[0x42; 32]).unwrap();
-        let point = key.verifying_key().to_encoded_point(false);
-        let mut policy = wave_policy();
-        policy.certificate_key = point.as_bytes()[1..].to_vec();
+        let policy = wave_policy();
         let body = czkp::certificate::AcceptedState {
             community: statement.context.community,
+            identity: policy.community_identity,
             owner: statement.context.owner,
             state: statement.state,
             scope: policy.proof_scope.circuit_digest,
