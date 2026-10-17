@@ -234,6 +234,7 @@ async fn configured_native_owner_constructs_actual_https_clients_without_claimin
             search_candidates: 8,
             search_publication_bytes: 65_536,
             tls_root_files: vec![],
+            member_origin: None,
             read_policy: board::ReadPolicy {
                 admission_action: "fixture".into(),
                 maximum_snapshot_age: 60,
