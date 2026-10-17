@@ -80,6 +80,46 @@ pub async fn reopen_initial_publication<'p, B: cwst::backend::Backend>(
     Ok((creation, initial))
 }
 
+/// The device-key twin of [`reopen_initial_publication`]: a device-key member restarted
+/// during its first publication reopens its activated creation from the community opening
+/// (the wallet unlock derives it; no passkey). Only under the device lease of the opening's
+/// own device key and only for the commitment that lease holds; missing data never creates.
+pub async fn reopen_device_initial_publication<'p, B: cwst::backend::Backend>(
+    opening: cvlt::PreparedOpen,
+    mut initial: cfyr::membership::InitialCreationLease<'p, Transport>,
+    backend: B,
+    clock: &mut impl Clock,
+) -> Result<
+    (
+        cvlt::InitialCreation<B>,
+        cfyr::membership::InitialCreationLease<'p, Transport>,
+    ),
+    cvlt::InitialError,
+> {
+    let device = opening.device().map_err(cvlt::InitialError::Open)?;
+    if initial.credential_id().map_err(|_| refused())? != device.value() {
+        return Err(refused());
+    }
+    let creation = opening.reopen_initial(backend).await?;
+    if creation.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+        return Err(refused());
+    }
+    let mut clock = SharedClock::new(clock);
+    let mut failed = false;
+    initial
+        .check(|| {
+            clock.now().unwrap_or_else(|_| {
+                failed = true;
+                u64::MAX
+            })
+        })
+        .map_err(|_| refused())?;
+    if failed {
+        return Err(cvlt::InitialError::Keys(Error::Clock));
+    }
+    Ok((creation, initial))
+}
+
 /// Obtain the original dedicated receipt assertion from the maintained Passkeys
 /// owner, retain all immutable publication inputs in the actual encrypted Store,
 /// then bind that exact commitment through the original same-key server CAS.

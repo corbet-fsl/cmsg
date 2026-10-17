@@ -149,7 +149,10 @@ pub async fn open_session(
 ///
 /// Resumable without a second confirmation: the stamp salt is derived from the device key's
 /// signature, so after an interruption the retained stamp still covers the join and the
-/// wallet is not asked again. A retried join returns the same member.
+/// wallet is not asked again. A retried join returns the same member. `resumed`: an earlier
+/// attempt may have reached the community; when no retained stamp covers the join any more
+/// (its cohort ended), the community is first asked to re-confirm that already applied join
+/// (no stamp sent), and only a join it never applied asks the wallet again.
 #[allow(clippy::too_many_arguments)]
 pub async fn join<B, C, E, A, R, F, Fut>(
     community: &mut Foyer<Transport>,
@@ -160,6 +163,7 @@ pub async fn join<B, C, E, A, R, F, Fut>(
     device: &ckmg::PublicKey,
     seed: [u8; 32],
     also: &[StampAction],
+    resumed: bool,
     sign: &mut impl DeviceSign,
     assertion: F,
 ) -> Result<String>
@@ -195,6 +199,12 @@ where
                 .all(|(scope, action)| holder.stamp_covers(scope, action, now()))
         })
         .await?;
+    if !covered && resumed {
+        let reconfirmed = send(community, name, wallet, &scope, None, &key, seed, salt, sign).await;
+        if let Ok(user) = reconfirmed {
+            return Ok(user);
+        }
+    }
     if !covered {
         let issuance = wallet_api
             .live_global_wallet(wallet_origin.into())
@@ -213,6 +223,42 @@ where
         )
         .await?;
     }
+    send(
+        community,
+        name,
+        wallet,
+        &scope,
+        Some(&action),
+        &key,
+        seed,
+        salt,
+        sign,
+    )
+    .await
+}
+
+/// Send one join: a fresh passport presentation over this community's signed challenge, the
+/// stamp presentation for `action` (none: re-confirm an already applied join), the device
+/// key's signature over the join message.
+#[allow(clippy::too_many_arguments)]
+async fn send<B, C, E, A, R>(
+    community: &mut Foyer<Transport>,
+    name: &str,
+    wallet: &mut GlobalPassport<B, C, E, A, R>,
+    scope: &StampScope,
+    action: Option<&StampAction>,
+    key: &[u8; 32],
+    seed: [u8; 32],
+    salt: [u8; 32],
+    sign: &mut impl DeviceSign,
+) -> Result<String>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+{
     // Passport presentation over this community's signed challenge.
     let request = community
         .call("presentation_challenge", json!({}))
@@ -239,10 +285,14 @@ where
             let proof = holder
                 .present(&mut rng, &expected, &signed, now())
                 .map_err(|_| ErrorCode::Unauthorized)?;
-            let stamp = holder
-                .present_stamp(&mut rng, &scope, &action, now())
-                .map_err(|_| ErrorCode::Unauthorized)?;
-            Ok((proof.to_bytes(), stamp.to_bytes()))
+            let stamp = match action {
+                Some(action) => holder
+                    .present_stamp(&mut rng, scope, action, now())
+                    .map_err(|_| ErrorCode::Unauthorized)?
+                    .to_bytes(),
+                None => Vec::new(),
+            };
+            Ok((proof.to_bytes(), stamp))
         })
         .await??;
     let signature = sign
@@ -250,7 +300,7 @@ where
             ckmg::DevicePurpose::DeviceJoin,
             payload(
                 ckmg::DevicePurpose::DeviceJoin,
-                cfyr::device_session::join_message(name, &challenge, &key),
+                cfyr::device_session::join_message(name, &challenge, key),
             )?,
         )
         .await?;

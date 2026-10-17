@@ -18,7 +18,8 @@ mod initial;
 pub use genesis::{
     InitialPublicationError, acknowledge_device_initial_publication,
     acknowledge_initial_publication, prepare_device_initial_publication,
-    prepare_initial_publication, reopen_initial_publication, retain_device_initial_publication,
+    prepare_initial_publication, reopen_device_initial_publication, reopen_initial_publication,
+    retain_device_initial_publication,
     retain_initial_publication,
 };
 mod current_member;

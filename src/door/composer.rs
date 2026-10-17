@@ -750,10 +750,13 @@ async fn stamp_trust(
 /// the join and the lineage genesis (`device_join`), opens its sessions by signature, and the
 /// first lineage is published with that stamp as its genesis evidence.
 ///
-/// Resumable before activation (the retained enrollment and the retained stamp mean no second
-/// confirmation). A restart after recovery (Done) opens both sessions again by the device key:
-/// the community opening signs the session message, the member id is the one the join kept.
-/// A restart between activation and Done (the first publication) is still refused.
+/// Resumable at every step without a second confirmation (`open` derives the community
+/// opening from the wallet unlock as often as needed). Before activation the retained
+/// enrollment signs and the retained stamp covers; once the join is applied its member id is
+/// kept and the join is never sent again. During the first publication (Activated, or Finished
+/// whose activation landed before its marker) the opening signs the sessions and rebuilds the
+/// genesis salt, the activated creation reopens from the vault and continues by its phase.
+/// After recovery (Done) both sessions open again by the device key.
 #[allow(clippy::too_many_arguments)]
 async fn drive_device<A, B, N, S, WB, WC, WE, WA, WR>(
     services: &mut S,
@@ -761,7 +764,7 @@ async fn drive_device<A, B, N, S, WB, WC, WE, WA, WR>(
     name: &str,
     origin: &str,
     member: Option<String>,
-    opening: cvlt::PreparedOpen,
+    open: &dyn Fn() -> Result<cvlt::PreparedOpen, ComposeError>,
     wallet_api: &Foyer<Transport>,
     wallet_origin: &str,
     wallet: &mut super::passport::GlobalPassport<WB, WC, WE, WA, WR>,
@@ -787,52 +790,56 @@ where
         .await
         .map_err(step("vault"))?
         .is_some();
-    let stage = resume_stage(progress.stage(false), vault_held)?;
+    let mut stage = resume_stage(progress.stage(false), vault_held)?;
     if stage == Stage::Done {
         return reopen_device(
             services,
             api,
             name,
             origin,
-            opening,
+            open()?,
             wallet_api,
             wallet_origin,
             progress,
         )
         .await;
     }
-    if stage >= Stage::Activated {
-        return Err(ComposeError::Inconsistent(
-            "a device-key member restarted during its first publication",
-        ));
-    }
-    let enrollment = if stage == Stage::Fresh {
+
+    // Before activation the retained enrollment owns the device key; a vault that no longer
+    // reopens as an enrollment after the join means activation landed before its marker.
+    let mut enrollment = None;
+    if stage == Stage::Fresh {
         let member = member.ok_or(ComposeError::Inconsistent("registration entry"))?;
         let seed = ckmg::EnrollmentSeed::new(
             ckmg::Binding::new(name, &member).map_err(step("enroll"))?,
             &mut entropy,
         )
         .map_err(step("enroll"))?;
-        let retained = custody::retain_device_enrollment(
-            opening,
-            seed,
-            backend.clone(),
-            "device-key-community",
-            &mut clock,
-            &mut entropy,
-        )
-        .await
-        .map_err(step("retain"))?;
-        progress.advance(false, Stage::Retained)?;
-        retained
-    } else {
-        custody::reopen_device_enrollment(opening, backend.clone())
+        enrollment = Some(
+            custody::retain_device_enrollment(
+                open()?,
+                seed,
+                backend.clone(),
+                "device-key-community",
+                &mut clock,
+                &mut entropy,
+            )
             .await
-            .map_err(step("reopen enrollment"))?
-    };
-    let device = enrollment.device();
+            .map_err(step("retain"))?,
+        );
+        progress.advance(false, Stage::Retained)?;
+        stage = Stage::Retained;
+    } else if stage < Stage::Activated {
+        match custody::reopen_device_enrollment(open()?, backend.clone()).await {
+            Ok(opened) => enrollment = Some(opened),
+            Err(_) if stage >= Stage::Finished => stage = Stage::Activated,
+            Err(e) => return Err(step("reopen enrollment")(e)),
+        }
+    }
     let mut companion = services.foyer(Service::Community).await?;
-    let (gsalt, user) = {
+
+    let (door, policy, mut creation, gsalt, user) = if let Some(enrollment) = enrollment {
+        let device = enrollment.device();
         let mut sign = enrollment.device_signer();
         let gsalt = super::device_join::derived_salt(
             name,
@@ -842,88 +849,165 @@ where
         )
         .await
         .map_err(step("genesis salt"))?;
-        let genesis = enrollment
-            .lineage_genesis_action(gsalt)
-            .map_err(step("genesis action"))?;
-        let seed = enrollment.seed().map_err(step("join"))?;
-        // The ONE wallet confirmation: a wallet passkey assertion for the stamp.
-        let assertion = |options: Value| async move {
-            let (credential, _) = wallet_keys
-                .sign_in(options)
+        let user = match (stage, progress.value.community_user.clone()) {
+            // The join is applied and its member id kept: never joined (or confirmed) again.
+            (Stage::Finished | Stage::Authorized, Some(user)) => user,
+            _ => {
+                let genesis = enrollment
+                    .lineage_genesis_action(gsalt)
+                    .map_err(step("genesis action"))?;
+                let seed = enrollment.seed().map_err(step("join"))?;
+                // The ONE wallet confirmation: a wallet passkey assertion for the stamp.
+                let assertion = |options: Value| async move {
+                    let (credential, _) = wallet_keys
+                        .sign_in(options)
+                        .await
+                        .map_err(|_| super::ErrorCode::Refused)?
+                        .into_parts();
+                    Ok(credential.as_json().clone())
+                };
+                let user = super::device_join::join(
+                    &mut api,
+                    name,
+                    wallet_api,
+                    wallet_origin,
+                    wallet,
+                    &device,
+                    seed,
+                    &[genesis],
+                    stage != Stage::Fresh,
+                    &mut sign,
+                    assertion,
+                )
                 .await
-                .map_err(|_| super::ErrorCode::Refused)?
-                .into_parts();
-            Ok(credential.as_json().clone())
+                .map_err(step("device join"))?;
+                progress.value.community_user = Some(user.clone());
+                progress.advance(false, Stage::Finished)?;
+                user
+            }
         };
-        let user = super::device_join::join(
-            &mut api,
-            name,
-            wallet_api,
-            wallet_origin,
-            wallet,
-            &device,
-            seed,
-            &[genesis],
-            &mut sign,
-            assertion,
-        )
-        .await
-        .map_err(step("device join"))?;
-        progress.value.community_user = Some(user.clone());
-        progress.advance(false, Stage::Finished)?;
         // Both sessions open by the device key's signature before activation.
         for foyer in [&mut api, &mut companion] {
             super::device_join::open_session(foyer, name, &user, &device, &mut sign)
                 .await
                 .map_err(step("device session"))?;
         }
-        (gsalt, user)
+        drop(sign);
+        let door = bound(name, origin, Scope::Community, api)?;
+        let policy: &'static mut Policy = Box::leak(Box::new(
+            door.current_policy(origin).map_err(step("policy"))?,
+        ));
+        let held = device_lease(&door, origin, &mut *policy).await?;
+        let creation = custody::activate_initial(enrollment, held, &mut clock, &mut entropy)
+            .await
+            .map_err(step("activate"))?;
+        progress.advance(false, Stage::Activated)?;
+        (door, policy, creation, gsalt, user)
+    } else {
+        // Restarted during the first publication: the community opening (from the wallet
+        // unlock) signs the sessions and rebuilds the genesis salt bit-exact; the member id is
+        // the one the join kept. No wallet prompt.
+        let user = progress
+            .value
+            .community_user
+            .clone()
+            .ok_or(ComposeError::Inconsistent(
+                "a device-key member without its member id",
+            ))?;
+        let opening = open()?;
+        let device = opening.device().map_err(step("reopen"))?;
+        let mut sign = |purpose: ckmg::DevicePurpose, payload: Vec<u8>| {
+            std::future::ready(
+                opening
+                    .sign_device(purpose, &payload)
+                    .map(|signature| signature.to_vec())
+                    .map_err(|_| super::ErrorCode::Unauthorized),
+            )
+        };
+        let gsalt = super::device_join::derived_salt(
+            name,
+            &device,
+            super::device_join::GENESIS_SALT_LABEL,
+            &mut sign,
+        )
+        .await
+        .map_err(step("genesis salt"))?;
+        for foyer in [&mut api, &mut companion] {
+            super::device_join::open_session(foyer, name, &user, &device, &mut sign)
+                .await
+                .map_err(step("device session"))?;
+        }
+        let door = bound(name, origin, Scope::Community, api)?;
+        let policy: &'static mut Policy = Box::leak(Box::new(
+            door.current_policy(origin).map_err(step("policy"))?,
+        ));
+        let held = device_lease(&door, origin, &mut *policy).await?;
+        let (creation, _) =
+            custody::reopen_device_initial_publication(open()?, held, backend.clone(), &mut clock)
+                .await
+                .map_err(step("reopen publication"))?;
+        (door, policy, creation, gsalt, user)
     };
 
-    let door = bound(name, origin, Scope::Community, api)?;
-    let policy: &'static mut Policy = Box::leak(Box::new(
-        door.current_policy(origin).map_err(step("policy"))?,
-    ));
-    let held = device_lease(&door, origin, &mut *policy).await?;
-    let mut creation = custody::activate_initial(enrollment, held, &mut clock, &mut entropy)
-        .await
-        .map_err(step("activate"))?;
-    progress.advance(false, Stage::Activated)?;
-
+    // The first publication continues by the creation's durable phase (as `drive`).
     let stamps = stamp_trust(wallet_api, wallet_origin).await?;
-    let held = device_lease(&door, origin, &mut *policy).await?;
-    let (prepared, held) = custody::prepare_device_initial_publication(
-        creation,
-        held,
-        wallet,
-        &stamps,
-        gsalt,
-        &mut clock,
-        &mut entropy,
-    )
-    .await
-    .map_err(step("prepare publication"))?;
-    creation = custody::retain_device_initial_publication(prepared, held, &stamps, &mut clock)
+    let mut phase = creation.phase().map_err(step("phase"))?;
+    if phase == cvlt::InitialPhase::Pending {
+        let held = device_lease(&door, origin, &mut *policy).await?;
+        let (prepared, held) = custody::prepare_device_initial_publication(
+            creation,
+            held,
+            wallet,
+            &stamps,
+            gsalt,
+            &mut clock,
+            &mut entropy,
+        )
         .await
-        .map_err(step("retain publication"))?;
-    let verifier = cdht::NetworkBackend::new(network.clone(), LineageVerifier);
-    let publication = creation.stage(verifier).await.map_err(step("stage"))?;
-    let (creation, _) = publication.flush().await.map_err(step("publish"))?;
-    let read = creation
-        .read_first_lineage(network.clone(), &mut clock)
-        .await
-        .map_err(step("read lineage"))?;
-    let held = device_lease(&door, origin, &mut *policy).await?;
-    let creation = custody::acknowledge_device_initial_publication(
-        read,
-        held,
-        network.clone(),
-        &stamps,
-        &mut clock,
-        &mut entropy,
-    )
-    .await
-    .map_err(step("acknowledge"))?;
+        .map_err(step("prepare publication"))?;
+        creation = custody::retain_device_initial_publication(prepared, held, &stamps, &mut clock)
+            .await
+            .map_err(step("retain publication"))?;
+        phase = cvlt::InitialPhase::Retained;
+    } else if phase == cvlt::InitialPhase::Prepared {
+        let held = device_lease(&door, origin, &mut *policy).await?;
+        creation = custody::retain_device_initial_publication(creation, held, &stamps, &mut clock)
+            .await
+            .map_err(step("retain publication"))?;
+        phase = cvlt::InitialPhase::Retained;
+    }
+    let creation = match phase {
+        cvlt::InitialPhase::Conflicted => {
+            return Err(ComposeError::Inconsistent("conflicted creation"));
+        }
+        cvlt::InitialPhase::Retained | cvlt::InitialPhase::Staged => {
+            let verifier = cdht::NetworkBackend::new(network.clone(), LineageVerifier);
+            let publication = if phase == cvlt::InitialPhase::Retained {
+                creation.stage(verifier).await.map_err(step("stage"))?
+            } else {
+                creation
+                    .resume_publication(verifier)
+                    .map_err(step("stage"))?
+            };
+            let (creation, _) = publication.flush().await.map_err(step("publish"))?;
+            let read = creation
+                .read_first_lineage(network.clone(), &mut clock)
+                .await
+                .map_err(step("read lineage"))?;
+            let held = device_lease(&door, origin, &mut *policy).await?;
+            custody::acknowledge_device_initial_publication(
+                read,
+                held,
+                network.clone(),
+                &stamps,
+                &mut clock,
+                &mut entropy,
+            )
+            .await
+            .map_err(step("acknowledge"))?
+        }
+        _ => creation,
+    };
     let held = device_lease(&door, origin, &mut *policy).await?;
     drop(
         custody::complete_device_initial_recovery(
@@ -1502,9 +1586,11 @@ where
                 "the community trust must be anchored to its founding fingerprint".into(),
             )
         })?;
-    let opening = unlock
-        .community_opening(&fingerprint, &settings.community_name)
-        .map_err(step("community opening"))?;
+    let open = || {
+        unlock
+            .community_opening(&fingerprint, &settings.community_name)
+            .map_err(step("community opening"))
+    };
     let member = if fresh {
         let community = cwlt::passport::CommunityId::new(settings.community_name.as_bytes())
             .map_err(step("passport"))?;
@@ -1528,7 +1614,7 @@ where
         &settings.community_name,
         community_origin,
         member,
-        opening,
+        &open,
         &global_companion,
         global_origin,
         &mut global,
