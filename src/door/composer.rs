@@ -709,6 +709,8 @@ struct DeviceDriven {
     companion: Foyer<Transport>,
     /// The wallet's stamp trust, read over the member's wallet session.
     stamps: cvlt::StampTrust,
+    /// The member id this device key belongs to (from the join, or kept since it).
+    user: String,
 }
 
 /// The device lease of a device-key member's initial creation (no passkey certificate).
@@ -830,7 +832,7 @@ where
     };
     let device = enrollment.device();
     let mut companion = services.foyer(Service::Community).await?;
-    let gsalt = {
+    let (gsalt, user) = {
         let mut sign = enrollment.device_signer();
         let gsalt = super::device_join::derived_salt(
             name,
@@ -875,7 +877,7 @@ where
                 .await
                 .map_err(step("device session"))?;
         }
-        gsalt
+        (gsalt, user)
     };
 
     let door = bound(name, origin, Scope::Community, api)?;
@@ -941,6 +943,7 @@ where
         policy,
         companion,
         stamps,
+        user,
     })
 }
 
@@ -966,21 +969,14 @@ async fn reopen_device<S: Services>(
             "a device-key member without its member id",
         ))?;
     let device = opening.device().map_err(step("restore"))?;
-    let mut sign = |purpose: ckmg::DevicePurpose, payload: Vec<u8>| {
-        std::future::ready(match purpose {
-            ckmg::DevicePurpose::DeviceSession => opening
-                .sign_device_session(&payload)
-                .map(|signature| signature.to_vec())
-                .map_err(|_| super::ErrorCode::Unauthorized),
-            _ => Err(super::ErrorCode::Unauthorized),
-        })
-    };
+    let mut sign = session_signer(&opening);
     let mut companion = services.foyer(Service::Community).await?;
     for foyer in [&mut api, &mut companion] {
         super::device_join::open_session(foyer, name, &user, &device, &mut sign)
             .await
             .map_err(step("device session"))?;
     }
+    drop(sign);
     drop(opening);
     let door = bound(name, origin, Scope::Community, api)?;
     let policy: &'static mut Policy = Box::leak(Box::new(
@@ -992,7 +988,24 @@ async fn reopen_device<S: Services>(
         policy,
         companion,
         stamps,
+        user,
     })
+}
+
+/// The device key's session signer from a community opening, once its enrollment is
+/// activated (before that the enrollment signs): the session purpose only.
+fn session_signer(
+    opening: &cvlt::PreparedOpen,
+) -> impl FnMut(ckmg::DevicePurpose, Vec<u8>) -> std::future::Ready<super::Result<Vec<u8>>> + '_ {
+    move |purpose, payload| {
+        std::future::ready(match purpose {
+            ckmg::DevicePurpose::DeviceSession => opening
+                .sign_device_session(&payload)
+                .map(|signature| signature.to_vec())
+                .map_err(|_| super::ErrorCode::Unauthorized),
+            _ => Err(super::ErrorCode::Unauthorized),
+        })
+    }
 }
 
 /// Sign in once on `companion` with the PRF extension and return the unlock secret of this
@@ -1505,9 +1518,10 @@ where
     };
     let DeviceDriven {
         mut door,
-        policy,
+        policy: _,
         companion,
         stamps,
+        user,
     } = drive_device(
         services,
         community_api,
@@ -1534,13 +1548,39 @@ where
         &network,
     )
     .await?;
+    // The recovery lease holds its session for the device's life: it gets a third session of
+    // the same device key, so the Door's own session stays free for owner actions (creation
+    // claim, vouching), as the wallet Door lends its companion for creation.
+    let mut vault_session = services.foyer(Service::Community).await?;
+    {
+        let opening = unlock
+            .community_opening(&fingerprint, &settings.community_name)
+            .map_err(step("community opening"))?;
+        super::device_join::open_session(
+            &mut vault_session,
+            &settings.community_name,
+            &user,
+            &device,
+            &mut session_signer(&opening),
+        )
+        .await
+        .map_err(step("device session"))?;
+    }
     drop(unlock);
-    // The companion session outlives this call: the account actor admits through it while
-    // the recovery lease keeps the Door's own session for the Vault.
+    // The companion session outlives this call: the account actor admits through it.
     let companion: &'static Foyer<Transport> = Box::leak(Box::new(companion));
     let actor_membership = companion.live_membership();
     let actor_policy = companion.current_policy();
-    let held = device_lease(&door, community_origin, policy).await?;
+    let vault_session: &'static Foyer<Transport> = Box::leak(Box::new(vault_session));
+    let vault_policy: &'static mut Policy = Box::leak(Box::new(vault_session.current_policy()));
+    let held = vault_session
+        .live_membership()
+        .observe_lease(now)
+        .await
+        .map_err(step("lease_observe"))?
+        .device_initial_creation(vault_policy, now)
+        .await
+        .map_err(step("lease_creation"))?;
     let owners = custody::prepare_device_initial_recovery(recovered, held, network.clone(), &stamps)
         .await
         .map_err(step("community recovery"))?;
