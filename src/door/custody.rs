@@ -6,11 +6,13 @@ use std::{cell::Cell, rc::Rc};
 
 mod genesis;
 mod initial_recovery;
-pub use initial_recovery::{InitialRecoveryAuthority, complete_initial_recovery};
+pub use initial_recovery::{
+    InitialRecoveryAuthority, complete_device_initial_recovery, complete_initial_recovery,
+};
 mod initial_restore;
 pub use initial_restore::{
     ComposedMemberVault, InitialRecoveredVault, InitialRecoveryOwners, InitialRootVault,
-    prepare_initial_recovery,
+    prepare_device_initial_recovery, prepare_initial_recovery,
 };
 mod initial;
 pub use genesis::{

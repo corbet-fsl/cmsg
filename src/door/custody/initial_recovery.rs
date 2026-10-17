@@ -22,6 +22,10 @@ pub struct InitialRecoveryAuthority<'a, 'p, C, N: cdht::Network> {
     pub(super) request_intent: Option<ckmg::IntentVerifier>,
     pub(super) delegation_spent: bool,
     pub(super) account_signing: Option<(Action, Vec<u8>, u64)>,
+    /// The wallet's stamp trust for a device-key member, whose genesis evidence is a stamp
+    /// and whose lease holds its device key instead of a passkey certificate. Present exactly
+    /// when the lease is a device lease (`lease.device_key()`); the passkey path keeps None.
+    pub(super) stamps: Option<cvlt::StampTrust>,
 }
 impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
     fn current(&mut self, request: &Authorization<'_>) -> Result<u64, Error> {
@@ -77,16 +81,29 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         {
             return Err(Error::Unauthorized);
         }
-        let certificate = self
-            .initial
-            .certificate_bytes()
-            .map_err(|_| Error::Unauthorized)?
-            .to_vec();
+        // A device lease (no passkey certificate) is reauthorized by its stamp genesis with
+        // the wallet's stamp trust, and only then; a passkey lease only by its certificate.
+        let device = self.initial.device_key().map_err(|_| Error::Unauthorized)?;
+        let certificate = match (device, &self.stamps) {
+            (Some(_), Some(_)) => Vec::new(),
+            (None, None) => self
+                .initial
+                .certificate_bytes()
+                .map_err(|_| Error::Unauthorized)?
+                .to_vec(),
+            _ => return Err(Error::Unauthorized),
+        };
+        // The authority reference: the passkey credential, or for a device lease its device
+        // key (the lease's credential), which must be the stamp genesis' author.
         let credential = self
             .initial
             .credential_id()
             .map_err(|_| Error::Unauthorized)?
             .to_vec();
+        if device.is_some_and(|key| credential != key) {
+            return Err(Error::Unauthorized);
+        }
+        let stamps = self.stamps.as_ref();
         let candidate = self.candidate;
         let mut failed = false;
         let clock = &mut self.clock;
@@ -102,9 +119,32 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                     if current.revocations().device_revoked(request.device.value()) {
                         return Err(Error::Unauthorized);
                     }
-                    let verified = candidate
-                        .reauthorize(current, &certificate, request.binding.member(), now)
-                        .map_err(|_| Error::Unauthorized)?;
+                    let verified = match stamps {
+                        Some(stamps) => candidate.reauthorize_with_stamps(
+                            current,
+                            stamps,
+                            request.binding.member(),
+                            now,
+                        ),
+                        None => candidate.reauthorize(
+                            current,
+                            &certificate,
+                            request.binding.member(),
+                            now,
+                        ),
+                    }
+                    .map_err(|_| Error::Unauthorized)?;
+                    let reference = match stamps {
+                        Some(_) => verified
+                            .author(now)
+                            .map_err(|_| Error::Unauthorized)?
+                            .value()
+                            .to_vec(),
+                        None => verified
+                            .credential_id(now)
+                            .map_err(|_| Error::Unauthorized)?
+                            .to_vec(),
+                    };
                     if signing.is_some_and(|signing| signing.expires > verified.valid_until()) {
                         return Err(Error::Expired);
                     }
@@ -113,10 +153,7 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                         || Some(lineage.root) != request.root
                         || lineage.epoch != request.epoch
                         || verified.author(now).map_err(|_| Error::Unauthorized)? != request.device
-                        || verified
-                            .credential_id(now)
-                            .map_err(|_| Error::Unauthorized)?
-                            != credential
+                        || reference != credential
                         || request
                             .statement
                             .is_some_and(|digest| lineage.digest().ok() != Some(digest))
@@ -304,9 +341,45 @@ impl<C: Clock, N: cdht::Network> ckmg::Authority for InitialRecoveryAuthority<'_
 /// Production Tor callers must obtain `network` from `Network::initial_records`
 /// before moving `initial`, so transport never re-locks its held Foyer session.
 pub async fn complete_initial_recovery<B: cwst::backend::Backend, N: cdht::Network + Clone>(
+    creation: cvlt::InitialCreation<B>,
+    initial: cfyr::membership::InitialCreationLease<'_, Transport>,
+    network: N,
+    clock: &mut impl Clock,
+    entropy: &mut impl ckmg::Entropy,
+) -> Result<cvlt::RetiredInitial, cvlt::InitialError> {
+    complete_recovery(creation, initial, network, None, clock, entropy).await
+}
+
+/// [`complete_initial_recovery`] of a device-key member: `initial` is its device lease and
+/// its genesis evidence by stamp is reauthorized with the wallet's stamp trust
+/// (`GlobalWalletLease::stamp_trust`), the device key standing in for a passkey credential.
+pub async fn complete_device_initial_recovery<
+    B: cwst::backend::Backend,
+    N: cdht::Network + Clone,
+>(
+    creation: cvlt::InitialCreation<B>,
+    initial: cfyr::membership::InitialCreationLease<'_, Transport>,
+    network: N,
+    stamps: &cvlt::StampTrust,
+    clock: &mut impl Clock,
+    entropy: &mut impl ckmg::Entropy,
+) -> Result<cvlt::RetiredInitial, cvlt::InitialError> {
+    complete_recovery(
+        creation,
+        initial,
+        network,
+        Some(stamps.clone()),
+        clock,
+        entropy,
+    )
+    .await
+}
+
+async fn complete_recovery<B: cwst::backend::Backend, N: cdht::Network + Clone>(
     mut creation: cvlt::InitialCreation<B>,
     initial: cfyr::membership::InitialCreationLease<'_, Transport>,
     network: N,
+    stamps: Option<cvlt::StampTrust>,
     clock: &mut impl Clock,
     entropy: &mut impl ckmg::Entropy,
 ) -> Result<cvlt::RetiredInitial, cvlt::InitialError> {
@@ -323,6 +396,7 @@ pub async fn complete_initial_recovery<B: cwst::backend::Backend, N: cdht::Netwo
         request_intent: None,
         delegation_spent: false,
         account_signing: None,
+        stamps,
     };
     let reader = candidate.read_lineage(&mut clock, &mut authority).await?;
     let backend = cvlt::TorLineageRecord::provisional_lineage(network.clone(), reader)
