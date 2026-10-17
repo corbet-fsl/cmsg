@@ -4,7 +4,7 @@
 //! silently (`open_device_session`).
 use super::{
     ErrorCode, Result, custody::SystemClock, foyer::Transport, passport::GlobalPassport,
-    stamp::request_stamp,
+    stamp::{pending_request, request_stamp, resend_stamp},
 };
 use cfyr::Foyer;
 use ckmg::{Authority, Clock, Entropy};
@@ -206,22 +206,26 @@ where
         }
     }
     if !covered {
-        let issuance = wallet_api
-            .live_global_wallet(wallet_origin.into())
-            .observe_lease(now)
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)?
-            .stamp_challenge(now)
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
-        request_stamp(
-            issuance,
-            wallet,
-            &actions,
-            assertion,
-            &mut passport::rand::rngs::OsRng,
-        )
-        .await?;
+        let issuance = || async {
+            wallet_api
+                .live_global_wallet(wallet_origin.into())
+                .observe_lease(now)
+                .await
+                .map_err(|_| ErrorCode::Unauthorized)?
+                .stamp_challenge(now)
+                .await
+                .map_err(|_| ErrorCode::Unauthorized)
+        };
+        let mut rng = passport::rand::rngs::OsRng;
+        // An earlier attempt was interrupted after its request was durably begun (possibly
+        // after the wallet answered): send the SAME request again, never a new confirmation.
+        let resent = match pending_request(wallet, &actions).await? {
+            Some(request) => resend_stamp(issuance().await?, wallet, request, &mut rng).await?,
+            None => false,
+        };
+        if !resent {
+            request_stamp(issuance().await?, wallet, &actions, assertion, &mut rng).await?;
+        }
     }
     send(
         community,

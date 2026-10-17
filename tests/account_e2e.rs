@@ -78,6 +78,18 @@ fn device(
     (settings, keys)
 }
 
+/// The fixture community's founding fingerprint (hex), from the genesis document its trust
+/// feed publishes, verified here: the composer refuses community settings without it.
+async fn community_fingerprint(world: &Value) -> String {
+    let feed = foyer(world, false)
+        .await
+        .call("trust_feed", json!({}))
+        .await
+        .unwrap();
+    let genesis: Vec<u8> = serde_json::from_value(feed["genesis"].clone()).unwrap();
+    data_encoding::HEXLOWER.encode(&csgn::verify_genesis(&genesis).unwrap().fingerprint())
+}
+
 /// The fixture platform is a development build: its wallet gate is opened here, never
 /// by the production composer.
 struct Gated<'a>(composer::NativeServices<'a>);
@@ -127,7 +139,8 @@ async fn enroll_open_lose_the_response_reopen_activate_and_repeat_on_the_real_op
         )
         .unwrap();
 
-        let (settings, mut keys) = device(&f, &config);
+        let (mut settings, mut keys) = device(&f, &config);
+        settings.community.fingerprint = Some(community_fingerprint(&f["community"]).await);
         // The production composer: global registration, wallet enrollment, passport issue,
         // community enrollment at the accounting operator and `bind_native_account`.
         let mut door = composer::compose_native_device(

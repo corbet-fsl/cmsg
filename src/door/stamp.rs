@@ -63,6 +63,64 @@ pub(crate) fn assertion_fields(credential: Value) -> Result<Value> {
     }))
 }
 
+/// The pending stamp request of an interrupted attempt that carries every one of `actions`,
+/// as the exact bytes first sent. Local only: no network, no confirmation.
+pub(crate) async fn pending_request<B, C, E, A, R>(
+    wallet: &mut GlobalPassport<B, C, E, A, R>,
+    actions: &[(StampScope, StampAction)],
+) -> Result<Option<Vec<u8>>>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+{
+    wallet
+        .with_global_passport(|holder| holder.pending_stamp_request(actions))
+        .await
+}
+
+/// Send the SAME request bytes of an interrupted attempt again (`request` from
+/// [`pending_request`]). The person confirmed them once; within the wallet's replay window
+/// the wallet answers the same request with the same blind stamp without verifying a new
+/// confirmation, so the assertion fields are left empty. `Ok(true)`: the stamp is retained.
+/// `Ok(false)`: the wallet did not answer this request again (replay window over, or the
+/// outcome is unknown); the pending request stays for the caller to settle.
+pub(crate) async fn resend_stamp<B, C, E, A, R, G>(
+    mut issuance: GlobalStampIssuance<Transport>,
+    wallet: &mut GlobalPassport<B, C, E, A, R>,
+    request: Vec<u8>,
+    rng: &mut G,
+) -> Result<bool>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+    G: passport::rand::RngCore + passport::rand::CryptoRng,
+{
+    wallet.same_stamp_wallet(&mut issuance).await?;
+    let unconfirmed = serde_json::json!({
+        "credential_id": [],
+        "client_data_json": [],
+        "authenticator_data": [],
+        "signature": [],
+        "user_handle": null,
+    });
+    let Ok(answer) = issuance.issue(request, unconfirmed, now).await else {
+        return Ok(false);
+    };
+    wallet
+        .same_stamp_wallet(&mut issuance)
+        .await
+        .map_err(|_| ErrorCode::Reconcile)?;
+    let blind = BlindStamp::from_bytes(&answer).map_err(|_| ErrorCode::Reconcile)?;
+    wallet.finish_stamp(rng, &blind).await?;
+    Ok(true)
+}
+
 /// Obtain one stamp covering `actions` (at most one per community) with ONE confirmation.
 ///
 /// `assertion` performs the one WebAuthn assertion of the wallet passkey for the options it
