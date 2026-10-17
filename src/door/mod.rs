@@ -25,6 +25,7 @@ pub mod facades;
 pub mod foyer;
 pub mod identity;
 mod inbox;
+pub(crate) mod interrupt;
 pub mod inbox_conversation;
 pub mod inbox_lineage;
 pub mod inbox_waves;

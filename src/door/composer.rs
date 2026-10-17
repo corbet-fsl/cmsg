@@ -305,7 +305,16 @@ impl ProgressFile {
             file.sync_all()?;
             std::fs::rename(&temporary, path)
         };
-        write().map_err(step("progress"))
+        write().map_err(step("progress"))?;
+        super::interrupt::point(&format!(
+            "{}-{}",
+            if wallet { "global" } else { "community" },
+            serde_json::to_value(stage)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_default()
+        ));
+        Ok(())
     }
 }
 
@@ -980,12 +989,14 @@ where
             .await
             .map_err(step("retain publication"))?;
         phase = cvlt::InitialPhase::Retained;
+        super::interrupt::point("publication-retained");
     } else if phase == cvlt::InitialPhase::Prepared {
         let held = device_lease(&door, origin, &mut *policy).await?;
         creation = custody::retain_device_initial_publication(creation, held, &stamps, &mut clock)
             .await
             .map_err(step("retain publication"))?;
         phase = cvlt::InitialPhase::Retained;
+        super::interrupt::point("publication-retained");
     }
     let creation = match phase {
         cvlt::InitialPhase::Conflicted => {
@@ -1001,12 +1012,13 @@ where
                     .map_err(step("stage"))?
             };
             let (creation, _) = publication.flush().await.map_err(step("publish"))?;
+            super::interrupt::point("publication-flushed");
             let read = creation
                 .read_first_lineage(network.clone(), &mut clock)
                 .await
                 .map_err(step("read lineage"))?;
             let held = device_lease(&door, origin, &mut *policy).await?;
-            custody::acknowledge_device_initial_publication(
+            let acknowledged = custody::acknowledge_device_initial_publication(
                 read,
                 held,
                 network.clone(),
@@ -1015,7 +1027,9 @@ where
                 &mut entropy,
             )
             .await
-            .map_err(step("acknowledge"))?
+            .map_err(step("acknowledge"))?;
+            super::interrupt::point("publication-acknowledged");
+            acknowledged
         }
         _ => creation,
     };

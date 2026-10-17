@@ -164,12 +164,16 @@ where
         wallet.credential(),
         request.confirmation_challenge(&challenge),
     )?;
+    super::interrupt::point("stamp-begun");
+    super::interrupt::confirmation();
     let credential = assertion(options).await?;
     let fields = assertion_fields(credential)?;
     let answer = issuance
         .issue(request.to_bytes(), fields, now)
         .await
         .map_err(|_| ErrorCode::Reconcile)?;
+    // The wallet answered; the stamp is not retained yet.
+    super::interrupt::point("stamp-answered");
     wallet
         .same_stamp_wallet(&mut issuance)
         .await
