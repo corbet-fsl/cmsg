@@ -155,10 +155,10 @@ impl DeviceSettings {
     }
 }
 
-/// The two Passkeys clients of one authenticator (global and community ceremony contexts).
+/// The member's wallet Passkeys client: its one confirmation per start unlocks every vault.
+/// A device-key member has no community passkey.
 pub struct DeviceKeys<A: cfyr::passkeys::Authenticator> {
     pub global: Client<A>,
-    pub community: Client<A>,
 }
 
 /// Where the encrypted checkpoints live. Both backends are `Clone` handles to
@@ -1399,9 +1399,9 @@ impl Services for OwnedNativeServices {
     }
 }
 
-/// What the embedder lends a reopened device: the services, a source of the member's
-/// authenticator per service (a fresh instance per ceremony; it must keep its credential
-/// across process restarts), and an optional last step on the Door.
+/// What the embedder lends a reopened device: the services, a source of the member's wallet
+/// authenticator (a fresh instance per ceremony; it must keep its credential across process
+/// restarts), and an optional last step on the Door.
 #[cfg(all(
     feature = "native-tor",
     feature = "native-prover",
@@ -1410,18 +1410,19 @@ impl Services for OwnedNativeServices {
 ))]
 pub struct OpenParts<S, F> {
     pub services: S,
-    /// One authenticator per service; called for every ceremony.
-    pub authenticators: F,
+    /// The wallet authenticator; called for every ceremony.
+    pub authenticator: F,
     /// Runs on the Door's thread after everything else is lent (for example
     /// `bind_waves`). It cannot replace what the composer lent.
     pub finish: Option<super::native::DeviceSetup>,
 }
 
 /// Open an already registered device and lend its Door everything a restart must restore
-/// that custody does not: the embedded authenticator for the community login (so the login
-/// action works without a human), the member's global session and the session-less global
-/// channel (community creation), and the activation prover. Custody itself still opens at
-/// the login action, exactly as in [`open_native_device`].
+/// that custody does not (see [`restore_device_login`]): the member's global session and the
+/// session-less global channel (community creation), the activation prover, and the retained
+/// device-key login, so the login action completes without any ceremony. Custody itself still
+/// opens at the login action, exactly as in [`open_native_device`]. Only the global
+/// authenticator is used: a device-key member has no community passkey.
 #[cfg(all(
     feature = "native-tor",
     feature = "native-prover",
@@ -1439,55 +1440,30 @@ pub async fn open_native_device_with<A, S, F>(
 where
     A: cfyr::passkeys::Authenticator + cpky::Authenticator + 'static,
     S: Services + Send + 'static,
-    F: Fn(Service) -> A + Clone + Send + 'static,
+    F: Fn() -> A + Send + 'static,
 {
     check_open(settings, &mut deployment, registered(progress)?)?;
     let settings = settings.clone();
     let OpenParts {
         mut services,
-        authenticators,
+        authenticator,
         finish,
     } = parts;
+    let progress = progress.to_owned();
     let setup: super::native::DeviceSetup = Box::new(move |door: &mut Door| {
         Box::pin(async move {
-            let global_origin = settings.global.origin.as_str();
-            let community_origin = settings.community.origin.as_str();
-            let log = |e: ComposeError| {
-                eprintln!("device setup: {e}");
-                super::ErrorCode::Unavailable
-            };
-            // The member's global session: the wallet login, once per start.
             let context = cpky::Context::new(
                 &settings.global.passkey_origin,
                 &settings.global.rp_id,
             )
             .map_err(|_| super::ErrorCode::InvalidRequest)?;
-            let mut keys = Client::new(context, authenticators(Service::Global));
-            let mut api = services.foyer(Service::Global).await.map_err(log)?;
-            login(&mut api, &mut keys).await.map_err(log)?;
-            let mut wallet_door =
-                bound("wallet", global_origin, Scope::Global, api).map_err(log)?;
-            let session = wallet_door.take_global(global_origin)?;
-            let public = services.public(Service::Global).await.map_err(log)?;
-            door.lend_global(community_origin, session, public)?;
-            door.set_activation_prover(std::sync::Arc::new(
-                super::accounting::NativeActivationProver::new(settings.prover.clone()),
-            ));
-            // The community login (vault unlock) runs on the embedded authenticator.
-            let login_configuration = super::login::Configuration {
-                page: format!("{}/login", settings.community.passkey_origin),
-                origin: settings.community.passkey_origin.clone(),
-                relying_party: settings.community.rp_id.clone(),
-            };
-            login_configuration
-                .context()
-                .map_err(|_| super::ErrorCode::InvalidRequest)?;
-            door.login_configuration
-                .insert(community_origin.to_owned(), login_configuration);
-            let make = authenticators.clone();
-            door.bind_authenticator(community_origin, Role::Member, move || {
-                make(Service::Community)
-            })?;
+            let mut keys = Client::new(context, authenticator());
+            restore_device_login(door, &settings, &mut services, &mut keys, &progress)
+                .await
+                .map_err(|e| {
+                    eprintln!("device setup: {e}");
+                    super::ErrorCode::Unavailable
+                })?;
             if let Some(finish) = finish {
                 finish(door).await?;
             }
@@ -1497,6 +1473,87 @@ where
     super::native::Embedded::configured_restore_with(deployment, lifetime_seconds, clock, setup)
         .await
         .map_err(step("open"))
+}
+
+/// Every start of a registered device-key member, on its freshly constructed Door: ONE wallet
+/// sign-in with PRF (the start's only confirmation) gives the member's global session and the
+/// device unlock; the wallet's stamp trust is read over that session; the community opening
+/// derives from the unlock with the community identity the Door's verified policy reports
+/// (it must equal the configured founding fingerprint); and the Door retains it as the device
+/// login (`Door::retain_device_login`) with the member id the join kept in `progress`. The
+/// next `login.start` then opens the community session by the device key and answers
+/// `authenticated_pending_custody` without a ceremony; its recovery verifies the stamp
+/// lineage with the retained trust. Interrupted anywhere, the next start simply repeats this.
+pub async fn restore_device_login<A, S>(
+    door: &mut Door,
+    settings: &DeviceSettings,
+    services: &mut S,
+    wallet: &mut Client<A>,
+    progress: &Path,
+) -> Result<(), ComposeError>
+where
+    A: cfyr::passkeys::Authenticator,
+    S: Services,
+{
+    settings.validate()?;
+    let global_origin = settings.global.origin.as_str();
+    let community_origin = settings.community.origin.as_str();
+    let user = ProgressFile::open(Some(progress.to_owned()))?
+        .value
+        .community_user
+        .ok_or(ComposeError::Inconsistent(
+            "a device-key member without its member id",
+        ))?;
+    let mut api = services.foyer(Service::Global).await?;
+    let unlock =
+        super::unlock_once::DeviceUnlock::from_unlock(sign_in_unlock(&mut api, wallet).await?);
+    let stamps = stamp_trust(&api, global_origin).await?;
+    let mut wallet_door = bound("wallet", global_origin, Scope::Global, api)?;
+    let session = wallet_door
+        .take_global(global_origin)
+        .map_err(step("global session"))?;
+    let public = services.public(Service::Global).await?;
+    door.lend_global(community_origin, session, public)
+        .map_err(step("global session"))?;
+    door.set_activation_prover(std::sync::Arc::new(
+        super::accounting::NativeActivationProver::new(settings.prover.clone()),
+    ));
+    let fingerprint = door
+        .current_policy(community_origin)
+        .map_err(step("community identity"))?
+        .with_current(now(), |current| current.fingerprint().copied())
+        .map_err(step("community identity"))?
+        .ok_or_else(|| {
+            ComposeError::Config(
+                "the community trust must be anchored to its founding fingerprint".into(),
+            )
+        })?;
+    let configured = settings
+        .community
+        .fingerprint
+        .as_deref()
+        .and_then(identity::Fingerprint::from_hex);
+    if configured.map(|configured| configured.0) != Some(fingerprint) {
+        return Err(ComposeError::Config(
+            "the community's verified identity differs from the device settings".into(),
+        ));
+    }
+    let opening = unlock
+        .community_opening(&fingerprint, &settings.community_name)
+        .map_err(step("community opening"))?;
+    drop(unlock);
+    door.retain_device_login(community_origin, user, opening, stamps)
+        .map_err(step("device login"))?;
+    // `login.poll` reports Idle for a configured origin before the first start.
+    let login = super::login::Configuration {
+        page: format!("{}/login", settings.community.passkey_origin),
+        origin: settings.community.passkey_origin.clone(),
+        relying_party: settings.community.rp_id.clone(),
+    };
+    login.context().map_err(step("login configuration"))?;
+    door.login_configuration
+        .insert(community_origin.to_owned(), login);
+    Ok(())
 }
 
 /// From a device configuration to a bound, fully registered device: global registration,

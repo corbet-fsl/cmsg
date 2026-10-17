@@ -25,6 +25,10 @@ pub(super) async fn start(door: &mut Door, key: &[u8; 32]) -> Result<Status> {
         Some(_) => return Err(ErrorCode::Refused),
         None => {}
     }
+    // A device-key member's retained login needs no ceremony.
+    if let Some(status) = super::session::start_device(door, key, &origin).await {
+        return status;
+    }
     let config = door
         .login_configuration
         .get(&origin)

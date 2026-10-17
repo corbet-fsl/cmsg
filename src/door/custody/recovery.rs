@@ -52,9 +52,28 @@ impl<N: cdht::Network + Clone> RecoveryOwners<'_, N> {
     /// replacement state. The caller must retain the network and bind the actual
     /// Vault before it can complete login; this result is not a readiness grant.
     pub async fn open<B: cwst::backend::Backend>(
+        self,
+        network: N,
+        backend: B,
+    ) -> super::super::Result<RestoredVault<B, N>> {
+        self.open_custody(network, backend, false).await
+    }
+
+    /// [`Self::open`] for a device-key member's community Store, enrolled through the
+    /// account path: it holds the account capsule only (the passport lives in the wallet).
+    pub async fn open_account_only<B: cwst::backend::Backend>(
+        self,
+        network: N,
+        backend: B,
+    ) -> super::super::Result<RestoredVault<B, N>> {
+        self.open_custody(network, backend, true).await
+    }
+
+    async fn open_custody<B: cwst::backend::Backend>(
         mut self,
         network: N,
         backend: B,
+        account_only: bool,
     ) -> super::super::Result<RestoredVault<B, N>> {
         let lifetime = self.authority.live.lifetime.clone();
         let mut guard = CheckGuard {
@@ -93,10 +112,12 @@ impl<N: cdht::Network + Clone> RecoveryOwners<'_, N> {
             None => self.recovery.open_existing(backend, owners).await,
         }
         .map_err(|_| ErrorCode::Unavailable)?;
-        let vault = vault
-            .restore_wallet_custody()
-            .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+        let vault = if account_only {
+            vault.restore_account_only_custody().await
+        } else {
+            vault.restore_wallet_custody().await
+        }
+        .map_err(|_| ErrorCode::Unavailable)?;
         guard.accepted = true;
         Ok(RestoredVault {
             vault,
@@ -283,13 +304,15 @@ impl Door {
     /// a fresh original HTTPS lobby/device observation. The user UUID, action
     /// body and constructor configuration never choose this member binding.
     /// Transport and later member operations still perform their own fresh checks.
+    /// A device-key login also returns the wallet's stamp trust it retained: the
+    /// recovery verifies the member's stamp lineage evidence with it.
     pub async fn prepare_login_recovery(
         &mut self,
         origin: &str,
         token: &super::super::ClientToken,
         now: u64,
-    ) -> super::super::Result<(cvlt::PreparedOpen, Binding)> {
-        let prepared = self.prepare_login_custody(origin, token, now)?;
+    ) -> super::super::Result<(cvlt::PreparedOpen, Binding, Option<cvlt::StampTrust>)> {
+        let (prepared, stamps) = self.take_login_custody(origin, token, now)?;
         let device = prepared.device().map_err(|_| ErrorCode::Unauthorized)?;
         let mut membership = self.live_membership(origin)?;
         let mut clock = SystemClock;
@@ -317,6 +340,76 @@ impl Door {
         }
         let binding = Binding::new(&self.config.community, &observed.member)
             .map_err(|_| ErrorCode::Unauthorized)?;
-        Ok((prepared, binding))
+        Ok((prepared, binding, stamps))
+    }
+
+    /// The login's Vault recovery once its records network runs: read the vault checkpoint
+    /// of `prepared`, prepare the recovery candidate (stamp checkpoints only with `stamps`),
+    /// complete the forced lineage read through `member` (which verifies stamp lineage
+    /// evidence with the same trust) and open or restore the Store into `backend`. Nothing
+    /// is bound to this Door yet; missing records never create new state.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn recover_login_vault<N, B>(
+        &self,
+        origin: &str,
+        prepared: cvlt::PreparedOpen,
+        binding: &Binding,
+        stamps: Option<cvlt::StampTrust>,
+        member: MemberAuthorityBuilder,
+        network: N,
+        backend: B,
+        now: u64,
+    ) -> super::super::Result<RestoredVault<B, N>>
+    where
+        N: cdht::Network + Clone,
+        B: cwst::backend::Backend,
+    {
+        let checkpoint = {
+            let mut record = prepared
+                .tor_records(network.clone())
+                .await
+                .map_err(|_| ErrorCode::Unavailable)?;
+            record
+                .checkpoint(&prepared.locator())
+                .await
+                .map_err(|_| ErrorCode::Unavailable)?
+        }; // Release the borrowed record before consuming PreparedOpen.
+        let completed = SystemClock.now().map_err(|_| ErrorCode::Clock)?;
+        if completed < now {
+            return Err(ErrorCode::Clock);
+        }
+        let candidate = self
+            .current_policy(origin)?
+            .with_current(completed, |current| {
+                prepared.prepare_recovery(
+                    &checkpoint,
+                    current,
+                    stamps.as_ref(),
+                    binding.member(),
+                    completed,
+                )
+            })
+            .map_err(|_| ErrorCode::Unavailable)?
+            .map_err(|_| ErrorCode::Unauthorized)?;
+        // Original recovery performs forced lineage reads and fresh HTTPS checks
+        // before lending Store custody. A device-key member (the stamp trust is held)
+        // enrolled its community Store through the account path: account custody only.
+        match stamps {
+            Some(stamps) => {
+                member
+                    .with_stamps(stamps)
+                    .prepare_recovery(&candidate, network.clone())
+                    .await?
+                    .open_account_only(network, backend)
+                    .await
+            }
+            None => {
+                member
+                    .prepare_recovery(&candidate, network.clone())
+                    .await?
+                    .open(network, backend)
+                    .await
+            }
+        }
     }
 }

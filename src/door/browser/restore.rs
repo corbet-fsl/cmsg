@@ -87,7 +87,7 @@ impl<W: TorWatcher + 'static> Composer<W> {
         now: u64,
     ) -> Result<()> {
         let config = self.configuration.take().ok_or(ErrorCode::Refused)?;
-        let (prepared, binding) = door.prepare_login_recovery(origin, token, now).await?;
+        let (prepared, binding, stamps) = door.prepare_login_recovery(origin, token, now).await?;
         let (client, owner) = door
             .prepare_browser_transport(
                 origin,
@@ -135,10 +135,20 @@ impl<W: TorWatcher + 'static> Composer<W> {
         let candidate = door
             .current_policy(origin)?
             .with_current(completed, |current| {
-                prepared.prepare_recovery(&checkpoint, current, None, binding.member(), completed)
+                prepared.prepare_recovery(
+                    &checkpoint,
+                    current,
+                    stamps.as_ref(),
+                    binding.member(),
+                    completed,
+                )
             })
             .map_err(|_| ErrorCode::Unavailable)?
             .map_err(|_| ErrorCode::Unauthorized)?;
+        let member = match stamps {
+            Some(stamps) => member.with_stamps(stamps),
+            None => member,
+        };
         let owners = member.prepare_recovery(&candidate, network.clone()).await?;
         let peers = network.clone();
         let restored = owners.open(network, backend).await?;

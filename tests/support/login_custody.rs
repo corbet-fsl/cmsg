@@ -294,7 +294,9 @@ async fn actual_login_custody_is_consumed_once_with_local_and_original_session_r
                 else {
                     panic!()
                 };
-                *custody = Some(VaultOutcome::Locked(cpky::Error::PrfUnavailable));
+                *custody = Some(Custody::Passkey(VaultOutcome::Locked(
+                    cpky::Error::PrfUnavailable,
+                )));
                 assert!(matches!(
                     door.prepare_login_custody(MEMBER, &token, now),
                     Err(ErrorCode::Unavailable)

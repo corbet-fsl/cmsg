@@ -1,9 +1,8 @@
 //! One already-enrolled restoration on the native owner's existing LocalSet.
 use super::{mesh, network};
 use crate::door::{
-    custody, login, ClientToken, Door, ErrorCode, Event, Output, Result, VaultComposer,
+    login, ClientToken, Door, ErrorCode, Event, Output, Result, VaultComposer,
 };
-use ckmg::Clock;
 use cmsh::tor_discovery::TorWatcher;
 use cwst::backend::Backend;
 use futures_util::{future::LocalBoxFuture, FutureExt};
@@ -70,7 +69,7 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
         now: u64,
     ) -> Result<()> {
         let config = self.configuration.take().ok_or(ErrorCode::Refused)?;
-        let (prepared, binding) = door.prepare_login_recovery(origin, token, now).await?;
+        let (prepared, binding, stamps) = door.prepare_login_recovery(origin, token, now).await?;
         let (client, owner) =
             door.prepare_native_transport(origin, &prepared, binding.clone(), config.window)?;
         let (drain, startup) =
@@ -81,32 +80,20 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
         let retained = self.network.as_ref().ok_or(ErrorCode::Unavailable)?;
         let member = retained.take_member_authority()?;
         let network = retained.records()?.network();
-        let checkpoint = {
-            let mut record = prepared
-                .tor_records(network.clone())
-                .await
-                .map_err(|_| ErrorCode::Unavailable)?;
-            record
-                .checkpoint(&prepared.locator())
-                .await
-                .map_err(|_| ErrorCode::Unavailable)?
-        }; // Release the borrowed record before consuming PreparedOpen.
-        let completed = custody::SystemClock.now().map_err(|_| ErrorCode::Clock)?;
-        if completed < now {
-            return Err(ErrorCode::Clock);
-        }
-        let candidate = door
-            .current_policy(origin)?
-            .with_current(completed, |current| {
-                prepared.prepare_recovery(&checkpoint, current, None, binding.member(), completed)
-            })
-            .map_err(|_| ErrorCode::Unavailable)?
-            .map_err(|_| ErrorCode::Unauthorized)?;
-        // Original recovery performs forced lineage reads and fresh HTTPS checks
-        // before lending Store custody. Missing records never create new state.
-        let owners = member.prepare_recovery(&candidate, network.clone()).await?;
         let peers = network.clone();
-        let restored = owners.open(network, config.backend).await?;
+        // A device-key login's stamp trust verifies its stamp checkpoint and lineage.
+        let restored = door
+            .recover_login_vault(
+                origin,
+                prepared,
+                &binding,
+                stamps,
+                member,
+                network,
+                config.backend,
+                now,
+            )
+            .await?;
         let mut owner = door
             .bind_vault_with_board_owner(origin, restored.vault, restored.intent, restored.lifetime)
             .await?;

@@ -27,11 +27,34 @@ pub(crate) enum State {
         session: cfyr::SessionInfo,
         binding: cfyr::session::SessionBinding<foyer::Transport>,
         scope: foyer::Scope,
-        custody: Option<VaultOutcome>,
+        custody: Option<Custody>,
     },
     Cancelled,
     Expired,
     Refused(ErrorCode),
+}
+
+/// What a completed login holds for the Vault preparation, consumed once.
+pub(crate) enum Custody {
+    /// The member's community passkey ceremony's PRF outcome.
+    Passkey(VaultOutcome),
+    /// A device-key member (no community passkey): the community opening derived from
+    /// this start's wallet unlock, and the wallet's stamp trust its stamp lineage
+    /// evidence verifies with.
+    Opening {
+        opening: cvlt::PreparedOpen,
+        stamps: cvlt::StampTrust,
+    },
+}
+
+/// A device-key member's login of this start, retained by the trusted composer per origin
+/// (`Door::retain_device_login`). The first `login.start` opens the Door's community session
+/// by the device key's session signature and moves the opening into that login; it is never
+/// a wire value, and no ceremony runs for it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct DeviceLogin {
+    user: String,
+    retained: Option<(cvlt::PreparedOpen, cvlt::StampTrust)>,
 }
 
 pub(super) fn passkey_error(error: cfyr::passkeys::Error) -> ErrorCode {
@@ -174,7 +197,7 @@ pub(super) fn poll(door: &mut Door, key: &[u8; 32]) -> Result<Status> {
                                     session,
                                     binding: stamp,
                                     scope,
-                                    custody: Some(custody),
+                                    custody: Some(Custody::Passkey(custody)),
                                 },
                                 Ok(Status::AuthenticatedPendingCustody),
                             ),
@@ -271,6 +294,19 @@ impl Door {
         token: &ClientToken,
         now: u64,
     ) -> Result<cvlt::PreparedOpen> {
+        self.take_login_custody(origin, token, now)
+            .map(|(opening, _)| opening)
+    }
+
+    /// [`Self::prepare_login_custody`] plus the wallet's stamp trust a device-key login
+    /// retained with its opening (`None` after a passkey ceremony): the recovery verifies
+    /// the member's stamp lineage evidence with it.
+    pub(crate) fn take_login_custody(
+        &mut self,
+        origin: &str,
+        token: &ClientToken,
+        now: u64,
+    ) -> Result<(cvlt::PreparedOpen, Option<cvlt::StampTrust>)> {
         self.observe(now)?;
         let key = token_hash(token.expose_for_transport());
         let grant = self.grants.get(&key).ok_or(ErrorCode::Unauthorized)?;
@@ -314,11 +350,136 @@ impl Door {
         // A later poll remains authenticated_pending_custody; a retry can never
         // recover a consumed capability or silently start another ceremony.
         match custody.take().ok_or(ErrorCode::Refused)? {
-            VaultOutcome::Ready(unlock) => cvlt::PreparedOpen::new(unlock, &self.config.community)
-                .map_err(|_| ErrorCode::Refused),
-            VaultOutcome::Locked(_) => Err(ErrorCode::Unavailable),
+            Custody::Passkey(VaultOutcome::Ready(unlock)) => {
+                cvlt::PreparedOpen::new(unlock, &self.config.community)
+                    .map(|opening| (opening, None))
+                    .map_err(|_| ErrorCode::Refused)
+            }
+            Custody::Passkey(VaultOutcome::Locked(_)) => Err(ErrorCode::Unavailable),
+            Custody::Opening { opening, stamps } => Ok((opening, Some(stamps))),
         }
     }
+
+    /// Trusted composition only: retain a device-key member's login for `origin` until the
+    /// first `login.start` of this start takes it (see [`DeviceLogin`]). `user` is the member
+    /// id the device key belongs to; `opening` the community opening derived from the wallet
+    /// unlock; `stamps` the wallet's stamp trust. Replaces an earlier, untaken retention.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn retain_device_login(
+        &mut self,
+        origin: &str,
+        user: String,
+        opening: cvlt::PreparedOpen,
+        stamps: cvlt::StampTrust,
+    ) -> Result<()> {
+        let binding = self.foyers.get(origin).ok_or(ErrorCode::Unavailable)?;
+        if binding.role != Role::Member || binding.sessions.primary != self.custody_scope() {
+            return Err(ErrorCode::Unauthorized);
+        }
+        opening.device().map_err(|_| ErrorCode::Unauthorized)?;
+        self.device_logins.insert(
+            origin.to_owned(),
+            DeviceLogin {
+                user,
+                retained: Some((opening, stamps)),
+            },
+        );
+        Ok(())
+    }
+}
+
+/// `login.start` of a device-key origin: `None` when `origin` retains no device login (the
+/// passkey ceremony applies). Otherwise the Door's community session opens by the device
+/// key's session signature from the retained opening and the login is authenticated at once,
+/// holding the opening for `prepare_login_custody`. A failed opening keeps the retention, so
+/// a repeated start retries silently; a taken one refuses (a new app start signs in again).
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) async fn start_device(
+    door: &mut Door,
+    key: &[u8; 32],
+    origin: &str,
+) -> Option<Result<Status>> {
+    let login = door.device_logins.get_mut(origin)?;
+    let user = login.user.clone();
+    let Some((opening, stamps)) = login.retained.take() else {
+        return Some(Err(ErrorCode::Refused));
+    };
+    let (result, opening) = open_device(door, origin, &user, opening).await;
+    Some(match result {
+        Ok((session, binding, scope)) => {
+            door.logins.insert(
+                *key,
+                State::Authenticated {
+                    session,
+                    binding,
+                    scope,
+                    custody: Some(Custody::Opening { opening, stamps }),
+                },
+            );
+            Ok(Status::AuthenticatedPendingCustody)
+        }
+        Err(error) => {
+            if let Some(login) = door.device_logins.get_mut(origin) {
+                login.retained = Some((opening, stamps));
+            }
+            Err(error)
+        }
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type Opened = (
+    cfyr::SessionInfo,
+    cfyr::session::SessionBinding<foyer::Transport>,
+    foyer::Scope,
+);
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn open_device(
+    door: &mut Door,
+    origin: &str,
+    user: &str,
+    opening: cvlt::PreparedOpen,
+) -> (Result<Opened>, cvlt::PreparedOpen) {
+    let expected = door.custody_scope();
+    let name = door.config.community.clone();
+    let Some(binding) = door.foyers.get_mut(origin) else {
+        return (Err(ErrorCode::Unavailable), opening);
+    };
+    if binding.role != Role::Member || binding.sessions.primary != expected {
+        return (Err(ErrorCode::Unauthorized), opening);
+    }
+    if binding.uncertain {
+        return (Err(ErrorCode::Reconcile), opening);
+    }
+    let Ok(device) = opening.device() else {
+        return (Err(ErrorCode::Unauthorized), opening);
+    };
+    let scope = binding.sessions.primary;
+    let Some(client) = binding.sessions.clients.get_mut(&scope) else {
+        return (Err(ErrorCode::Unavailable), opening);
+    };
+    // Fence other forwarded actions across the session's awaited round trips.
+    binding.uncertain = true;
+    let mut sign = |purpose: ckmg::DevicePurpose, payload: Vec<u8>| {
+        std::future::ready(match purpose {
+            ckmg::DevicePurpose::DeviceSession => opening
+                .sign_device_session(&payload)
+                .map(|signature| signature.to_vec())
+                .map_err(|_| ErrorCode::Unauthorized),
+            _ => Err(ErrorCode::Unauthorized),
+        })
+    };
+    let opened =
+        super::super::device_join::open_session(client, &name, user, &device, &mut sign).await;
+    let result = opened.and_then(|session| {
+        client
+            .session_binding()
+            .map(|stamp| (session, stamp, scope))
+            .map_err(foyer::map_error)
+    });
+    binding.uncertain = false;
+    (result, opening)
 }
 
 impl Door {

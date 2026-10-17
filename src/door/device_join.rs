@@ -110,14 +110,15 @@ pub async fn derived_salt(
 
 /// Open the community session of a device-key member before its creation is activated: the
 /// device signs the server's one-use nonce (purpose `DeviceSession`). After activation the
-/// Vault's Keys sign instead (`Door::open_device_session`).
+/// Vault's Keys sign instead (`Door::open_device_session`), or the community opening's
+/// session signature. Returns the opened session.
 pub async fn open_session(
     community: &mut Foyer<Transport>,
     name: &str,
     user: &str,
     device: &ckmg::PublicKey,
     sign: &mut impl DeviceSign,
-) -> Result<u64> {
+) -> Result<cfyr::SessionInfo> {
     let challenge = community
         .begin_device_session()
         .await
@@ -128,11 +129,10 @@ pub async fn open_session(
             payload(ckmg::DevicePurpose::DeviceSession, challenge.message(name))?,
         )
         .await?;
-    Ok(community
+    community
         .finish_device_session(challenge.nonce, user, *device.value(), signature)
         .await
-        .map_err(|_| ErrorCode::Unauthorized)?
-        .expires)
+        .map_err(|_| ErrorCode::Unauthorized)
 }
 
 /// Join `name` through `community` (a session-less Foyer of that community) and return the
