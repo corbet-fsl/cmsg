@@ -66,6 +66,7 @@ fn verify_read(
     charter: &cchr::VerifiedCharter,
     observed: &cfyr::membership::Observation,
     credential: &[u8],
+    stamps: Option<&cvlt::StampTrust>,
     now: u64,
 ) -> Result<u64, Error> {
     lifetime.check(request)?;
@@ -83,7 +84,7 @@ fn verify_read(
     let mut selected: Option<cvlt::VerifiedLineageObservation<'_>> = None;
     for evidence in read.evidence() {
         let candidate = evidence
-            .verify(charter, lifetime.binding.member(), now)
+            .verify_for(charter, stamps, lifetime.binding.member(), now)
             .map_err(|_| Error::Unauthorized)?;
         let wins = match &selected {
             None => true,
@@ -186,6 +187,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         let lifetime = &self.live.lifetime;
         let expected_origin = &self.live.origin;
         let clock = &mut self.live.clock;
+        let stamps = self.stamps.as_ref();
         let checked = lease.with_community_policy(
             &mut self.policy,
             || match clock.now() {
@@ -203,7 +205,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
                     return Err(Error::Unauthorized);
                 }
                 verify_read(
-                    &read, lifetime, &request, charter, observed, credential, now,
+                    &read, lifetime, &request, charter, observed, credential, stamps, now,
                 )
             },
         );
@@ -305,6 +307,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         let lifetime = &self.live.lifetime;
         let origin = &self.live.origin;
         let clock = &mut self.live.clock;
+        let stamps = self.stamps.as_ref();
         let checked = pending.lease.with_community_policy(
             &mut self.policy,
             || match clock.now() {
@@ -328,6 +331,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
                     charter,
                     observed,
                     credential,
+                    stamps,
                     now,
                 )
             },

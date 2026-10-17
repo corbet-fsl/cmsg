@@ -214,6 +214,9 @@ pub struct MemberAuthority<C, B: cdht::runtime::Backend> {
     live: TransportAuthority<C>,
     policy: cfyr::policy::CurrentPolicy<Transport>,
     records: cvlt::LineageRecords<B>,
+    /// The wallet's stamp trust: a device-key member's lineage (genesis evidence by stamp)
+    /// verifies only with it; None keeps the passkey-only verification.
+    stamps: Option<cvlt::StampTrust>,
     intent: Option<ckmg::IntentVerifier>,
     /// The account actor's own one-use channels; never shared with `intent`.
     account: Option<AccountVerifiers>,
@@ -257,8 +260,16 @@ pub struct MemberAuthorityBuilder {
     origin: String,
     policy: cfyr::policy::CurrentPolicy<Transport>,
     last_time: u64,
+    stamps: Option<cvlt::StampTrust>,
 }
 impl MemberAuthorityBuilder {
+    /// Verify stamp (device-key genesis) evidence with the wallet's authenticated stamp
+    /// trust, judged at the receipt's signed time; passkey evidence verifies as before.
+    #[must_use]
+    pub fn with_stamps(mut self, stamps: cvlt::StampTrust) -> Self {
+        self.stamps = Some(stamps);
+        self
+    }
     /// Attach genuine root-owned Records after network construction.
     pub fn bind<C: Clock, B: cdht::runtime::Backend>(
         self,
@@ -278,6 +289,7 @@ impl MemberAuthorityBuilder {
             },
             policy: self.policy,
             records,
+            stamps: self.stamps,
             intent: None,
             account: None,
             pending_current: None,
@@ -430,6 +442,7 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
         let (now, membership_expires) = self.live.observe(&request).await?;
         let lifetime = &self.live.lifetime;
         let clock = &mut self.live.clock;
+        let stamps = self.stamps.as_ref();
         let completed = self
             .policy
             .with_current(now, |current| {
@@ -441,7 +454,7 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
                     // Invalid observed material refuses the observation; never roll
                     // back to an older accepting head after a failed verification.
                     let candidate = evidence
-                        .verify(current, lifetime.binding.member(), now)
+                        .verify_for(current, stamps, lifetime.binding.member(), now)
                         .map_err(|_| Error::Unauthorized)?;
                     let wins = match &selected {
                         None => true,
@@ -561,6 +574,7 @@ impl Door {
             origin: origin.into(),
             policy: self.custody_current_policy(origin)?,
             last_time: transport.last_time,
+            stamps: None,
         })
     }
 

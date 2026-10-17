@@ -6,6 +6,7 @@ use super::*;
 pub struct RecoveryAuthority<'attempt, C> {
     live: TransportAuthority<C>,
     policy: &'attempt mut cfyr::policy::CurrentPolicy<Transport>,
+    stamps: Option<&'attempt cvlt::StampTrust>,
 }
 
 /// Original recovery and normal member owners. No accepting result is cached:
@@ -143,6 +144,7 @@ impl MemberAuthorityBuilder {
             live,
             policy,
             records,
+            stamps,
             intent,
             account: _,
             pending_current,
@@ -160,6 +162,7 @@ impl MemberAuthorityBuilder {
             origin: live.origin,
             policy,
             last_time: live.last_time,
+            stamps,
         };
         let reader = recovery
             .lineage_reader()
@@ -203,6 +206,7 @@ impl MemberAuthorityBuilder {
                 last_time: self.last_time,
             },
             policy: &mut self.policy,
+            stamps: self.stamps.as_ref(),
         })
     }
 }
@@ -230,6 +234,7 @@ impl<C: Clock> ckmg::Authority for RecoveryAuthority<'_, C> {
         let (now, membership_expires) = self.live.observe(&request).await?;
         let lifetime = &self.live.lifetime;
         let clock = &mut self.live.clock;
+        let stamps = self.stamps;
         let completed = self
             .policy
             .with_current(now, |current| {
@@ -239,7 +244,7 @@ impl<C: Clock> ckmg::Authority for RecoveryAuthority<'_, C> {
                 // This certificate/assertion authenticates the retained checkpoint;
                 // it says nothing about the current lineage in the DHT.
                 let observed = evidence
-                    .verify(current, lifetime.binding.member(), now)
+                    .verify_for(current, stamps, lifetime.binding.member(), now)
                     .map_err(|_| Error::Unauthorized)?;
                 let completed = clock.now()?;
                 if completed < now {
