@@ -135,7 +135,7 @@ impl<W: TorWatcher + 'static> Composer<W> {
         let candidate = door
             .current_policy(origin)?
             .with_current(completed, |current| {
-                prepared.prepare_recovery(&checkpoint, current, binding.member(), completed)
+                prepared.prepare_recovery(&checkpoint, current, None, binding.member(), completed)
             })
             .map_err(|_| ErrorCode::Unavailable)?
             .map_err(|_| ErrorCode::Unauthorized)?;

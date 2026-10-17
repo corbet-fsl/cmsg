@@ -379,7 +379,7 @@ async fn ordinary_open(
         .current_policy(origin)
         .unwrap()
         .with_current(completed, |current| {
-            opening.prepare_recovery(&checkpoint, current, member, completed)
+            opening.prepare_recovery(&checkpoint, current, None, member, completed)
         })
         .unwrap()
         .unwrap();

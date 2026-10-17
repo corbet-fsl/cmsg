@@ -220,7 +220,7 @@ async fn cancelled_final_store_read_discards_the_genuine_ordinary_member_lease()
             .current_policy(origin)
             .unwrap()
             .with_current(now(), |current| {
-                opening.prepare_recovery(&checkpoint, current, &member, now())
+                opening.prepare_recovery(&checkpoint, current, None, &member, now())
             })
             .unwrap()
             .unwrap();
