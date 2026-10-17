@@ -56,6 +56,26 @@ pub async fn prepare_initial_recovery<'a, 'p, N: cdht::Network + Clone>(
     initial: cfyr::membership::InitialCreationLease<'p, Transport>,
     network: N,
 ) -> super::super::Result<InitialRecoveryOwners<'a, 'p, N>> {
+    prepare_recovery(candidate, initial, network, None).await
+}
+
+/// [`prepare_initial_recovery`] of a device-key member: `initial` is its device lease and
+/// every check reauthorizes its stamp genesis with the wallet's stamp trust.
+pub async fn prepare_device_initial_recovery<'a, 'p, N: cdht::Network + Clone>(
+    candidate: &'a cvlt::RecoveryCandidate,
+    initial: cfyr::membership::InitialCreationLease<'p, Transport>,
+    network: N,
+    stamps: &cvlt::StampTrust,
+) -> super::super::Result<InitialRecoveryOwners<'a, 'p, N>> {
+    prepare_recovery(candidate, initial, network, Some(stamps.clone())).await
+}
+
+async fn prepare_recovery<'a, 'p, N: cdht::Network + Clone>(
+    candidate: &'a cvlt::RecoveryCandidate,
+    initial: cfyr::membership::InitialCreationLease<'p, Transport>,
+    network: N,
+    stamps: Option<cvlt::StampTrust>,
+) -> super::super::Result<InitialRecoveryOwners<'a, 'p, N>> {
     let acknowledged = candidate
         .acknowledged_initial()
         .map_err(|_| ErrorCode::Unauthorized)?;
@@ -70,6 +90,7 @@ pub async fn prepare_initial_recovery<'a, 'p, N: cdht::Network + Clone>(
         request_intent: None,
         delegation_spent: false,
         account_signing: None,
+        stamps,
     };
     let reader = candidate
         .read_lineage(&mut SystemClock, &mut authority)

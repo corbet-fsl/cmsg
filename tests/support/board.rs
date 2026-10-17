@@ -20,6 +20,8 @@ fn configured() -> (Door, ClientToken) {
             search_candidates: 32,
             search_publication_bytes: MAX_BODY_BYTES,
             tls_root_files: vec![],
+            // The member's web origin, distinct from the door's (a native device's Board).
+            member_origin: Some("https://example.test".into()),
             read_policy: ReadPolicy {
                 admission_action: "fixture".into(),
                 maximum_snapshot_age: 60,

@@ -213,6 +213,128 @@ pub async fn prepare_initial_publication<
     Ok((creation, initial))
 }
 
+/// The device-key twin of [`prepare_initial_publication`]: the genesis evidence is the
+/// presentation of the `lineage_genesis` slot of the join's stamp (no passkey prompt), and
+/// the bind carries it so the server checks it before its CAS. `initial` must be the device
+/// lease whose key attested the receipt; `stamps` is the wallet's trust
+/// (`GlobalWalletLease::stamp_trust`); `salt` the genesis slot's derived salt.
+#[allow(clippy::too_many_arguments)]
+pub async fn prepare_device_initial_publication<'p, B, WB, WC, WE, WA, WR>(
+    creation: cvlt::InitialCreation<B>,
+    mut initial: cfyr::membership::InitialCreationLease<'p, Transport>,
+    wallet: &mut super::super::passport::GlobalPassport<WB, WC, WE, WA, WR>,
+    stamps: &cvlt::StampTrust,
+    salt: [u8; 32],
+    clock: &mut impl Clock,
+    entropy: &mut impl ckmg::Entropy,
+) -> Result<
+    (
+        cvlt::InitialCreation<B>,
+        cfyr::membership::InitialCreationLease<'p, Transport>,
+    ),
+    InitialPublicationError,
+>
+where
+    B: cwst::backend::Backend,
+    WB: cwst::backend::Backend,
+    WC: Clock,
+    WE: ckmg::Entropy,
+    WA: ckmg::Authority,
+    WR: cvlt::Records,
+{
+    let mut clock = SharedClock::new(clock);
+    if creation.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+        return Err(refused().into());
+    }
+    let (_, author) = creation
+        .receipt()
+        .attested_lineage()
+        .map_err(cvlt::InitialError::Keys)?;
+    // Only the device lease of the key that attested the receipt.
+    if initial.credential_id().map_err(|_| refused())? != author.value() {
+        return Err(refused().into());
+    }
+    let member = initial.observation().map_err(|_| refused())?.member.clone();
+    let at = creation.genesis_at()?;
+    let action = cvlt::lineage_genesis_action(creation.receipt(), salt, at)
+        .map_err(|_| refused())?;
+    let mut failed = false;
+    let scope = initial
+        .with_current(
+            || {
+                clock.now().unwrap_or_else(|_| {
+                    failed = true;
+                    u64::MAX
+                })
+            },
+            |current| cvlt::lineage_stamp_scope(current).map_err(|_| refused()),
+        )
+        .map_err(|_| refused())??;
+    if failed {
+        return Err(cvlt::InitialError::Keys(Error::Clock).into());
+    }
+    let now = clock.now().map_err(cvlt::InitialError::Keys)?;
+    let presentation = wallet
+        .with_global_passport(|holder| {
+            holder.present_stamp(&mut cwlt::passport::rand::rngs::OsRng, &scope, &action, now)
+        })
+        .await
+        .map_err(|_| refused())?
+        .map_err(|_| refused())?;
+    let now = clock.now().map_err(cvlt::InitialError::Keys)?;
+    let evidence = initial
+        .with_current(
+            || {
+                clock.now().unwrap_or_else(|_| {
+                    failed = true;
+                    u64::MAX
+                })
+            },
+            |current| {
+                if current.revocations().device_revoked(author.value()) {
+                    return Err(refused());
+                }
+                cvlt::LineageEvidence::prepare_stamp(
+                    current,
+                    stamps,
+                    creation.receipt(),
+                    &presentation,
+                    salt,
+                    at,
+                    &member,
+                    now,
+                )
+                .map_err(|_| refused())
+            },
+        )
+        .map_err(|_| refused())??;
+    if failed {
+        return Err(cvlt::InitialError::Keys(Error::Clock).into());
+    }
+    // The bind carries exactly the published genesis evidence bytes.
+    let bound = cvlt::GenesisStampEvidence::new(creation.receipt().clone(), &presentation, salt, at)
+        .to_bytes()
+        .map_err(|_| refused())?;
+    let expires = initial.expires().map_err(|_| refused())?;
+    let creation = creation
+        .prepare(&evidence, expires, &mut clock, entropy)
+        .await?;
+    let publication = creation.publication_commitment()?;
+    let initial = initial
+        .bind_publication_with_evidence(publication, &bound, || {
+            clock.now().unwrap_or_else(|_| {
+                failed = true;
+                u64::MAX
+            })
+        })
+        .await
+        .map_err(InitialPublicationError::Foyer)?;
+    if failed {
+        return Err(InitialPublicationError::Foyer(cfyr::Error::Reconcile));
+    }
+    Ok((creation, initial))
+}
+
 struct Completion<'p, C> {
     initial: cfyr::membership::InitialCreationLease<'p, Transport>,
     clock: C,
@@ -221,7 +343,40 @@ struct Completion<'p, C> {
     location: ckmg::Locator,
     sealed_digest: [u8; 32],
     publication: [u8; 32],
+    /// The wallet's stamp trust on the device-key path (genesis evidence by stamp); None on
+    /// the passkey path, where stamp evidence refuses.
+    stamps: Option<cvlt::StampTrust>,
     closed: bool,
+}
+
+/// Verify `evidence` for `member` under `current`: stamp evidence only with the wallet's stamp
+/// trust. The authority reference it proves is the passkey credential, or for stamp evidence
+/// the device key that attested the receipt (the device lease's credential).
+fn verified_reference<'a>(
+    evidence: &'a cvlt::LineageEvidence,
+    stamps: Option<&cvlt::StampTrust>,
+    current: &'a cchr::VerifiedCharter,
+    member: &str,
+    now: u64,
+) -> Result<(cvlt::VerifiedLineageObservation<'a>, Vec<u8>), Error> {
+    let observed = match stamps {
+        Some(stamps) => evidence.verify_with_stamps(current, stamps, member, now),
+        None => evidence.verify(current, member, now),
+    }
+    .map_err(|_| Error::Unauthorized)?;
+    let reference = if evidence.is_stamp() {
+        observed
+            .author(now)
+            .map_err(|_| Error::Unauthorized)?
+            .value()
+            .to_vec()
+    } else {
+        observed
+            .credential_id(now)
+            .map_err(|_| Error::Unauthorized)?
+            .to_vec()
+    };
+    Ok((observed, reference))
 }
 fn same_intent(a: &ckmg::CompletionIntent, b: &ckmg::CompletionIntent) -> bool {
     a.outer_generation == b.outer_generation
@@ -295,15 +450,16 @@ impl<C: Clock> Completion<'_, C> {
                     if current.revocations().device_revoked(author.value()) {
                         return Err(Error::Revoked);
                     }
-                    let observed = evidence
-                        .verify(current, lineage.binding.member(), now)
-                        .map_err(|_| Error::Unauthorized)?;
+                    let (observed, reference) = verified_reference(
+                        &evidence,
+                        self.stamps.as_ref(),
+                        current,
+                        lineage.binding.member(),
+                        now,
+                    )?;
                     if observed.lineage(now).map_err(|_| Error::Unauthorized)? != lineage
                         || observed.author(now).map_err(|_| Error::Unauthorized)? != author
-                        || observed
-                            .credential_id(now)
-                            .map_err(|_| Error::Unauthorized)?
-                            != request.authority_reference
+                        || reference != request.authority_reference
                     {
                         return Err(Error::Unauthorized);
                     }
@@ -348,6 +504,26 @@ pub async fn retain_initial_publication<B: cwst::backend::Backend>(
     initial: cfyr::membership::InitialCreationLease<'_, Transport>,
     clock: &mut impl Clock,
 ) -> Result<cvlt::InitialCreation<B>, cvlt::InitialError> {
+    retain_publication(creation, initial, None, clock).await
+}
+
+/// [`retain_initial_publication`] of a device-key member: its genesis evidence by stamp is
+/// verified with the wallet's stamp trust, and the device key is its authority reference.
+pub async fn retain_device_initial_publication<B: cwst::backend::Backend>(
+    creation: cvlt::InitialCreation<B>,
+    initial: cfyr::membership::InitialCreationLease<'_, Transport>,
+    stamps: &cvlt::StampTrust,
+    clock: &mut impl Clock,
+) -> Result<cvlt::InitialCreation<B>, cvlt::InitialError> {
+    retain_publication(creation, initial, Some(stamps.clone()), clock).await
+}
+
+async fn retain_publication<B: cwst::backend::Backend>(
+    creation: cvlt::InitialCreation<B>,
+    initial: cfyr::membership::InitialCreationLease<'_, Transport>,
+    stamps: Option<cvlt::StampTrust>,
+    clock: &mut impl Clock,
+) -> Result<cvlt::InitialCreation<B>, cvlt::InitialError> {
     if creation.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
         return Err(refused());
     }
@@ -365,6 +541,7 @@ pub async fn retain_initial_publication<B: cwst::backend::Backend>(
         location,
         sealed_digest,
         publication,
+        stamps,
         closed: false,
     };
     creation.retain(&mut clock, &mut authority).await
@@ -464,12 +641,16 @@ impl<C: Clock, R: cdht::runtime::Backend> ckmg::Authority for AcknowledgmentAuth
                     if evidence.to_bytes().map_err(|_| Error::Unauthorized)? != original {
                         return Err(Error::Unauthorized);
                     }
-                    let actual = evidence
-                        .verify(current, lineage.binding.member(), now)
-                        .map_err(|_| Error::Unauthorized)?;
+                    let (actual, reference) = verified_reference(
+                        evidence,
+                        self.completion.stamps.as_ref(),
+                        current,
+                        lineage.binding.member(),
+                        now,
+                    )?;
                     if actual.lineage(now).map_err(|_| Error::Unauthorized)? != lineage
                         || actual.author(now).map_err(|_| Error::Unauthorized)? != author
-                        || actual.credential_id(now).map_err(|_| Error::Unauthorized)? != credential
+                        || reference != credential
                     {
                         return Err(Error::Unauthorized);
                     }
@@ -515,8 +696,35 @@ impl<C: Clock, R: cdht::runtime::Backend> ckmg::Authority for AcknowledgmentAuth
 /// before moving `initial`, so transport never re-locks its held Foyer session.
 pub async fn acknowledge_initial_publication<B: cwst::backend::Backend, N: cdht::Network>(
     read: cvlt::InitialLineageRead<B>,
+    initial: cfyr::membership::InitialCreationLease<'_, Transport>,
+    network: N,
+    clock: &mut impl Clock,
+    entropy: &mut impl ckmg::Entropy,
+) -> Result<cvlt::InitialCreation<B>, cvlt::InitialError> {
+    acknowledge_publication(read, initial, network, None, clock, entropy).await
+}
+
+/// [`acknowledge_initial_publication`] of a device-key member: the published genesis
+/// evidence by stamp is verified with the wallet's stamp trust.
+pub async fn acknowledge_device_initial_publication<
+    B: cwst::backend::Backend,
+    N: cdht::Network,
+>(
+    read: cvlt::InitialLineageRead<B>,
+    initial: cfyr::membership::InitialCreationLease<'_, Transport>,
+    network: N,
+    stamps: &cvlt::StampTrust,
+    clock: &mut impl Clock,
+    entropy: &mut impl ckmg::Entropy,
+) -> Result<cvlt::InitialCreation<B>, cvlt::InitialError> {
+    acknowledge_publication(read, initial, network, Some(stamps.clone()), clock, entropy).await
+}
+
+async fn acknowledge_publication<B: cwst::backend::Backend, N: cdht::Network>(
+    read: cvlt::InitialLineageRead<B>,
     mut initial: cfyr::membership::InitialCreationLease<'_, Transport>,
     network: N,
+    stamps: Option<cvlt::StampTrust>,
     clock: &mut impl Clock,
     entropy: &mut impl ckmg::Entropy,
 ) -> Result<cvlt::InitialCreation<B>, cvlt::InitialError> {
@@ -550,6 +758,7 @@ pub async fn acknowledge_initial_publication<B: cwst::backend::Backend, N: cdht:
         location,
         sealed_digest,
         publication,
+        stamps,
         closed: false,
     };
     let acknowledgment = read

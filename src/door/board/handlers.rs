@@ -79,6 +79,17 @@ pub trait CommittedOwner {
         expires: u64,
     ) -> OwnerFuture<'a, SignedAttendance>;
 
+    /// The Forum Enter `record_proof`: the member's cached record of the current
+    /// `epoch` bound to the challenge's record context (JSON presentation). Nothing
+    /// is proven on this path; owners without record custody refuse.
+    fn present_record<'a>(
+        &'a mut self,
+        _challenge: &'a clnk::Challenge,
+        _epoch: &'a czkp::record::Epoch,
+    ) -> OwnerFuture<'a, Vec<u8>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
     /// Group membership writes: the owner's encrypted checkpoint, device
     /// signer for consents, current Guard/Contacts authority and the atomic
     /// Threads publication. Owners without this integration refuse writes.
@@ -312,6 +323,29 @@ pub(super) fn with_context<B: cwst::backend::Backend, T>(
     result
 }
 
+/// The record epoch the community's current signed balance publication names.
+fn current_record_epoch(
+    current: &mut cfyr::policy::CurrentPolicy<foyer::Transport>,
+    community: &str,
+    expires: u64,
+) -> Result<czkp::record::Epoch> {
+    let started = now(expires)?;
+    current
+        .with_current(started, |charter| {
+            if charter.community() != community {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let balance = charter.balance().ok_or(ErrorCode::Unavailable)?;
+            let material: cblc::publication::PublicVerifierMaterial =
+                serde_json::from_slice(balance.payload()).map_err(|_| ErrorCode::Unauthorized)?;
+            material
+                .validate_at(community, started)
+                .map_err(|_| ErrorCode::Unauthorized)?;
+            material.record_epoch.ok_or(ErrorCode::Unavailable)
+        })
+        .map_err(|_| ErrorCode::Unavailable)?
+}
+
 fn publication<B: cwst::backend::Backend>(
     context: &cbrd::ReadContext<'_, B>,
     now: u64,
@@ -531,6 +565,22 @@ async fn attendance<T: clnk::Transport, R, O: CommittedOwner>(
             return Err(error);
         }
     }
+    // A Forum without accounting sends no record context and takes no proof.
+    let record_proof = if challenge.record_context().is_empty() {
+        Vec::new()
+    } else {
+        let proof = match current_record_epoch(current, &community, expires) {
+            Ok(epoch) => owner.present_record(&challenge, &epoch).await,
+            Err(error) => Err(error),
+        };
+        match proof {
+            Ok(proof) => proof,
+            Err(error) => {
+                *pending = false;
+                return Err(error);
+            }
+        }
+    };
     let SignedAttendance {
         signature,
         admitted: _admitted,
@@ -538,7 +588,7 @@ async fn attendance<T: clnk::Transport, R, O: CommittedOwner>(
     // Preserve uncertainty on every failed/cancelled Enter. Never retry a
     // possibly accepted entry after losing its original response.
     board
-        .enter(signature)
+        .enter(signature, record_proof)
         .await
         .map_err(|_| ErrorCode::Reconcile)?;
     // An accepted network response alone does not permit reporting presence.

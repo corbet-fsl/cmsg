@@ -59,6 +59,12 @@ pub struct Configuration {
     /// production leaves it empty and no code path differs.
     #[serde(default)]
     pub tls_root_files: Vec<std::path::PathBuf>,
+    /// The web origin this member presents to the Forum (`https://<address>.<base>`, one of
+    /// the origins the Forum's registry lists for the community). A native device has no page
+    /// origin of its own and its door origin is the community's API host, which the Forum does
+    /// not admit. Absent: the door's origin, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_origin: Option<String>,
     /// Relay and gateway keys for the forum calls.
     #[cfg(feature = "ohttp")]
     pub ohttp: super::ohttp::OhttpEndpoint,
@@ -221,6 +227,7 @@ fn construct_board(
     config: Configuration,
     clock: impl clnk::Clock + 'static,
 ) -> Result<RoomBoard> {
+    let origin = config.member_origin.as_deref().unwrap_or(origin);
     let transport = forum_transport(&config, origin)?;
     let rooms = forum_transport(&config, origin)?;
     let link = clnk::Link::at(transport, community.into(), origin.into(), clock)

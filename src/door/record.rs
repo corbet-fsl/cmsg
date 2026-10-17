@@ -281,3 +281,57 @@ where
     // No await follows the original owner completion sample/object lifetime cut.
     Ok(received)
 }
+
+/// Prove this epoch's record from a received packet and cache it in the Vault
+/// (decided 2026-10-05: once per epoch, in the background; members never wait on
+/// it at a Forum). A ready cache returns at once. The epoch key is persisted
+/// before proving, the proof runs on a blocking worker without the Store, and
+/// only the verified prover output is committed.
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub async fn prove_received_record<B, C, E, A, R>(
+    vault: &mut Vault<B, C, E, A, R, cvlt::WalletCustody>,
+    received: &ckmg::wallet_engine::ReceivedRecord,
+    prover: &ckmg::wallet_engine::native_prover::NativeProver,
+) -> Result<()>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+{
+    let operation = || -> Result<[u8; 32]> {
+        let mut id = [0; 32];
+        getrandom::fill(&mut id).map_err(|_| ErrorCode::Unavailable)?;
+        Ok(id)
+    };
+    let epoch = received.epoch().clone();
+    if vault
+        .record_ready(&epoch, now())
+        .await
+        .map_err(|_| ErrorCode::Unauthorized)?
+    {
+        return Ok(());
+    }
+    let accepted = vault
+        .restore_accepted_account()
+        .await
+        .map_err(|_| ErrorCode::Unauthorized)?;
+    let key = vault
+        .begin_record_epoch(&epoch, accepted.owner(), now(), operation()?)
+        .await
+        .map_err(|_| ErrorCode::Unauthorized)?;
+    let evidence = accepted
+        .record_epoch(received, key, now())
+        .map_err(|_| ErrorCode::Unauthorized)?;
+    let record = evidence.record().clone();
+    let prover = prover.clone();
+    let proof = tokio::task::spawn_blocking(move || prover.prove_record_epoch(&evidence))
+        .await
+        .map_err(|_| ErrorCode::Unavailable)?
+        .map_err(|_| ErrorCode::Unavailable)?;
+    vault
+        .finish_record_epoch(record, proof, operation()?)
+        .await
+        .map_err(|_| ErrorCode::Unauthorized)
+}

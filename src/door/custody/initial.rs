@@ -15,6 +15,8 @@ pub struct InitialEnrollment<B: cwst::backend::Backend> {
 enum FinishScope {
     Community,
     Wallet,
+    /// A device-key member's creation: no passkey ceremony, nothing to finish.
+    Device,
 }
 
 /// Original owner refusal; a failed or uncertain step never retries creation.
@@ -58,8 +60,101 @@ impl<B: cwst::backend::Backend> InitialEnrollment<B> {
                     .await
                     .map_err(EnrollmentError::Foyer)
             }
+            FinishScope::Device => Err(EnrollmentError::Vault(cvlt::InitialError::Invalid)),
         }
     }
+
+    /// The creation's opaque seed commitment (the one `device_join` registers).
+    pub fn seed(&self) -> Result<[u8; 32], cvlt::InitialError> {
+        self.candidate.commitment()
+    }
+
+    /// A device-key creation's committed time, which its genesis stamp binds.
+    pub fn genesis_at(&self) -> Result<u64, cvlt::InitialError> {
+        self.candidate.genesis_at()
+    }
+
+    /// The `lineage_genesis` stamp action of this device-key creation with the device's salt,
+    /// for the same stamp request as the join (one confirmation).
+    pub fn lineage_genesis_action(
+        &self,
+        salt: [u8; 32],
+    ) -> Result<cwlt::passport::StampAction, cvlt::InitialError> {
+        self.candidate.lineage_genesis_action(salt)
+    }
+
+    /// The device signer before activation (join, session, salts): fixed purposes only, the
+    /// tag prepended by ckmg. Crate-private: the device producer is its only caller.
+    pub(crate) fn sign_device(
+        &self,
+        purpose: ckmg::DevicePurpose,
+        payload: &[u8],
+    ) -> Result<[u8; 64], cvlt::InitialError> {
+        self.candidate.sign_device(purpose, payload)
+    }
+
+    /// [`Self::sign_device`] as `device_join`'s signer.
+    pub(crate) fn device_signer(
+        &self,
+    ) -> impl FnMut(ckmg::DevicePurpose, Vec<u8>) -> std::future::Ready<crate::door::Result<Vec<u8>>> + '_
+    {
+        move |purpose, payload| {
+            std::future::ready(
+                self.sign_device(purpose, &payload)
+                    .map(|signature| signature.to_vec())
+                    .map_err(|_| crate::door::ErrorCode::Unauthorized),
+            )
+        }
+    }
+}
+
+/// Retain a device-key member's first community creation before it joins: the candidate's
+/// authority reference is this scope's device key and its genesis time is committed with it.
+/// No passkey ceremony and no server mutation happen here; `device_join` (one stamp for the
+/// join and the genesis) follows, then the device session and activation.
+pub async fn retain_device_enrollment<B: cwst::backend::Backend>(
+    opening: cvlt::PreparedOpen,
+    seed: ckmg::EnrollmentSeed,
+    backend: B,
+    name: &str,
+    clock: &mut impl Clock,
+    entropy: &mut impl ckmg::Entropy,
+) -> Result<InitialEnrollment<B>, EnrollmentError> {
+    if seed.binding().community() == "wallet" {
+        return Err(EnrollmentError::Vault(cvlt::InitialError::Invalid));
+    }
+    let device = opening
+        .device()
+        .map_err(|e| EnrollmentError::Vault(cvlt::InitialError::Open(e)))?;
+    let candidate = opening
+        .retain_device_enrollment(backend, seed, name, clock, entropy)
+        .await
+        .map_err(EnrollmentError::Vault)?;
+    Ok(InitialEnrollment {
+        candidate,
+        device,
+        finish: FinishScope::Device,
+    })
+}
+
+/// Reopen a retained device-key creation after a restart; a passkey candidate refuses.
+pub async fn reopen_device_enrollment<B: cwst::backend::Backend>(
+    opening: cvlt::PreparedOpen,
+    backend: B,
+) -> Result<InitialEnrollment<B>, EnrollmentError> {
+    let device = opening
+        .device()
+        .map_err(|e| EnrollmentError::Vault(cvlt::InitialError::Open(e)))?;
+    let candidate = opening
+        .reopen_enrollment(backend)
+        .await
+        .map_err(EnrollmentError::Vault)?;
+    candidate.genesis_at().map_err(EnrollmentError::Vault)?;
+    Ok(InitialEnrollment {
+        candidate,
+        device,
+        finish: FinishScope::Device,
+    })
 }
 
 /// Join the inseparable original Passkeys registration outputs before persisting

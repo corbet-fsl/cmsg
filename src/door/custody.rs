@@ -6,22 +6,27 @@ use std::{cell::Cell, rc::Rc};
 
 mod genesis;
 mod initial_recovery;
-pub use initial_recovery::{InitialRecoveryAuthority, complete_initial_recovery};
+pub use initial_recovery::{
+    InitialRecoveryAuthority, complete_device_initial_recovery, complete_initial_recovery,
+};
 mod initial_restore;
 pub use initial_restore::{
     ComposedMemberVault, InitialRecoveredVault, InitialRecoveryOwners, InitialRootVault,
-    prepare_initial_recovery,
+    prepare_device_initial_recovery, prepare_initial_recovery,
 };
 mod initial;
 pub use genesis::{
-    InitialPublicationError, acknowledge_initial_publication, prepare_initial_publication,
-    reopen_initial_publication, retain_initial_publication,
+    InitialPublicationError, acknowledge_device_initial_publication,
+    acknowledge_initial_publication, prepare_device_initial_publication,
+    prepare_initial_publication, reopen_initial_publication, retain_device_initial_publication,
+    retain_initial_publication,
 };
 mod current_member;
 mod recovery;
 pub use initial::{
-    EnrollmentError, InitialEnrollment, activate_initial, reopen_initial_enrollment,
-    retain_global_initial_enrollment, retain_initial_enrollment,
+    EnrollmentError, InitialEnrollment, activate_initial, reopen_device_enrollment,
+    reopen_initial_enrollment, retain_device_enrollment, retain_global_initial_enrollment,
+    retain_initial_enrollment,
 };
 pub use recovery::{
     AccountWiring, RecoveredVault, RecoveryAuthority, RecoveryOwners, RestoredVault,
