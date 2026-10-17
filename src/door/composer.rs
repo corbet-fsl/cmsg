@@ -246,6 +246,10 @@ enum Stage {
 struct Progress {
     global: Stage,
     community: Stage,
+    /// The member id `device_join` returned for this device key: a restarted device-key
+    /// member opens its sessions under it (the server assigns it; nothing local derives it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    community_user: Option<String>,
 }
 
 struct ProgressFile {
@@ -745,8 +749,9 @@ async fn stamp_trust(
 /// first lineage is published with that stamp as its genesis evidence.
 ///
 /// Resumable before activation (the retained enrollment and the retained stamp mean no second
-/// confirmation). The device key signs sessions and salts only through the enrollment, so a
-/// restart after activation is refused until a post-activation session signer exists.
+/// confirmation). A restart after recovery (Done) opens both sessions again by the device key:
+/// the community opening signs the session message, the member id is the one the join kept.
+/// A restart between activation and Done (the first publication) is still refused.
 #[allow(clippy::too_many_arguments)]
 async fn drive_device<A, B, N, S, WB, WC, WE, WA, WR>(
     services: &mut S,
@@ -781,9 +786,22 @@ where
         .map_err(step("vault"))?
         .is_some();
     let stage = resume_stage(progress.stage(false), vault_held)?;
+    if stage == Stage::Done {
+        return reopen_device(
+            services,
+            api,
+            name,
+            origin,
+            opening,
+            wallet_api,
+            wallet_origin,
+            progress,
+        )
+        .await;
+    }
     if stage >= Stage::Activated {
         return Err(ComposeError::Inconsistent(
-            "a device-key member restarted after activation",
+            "a device-key member restarted during its first publication",
         ));
     }
     let enrollment = if stage == Stage::Fresh {
@@ -849,6 +867,7 @@ where
         )
         .await
         .map_err(step("device join"))?;
+        progress.value.community_user = Some(user.clone());
         progress.advance(false, Stage::Finished)?;
         // Both sessions open by the device key's signature before activation.
         for foyer in [&mut api, &mut companion] {
@@ -917,6 +936,57 @@ where
         .map_err(step("recovery"))?,
     );
     progress.advance(false, Stage::Done)?;
+    Ok(DeviceDriven {
+        door,
+        policy,
+        companion,
+        stamps,
+    })
+}
+
+/// A device-key member restarted after recovery: both community sessions open again by the
+/// device key's session signature from the community opening (its Keys open later, under a
+/// lease that needs this session); the member id is the one its join returned.
+#[allow(clippy::too_many_arguments)]
+async fn reopen_device<S: Services>(
+    services: &mut S,
+    mut api: Foyer<Transport>,
+    name: &str,
+    origin: &str,
+    opening: cvlt::PreparedOpen,
+    wallet_api: &Foyer<Transport>,
+    wallet_origin: &str,
+    progress: &ProgressFile,
+) -> Result<DeviceDriven, ComposeError> {
+    let user = progress
+        .value
+        .community_user
+        .clone()
+        .ok_or(ComposeError::Inconsistent(
+            "a device-key member without its member id",
+        ))?;
+    let device = opening.device().map_err(step("restore"))?;
+    let mut sign = |purpose: ckmg::DevicePurpose, payload: Vec<u8>| {
+        std::future::ready(match purpose {
+            ckmg::DevicePurpose::DeviceSession => opening
+                .sign_device_session(&payload)
+                .map(|signature| signature.to_vec())
+                .map_err(|_| super::ErrorCode::Unauthorized),
+            _ => Err(super::ErrorCode::Unauthorized),
+        })
+    };
+    let mut companion = services.foyer(Service::Community).await?;
+    for foyer in [&mut api, &mut companion] {
+        super::device_join::open_session(foyer, name, &user, &device, &mut sign)
+            .await
+            .map_err(step("device session"))?;
+    }
+    drop(opening);
+    let door = bound(name, origin, Scope::Community, api)?;
+    let policy: &'static mut Policy = Box::leak(Box::new(
+        door.current_policy(origin).map_err(step("policy"))?,
+    ));
+    let stamps = stamp_trust(wallet_api, wallet_origin).await?;
     Ok(DeviceDriven {
         door,
         policy,
