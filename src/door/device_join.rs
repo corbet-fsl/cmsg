@@ -254,24 +254,17 @@ where
             )?,
         )
         .await?;
-    let joined = community
-        .call(
-            "device_join",
-            json!({
-                "passport": {"challenge": challenge, "proof": proof},
-                "stamp": stamp,
-                "salt": salt,
-                "device_key": key,
-                "seed": seed,
-                "signature": signature,
-            }),
-        )
+    community
+        .device_join(json!({
+            "passport": {"challenge": challenge, "proof": proof},
+            "stamp": stamp,
+            "salt": salt,
+            "device_key": key,
+            "seed": seed,
+            "signature": signature,
+        }))
         .await
-        .map_err(|_| ErrorCode::Reconcile)?;
-    joined["user"]
-        .as_str()
-        .map(str::to_owned)
-        .ok_or(ErrorCode::Reconcile)
+        .map_err(|_| ErrorCode::Reconcile)
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
