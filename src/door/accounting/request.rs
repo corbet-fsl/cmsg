@@ -289,11 +289,8 @@ mod lower {
         material: &cblc::publication::PublicVerifierMaterial,
     ) -> Result<engine::ResponseTrust> {
         Ok(engine::ResponseTrust {
-            certificate_key: material
-                .certificate_key
-                .as_slice()
-                .try_into()
-                .map_err(|_| ErrorCode::Unauthorized)?,
+            certificate_keys: material.certificate_keys.clone(),
+            community_identity: material.community_identity,
             frontier: material
                 .record_epoch
                 .as_ref()

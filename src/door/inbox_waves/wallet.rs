@@ -73,8 +73,10 @@ impl ContactAuthority for RosterContactAuthority {
 pub struct WaveScope {
     /// The wave proof scope field.
     pub scope: [u8; 32],
-    /// The issuer certificate key field.
-    pub issuer_key: [u8; 32],
+    /// The issuer certificate key (64-byte affine P-256 point, the circuit's public
+    /// `issuer_key`): the published ring key whose period holds the account
+    /// certificate's acceptance time.
+    pub issuer_key: [u8; 64],
 }
 
 pub struct AccountWallet<S, P, U, C, K> {
