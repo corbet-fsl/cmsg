@@ -13,6 +13,7 @@ mod genesis;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 mod lifecycle;
 mod pending;
+mod recipient;
 mod request;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub use activation::{prove as prove_activation, NativeActivationProver};

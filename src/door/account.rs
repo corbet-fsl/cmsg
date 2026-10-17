@@ -624,6 +624,42 @@ mod run {
         }
     }
 
+    /// Register the account's record recipient under one fresh admission.
+    async fn record_recipient<B, C, E, A, R, GB, GC, GE, GA, GR, G>(
+        parts: &mut Fresh<'_, B, C, E, A, R, GB, GC, GE, GA, GR, G>,
+        intents: &mut AccountingIntents,
+    ) -> Result<()>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+        GB: cwst::backend::Backend,
+        GC: Clock,
+        GE: Entropy,
+        GA: Authority,
+        GR: Records,
+        G: cwlt::passport::rand::RngCore + cwlt::passport::rand::CryptoRng,
+    {
+        let mut admission = admit(
+            &mut *parts.membership,
+            &mut *parts.policy,
+            &mut *parts.global,
+            parts.device,
+            &mut *parts.rng,
+            parts.creation,
+        )
+        .await?;
+        parts
+            .account
+            .store_community_credential(admission.community_credential())
+            .await?;
+        admission
+            .register_record_recipient(&mut *parts.account, intents)
+            .await
+    }
+
     /// The actor's view of the enrollment while one admission is held.
     enum Stage<'p> {
         Admitted(AccountAdmission<'p>),
@@ -959,6 +995,14 @@ mod run {
                             .await
                             .ok()
                             .flatten();
+                    }
+                    // The ledger seals each epoch's record packet to this key; the
+                    // registration is idempotent, so every login repeats it. A
+                    // failure leaves login intact: the record waits for the next one.
+                    if reply.is_ok() {
+                        if let Err(error) = record_recipient(&mut parts, &mut intents).await {
+                            eprintln!("account actor: record recipient: {error:?}");
+                        }
                     }
                 }
                 mailbox.reply(reply);

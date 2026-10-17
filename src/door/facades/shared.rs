@@ -92,6 +92,7 @@ where
     E: ckmg::Entropy,
     A: ckmg::Authority,
     R: cvlt::Records,
+    W: cvlt::RecordSlot,
 {
     type Backend = B;
     fn groups(&mut self) -> Option<&mut dyn cbrd::GroupOwner> {
@@ -237,6 +238,32 @@ where
                 signature: signed.signature,
                 admitted: signed.admitted,
             })
+        })
+    }
+    fn present_record<'a>(
+        &'a mut self,
+        challenge: &'a clnk::Challenge,
+        epoch: &'a czkp::record::Epoch,
+    ) -> board::OwnerFuture<'a, Vec<u8>> {
+        Box::pin(async move {
+            // Untrusted service bytes; the Wallet owner bounds them against the epoch.
+            let context: czkp::record::Context =
+                serde_json::from_slice(challenge.record_context()).map_err(|_| ErrorCode::Refused)?;
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let custody = retained.as_mut().ok_or(ErrorCode::Unavailable)?;
+            let now =
+                ckmg::Clock::now(&mut super::super::custody::SystemClock).map_err(keys_error)?;
+            let presentation = custody
+                .vault
+                .present_record(epoch, &context, now)
+                .await
+                .map_err(|_| ErrorCode::Unavailable)?;
+            self.require_open()?;
+            serde_json::to_vec(&presentation).map_err(|_| ErrorCode::Unavailable)
         })
     }
 }
