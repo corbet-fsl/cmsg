@@ -175,6 +175,9 @@ pub(super) struct Book {
     /// The member read the one-time explanation of vouching and confirmed it.
     #[serde(default)]
     pub explained: bool,
+    /// Communities this Vault created and finished creating (`foyer.communities`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub communities: Vec<super::communities::Entry>,
 }
 
 impl Drop for Book {

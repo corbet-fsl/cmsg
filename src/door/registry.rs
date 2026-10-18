@@ -11,6 +11,7 @@ use board::{
     room_leave as board_room_leave, room_serve as board_room_serve, search as board_search,
     watch as board_watch,
 };
+use communities::communities;
 use creating::{
     community_create, community_creation, community_creation_claim, community_creation_finish,
 };
@@ -463,6 +464,7 @@ actions! {
     "foyer.community_create" => community_create(creating::Create) -> creating::Created, VaultAccess, Foyer;
     "foyer.community_creation" => community_creation(Empty) -> creating::Draft, VaultAccess, Foyer;
     "foyer.community_creation_finish" => community_creation_finish(Empty) -> Empty, VaultAccess, Foyer;
+    "foyer.communities" => communities(Empty) -> communities::Communities, VaultAccess, Foyer;
     "foyer.community_creation_claim" => community_creation_claim(creating::Claim) -> creating::Claimed, VaultAccess, Foyer;
     "foyer.voucher_link_create" => voucher_link_create(vouching::LinkCreate) -> vouching::LinkInfo, VaultAccess, Foyer;
     "foyer.voucher_links" => voucher_links(Empty) -> vouching::Links, VaultAccess, Foyer;

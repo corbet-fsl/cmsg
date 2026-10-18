@@ -14,6 +14,7 @@ pub mod browser;
 pub mod composer;
 mod composition;
 pub mod courier;
+mod communities;
 mod creating;
 mod device_session;
 pub mod device_join;
