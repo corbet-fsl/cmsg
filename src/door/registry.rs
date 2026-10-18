@@ -5,7 +5,7 @@ use courier::{
     group_propose as courier_group_propose, group_welcome as courier_group_welcome,
 };
 use board::{
-    attend as board_attend, depart as board_depart, discovery as board_discovery,
+    attend as board_attend, depart as board_depart, room_list as board_room_list, discovery as board_discovery,
     group_act as board_group_act, groups as board_groups, heartbeat as board_heartbeat,
     profile_publish as board_profile_publish, room_admit as board_room_admit, room_join as board_room_join,
     room_leave as board_room_leave, room_serve as board_room_serve, search as board_search,
@@ -437,6 +437,7 @@ actions! {
     "board.room_serve" => board_room_serve(board::RoomRef) -> board::RoomServed, GroupRecord, Board;
     "board.profile_publish" => board_profile_publish(board::ProfilePublish) -> board::ProfilePublished, ProfileRecord, Board;
     "board.heartbeat" => board_heartbeat(Empty) -> cbrd::cfrm::LiveOutput, BoardRecord, Board;
+    "board.room_list" => board_room_list(board::Search) -> cbrd::cfrm::RoomListOutput, BoardRecord, Board;
     "board.depart" => board_depart(Empty) -> cbrd::cfrm::EmptyOutput, BoardRecord, Board;
     "board.disconnect" => board_disconnect(Empty) -> cbrd::Status, LocalLifecycle, Board;
     "inbox.snapshot" => inbox_snapshot(facades::Relation) -> cnbx::ConversationView, VaultAccess, Inbox;
