@@ -146,6 +146,7 @@ async fn encrypted_storage_without_unlocked_current_keys_does_not_bind_vault_or_
     );
     for (action, body) in [
         ("inbox.history", json!({"conversation":([0; 32])})),
+        ("inbox.thread", json!({"conversation":([0; 32])})),
         (
             "inbox.snapshot",
             json!({"conversation":([0; 32]),"peer":"synthetic-peer"}),

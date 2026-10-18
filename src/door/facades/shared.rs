@@ -391,6 +391,21 @@ where
             self.after_wait(result)
         })
     }
+    fn thread(&mut self, request: Conversation) -> OwnedFuture<'_, Vec<ThreadEntry>> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .thread(request)
+                .await;
+            self.after_wait(result)
+        })
+    }
     fn relation(&mut self, request: Relation) -> OwnedFuture<'_, cnbx::Relation> {
         Box::pin(async move {
             if self.lifetime.is_closed() {

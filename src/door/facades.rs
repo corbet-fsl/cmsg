@@ -34,6 +34,15 @@ pub struct Delivery {
     pub message: [u8; 32],
 }
 
+/// One message of a direct thread with the delivery state of this member's
+/// own sends (`None` for received messages and for sends not yet tracked).
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ThreadEntry {
+    pub message: cnbx::Message,
+    pub status: Option<cnbx::DeliveryStatus>,
+}
+
 pub(super) trait BoundBoard {
     /// Structural owner availability only; this never grants domain authority.
     fn require_committed(&self) -> Result<()> {
@@ -265,6 +274,8 @@ pub(super) trait BoundVault {
     fn current_identity(&mut self) -> OwnedFuture<'_, VaultIdentity>;
     fn snapshot(&mut self, request: Relation) -> OwnedFuture<'_, cnbx::ConversationView>;
     fn history(&mut self, request: Conversation) -> OwnedFuture<'_, Vec<cnbx::Message>>;
+    /// The whole thread, oldest first, each message with its delivery status.
+    fn thread(&mut self, request: Conversation) -> OwnedFuture<'_, Vec<ThreadEntry>>;
     fn relation(&mut self, request: Relation) -> OwnedFuture<'_, cnbx::Relation>;
     fn delivery(&mut self, request: Delivery) -> OwnedFuture<'_, Option<cnbx::DeliveryStatus>>;
     /// Pin the verified key-chain head of this community beside its credential.
@@ -537,6 +548,19 @@ where
     }
     fn history(&mut self, request: Conversation) -> OwnedFuture<'_, Vec<cnbx::Message>> {
         Box::pin(async move { Ok(self.view(request.conversation).await?.history().to_vec()) })
+    }
+    fn thread(&mut self, request: Conversation) -> OwnedFuture<'_, Vec<ThreadEntry>> {
+        Box::pin(async move {
+            let view = self.view(request.conversation).await?;
+            Ok(view
+                .history()
+                .iter()
+                .map(|message| ThreadEntry {
+                    status: view.delivery_status(&message.id),
+                    message: message.clone(),
+                })
+                .collect())
+        })
     }
     fn relation(&mut self, request: Relation) -> OwnedFuture<'_, cnbx::Relation> {
         Box::pin(async move {

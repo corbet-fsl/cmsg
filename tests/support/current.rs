@@ -160,7 +160,7 @@ impl PublicFeed {
 fn request(action: &str) -> Vec<u8> {
     let body = match action {
         "inbox.snapshot" | "inbox.relation" => json!({"conversation":vec![1;32], "peer":"peer"}),
-        "inbox.history" => json!({"conversation":vec![1;32]}),
+        "inbox.history" | "inbox.thread" => json!({"conversation":vec![1;32]}),
         "inbox.delivery_status" => json!({"conversation":vec![1;32], "message":vec![2;32]}),
         _ => json!({}),
     };
