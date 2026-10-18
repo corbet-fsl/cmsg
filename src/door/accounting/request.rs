@@ -113,6 +113,21 @@ struct Snapshot {
 }
 
 /// Genesis update, ruled by the manager: empty inboxes and the plain Update effect.
+/// The ledger verifies every ApplyExtended proof as an extension update bundle.
+/// A genesis is one step from the empty inbox to the statement's next state, the
+/// proof in lower hex (the same wire as a community activation).
+pub(super) fn genesis_bundle(next_state: &[u8; 32], proof: &[u8]) -> Result<Vec<u8>> {
+    serde_json::to_vec(&serde_json::json!({
+        "version": 1,
+        "proofs": [{
+            "state": next_state,
+            "inbox": Inbox::default().root,
+            "proof": data_encoding::HEXLOWER.encode(proof),
+        }],
+    }))
+    .map_err(|_| ErrorCode::Unavailable)
+}
+
 fn genesis_update() -> ExtendedUpdate {
     ExtendedUpdate {
         previous_inbox: Inbox::default(),
@@ -397,7 +412,7 @@ impl<'p> CurrentEnrollment<'p> {
                 current,
                 statement,
                 &genesis.scope,
-                &genesis.proof,
+                &genesis_bundle(&statement.next_state, &genesis.proof)?,
                 genesis_update(),
                 intent,
             )
@@ -839,6 +854,32 @@ mod tests {
 
     fn key() -> [u8; 32] {
         operator().verifying_key().to_bytes()
+    }
+
+    #[test]
+    fn a_genesis_proof_travels_as_the_ledgers_single_step_update_bundle() {
+        let state = [7u8; 32];
+        let raw = [1u8, 2, 3, 250];
+        let bundle: serde_json::Value =
+            serde_json::from_slice(&genesis_bundle(&state, &raw).unwrap()).unwrap();
+        let object = bundle.as_object().unwrap();
+        assert_eq!(object.len(), 2);
+        assert_eq!(bundle["version"], 1);
+        let steps = bundle["proofs"].as_array().unwrap();
+        assert_eq!(steps.len(), 1);
+        let step = steps[0].as_object().unwrap();
+        assert_eq!(step.len(), 3);
+        assert_eq!(serde_json::from_value::<[u8; 32]>(step["state"].clone()).unwrap(), state);
+        assert_eq!(
+            serde_json::from_value::<[u8; 32]>(step["inbox"].clone()).unwrap(),
+            Inbox::default().root
+        );
+        let proof = data_encoding::HEXLOWER
+            .decode(step["proof"].as_str().unwrap().as_bytes())
+            .unwrap();
+        assert_eq!(proof, raw);
+        // The raw proof bytes alone are not a bundle the ledger can read.
+        assert!(serde_json::from_slice::<serde_json::Value>(&raw).is_err());
     }
 
     #[test]
