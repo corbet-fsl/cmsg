@@ -339,7 +339,27 @@ impl Binding {
             .map_err(map_error)
     }
 
-    fn community_client(&mut self) -> Result<&mut Foyer<Transport>> {
+    /// Install the ADMIN session the signed nonce and one confirmation stamp open.
+    pub(super) async fn finish_garden_session(
+        &mut self,
+        nonce: [u8; 32],
+        user: &str,
+        device_key: [u8; 32],
+        signature: Vec<u8>,
+        stamp: Vec<u8>,
+        salt: [u8; 32],
+    ) -> Result<u64> {
+        if self.uncertain {
+            return Err(ErrorCode::Reconcile);
+        }
+        self.community_client()?
+            .finish_garden_session(nonce, user, device_key, signature, stamp, salt)
+            .await
+            .map(|info| info.expires)
+            .map_err(map_error)
+    }
+
+    pub(super) fn community_client(&mut self) -> Result<&mut Foyer<Transport>> {
         self.sessions
             .clients
             .get_mut(&Scope::Community)
@@ -498,6 +518,24 @@ impl Door {
         origin: &str,
     ) -> Result<cfyr::policy::CurrentPolicy<Transport>> {
         Ok(self.wallet_foyer(origin)?.current_policy())
+    }
+
+    /// Burn: delete the local data of every held membership whose chain the wallet's verified
+    /// platform charter ended (dissolved or banned alike), then forget it. One-directional:
+    /// nothing is restored and the reason class changes nothing. A failed purge keeps that
+    /// membership for the next refresh. Returns the fingerprints fully deleted.
+    pub fn retire_ended_memberships(
+        &self,
+        origin: &str,
+        memberships: &mut super::identity::Memberships,
+        data: &mut impl super::identity::LocalData,
+    ) -> Result<Vec<super::identity::Fingerprint>> {
+        let now = ckmg::Clock::now(&mut custody::SystemClock).map_err(|_| ErrorCode::Clock)?;
+        let ended = self
+            .wallet_current_policy(origin)?
+            .with_current(now, |charter| charter.ended().to_vec())
+            .map_err(|_| ErrorCode::Unavailable)?;
+        Ok(memberships.retire_ended(&ended, data))
     }
 
     pub(super) fn custody_scope(&self) -> Scope {
