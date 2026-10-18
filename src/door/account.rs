@@ -119,6 +119,9 @@ pub(super) enum Command {
     Resume,
     /// The caller applied the acceptance of this request: forget the stored bytes.
     Settle([u8; 32]),
+    /// How many vouchers the accepted account may still hand out in this sponsor
+    /// role (member 0, admin 1, root 2), read from its committed state. Reads only.
+    VoucherRemaining(u8),
 }
 
 /// Typed answer of one command.
@@ -141,6 +144,8 @@ pub(super) enum Answer {
     Owed(Option<Shared<Applied>>),
     /// The stored update was forgotten.
     Settled,
+    /// Vouchers the account may still hand out (before the device's open links).
+    Remaining(u64),
 }
 
 macro_rules! accessor {
@@ -161,6 +166,7 @@ impl Answer {
     accessor!(gate, Gate, Gate);
     accessor!(updated, Updated, Shared<Applied>);
     accessor!(owed, Owed, Option<Shared<Applied>>);
+    accessor!(remaining, Remaining, u64);
 
     /// The open step answers `Opened`, or `Reopened` when a pending request was
     /// resumed; either way the request is accepted.
@@ -211,7 +217,11 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
     // an active member whose community changed its gates is held there.
     if matches!(
         command,
-        Command::Update(_) | Command::Resume | Command::Settle(_) | Command::Join(_)
+        Command::Update(_)
+            | Command::Resume
+            | Command::Settle(_)
+            | Command::Join(_)
+            | Command::VoucherRemaining(_)
     ) {
         return Repeat::As(command);
     }
@@ -228,7 +238,11 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
             }),
             Command::Activate => Answer::Activated(active),
             Command::Creation(_) => Answer::Noted,
-            Command::Join(_) | Command::Update(_) | Command::Resume | Command::Settle(_) => {
+            Command::Join(_)
+            | Command::Update(_)
+            | Command::Resume
+            | Command::Settle(_)
+            | Command::VoucherRemaining(_) => {
                 unreachable!("returned above")
             }
         });
@@ -356,7 +370,7 @@ mod run {
     use super::super::vouching::Book;
     use super::super::{
         accounting::{
-            existing_active, has_pending, issue_account_admission, AccountAdmission,
+            existing_active, has_pending, issue_account_admission, voucher_remaining, AccountAdmission,
             AccountingIntents, CheckpointAcquisition, CommunityAccount, CurrentEnrollment,
             SubmittedEnrollment, AcceptedResponse, SignedApplyExtended,
         },
@@ -1059,6 +1073,13 @@ mod run {
                     mailbox.reply(reply.map(|()| Answer::Settled));
                     continue;
                 }
+                Command::VoucherRemaining(role) => {
+                    let reply = voucher_remaining(&mut account, *role, clock())
+                        .await
+                        .map(Answer::Remaining);
+                    mailbox.reply(reply);
+                    continue;
+                }
                 _ => {}
             }
             let admission = match admit(
@@ -1242,7 +1263,8 @@ mod run {
             | Command::Creation(_)
             | Command::Update(_)
             | Command::Resume
-            | Command::Settle(_) => (Err(ErrorCode::Unavailable), Next::Carry),
+            | Command::Settle(_)
+            | Command::VoucherRemaining(_) => (Err(ErrorCode::Unavailable), Next::Carry),
             Command::Activate => {
                 let Some(admission) = stage.admission() else {
                     return (Err(ErrorCode::Unavailable), Next::Carry);

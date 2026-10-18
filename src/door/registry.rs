@@ -228,7 +228,7 @@ pub(super) async fn account_call(
     account_call_at(door, &origin, command).await
 }
 
-async fn account_call_at(
+pub(super) async fn account_call_at(
     door: &mut Door,
     origin: &str,
     command: account::Command,
