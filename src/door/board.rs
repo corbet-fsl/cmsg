@@ -303,6 +303,29 @@ pub(super) async fn heartbeat(
     }
 }
 
+/// The listed public rooms of this community, one page: opaque room id, public
+/// name and description and the here-now count. Find a room to join (`room_join`).
+pub(super) async fn room_list(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: Search,
+) -> Result<(cfrm::RoomListOutput, Vec<Event>)> {
+    let reply = execute(
+        door,
+        key,
+        cfrm::Request::RoomList(cfrm::RoomListInput {
+            possession: possession(),
+            cursor: request.cursor,
+            page_size: request.page_size,
+        }),
+    )
+    .await?;
+    match reply.response {
+        cfrm::Output::RoomList(page) => Ok((page, vec![])),
+        _ => Err(ErrorCode::Reconcile),
+    }
+}
+
 pub(super) async fn depart(
     door: &mut Door,
     key: &[u8; 32],
