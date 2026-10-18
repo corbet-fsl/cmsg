@@ -26,7 +26,7 @@ pub use handlers::{CommittedOwner, CommittedRead, OwnerFuture, ReadPolicy, Signe
 pub(super) use profile::profile_publish;
 pub use profile::{ProfileParts, ProfilePublish, ProfilePublished};
 pub(super) use rooms::{room_admit, room_join, room_leave, room_serve};
-pub use rooms::{RoomAdmitted, RoomJoin, RoomJoinStatus, RoomRef, RoomServed};
+pub use rooms::{RoomAdmitted, RoomConnected, RoomJoin, RoomJoinStatus, RoomRef, RoomServed};
 
 /// Only the user's paging choice crosses the public boundary. Link supplies
 /// the live session/nonce and Vault signs its exact prepared transcript.
@@ -281,6 +281,69 @@ async fn execute(door: &mut Door, key: &[u8; 32], request: cfrm::Request) -> Res
     // The actor owns the prepared request, signing intent and remote completion.
     // Neither a dropped caller nor local disposal can produce an implicit retry.
     board.execute(prepared, signature).await
+}
+
+/// Connect this device to a member room if it is not connected yet: the common
+/// room epoch, one blind room pass for `room` (both signed by the device like any
+/// Forum request) and the room's Connect command. A live connection is kept.
+pub(super) async fn ensure_room(door: &mut Door, key: &[u8; 32], room: [u8; 16]) -> Result<()> {
+    let grant = door.grants.get(key).ok_or(ErrorCode::Unauthorized)?;
+    let origin = grant.origin.clone();
+    let expires = grant.expires;
+    let board = door.boards.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
+    if !board.has_rooms() {
+        return Err(ErrorCode::Unavailable);
+    }
+    if board.room_connection(room).is_ok() {
+        return Ok(());
+    }
+    let vault = door.vaults.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
+    let foyer = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
+    let now = current::version(foyer, &door.config.community, expires, door.clock_floor)?;
+    let mut nonce = [0; 16];
+    getrandom::fill(&mut nonce).map_err(|_| ErrorCode::Unavailable)?;
+    let prepared = board.room_prepare_epoch(nonce)?;
+    let facades::SignedBoard {
+        signature,
+        admitted: epoch,
+    } = vault.sign_board(&prepared, &origin, now, expires).await?;
+    current::version(foyer, &door.config.community, expires, now)?;
+    board.room_receive_epoch(prepared, signature).await?;
+    drop(epoch);
+    let mut operation = [0; 16];
+    getrandom::fill(&mut operation).map_err(|_| ErrorCode::Unavailable)?;
+    getrandom::fill(&mut nonce).map_err(|_| ErrorCode::Unavailable)?;
+    let prepared = board.room_prepare_pass(room, operation, nonce)?;
+    let facades::SignedBoard {
+        signature,
+        admitted: pass,
+    } = vault.sign_board(&prepared, &origin, now, expires).await?;
+    current::version(foyer, &door.config.community, expires, now)?;
+    let connection = board.room_receive_pass(prepared, signature).await?;
+    drop(pass);
+    let mut command = [0; 16];
+    getrandom::fill(&mut command).map_err(|_| ErrorCode::Unavailable)?;
+    command[0] = connection[0];
+    board
+        .execute_room(cbrd::clnk::cmbl::Request {
+            room,
+            operation: command,
+            action: cbrd::clnk::cmbl::Action::Connect { connection },
+        })
+        .await
+        .map_err(after_send)?;
+    Ok(())
+}
+
+/// `board.room_connect`: connect to a member room now (the room actions below
+/// do this themselves when needed).
+pub(super) async fn room_connect(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: RoomRef,
+) -> Result<(RoomConnected, Vec<Event>)> {
+    ensure_room(door, key, request.room).await?;
+    Ok((RoomConnected { connected: true }, vec![]))
 }
 
 pub(super) async fn heartbeat(

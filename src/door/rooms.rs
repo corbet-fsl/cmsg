@@ -37,6 +37,36 @@ pub trait RoomLink: Sized + 'static {
         Box::pin(async { Err(LinkError::Rejected) })
     }
     fn close_rooms<T: clnk::Transport>(_board: &mut cbrd::Board<T, Self>) {}
+    /// The common room epoch request (signed by the device before it is sent).
+    fn prepare_room_epoch<T: clnk::Transport>(
+        _board: &cbrd::Board<T, Self>,
+        _nonce: cmbl::Id,
+    ) -> Result<cbrd::Prepared, LinkError> {
+        Err(LinkError::Rejected)
+    }
+    fn receive_room_epoch<'a, T: clnk::Transport>(
+        _board: &'a mut cbrd::Board<T, Self>,
+        _prepared: cbrd::Prepared,
+        _signature: Vec<u8>,
+    ) -> RoomFuture<'a, ()> {
+        Box::pin(async { Err(LinkError::Rejected) })
+    }
+    /// A blind room pass request for `room` (signed by the device).
+    fn prepare_room_pass<T: clnk::Transport>(
+        _board: &mut cbrd::Board<T, Self>,
+        _room: cmbl::Id,
+        _operation: cmbl::Id,
+        _nonce: cmbl::Id,
+    ) -> Result<cbrd::Prepared, LinkError> {
+        Err(LinkError::Rejected)
+    }
+    fn receive_room_pass<'a, T: clnk::Transport>(
+        _board: &'a mut cbrd::Board<T, Self>,
+        _prepared: cbrd::Prepared,
+        _signature: Vec<u8>,
+    ) -> RoomFuture<'a, cmbl::Id> {
+        Box::pin(async { Err(LinkError::Rejected) })
+    }
     /// Join a member room (consent already decided, evidence from a sealed
     /// member answer): see `cbrd::Board::join_room`.
     fn join_room<'a, T, K, B, S, A, C, P>(
@@ -130,6 +160,34 @@ impl<R: clnk::Transport + 'static> RoomLink for clnk::AnonymousRooms<R> {
     }
     fn close_rooms<T: clnk::Transport>(board: &mut cbrd::Board<T, Self>) {
         board.close_rooms();
+    }
+    fn prepare_room_epoch<T: clnk::Transport>(
+        board: &cbrd::Board<T, Self>,
+        nonce: cmbl::Id,
+    ) -> Result<cbrd::Prepared, LinkError> {
+        board.prepare_room_epoch(nonce)
+    }
+    fn receive_room_epoch<'a, T: clnk::Transport>(
+        board: &'a mut cbrd::Board<T, Self>,
+        prepared: cbrd::Prepared,
+        signature: Vec<u8>,
+    ) -> RoomFuture<'a, ()> {
+        Box::pin(board.receive_room_epoch(prepared, signature))
+    }
+    fn prepare_room_pass<T: clnk::Transport>(
+        board: &mut cbrd::Board<T, Self>,
+        room: cmbl::Id,
+        operation: cmbl::Id,
+        nonce: cmbl::Id,
+    ) -> Result<cbrd::Prepared, LinkError> {
+        board.prepare_room_pass(room, operation, nonce)
+    }
+    fn receive_room_pass<'a, T: clnk::Transport>(
+        board: &'a mut cbrd::Board<T, Self>,
+        prepared: cbrd::Prepared,
+        signature: Vec<u8>,
+    ) -> RoomFuture<'a, cmbl::Id> {
+        Box::pin(board.receive_room_pass(prepared, signature))
     }
     fn join_room<'a, T, K, B, S, A, C, P>(
         board: &'a cbrd::Board<T, Self>,

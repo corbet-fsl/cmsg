@@ -814,6 +814,42 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
         }
         self.inner.execute(prepared, signature)
     }
+    fn room_connection(&self, room: [u8; 16]) -> Result<[u8; 16]> {
+        self.inner.room_connection(room)
+    }
+    fn room_prepare_epoch(&mut self, nonce: [u8; 16]) -> Result<cbrd::Prepared> {
+        self.idle()?;
+        self.inner.room_prepare_epoch(nonce)
+    }
+    fn room_receive_epoch(
+        &mut self,
+        prepared: cbrd::Prepared,
+        signature: Vec<u8>,
+    ) -> OwnedFuture<'_, ()> {
+        if let Err(error) = self.idle() {
+            return Box::pin(async move { Err(error) });
+        }
+        self.inner.room_receive_epoch(prepared, signature)
+    }
+    fn room_prepare_pass(
+        &mut self,
+        room: [u8; 16],
+        operation: [u8; 16],
+        nonce: [u8; 16],
+    ) -> Result<cbrd::Prepared> {
+        self.idle()?;
+        self.inner.room_prepare_pass(room, operation, nonce)
+    }
+    fn room_receive_pass(
+        &mut self,
+        prepared: cbrd::Prepared,
+        signature: Vec<u8>,
+    ) -> OwnedFuture<'_, [u8; 16]> {
+        if let Err(error) = self.idle() {
+            return Box::pin(async move { Err(error) });
+        }
+        self.inner.room_receive_pass(prepared, signature)
+    }
     fn attend(&mut self, origin: &str, expires: u64) -> OwnedFuture<'_, cbrd::Status> {
         let origin = origin.to_owned();
         Box::pin(async move {
