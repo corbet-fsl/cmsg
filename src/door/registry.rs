@@ -169,6 +169,13 @@ async fn inbox_history(
 ) -> Result<(Vec<cnbx::Message>, Vec<Event>)> {
     inbox_read(door, key, |vault| vault.history(request)).await
 }
+async fn inbox_thread(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: facades::Conversation,
+) -> Result<(Vec<facades::ThreadEntry>, Vec<Event>)> {
+    inbox_read(door, key, |vault| vault.thread(request)).await
+}
 async fn inbox_relation(
     door: &mut Door,
     key: &[u8; 32],
@@ -537,6 +544,7 @@ actions! {
     "board.disconnect" => board_disconnect(Empty) -> cbrd::Status, LocalLifecycle, Board;
     "inbox.snapshot" => inbox_snapshot(facades::Relation) -> cnbx::ConversationView, VaultAccess, Inbox;
     "inbox.history" => inbox_history(facades::Conversation) -> Vec<cnbx::Message>, VaultAccess, Inbox;
+    "inbox.thread" => inbox_thread(facades::Conversation) -> Vec<facades::ThreadEntry>, VaultAccess, Inbox;
     "inbox.relation" => inbox_relation(facades::Relation) -> cnbx::Relation, VaultAccess, Inbox;
     "inbox.delivery_status" => inbox_delivery(facades::Delivery) -> Option<cnbx::DeliveryStatus>, VaultAccess, Inbox;
     "inbox.blocking_rules" => inbox_blocking_rules(Empty) -> Vec<String>, VaultAccess, Inbox;
