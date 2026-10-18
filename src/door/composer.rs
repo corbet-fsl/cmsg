@@ -634,6 +634,15 @@ where
             .take_global(global_origin)
             .map_err(step("global session"))?,
     ));
+    // A registered device's start opened no second wallet session (its one confirmation is
+    // the wallet Door's login); the native Door still lends one, at one more ceremony.
+    let global_companion = match global_companion {
+        Some(companion) => companion,
+        None => {
+            keys.limit(1);
+            wallet_companion(services, keys).await?
+        }
+    };
     let public = services.public(Service::Global).await?;
     door.lend_global(community_origin, global_companion, public)
         .map_err(step("global session"))?;
@@ -756,6 +765,72 @@ mod tests {
         block_on(first.advance(true, Stage::Finished)).unwrap();
         let reopened = block_on(ProgressFile::load(BackendProgress::new(backend))).unwrap();
         assert_eq!(reopened.stage(true), Stage::Finished);
+    }
+
+    /// Decision B (one confirmation per device): a registered device's start may run exactly
+    /// ONE wallet ceremony, and its PRF is the unlock; a second prompt is refused before the
+    /// authenticator runs. A registration is bounded by REGISTRATION_CONFIRMATIONS.
+    #[test]
+    fn a_registered_start_counts_one_wallet_ceremony_and_refuses_a_second() {
+        use cfyr::passkeys::software::{SoftwareAuthenticator, TestConfiguration};
+        use futures_executor::block_on;
+        use serde_json::json;
+        const ORIGIN: &str = "https://wallet.example.test";
+        const RP: &str = "wallet.example.test";
+        let b64 = |bytes: &[u8]| data_encoding::BASE64URL_NOPAD.encode(bytes);
+        block_on(async {
+            let platform = SoftwareAuthenticator::new(
+                ORIGIN,
+                TestConfiguration {
+                    user_verified: true,
+                    prf: true,
+                    evaluate_at_create: true,
+                },
+            )
+            .unwrap();
+            let mut keys =
+                DeviceKeys::new(Client::new(cfyr::passkeys::Context::new(ORIGIN, RP).unwrap(), platform));
+            let mut progress =
+                ProgressFile::load(BackendProgress::new(cwst::backend::Memory::new())).await.unwrap();
+
+            // Registration: the create ceremony with PRF counts once.
+            keys.limit(confirmation_budget(&progress));
+            assert_eq!(confirmation_budget(&progress), REGISTRATION_CONFIRMATIONS);
+            keys.confirm("register").unwrap().register_member(json!({"publicKey": {
+                "rp":{"id":RP,"name":"Wallet"},
+                "user":{"id":b64(&[17;16]),"name":"member","displayName":"Member"},
+                "challenge":b64(&[41;32]),
+                "pubKeyCredParams":[{"type":"public-key","alg":-7}],
+                "authenticatorSelection":{"residentKey":"required","requireResidentKey":true,
+                    "userVerification":"required","authenticatorAttachment":"platform"},
+                "timeout":42000,"excludeCredentials":[],"attestation":"none",
+                "extensions":{"credProps":true},"hints":["client-device"]
+            }})).await.unwrap();
+            assert_eq!(keys.ceremonies(), 1);
+            progress.advance(true, Stage::Done).await.unwrap();
+            assert_eq!(confirmation_budget(&progress), REGISTRATION_CONFIRMATIONS);
+            progress.advance(false, Stage::Done).await.unwrap();
+
+            // Registered: the start's budget is one; its login carries the PRF unlock.
+            keys.limit(confirmation_budget(&progress));
+            assert_eq!(confirmation_budget(&progress), REGISTERED_CONFIRMATIONS);
+            let login = json!({"publicKey": {"challenge":b64(&[55;32]),"rpId":RP,
+                "userVerification":"required","allowCredentials":[],"timeout":21000}});
+            let (_, outcome) = keys
+                .confirm("login")
+                .unwrap()
+                .sign_in(login.clone())
+                .await
+                .unwrap()
+                .into_parts();
+            assert!(matches!(outcome, cfyr::passkeys::VaultOutcome::Ready(_)));
+            assert_eq!(keys.ceremonies(), 2);
+            // The former second unlock, a second session or any other prompt: refused unprompted.
+            for purpose in ["wallet session", "join stamp", "reopen"] {
+                assert!(matches!(keys.confirm(purpose), Err(ComposeError::Step(p, _)) if p == purpose));
+            }
+            assert_eq!(keys.ceremonies(), 2);
+        });
     }
 
     #[cfg(feature = "native-tor")]

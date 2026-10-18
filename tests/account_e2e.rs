@@ -74,9 +74,7 @@ fn device(
         },
         forum: None,
     };
-    let keys = composer::DeviceKeys {
-        global: passkeys(&f["wallet"]),
-    };
+    let keys = composer::DeviceKeys::new(passkeys(&f["wallet"]));
     (settings, keys)
 }
 
