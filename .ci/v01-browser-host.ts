@@ -144,7 +144,7 @@ if (command === 'select') {
     `<script type="importmap">${JSON.stringify({ imports })}</script>\n`);
   const entries = {
     member: "export { createConfiguredVaultClient as createClient } from './browser.js';\n",
-    vault: "export { startConfiguredVaultHost } from './browser.js';\n",
+    vault: "export { startConfiguredVaultHost, prepareConfiguredWalletHost } from './browser.js';\n",
     popup: "export { preparePopupLogin } from './browser.js';\n",
   };
   for (const [name, source] of Object.entries(entries)) {

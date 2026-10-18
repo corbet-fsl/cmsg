@@ -78,6 +78,40 @@ export function startConfiguredVaultHost() {
   );
 }
 
+/** The deployment's one wallet frame (wallet.<base>). Reading its configuration is bounded
+ * like every configured entry; the registration itself runs only on `register()`, from the
+ * frame's own control, and may take as long as the member's ceremonies take.
+ */
+export function prepareConfiguredWalletHost() {
+  if (window.parent === window || window.parent !== window.top || location.protocol !== 'https:') {
+    return Promise.reject(new CmsgError('unauthorized'));
+  }
+  return configured<VaultHostConfiguration, {registers: boolean; register(): ReturnType<typeof startWalletHost>; dispose(): Promise<void>}>(
+    '/cmsg/vault.json', async configuration => ({
+      registers: configuration.registration != null && configuration.wallet_origin === location.origin,
+      register: () => startWalletHost(configuration),
+      async dispose() {},
+    }),
+  );
+}
+
+/** Register (or resume) this device in the wallet frame, then serve the member page. */
+export async function startWalletHost(configuration: VaultHostConfiguration) {
+  const {default: init, VaultHost} = await import('./wasm/cmsg.js');
+  await init();
+  const host = await VaultHost.wallet(JSON.stringify(configuration)) as InstanceType<typeof VaultHost>;
+  let disposal: Promise<void> | undefined;
+  return {
+    loginStatus(): CliCallbackStatus | null { return JSON.parse(host.login_status()) as CliCallbackStatus | null; },
+    continueLogin(): void { host.continue_login(); },
+    cancelLogin(): void { host.cancel_login(); },
+    dispose(): Promise<void> {
+      disposal ??= host.dispose().finally(() => host.free());
+      return disposal;
+    },
+  };
+}
+
 /** Native CLI callback page; trusted entry consumes the fragment before loading Wasm.
  * This exposes only progress and handover, never a launch/callback capability.
  */
@@ -152,8 +186,15 @@ export async function createVaultClient(configuration: VaultBridgeConfiguration)
   let memberURL: URL, vaultURL: URL, pageURL: URL;
   try { memberURL = new URL(member); vaultURL = new URL(vault); pageURL = new URL(page); }
   catch { throw new CmsgError('invalid_request'); }
+  // The vault frame is the community's own (vault.<member host>) or, with wallet_origin, exactly
+  // the deployment's one wallet frame (wallet.<base> for a member page on <base>).
+  const wallet = configuration.wallet_origin;
+  const base = wallet !== undefined && wallet === vault && vaultURL.hostname.startsWith('wallet.')
+    ? vaultURL.hostname.slice('wallet.'.length) : '';
+  const walletFrame = base !== '' && memberURL.hostname !== vaultURL.hostname
+    && (memberURL.hostname === base || memberURL.hostname.endsWith(`.${base}`));
   if (memberURL.origin !== member || vaultURL.origin !== vault || memberURL.protocol !== 'https:'
-      || vaultURL.protocol !== 'https:' || vaultURL.hostname !== `vault.${memberURL.hostname}`
+      || vaultURL.protocol !== 'https:' || !(walletFrame || vaultURL.hostname === `vault.${memberURL.hostname}`)
       || memberURL.port !== vaultURL.port || pageURL.origin !== vault || pageURL.username
       || pageURL.password || pageURL.search || pageURL.hash) throw new CmsgError('unauthorized');
   if (!document.body) throw new CmsgError('unavailable');
@@ -161,7 +202,10 @@ export async function createVaultClient(configuration: VaultBridgeConfiguration)
   frame.title = 'Account security';
   frame.setAttribute('data-cmsg-vault', '');
   frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox');
-  frame.allow = "publickey-credentials-get 'none'; publickey-credentials-create 'none'";
+  // Only the wallet frame holds the device's one passkey; a community frame never runs a ceremony.
+  frame.allow = walletFrame
+    ? `publickey-credentials-get ${vault}; publickey-credentials-create ${vault}`
+    : "publickey-credentials-get 'none'; publickey-credentials-create 'none'";
   frame.referrerPolicy = 'no-referrer';
   const encoder = new TextEncoder();
   let port: MessagePort | undefined;
