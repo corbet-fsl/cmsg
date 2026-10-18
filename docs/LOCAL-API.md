@@ -14,7 +14,8 @@ Trusted embedding binds actual Board, Vault and Mesh values through
 origin. Vault binding derives Inbox's member binding only after the actual
 Keys owner accepts `lineage`; subsequent Inbox reads recheck it and load from
 that Vault's authenticated Store. `inbox.history`, `inbox.relation` and
-`inbox.delivery_status` return the original Threads, Contacts and Delivery DTOs.
+`inbox.delivery_status` return the original Threads, Contacts and Delivery DTOs;
+`inbox.thread` returns the history with each message's delivery status.
 No separate snapshot/store or caller-supplied pseudonym authorizes a read.
 Every Inbox read checks Foyer's current signed minimum runtime version before
 and after the owner await, with the same grant expiry and a nonregressing clock.
