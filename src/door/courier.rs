@@ -252,6 +252,7 @@ const ACTIONS: &[&str] = &[
     "board.heartbeat",
     "board.group_message",
     "board.room_serve",
+    "board.room_admit",
     "foyer.refresh",
     "foyer.voucher_links",
     "foyer.voucher_vouched_by",
@@ -802,6 +803,14 @@ async fn gather(
                 .call(
                     door,
                     "board.room_serve",
+                    json!({"room": room.room, "group": room.group}),
+                )
+                .await;
+            // Admit the newcomers whose external commits are waiting for this member.
+            let _ = lease
+                .call(
+                    door,
+                    "board.room_admit",
                     json!({"room": room.room, "group": room.group}),
                 )
                 .await;
