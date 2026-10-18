@@ -11,6 +11,9 @@ use cpky::{
 };
 use serde_json::{json, Value};
 
+#[path = "support/foyer_fixture.rs"]
+mod foyer_fixture;
+
 #[path = "support/initial_network.rs"]
 mod initial_network;
 
@@ -21,7 +24,7 @@ impl ckmg::Clock for Clock {
     }
 }
 fn fixture() -> Value {
-    let path = std::env::var("CMSG_FOYER_FIXTURE").expect("actual owner fixture required");
+    let path = foyer_fixture::fixture_path();
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
 fn passkeys() -> cpky::Client<SoftwareAuthenticator> {

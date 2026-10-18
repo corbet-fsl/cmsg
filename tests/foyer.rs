@@ -8,6 +8,9 @@ use std::{
     sync::Arc,
 };
 
+#[path = "support/foyer_fixture.rs"]
+mod foyer_fixture;
+
 const MEMBER: &str = "https://alpha.example.test";
 const ADMIN: &str = "https://admin.alpha.example.test";
 const ROOT: &str = "https://admin.root.example.test";
@@ -15,7 +18,7 @@ const WALLET: &str = "https://wallet.example.test";
 
 fn fixture() -> Value {
     let path =
-        std::env::var("CMSG_FOYER_FIXTURE").expect("Run this suite with .ci/with-foyer-fixture.py");
+        foyer_fixture::fixture_path();
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
 

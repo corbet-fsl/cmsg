@@ -5,6 +5,9 @@ use super::*;
 use cfyr::Transport as _;
 use cpky::software::{SoftwareAuthenticator, TestConfiguration};
 use serde_json::{json, Value};
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "foyer_fixture.rs"]
+mod foyer_fixture;
 
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
@@ -16,7 +19,7 @@ type Passkeys = cpky::Client<SoftwareAuthenticator>;
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn fixture() -> Value {
-    let path = std::env::var("CMSG_FOYER_FIXTURE").expect("original live owner fixture required");
+    let path = foyer_fixture::fixture_path();
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
 #[cfg(target_arch = "wasm32")]

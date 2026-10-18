@@ -16,11 +16,14 @@ mod initial_network;
 mod wallet;
 use wallet::*;
 
+#[path = "support/foyer_fixture.rs"]
+mod foyer_fixture;
+
 #[path = "support/common_record.rs"]
 mod common_record;
 
 fn fixture() -> Value {
-    let path = std::env::var("CMSG_FOYER_FIXTURE").expect("original owner fixture required");
+    let path = foyer_fixture::fixture_path();
     let fixture: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let actual = fixture["certified_wallet"].clone();
     assert_eq!(actual["clock"], "SystemClock");
