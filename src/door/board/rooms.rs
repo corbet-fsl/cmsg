@@ -10,14 +10,12 @@ use cbrd::join_seal::{self, JoinKey};
 use std::collections::BTreeMap;
 
 /// A room is named by its opaque identifier from the listing and by the group
-/// it belongs to. `accept_profile_visibility` is the semipublic consent.
+/// it belongs to. Joining a public room is the consent to visible profiles.
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RoomJoin {
     pub room: [u8; 16],
     pub group: [u8; 32],
-    #[serde(default)]
-    pub accept_profile_visibility: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -142,7 +140,6 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             owner,
             &source,
             intent,
-            join.accept_profile_visibility,
             MAX_GROUPS,
         )
         .await
@@ -181,7 +178,7 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
         let intent = cbrd::GroupIntent::Leave { group: room.group };
         let (candidate, current, now, _) =
-            cbrd::prepare_group_intent(owner, &source, intent.clone(), false, MAX_GROUPS)
+            cbrd::prepare_group_intent(owner, &source, intent.clone(), MAX_GROUPS)
                 .await
                 .map_err(group_error)?;
         let left = self
@@ -197,7 +194,7 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             None => {
                 let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
                 let (views, _) =
-                    cbrd::execute_group_intent(owner, &source, intent, false, MAX_GROUPS)
+                    cbrd::execute_group_intent(owner, &source, intent, MAX_GROUPS)
                         .await
                         .map_err(group_error)?;
                 Ok(views)

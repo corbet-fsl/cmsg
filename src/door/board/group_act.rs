@@ -4,14 +4,12 @@
 //! raw command, actor, signature or policy is accepted from JSON.
 use super::*;
 
-/// One membership write. `accept_profile_visibility` is the semipublic consent
-/// ("members of this group may see my private profile"); rooms refuse without it.
+/// One membership write. Joining a public room is itself the consent to
+/// visible profiles (decided 2026-10-13); the write carries no switch for it.
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GroupAct {
     pub intent: cbrd::GroupIntent,
-    #[serde(default)]
-    pub accept_profile_visibility: bool,
 }
 
 pub(in crate::door) async fn group_act(
@@ -28,19 +26,17 @@ pub(in crate::door) async fn group_act(
     let board = door.boards.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     board.require_committed()?;
     let views = board
-        .group_act(request.intent, request.accept_profile_visibility, expires)
+        .group_act(request.intent, expires)
         .await?;
     Ok((views, vec![]))
 }
 
-/// Intent plus the semipublic profile statement, as in `board.group_act`, for
+/// Intent as in `board.group_act`, for
 /// commands that need other members: the others answer for themselves.
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GroupPropose {
     pub intent: cbrd::GroupIntent,
-    #[serde(default)]
-    pub accept_profile_visibility: bool,
 }
 
 /// Text for one member's direct conversation; the caller sends it unchanged.
@@ -124,8 +120,6 @@ pub enum GroupInbound {
 pub struct GroupAnswer {
     pub operation: [u8; 32],
     pub accept: bool,
-    #[serde(default)]
-    pub accept_profile_visibility: bool,
 }
 
 /// The decision to send back to the actor in the same conversation.
@@ -158,7 +152,7 @@ pub(in crate::door) async fn group_propose(
 ) -> Result<(GroupProposed, Vec<Event>)> {
     let (board, expires) = board_of(door, key)?;
     let proposed = board
-        .group_propose(request.intent, request.accept_profile_visibility, expires)
+        .group_propose(request.intent, expires)
         .await?;
     Ok((proposed, vec![]))
 }
@@ -197,7 +191,6 @@ pub(in crate::door) async fn group_answer(
         .group_answer(
             request.operation,
             request.accept,
-            request.accept_profile_visibility,
             expires,
         )
         .await?;

@@ -218,14 +218,14 @@ committed Groups checkpoint, under the policy projected from the current signed
 Rulebook settings (`groups.*`, `seats.*`, `waves.*`). It is local and read-only:
 no Forum request, consent or membership decision. It refuses unless the retained
 Vault owner and the current Foyer Charter are available.
-`board.group_act` takes `{"intent": {...}, "accept_profile_visibility": bool}` where
+`board.group_act` takes `{"intent": {...}}` where
 `intent` is one of `create`, `fork`, `join`, `leave` or `describe` (tagged by
 `"intent"`), and returns the group views after the change. The caller never names
 the acting member and never supplies a signature, command or policy: the retained
 owner supplies the local member and signs consents with the device key, Groups
 decides, and nothing changes unless the whole transaction publishes. Joining or
-opening a room requires `accept_profile_visibility: true` (members of the group
-may see your private profile); without it Groups refuses. The action refuses with
+opening a public room is itself the consent to visible profiles (there is no
+separate switch; circles and in-groups stay hidden). The action refuses with
 `unavailable` until the retained owner provides the group integration.
 
 Commands that need other members (`create`, `fork`, `join` with vouches) run in
@@ -233,7 +233,7 @@ three door actions over the members' direct conversations; nobody is ever added,
 removed or consented for by someone else, and groups stay immutable (a change is
 always a fork the members consent to; there are no admins):
 
-- `board.group_propose {intent, accept_profile_visibility}` signs only the local
+- `board.group_propose {intent}` signs only the local
   member's own consent and returns `{operation, invitations: [{member, text}],
   committed}`. Send each `text` unchanged in the direct conversation with that
   contact. A command that needs nobody else commits at once (`committed` set).
@@ -248,7 +248,7 @@ always a fork the members consent to; there are no admins):
   devices, standing and policy) only when every consent is present. A decline
   ends the proposal. Pending proposals and invitations live in memory only and
   expire with the consent window (one hour); a restart means proposing again.
-- `board.group_answer {operation, accept, accept_profile_visibility}` is the
+- `board.group_answer {operation, accept}` is the
   member's own decision on a stored invitation; it returns `{actor, text}` to
   send back in the conversation with the actor. For a command that creates a
   group (create, fork) an accepted answer carries the member's fresh MLS key
@@ -266,7 +266,7 @@ always a fork the members consent to; there are no admins):
   the same conversation until every member is served. Welcomes are kept for a
   week.
 - Member rooms (anonymous room transport; refused with `unavailable` on a
-  Board without it). `board.room_join {room, group, accept_profile_visibility}`
+  Board without it). `board.room_join {room, group}`
   is one step; call it again until `state: "joined"`. First call posts a join
   request carrying only a fresh ephemeral key (`requested`); then `waiting`
   until an online member has answered with its evidence sealed to that key.
