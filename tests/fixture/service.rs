@@ -92,33 +92,54 @@ async fn login_request(
 }
 
 // Fault only the transport after the original owner accepts a real assertion.
+// The two login requests are minted when the test asks (`POST /__requests`), never at
+// fixture start: the owner's ceremonies live 300 s, and a slow run may reach the test later.
 async fn login_faults(
-    service: &Running,
-    member: &mut Member,
+    service: Arc<Running>,
+    member: Member,
 ) -> (serde_json::Value, tokio::task::JoinHandle<()>) {
-    let mut requests = Vec::new();
-    for _ in 0..2 {
-        requests.push(
-            login_request(
-                service,
-                WALLET,
-                &mut member.authenticator,
-                &member.user,
-                &member.credential,
-            )
-            .await,
-        );
-    }
     let counts = Arc::new([AtomicUsize::new(0), AtomicUsize::new(0)]);
     let release = Arc::new(tokio::sync::Notify::new());
     let observed = counts.clone();
     let released = release.clone();
-    let challenges = requests
-        .iter()
-        .map(|body| body["ceremony"].as_str().unwrap().to_owned())
-        .collect::<Vec<_>>();
+    let challenges = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let minted = challenges.clone();
+    let reset = counts.clone();
+    let member = Arc::new(tokio::sync::Mutex::new(member));
     let upstream = service.base.clone();
     let app = axum::Router::new()
+        .route(
+            "/__requests",
+            axum::routing::post(move || {
+                let (service, member, minted, reset) =
+                    (service.clone(), member.clone(), minted.clone(), reset.clone());
+                async move {
+                    let mut member = member.lock().await;
+                    let member = &mut *member;
+                    let mut requests = Vec::new();
+                    for _ in 0..2 {
+                        requests.push(
+                            login_request(
+                                &service,
+                                WALLET,
+                                &mut member.authenticator,
+                                &member.user,
+                                &member.credential,
+                            )
+                            .await,
+                        );
+                    }
+                    *minted.lock().unwrap() = requests
+                        .iter()
+                        .map(|body| body["ceremony"].as_str().unwrap().to_owned())
+                        .collect();
+                    for count in reset.iter() {
+                        count.store(0, Ordering::SeqCst);
+                    }
+                    axum::Json(requests)
+                }
+            }),
+        )
         .route(
             "/__stats",
             axum::routing::get(move || {
@@ -152,6 +173,8 @@ async fn login_faults(
                 async move {
                     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
                     let index = challenges
+                        .lock()
+                        .unwrap()
                         .iter()
                         .position(|id| Some(id.as_str()) == value["ceremony"].as_str())
                         .unwrap();
@@ -184,7 +207,7 @@ async fn login_faults(
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    (json!({"base":base,"host":WALLET,"requests":requests}), task)
+    (json!({"base":base,"host":WALLET}), task)
 }
 
 // The unoptimized original owner futures are deep; give every runtime thread real
@@ -232,9 +255,9 @@ async fn entry() {
     } else {
         None
     };
-    let wallet = global(1000).await;
+    let wallet = Arc::new(global(1000).await);
     let (mut global_member, passport, public) = wallet_passport(&wallet).await;
-    let service = community_unfounded_with_burst("alpha", &public, 1000).await;
+    let service = Arc::new(community_unfounded_with_burst("alpha", &public, 1000).await);
     let global_root = enrol(
         &wallet,
         ROOT,
@@ -266,6 +289,30 @@ async fn entry() {
             .unwrap();
         custody_registrations.insert(target.into(), registration);
     }
+    // The native custody test mints its registration when it runs (`POST
+    // /__custody_registration`): the owner's ceremonies live 300 s from register_begin.
+    let mint = {
+        let (wallet, service) = (wallet.clone(), service.clone());
+        axum::Router::new().route(
+            "/__custody_registration",
+            axum::routing::post(move || {
+                let (wallet, service) = (wallet.clone(), service.clone());
+                async move {
+                    let (_, passport, _) = wallet_passport(&wallet).await;
+                    let proof = presentation(&service, member_host, None, &passport).await;
+                    axum::Json(
+                        client(&service, member_host, None)
+                            .call("register_begin", json!({"passport":proof}))
+                            .await
+                            .unwrap(),
+                    )
+                }
+            }),
+        )
+    };
+    let mint_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mint_base = format!("http://{}", mint_listener.local_addr().unwrap());
+    let mint_task = tokio::spawn(async move { axum::serve(mint_listener, mint).await.unwrap() });
     // Actual holder proof for each independent initial-custody journey. The
     // client chooses its private seed before submitting the original proof.
     let mut initial_enrollments = serde_json::Map::new();
@@ -322,7 +369,8 @@ async fn entry() {
             release: tokio::sync::Notify::new(),
         });
     }
-    let (login_faults, login_fault_task) = login_faults(&wallet, &mut global_member).await;
+    let global_session = global_member.session.clone();
+    let (login_faults, login_fault_task) = login_faults(wallet.clone(), global_member).await;
     let faults = Arc::new(faults);
     let observed = faults.clone();
     let released = faults.clone();
@@ -418,10 +466,11 @@ async fn entry() {
         "now": NOW + 1,
         "browser_registration": browser_registration,
         "custody_registrations": custody_registrations,
+        "custody_registration_mint": format!("{mint_base}/__custody_registration"),
         "initial_enrollments": initial_enrollments,
         "trust_key_ring": trust_feed["key_ring"],
         "login_faults": login_faults,
-        "global": {"base": wallet.base, "host": WALLET, "session": global_member.session},
+        "global": {"base": wallet.base, "host": WALLET, "session": global_session},
         "member": {"base": service.base, "host": member_host, "session": member.session},
         "vault": {"base": service.base, "host": member_host, "session": vault_session},
         "admin": {"base": service.base, "host": admin_host, "session": admin.session},
@@ -478,4 +527,5 @@ async fn entry() {
     }
     proxy_task.abort();
     login_fault_task.abort();
+    mint_task.abort();
 }

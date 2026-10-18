@@ -144,6 +144,16 @@ async fn unknown_session_result_and_cancelled_reply_fence_original_foyer() {
     let now = fixture["now"].as_u64().unwrap();
     let fault = &fixture["login_faults"];
     let base = fault["base"].as_str().unwrap();
+    // Minted now, not at fixture start: the owner's login ceremonies live 300 s.
+    let minted = reqwest::Client::new()
+        .post(format!("{base}/__requests"))
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    let requests: Vec<Value> = serde_json::from_slice(&minted).unwrap();
     for index in 0..2 {
         let mut door = Door::new(
             crate::door::Configuration::new(
@@ -179,7 +189,7 @@ async fn unknown_session_result_and_cancelled_reply_fence_original_foyer() {
             .clients
             .remove(&foyer::Scope::Global)
             .unwrap();
-        let body = fault["requests"][index].clone();
+        let body = requests[index].clone();
         // The public assertion came from the original server's real authenticator
         // fixture. The proxy breaks/withholds only its already accepted reply.
         let future = async move {

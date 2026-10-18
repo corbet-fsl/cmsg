@@ -104,12 +104,22 @@ async fn actual_login_custody_is_consumed_once_with_local_and_original_session_r
     }
     let fixture = fixture().await;
     let now = fixture["now"].as_u64().unwrap();
-    let target = if cfg!(target_arch = "wasm32") {
-        "browser"
-    } else {
-        "native"
+    // Native mints its registration now (the owner's ceremonies live 300 s from
+    // register_begin); the browser matrix keeps the fixture's pre-minted one.
+    #[cfg(not(target_arch = "wasm32"))]
+    let registration: &Value = &{
+        let minted = reqwest::Client::new()
+            .post(fixture["custody_registration_mint"].as_str().unwrap())
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        serde_json::from_slice::<Value>(&minted).unwrap()
     };
-    let registration = &fixture["custody_registrations"][target];
+    #[cfg(target_arch = "wasm32")]
+    let registration = &fixture["custody_registrations"]["browser"];
     let platform = SoftwareAuthenticator::new(
         VAULT,
         TestConfiguration {
