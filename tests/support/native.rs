@@ -411,19 +411,18 @@ async fn a_slow_action_longer_than_the_hop_reports_its_real_outcome() {
         release.release();
     });
     assert!(matches!(
-        client.invoke_bytes(REVOKE).await.unwrap(),
+        client.invoke_bytes(STATUS).await.unwrap(),
         Output::Ok { .. }
     ));
     // Read outcomes are acknowledged by the next request and then forgotten;
-    // a repeated identical request is a new action (the capability is revoked).
+    // a repeated identical request after that is a new action.
     assert_eq!(operations.table().kept.len(), 1);
     assert!(matches!(
-        client.invoke_bytes(REVOKE).await.unwrap(),
-        Output::Error {
-            error: ErrorCode::Unauthorized
-        }
+        client.invoke_bytes(STATUS).await.unwrap(),
+        Output::Ok { .. }
     ));
-    assert!(operations.table().kept.is_empty());
+    assert_eq!(operations.table().started, 2);
+    assert_eq!(operations.table().kept.len(), 1);
     assert!(operations.table().running.is_empty());
     server.abort();
 }
@@ -434,8 +433,8 @@ async fn a_restarted_front_end_reattaches_to_the_running_action() {
     let (state, token, _thread) = paired_with(clock.clone()).await;
     let operations = state.operations.clone();
     let (first, restarted, server) = served(state, &token).await;
-    // The first front end starts the revoke and dies while it runs.
-    let mut call = Box::pin(async move { first.invoke_bytes(REVOKE).await });
+    // The first front end starts the action and dies while it runs.
+    let mut call = Box::pin(async move { first.invoke_bytes(STATUS).await });
     tokio::select! {
         _ = clock.entered.notified() => {},
         _ = &mut call => panic!("the owner must be held inside the action"),
@@ -443,18 +442,18 @@ async fn a_restarted_front_end_reattaches_to_the_running_action() {
     tokio::time::sleep(Duration::from_millis(400)).await;
     drop(call);
     assert_eq!(operations.table().running.len(), 1);
-    // The restarted front end repeats the request, attaches to the running
-    // action (a second revoke would be Unauthorized) and gets its outcome.
+    // The restarted front end repeats the request and attaches to the running
+    // action instead of starting it again, then gets its real outcome.
     let release = clock.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(400)).await;
         release.release();
     });
     assert!(matches!(
-        restarted.invoke_bytes(REVOKE).await.unwrap(),
+        restarted.invoke_bytes(STATUS).await.unwrap(),
         Output::Ok { .. }
     ));
-    // An outcome nobody has read yet is kept for the next restart, too.
+    // An outcome nobody has acknowledged yet is kept for the next restart, too.
     let again = Client::with_hop(
         restarted.endpoint.origin().ascii_serialization().as_str(),
         ORIGIN,
@@ -463,10 +462,57 @@ async fn a_restarted_front_end_reattaches_to_the_running_action() {
     )
     .unwrap();
     assert!(matches!(
-        again.invoke_bytes(REVOKE).await.unwrap(),
+        again.invoke_bytes(STATUS).await.unwrap(),
         Output::Ok { .. }
     ));
+    assert_eq!(operations.table().started, 1);
     server.abort();
+}
+
+struct SetClock(std::sync::atomic::AtomicU64);
+impl Clock for SetClock {
+    fn now(&self) -> u64 {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+fn operation_request(token: &ClientToken, body: &'static [u8]) -> Request {
+    let mut req = request(token, Body::from(body));
+    req.headers_mut()
+        .insert(OPERATION, HeaderValue::from_static("1"));
+    req
+}
+
+#[tokio::test]
+async fn a_revoked_or_expired_capability_gets_no_kept_outcome() {
+    // Revoked: the kept status outcome is refused and dropped.
+    let (state, token) = paired().await;
+    let kept = dispatch(state.clone(), None, operation_request(&token, STATUS)).await;
+    assert_eq!(kept.status(), StatusCode::OK);
+    assert_eq!(state.operations.table().kept.len(), 1);
+    assert_eq!(
+        dispatch(state.clone(), None, request(&token, Body::from(REVOKE)))
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_error(
+        dispatch(state.clone(), None, operation_request(&token, STATUS)).await,
+        ErrorCode::Unauthorized,
+    )
+    .await;
+    assert!(state.operations.table().kept.is_empty());
+    // Expired: the same without any owner command after the outcome was kept.
+    let clock = Arc::new(SetClock(std::sync::atomic::AtomicU64::new(11)));
+    let (state, token, _thread) = paired_with(clock.clone()).await;
+    let kept = dispatch(state.clone(), None, operation_request(&token, STATUS)).await;
+    assert_eq!(kept.status(), StatusCode::OK);
+    clock.0.store(100, std::sync::atomic::Ordering::SeqCst);
+    assert_error(
+        dispatch(state.clone(), None, operation_request(&token, STATUS)).await,
+        ErrorCode::Unauthorized,
+    )
+    .await;
+    assert!(state.operations.table().kept.is_empty());
 }
 
 #[tokio::test]
@@ -515,10 +561,13 @@ async fn operation_hops_refuse_malformed_protocol_headers() {
 #[tokio::test]
 async fn a_cancelled_operation_unregisters_and_kept_outcomes_are_bounded() {
     let operations = Arc::new(Operations::default());
-    let Attached::Started(finish, mut receiver) = operations.attach([1; 32]) else {
+    let Attached::Started(finish, mut receiver) = operations.attach([1; 32], [0; 32]) else {
         panic!("a new id starts an operation");
     };
-    assert!(matches!(operations.attach([1; 32]), Attached::Running(_)));
+    assert!(matches!(
+        operations.attach([1; 32], [0; 32]),
+        Attached::Running(_)
+    ));
     // Its task ended without an outcome: waiters see the end, nothing is kept.
     drop(finish);
     assert!(operations.table().running.is_empty());
@@ -527,7 +576,7 @@ async fn a_cancelled_operation_unregisters_and_kept_outcomes_are_bounded() {
         .await
         .is_err());
     for n in 0..=MAX_KEPT {
-        let Attached::Started(finish, _) = operations.attach([n as u8 + 2; 32]) else {
+        let Attached::Started(finish, _) = operations.attach([n as u8 + 2; 32], [0; 32]) else {
             panic!("a new id starts an operation");
         };
         finish.complete(Output::Error {
