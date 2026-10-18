@@ -153,6 +153,35 @@ pub(super) trait BoundBoard {
     ) -> rooms::RoomFuture<'_, cbrd::clnk::cmbl::Outcome> {
         Box::pin(async { Err(cbrd::clnk::ErrorCode::Rejected) })
     }
+    /// The live connection of `room`, if this device has connected to it.
+    fn room_connection(&self, _room: [u8; 16]) -> Result<[u8; 16]> {
+        Err(ErrorCode::Unavailable)
+    }
+    fn room_prepare_epoch(&mut self, _nonce: [u8; 16]) -> Result<cbrd::Prepared> {
+        Err(ErrorCode::Unavailable)
+    }
+    fn room_receive_epoch(
+        &mut self,
+        _prepared: cbrd::Prepared,
+        _signature: Vec<u8>,
+    ) -> OwnedFuture<'_, ()> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    fn room_prepare_pass(
+        &mut self,
+        _room: [u8; 16],
+        _operation: [u8; 16],
+        _nonce: [u8; 16],
+    ) -> Result<cbrd::Prepared> {
+        Err(ErrorCode::Unavailable)
+    }
+    fn room_receive_pass(
+        &mut self,
+        _prepared: cbrd::Prepared,
+        _signature: Vec<u8>,
+    ) -> OwnedFuture<'_, [u8; 16]> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn status(&self) -> cbrd::Status;
     fn disconnect(&mut self) -> cbrd::Status;
     fn prepare(&mut self, request: cbrd::cfrm::Request, nonce: [u8; 16]) -> Result<cbrd::Prepared>;
@@ -177,6 +206,42 @@ impl<T: clnk::Transport, R: RoomLink> BoundBoard for BoardBinding<T, R> {
         command: cbrd::clnk::cmbl::Request,
     ) -> rooms::RoomFuture<'_, cbrd::clnk::cmbl::Outcome> {
         R::execute_room(&self.board, command)
+    }
+    fn room_connection(&self, room: [u8; 16]) -> Result<[u8; 16]> {
+        R::room_connection(&self.board, room).map_err(board::before_send)
+    }
+    fn room_prepare_epoch(&mut self, nonce: [u8; 16]) -> Result<cbrd::Prepared> {
+        R::prepare_room_epoch(&self.board, nonce).map_err(board::before_send)
+    }
+    fn room_receive_epoch(
+        &mut self,
+        prepared: cbrd::Prepared,
+        signature: Vec<u8>,
+    ) -> OwnedFuture<'_, ()> {
+        Box::pin(async move {
+            R::receive_room_epoch(&mut self.board, prepared, signature)
+                .await
+                .map_err(board::after_send)
+        })
+    }
+    fn room_prepare_pass(
+        &mut self,
+        room: [u8; 16],
+        operation: [u8; 16],
+        nonce: [u8; 16],
+    ) -> Result<cbrd::Prepared> {
+        R::prepare_room_pass(&mut self.board, room, operation, nonce).map_err(board::before_send)
+    }
+    fn room_receive_pass(
+        &mut self,
+        prepared: cbrd::Prepared,
+        signature: Vec<u8>,
+    ) -> OwnedFuture<'_, [u8; 16]> {
+        Box::pin(async move {
+            R::receive_room_pass(&mut self.board, prepared, signature)
+                .await
+                .map_err(board::after_send)
+        })
     }
     fn status(&self) -> cbrd::Status {
         self.board.status()

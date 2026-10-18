@@ -50,6 +50,11 @@ pub struct RoomAdmitted {
 }
 
 #[derive(Clone, Serialize, JsonSchema)]
+pub struct RoomConnected {
+    pub connected: bool,
+}
+
+#[derive(Clone, Serialize, JsonSchema)]
 pub struct RoomServed {
     /// Requests this call answered.
     pub answered: u32,
@@ -326,6 +331,7 @@ pub(in crate::door) async fn room_join(
     key: &[u8; 32],
     request: RoomJoin,
 ) -> Result<(RoomJoinStatus, Vec<Event>)> {
+    super::ensure_room(door, key, request.room).await?;
     let (board, expires) = handles(door, key)?;
     Ok((board.room_join(request, expires).await?, vec![]))
 }
@@ -335,6 +341,7 @@ pub(in crate::door) async fn room_serve(
     key: &[u8; 32],
     request: RoomRef,
 ) -> Result<(RoomServed, Vec<Event>)> {
+    super::ensure_room(door, key, request.room).await?;
     let (board, expires) = handles(door, key)?;
     Ok((board.room_serve(request, expires).await?, vec![]))
 }
@@ -355,6 +362,7 @@ pub(in crate::door) async fn room_admit(
     key: &[u8; 32],
     request: RoomRef,
 ) -> Result<(RoomAdmitted, Vec<Event>)> {
+    super::ensure_room(door, key, request.room).await?;
     let (board, expires) = handles(door, key)?;
     Ok((board.room_admit(request, expires).await?, vec![]))
 }
