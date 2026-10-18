@@ -11,8 +11,8 @@ use axum::{
     Json, Router,
 };
 use futures_util::FutureExt;
-use std::{future::Future, panic::AssertUnwindSafe, sync::Arc};
-use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit};
+use std::{future::Future, panic::AssertUnwindSafe, sync::Arc, time::Duration};
+use tokio::sync::{mpsc, oneshot, watch, OwnedSemaphorePermit};
 
 #[cfg(feature = "native-tor")]
 pub mod deployment;
@@ -29,6 +29,162 @@ struct HttpState {
     runtime: Owner,
     hosts: BTreeSet<String>,
     requests: Arc<tokio::sync::Semaphore>,
+    operations: Arc<Operations>,
+    /// Longest one hop of the operation protocol waits for completion.
+    hop_wait: Duration,
+}
+
+impl HttpState {
+    fn new(runtime: Owner, hosts: BTreeSet<String>) -> Self {
+        Self {
+            runtime,
+            hosts,
+            requests: Arc::new(tokio::sync::Semaphore::new(MAX_CLIENTS)),
+            operations: Arc::default(),
+            hop_wait: HOP_WAIT,
+        }
+    }
+}
+
+/// Operation protocol (opt-in per request with `cmsg-operation: 1`). An action
+/// is identified by its caller and exact bytes, so a repeated identical request
+/// attaches to the running action or receives its kept outcome instead of
+/// starting it again. One hop waits at most `hop_wait`; a still-running action
+/// answers `pending` and the caller asks again. A transport timeout therefore
+/// never decides an action's outcome. The device keeps each outcome until the
+/// caller acknowledges it (`cmsg-acknowledge` on a later request), so a
+/// restarted caller repeating its request receives the same outcome.
+const OPERATION: HeaderName = HeaderName::from_static("cmsg-operation");
+const ACKNOWLEDGE: HeaderName = HeaderName::from_static("cmsg-acknowledge");
+const HOP_WAIT: Duration = Duration::from_secs(3);
+const CLIENT_HOP: Duration = Duration::from_secs(10);
+const LOST_HOP_PAUSE: Duration = Duration::from_millis(100);
+/// Kept unacknowledged outcomes; the oldest is dropped beyond this bound.
+const MAX_KEPT: usize = 32;
+const MAX_ACKNOWLEDGED: usize = 8;
+
+type OperationId = [u8; 32];
+
+fn operation_id(origin: &str, token: &str, envelope: &[u8]) -> OperationId {
+    let mut hash = Sha256::new();
+    hash.update(b"cmsg native operation v1\0");
+    for part in [origin.as_bytes(), token.as_bytes()] {
+        hash.update((part.len() as u64).to_be_bytes());
+        hash.update(part);
+    }
+    hash.update(envelope);
+    hash.finalize().into()
+}
+
+fn encode_operation(id: &OperationId) -> String {
+    BASE64URL_NOPAD.encode(id)
+}
+
+fn decode_operation(value: &str) -> Option<OperationId> {
+    BASE64URL_NOPAD
+        .decode(value.as_bytes())
+        .ok()?
+        .try_into()
+        .ok()
+}
+
+#[derive(Default)]
+struct Operations(std::sync::Mutex<OperationTable>);
+
+#[derive(Default)]
+struct OperationTable {
+    running: std::collections::HashMap<OperationId, watch::Receiver<Option<Output>>>,
+    kept: std::collections::HashMap<OperationId, (u64, Output)>,
+    sequence: u64,
+}
+
+enum Attached {
+    Kept(Output),
+    Running(watch::Receiver<Option<Output>>),
+    Started(Finish, watch::Receiver<Option<Output>>),
+}
+
+impl Operations {
+    fn table(&self) -> std::sync::MutexGuard<'_, OperationTable> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn acknowledge(&self, ids: &[OperationId]) {
+        let mut table = self.table();
+        for id in ids {
+            table.kept.remove(id);
+        }
+    }
+
+    fn attach(self: &Arc<Self>, id: OperationId) -> Attached {
+        let mut table = self.table();
+        if let Some((_, output)) = table.kept.get(&id) {
+            return Attached::Kept(output.clone());
+        }
+        if let Some(receiver) = table.running.get(&id) {
+            return Attached::Running(receiver.clone());
+        }
+        let (sender, receiver) = watch::channel(None);
+        table.running.insert(id, receiver.clone());
+        Attached::Started(
+            Finish {
+                operations: self.clone(),
+                id,
+                sender: Some(sender),
+            },
+            receiver,
+        )
+    }
+}
+
+/// Completes one running operation. Dropped without an outcome (its task was
+/// cancelled), it unregisters the operation and every waiter sees Reconcile.
+struct Finish {
+    operations: Arc<Operations>,
+    id: OperationId,
+    sender: Option<watch::Sender<Option<Output>>>,
+}
+
+impl Finish {
+    fn complete(mut self, output: Output) {
+        {
+            let mut table = self.operations.table();
+            table.running.remove(&self.id);
+            // A refused capability keeps nothing: it cannot displace kept outcomes.
+            if !matches!(
+                output,
+                Output::Error {
+                    error: ErrorCode::Unauthorized
+                }
+            ) {
+                table.sequence += 1;
+                let sequence = table.sequence;
+                table.kept.insert(self.id, (sequence, output.clone()));
+                while table.kept.len() > MAX_KEPT {
+                    let oldest = table
+                        .kept
+                        .iter()
+                        .min_by_key(|(_, (sequence, _))| *sequence)
+                        .map(|(id, _)| *id)
+                        .expect("a table above its bound is not empty");
+                    table.kept.remove(&oldest);
+                }
+            }
+        }
+        if let Some(sender) = self.sender.take() {
+            sender.send_replace(Some(output));
+        }
+    }
+}
+
+impl Drop for Finish {
+    fn drop(&mut self) {
+        if self.sender.is_some() {
+            self.operations.table().running.remove(&self.id);
+        }
+    }
 }
 
 /// Only bounded messages cross threads. Door and all its child facades stay on
@@ -69,7 +225,13 @@ async fn drain_composer(composer: &mut Option<Box<dyn VaultComposer>>) -> Result
 /// One courier per bound Mesh of the Door, started after the dispatch that bound
 /// the Mesh (the login) and ended with it.
 #[derive(Default)]
-struct Couriers(Vec<(String, std::rc::Rc<super::courier::Shared>, super::courier::Courier)>);
+struct Couriers(
+    Vec<(
+        String,
+        std::rc::Rc<super::courier::Shared>,
+        super::courier::Courier,
+    )>,
+);
 
 impl Couriers {
     async fn sync(&mut self, door: &super::courier::SharedDoor) {
@@ -80,7 +242,11 @@ impl Couriers {
                 .any(|(o, s)| o == origin && std::rc::Rc::ptr_eq(s, shared))
         });
         for (origin, shared) in bound {
-            if self.0.iter().any(|(o, s, _)| *o == origin && std::rc::Rc::ptr_eq(s, &shared)) {
+            if self
+                .0
+                .iter()
+                .any(|(o, s, _)| *o == origin && std::rc::Rc::ptr_eq(s, &shared))
+            {
                 continue;
             }
             let courier =
@@ -407,14 +573,7 @@ where
 {
     validate_hosts(&hosts)?;
     let (runtime, value, _thread) = Owner::start(initialize, clock).await?;
-    Ok((
-        routes(HttpState {
-            runtime,
-            hosts,
-            requests: Arc::new(tokio::sync::Semaphore::new(MAX_CLIENTS)),
-        }),
-        value,
-    ))
+    Ok((routes(HttpState::new(runtime, hosts)), value))
 }
 
 fn routes(state: HttpState) -> Router {
@@ -629,11 +788,10 @@ impl Embedded {
         )
         .await?;
         let client = Client::new(&format!("http://{address}"), &origin, token)?;
-        let app = routes(HttpState {
-            runtime: owner.clone(),
-            hosts: BTreeSet::from([address.to_string()]),
-            requests: Arc::new(tokio::sync::Semaphore::new(MAX_CLIENTS)),
-        });
+        let app = routes(HttpState::new(
+            owner.clone(),
+            BTreeSet::from([address.to_string()]),
+        ));
         let (stop, receive) = oneshot::channel();
         let server = tokio::spawn(async move {
             axum::serve(listener, app)
@@ -732,6 +890,22 @@ async fn dispatch(state: HttpState, action: Option<String>, request: Request) ->
             error: ErrorCode::Unauthorized,
         });
     }
+    let operation = match headers.get(&OPERATION) {
+        None => None,
+        Some(_) if unique_header(headers, OPERATION) == Some("1") => match acknowledged(headers) {
+            Some(ids) => Some(ids),
+            None => {
+                return response(Output::Error {
+                    error: ErrorCode::InvalidRequest,
+                })
+            }
+        },
+        Some(_) => {
+            return response(Output::Error {
+                error: ErrorCode::InvalidRequest,
+            })
+        }
+    };
     let origin = origin.to_owned();
     let token = Zeroizing::new(token.to_owned());
     let Ok(permit) = state.requests.clone().try_acquire_owned() else {
@@ -739,45 +913,139 @@ async fn dispatch(state: HttpState, action: Option<String>, request: Request) ->
             error: ErrorCode::Capacity,
         });
     };
+    if let Some(acknowledged) = operation {
+        return operate(state, action, request, origin, token, permit, &acknowledged).await;
+    }
     // Bound queued work before authentication; repeat authority after body and
     // channel waiting with fresh time inside the owner thread.
     let authorized = state.runtime.authenticate(&origin, &token).await;
     if let Err(error) = authorized {
         return response(Output::Error { error });
     }
+    let envelope = match envelope(action, request).await {
+        Ok(envelope) => envelope,
+        Err(refused) => return *refused,
+    };
+    let output = state.runtime.invoke(origin, token, envelope, permit).await;
+    response(output)
+}
+
+/// Acknowledged operation ids: absent, or one header with at most
+/// `MAX_ACKNOWLEDGED` comma-separated ids. Anything else is refused.
+fn acknowledged(headers: &HeaderMap) -> Option<Vec<OperationId>> {
+    if headers.get(&ACKNOWLEDGE).is_none() {
+        return Some(Vec::new());
+    }
+    let ids = unique_header(headers, ACKNOWLEDGE)?
+        .split(',')
+        .map(decode_operation)
+        .collect::<Option<Vec<_>>>()?;
+    (ids.len() <= MAX_ACKNOWLEDGED).then_some(ids)
+}
+
+/// Read the bounded body and build the exact invocation envelope.
+async fn envelope(
+    action: Option<String>,
+    request: Request,
+) -> std::result::Result<Vec<u8>, Box<Response>> {
     let bytes = match tokio::time::timeout(
-        std::time::Duration::from_secs(5),
+        Duration::from_secs(5),
         to_bytes(request.into_body(), MAX_BODY_BYTES),
     )
     .await
     {
         Ok(Ok(bytes)) => bytes,
         Ok(Err(_)) => {
-            return response(Output::Error {
+            return Err(Box::new(response(Output::Error {
                 error: ErrorCode::Capacity,
-            })
+            })))
         }
         Err(_) => {
-            return response(Output::Error {
+            return Err(Box::new(response(Output::Error {
                 error: ErrorCode::Unavailable,
-            })
+            })))
         }
     };
     // Preserve the exact body bytes for the typed Serde decoder, including its
     // duplicate-field rejection. No Value round trip before authorization.
-    let envelope = if let Some(action) = action {
+    Ok(if let Some(action) = action {
         let Ok(body) = std::str::from_utf8(&bytes) else {
-            return response(Output::Error {
+            return Err(Box::new(response(Output::Error {
                 error: ErrorCode::InvalidRequest,
-            });
+            })));
         };
         let name = serde_json::to_string(&action).expect("a string always encodes as JSON");
         format!("{{\"action\":{name},\"version\":1,\"body\":{body}}}").into_bytes()
     } else {
         bytes.to_vec()
+    })
+}
+
+/// One hop of the operation protocol. A new action runs in its own task
+/// (authentication, then admitted execution) that no HTTP waiter can cancel;
+/// the hop waits at most `hop_wait` for it. The permit bounds every waiter and
+/// travels with a new action into the owner, as without the protocol.
+async fn operate(
+    state: HttpState,
+    action: Option<String>,
+    request: Request,
+    origin: String,
+    token: Zeroizing<String>,
+    permit: OwnedSemaphorePermit,
+    acknowledged: &[OperationId],
+) -> Response {
+    let envelope = match envelope(action, request).await {
+        Ok(envelope) => envelope,
+        Err(refused) => return *refused,
     };
-    let output = state.runtime.invoke(origin, token, envelope, permit).await;
-    response(output)
+    state.operations.acknowledge(acknowledged);
+    let id = operation_id(&origin, &token, &envelope);
+    let (mut receiver, _permit) = match state.operations.attach(id) {
+        Attached::Kept(output) => return operation_response(&id, Some(output)),
+        Attached::Running(receiver) => (receiver, Some(permit)),
+        Attached::Started(finish, receiver) => {
+            let runtime = state.runtime.clone();
+            tokio::spawn(async move {
+                let output = match runtime.authenticate(&origin, &token).await {
+                    Err(error) => Output::Error { error },
+                    Ok(()) => runtime.invoke(origin, token, envelope, permit).await,
+                };
+                finish.complete(output);
+            });
+            (receiver, None)
+        }
+    };
+    let outcome = match tokio::time::timeout(
+        state.hop_wait,
+        receiver.wait_for(|outcome| outcome.is_some()),
+    )
+    .await
+    {
+        Ok(Ok(outcome)) => outcome.clone(),
+        // The action's task ended without an outcome: it may have committed.
+        Ok(Err(_)) => Some(Output::Error {
+            error: ErrorCode::Reconcile,
+        }),
+        Err(_) => None,
+    };
+    operation_response(&id, outcome)
+}
+
+/// A final outcome, or `pending` (202) while the action is still running.
+fn operation_response(id: &OperationId, outcome: Option<Output>) -> Response {
+    let mut answer = match outcome {
+        Some(output) => response(output),
+        None => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({ "status": "pending" })),
+        )
+            .into_response(),
+    };
+    answer.headers_mut().insert(
+        OPERATION,
+        HeaderValue::from_str(&encode_operation(id)).expect("base64url is a header value"),
+    );
+    answer
 }
 
 fn response(output: Output) -> Response {
@@ -815,6 +1083,20 @@ pub struct Client {
     endpoint: url::Url,
     origin: String,
     capability: ClientToken,
+    /// Outcomes this client has read, acknowledged on its next request.
+    acknowledged: std::sync::Mutex<Vec<String>>,
+}
+
+/// What one hop of the operation protocol learned.
+enum Hop {
+    Final(Output, Option<String>),
+    Pending,
+    /// No answer within the hop (timeout, interrupted response): ask again.
+    Lost,
+    /// The device is not listening: nothing is running there any more.
+    Gone,
+    /// The device answered outside the protocol.
+    Invalid,
 }
 
 impl Client {
@@ -822,6 +1104,11 @@ impl Client {
     /// origins are allowed; neither DNS, redirects nor environment proxies can
     /// forward this capability to a different service. No cookie jar is used.
     pub fn new(base: &str, origin: &str, capability: ClientToken) -> Result<Self> {
+        Self::with_hop(base, origin, capability, CLIENT_HOP)
+    }
+
+    /// `hop` bounds one request/response exchange, never an action.
+    fn with_hop(base: &str, origin: &str, capability: ClientToken, hop: Duration) -> Result<Self> {
         validate_origin(origin)?;
         let mut endpoint = url::Url::parse(base).map_err(|_| ErrorCode::InvalidRequest)?;
         let loopback = match endpoint.host() {
@@ -844,7 +1131,7 @@ impl Client {
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
-            .timeout(std::time::Duration::from_secs(10))
+            .timeout(hop)
             .build()
             .map_err(|_| ErrorCode::Unavailable)?;
         Ok(Self {
@@ -852,14 +1139,18 @@ impl Client {
             endpoint,
             origin: origin.into(),
             capability,
+            acknowledged: std::sync::Mutex::default(),
         })
     }
 
     /// Forward the original invocation bytes. There is no Value parse/reencode
     /// that could erase duplicate fields before the Door's typed decoder.
-    /// Once send begins, any transport/response failure is Reconcile: the action
-    /// may already have committed. Valid owner refusals stay unchanged in Output.
-    /// No automatic retry or redirect can repeat a mutation.
+    /// The action runs as one device operation: a hop without an answer, or a
+    /// `pending` answer, repeats the identical request, which attaches to the
+    /// same operation and can never start the action twice. The result is the
+    /// action's real outcome, however long it runs; Reconcile only when the
+    /// device stops listening or answers outside the protocol. Valid owner
+    /// refusals stay unchanged in Output. No redirect is ever followed.
     pub async fn invoke_bytes(&self, request: &[u8]) -> Result<Output> {
         if request.len() > MAX_BODY_BYTES {
             return Err(ErrorCode::Capacity);
@@ -869,34 +1160,111 @@ impl Client {
         let mut authorization =
             HeaderValue::from_str(&bearer).expect("paired capability is fixed ASCII base64url");
         authorization.set_sensitive(true);
-        let mut response = self
+        loop {
+            let acknowledged = self.take_acknowledged();
+            match self.hop(request, &authorization, &acknowledged).await {
+                Hop::Final(output, id) => {
+                    self.restore_acknowledged(id.into_iter().collect());
+                    return Ok(output);
+                }
+                Hop::Pending => {}
+                Hop::Lost => {
+                    self.restore_acknowledged(acknowledged);
+                    tokio::time::sleep(LOST_HOP_PAUSE).await;
+                }
+                Hop::Gone => {
+                    self.restore_acknowledged(acknowledged);
+                    return Err(ErrorCode::Reconcile);
+                }
+                Hop::Invalid => return Err(ErrorCode::Reconcile),
+            }
+        }
+    }
+
+    fn take_acknowledged(&self) -> Vec<String> {
+        let mut pending = self
+            .acknowledged
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let count = pending.len().min(MAX_ACKNOWLEDGED);
+        pending.drain(..count).collect()
+    }
+
+    fn restore_acknowledged(&self, ids: Vec<String>) {
+        let mut pending = self
+            .acknowledged
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for id in ids {
+            if !pending.contains(&id) {
+                pending.push(id);
+            }
+        }
+        // An unacknowledged outcome only waits for the device's own bound.
+        let excess = pending.len().saturating_sub(MAX_KEPT);
+        pending.drain(..excess);
+    }
+
+    async fn hop(
+        &self,
+        request: &[u8],
+        authorization: &HeaderValue,
+        acknowledged: &[String],
+    ) -> Hop {
+        let mut call = self
             .http
             .post(self.endpoint.clone())
             .header(header::ORIGIN, &self.origin)
-            .header(header::AUTHORIZATION, authorization)
+            .header(header::AUTHORIZATION, authorization.clone())
             .header(header::CONTENT_TYPE, "application/json")
-            .body(request.to_vec())
-            .send()
-            .await
-            .map_err(|_| ErrorCode::Reconcile)?;
+            .header(OPERATION, "1");
+        if !acknowledged.is_empty() {
+            call = call.header(ACKNOWLEDGE, acknowledged.join(","));
+        }
+        let mut response = match call.body(request.to_vec()).send().await {
+            Ok(response) => response,
+            Err(error) if error.is_connect() => return Hop::Gone,
+            Err(_) => return Hop::Lost,
+        };
         let status = response.status();
+        let id = unique_header(response.headers(), OPERATION)
+            .filter(|id| decode_operation(id).is_some())
+            .map(str::to_owned);
         if unique_header(response.headers(), header::CONTENT_TYPE) != Some("application/json")
             || unique_header(response.headers(), header::CACHE_CONTROL) != Some("no-store")
         {
-            return Err(ErrorCode::Reconcile);
+            return Hop::Invalid;
         }
         let mut bytes = Zeroizing::new(Vec::new());
-        while let Some(chunk) = response.chunk().await.map_err(|_| ErrorCode::Reconcile)? {
-            if chunk.len() > MAX_RESULT_BYTES - bytes.len() {
-                return Err(ErrorCode::Reconcile);
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    if chunk.len() > MAX_RESULT_BYTES - bytes.len() {
+                        return Hop::Invalid;
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                Ok(None) => break,
+                Err(_) => return Hop::Lost,
             }
-            bytes.extend_from_slice(&chunk);
         }
-        let output: Output = serde_json::from_slice(&bytes).map_err(|_| ErrorCode::Reconcile)?;
+        if status == StatusCode::ACCEPTED {
+            return match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                Ok(value)
+                    if value == serde_json::json!({ "status": "pending" }) && id.is_some() =>
+                {
+                    Hop::Pending
+                }
+                _ => Hop::Invalid,
+            };
+        }
+        let Ok(output) = serde_json::from_slice::<Output>(&bytes) else {
+            return Hop::Invalid;
+        };
         if status.is_success() != matches!(output, Output::Ok { .. }) {
-            return Err(ErrorCode::Reconcile);
+            return Hop::Invalid;
         }
-        Ok(output)
+        Hop::Final(output, id)
     }
 }
 

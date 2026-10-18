@@ -880,7 +880,7 @@ async fn native_client_refuses_truncated_http_response() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[tokio::test]
-async fn lost_mutation_response_requires_reconciliation_and_is_never_retried() {
+async fn lost_mutation_response_reattaches_and_never_runs_the_action_twice() {
     use axum::{
         body::{Body, Bytes},
         extract::Request,
@@ -944,13 +944,19 @@ async fn lost_mutation_response_requires_reconciliation_and_is_never_retried() {
     );
     let server = tokio::spawn(async move { axum::serve(listener, proxy).await.unwrap() });
     let client = native::Client::new(&format!("http://{address}"), ORIGIN, token).unwrap();
-    assert!(matches!(
-        client
-            .invoke_bytes(br#"{"action":"client.revoke","version":1,"body":{}}"#)
-            .await,
-        Err(ErrorCode::Reconcile)
-    ));
-    assert_eq!(count.load(Ordering::SeqCst), 1);
+    // The damaged response is a lost hop: the identical request attaches to the
+    // same device operation and reads its kept outcome. A second execution of
+    // the revoke would have answered Unauthorized.
+    assert_eq!(
+        value(
+            client
+                .invoke_bytes(br#"{"action":"client.revoke","version":1,"body":{}}"#)
+                .await
+                .unwrap()
+        )["result"]["revoked"],
+        true
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 2);
     assert_eq!(
         value(
             client
@@ -960,7 +966,7 @@ async fn lost_mutation_response_requires_reconciliation_and_is_never_retried() {
         ),
         error(ErrorCode::Unauthorized)
     );
-    assert_eq!(count.load(Ordering::SeqCst), 2);
+    assert_eq!(count.load(Ordering::SeqCst), 3);
     server.abort();
     let _ = server.await;
 }

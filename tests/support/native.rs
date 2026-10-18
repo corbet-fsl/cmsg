@@ -36,11 +36,7 @@ async fn paired_with(
     .await
     .unwrap();
     (
-        HttpState {
-            runtime,
-            hosts: BTreeSet::from(["localhost:3000".into()]),
-            requests: Arc::new(tokio::sync::Semaphore::new(MAX_CLIENTS)),
-        },
+        HttpState::new(runtime, BTreeSet::from(["localhost:3000".into()])),
         token,
         thread,
     )
@@ -374,4 +370,214 @@ async fn embedded_owns_pairing_and_non_send_initialization_and_drains_shutdown()
     )
     .await
     .is_err());
+}
+
+/// Serve `state` on loopback with a short operation hop; the returned clients
+/// share one capability, like a front end restarted with the same pairing.
+async fn served(
+    mut state: HttpState,
+    token: &ClientToken,
+) -> (Client, Client, tokio::task::JoinHandle<std::io::Result<()>>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    state.hosts = BTreeSet::from([address.clone()]);
+    state.hop_wait = Duration::from_millis(40);
+    let server = tokio::spawn(async move { axum::serve(listener, routes(state)).await });
+    let client = || {
+        let token = ClientToken(Zeroizing::new(token.expose_for_transport().into()));
+        Client::with_hop(
+            &format!("http://{address}"),
+            ORIGIN,
+            token,
+            Duration::from_millis(150),
+        )
+        .unwrap()
+    };
+    (client(), client(), server)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_slow_action_longer_than_the_hop_reports_its_real_outcome() {
+    // The owner is held inside the admitted action (second clock reading) for
+    // many client hops; the client neither gives up nor reports Reconcile.
+    let clock = Arc::new(GateClock::new(1));
+    let (state, token, _thread) = paired_with(clock.clone()).await;
+    let operations = state.operations.clone();
+    let (client, _, server) = served(state, &token).await;
+    let release = clock.clone();
+    tokio::spawn(async move {
+        release.entered.notified().await;
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        release.release();
+    });
+    assert!(matches!(
+        client.invoke_bytes(REVOKE).await.unwrap(),
+        Output::Ok { .. }
+    ));
+    // Read outcomes are acknowledged by the next request and then forgotten;
+    // a repeated identical request is a new action (the capability is revoked).
+    assert_eq!(operations.table().kept.len(), 1);
+    assert!(matches!(
+        client.invoke_bytes(REVOKE).await.unwrap(),
+        Output::Error {
+            error: ErrorCode::Unauthorized
+        }
+    ));
+    assert!(operations.table().kept.is_empty());
+    assert!(operations.table().running.is_empty());
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_restarted_front_end_reattaches_to_the_running_action() {
+    let clock = Arc::new(GateClock::new(1));
+    let (state, token, _thread) = paired_with(clock.clone()).await;
+    let operations = state.operations.clone();
+    let (first, restarted, server) = served(state, &token).await;
+    // The first front end starts the revoke and dies while it runs.
+    let mut call = Box::pin(async move { first.invoke_bytes(REVOKE).await });
+    tokio::select! {
+        _ = clock.entered.notified() => {},
+        _ = &mut call => panic!("the owner must be held inside the action"),
+    }
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    drop(call);
+    assert_eq!(operations.table().running.len(), 1);
+    // The restarted front end repeats the request, attaches to the running
+    // action (a second revoke would be Unauthorized) and gets its outcome.
+    let release = clock.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        release.release();
+    });
+    assert!(matches!(
+        restarted.invoke_bytes(REVOKE).await.unwrap(),
+        Output::Ok { .. }
+    ));
+    // An outcome nobody has read yet is kept for the next restart, too.
+    let again = Client::with_hop(
+        restarted.endpoint.origin().ascii_serialization().as_str(),
+        ORIGIN,
+        ClientToken(Zeroizing::new(token.expose_for_transport().into())),
+        Duration::from_millis(150),
+    )
+    .unwrap();
+    assert!(matches!(
+        again.invoke_bytes(REVOKE).await.unwrap(),
+        Output::Ok { .. }
+    ));
+    server.abort();
+}
+
+#[tokio::test]
+async fn operation_hops_refuse_malformed_protocol_headers() {
+    let (state, token) = paired().await;
+    for (name, value) in [("cmsg-operation", "2"), ("cmsg-acknowledge", "not-an-id")] {
+        let mut req = request(&token, Body::from(STATUS));
+        req.headers_mut()
+            .insert(OPERATION, HeaderValue::from_static("1"));
+        req.headers_mut().insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_static(value),
+        );
+        assert_error(
+            dispatch(state.clone(), None, req).await,
+            ErrorCode::InvalidRequest,
+        )
+        .await;
+    }
+    let ids = vec![encode_operation(&[0; 32]); MAX_ACKNOWLEDGED + 1].join(",");
+    let mut req = request(&token, Body::from(STATUS));
+    req.headers_mut()
+        .insert(OPERATION, HeaderValue::from_static("1"));
+    req.headers_mut()
+        .insert(ACKNOWLEDGE, HeaderValue::from_str(&ids).unwrap());
+    assert_error(
+        dispatch(state.clone(), None, req).await,
+        ErrorCode::InvalidRequest,
+    )
+    .await;
+    // A refused capability is answered but leaves nothing behind.
+    let mut req = request(
+        &ClientToken(Zeroizing::new("AAAA".into())),
+        Body::from(STATUS),
+    );
+    req.headers_mut()
+        .insert(OPERATION, HeaderValue::from_static("1"));
+    assert_error(
+        dispatch(state.clone(), None, req).await,
+        ErrorCode::Unauthorized,
+    )
+    .await;
+    assert!(state.operations.table().kept.is_empty());
+}
+
+#[tokio::test]
+async fn a_cancelled_operation_unregisters_and_kept_outcomes_are_bounded() {
+    let operations = Arc::new(Operations::default());
+    let Attached::Started(finish, mut receiver) = operations.attach([1; 32]) else {
+        panic!("a new id starts an operation");
+    };
+    assert!(matches!(operations.attach([1; 32]), Attached::Running(_)));
+    // Its task ended without an outcome: waiters see the end, nothing is kept.
+    drop(finish);
+    assert!(operations.table().running.is_empty());
+    assert!(receiver
+        .wait_for(|outcome| outcome.is_some())
+        .await
+        .is_err());
+    for n in 0..=MAX_KEPT {
+        let Attached::Started(finish, _) = operations.attach([n as u8 + 2; 32]) else {
+            panic!("a new id starts an operation");
+        };
+        finish.complete(Output::Error {
+            error: ErrorCode::Refused,
+        });
+    }
+    let table = operations.table();
+    assert_eq!(table.kept.len(), MAX_KEPT);
+    assert!(!table.kept.contains_key(&[2; 32]));
+}
+
+#[tokio::test]
+async fn client_acknowledgements_are_bounded_and_pending_needs_an_operation() {
+    let (_, token) = paired().await;
+    let client = Client::with_hop(
+        "http://127.0.0.1:1",
+        ORIGIN,
+        token,
+        Duration::from_millis(150),
+    )
+    .unwrap();
+    client.restore_acknowledged((0..MAX_KEPT + 3).map(|n| n.to_string()).collect());
+    assert_eq!(client.acknowledged.lock().unwrap().len(), MAX_KEPT);
+    assert_eq!(client.take_acknowledged().len(), MAX_ACKNOWLEDGED);
+    // A `pending` answer without an operation id is outside the protocol.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = Router::new()
+        .route(
+            "/invoke",
+            post(|| async {
+                (
+                    StatusCode::ACCEPTED,
+                    Json(serde_json::json!({ "status": "pending" })),
+                )
+            }),
+        )
+        .layer(middleware::map_response(no_store));
+    let server = tokio::spawn(async move { axum::serve(listener, app).await });
+    let (_, token) = paired().await;
+    let client = Client::with_hop(
+        &format!("http://{address}"),
+        ORIGIN,
+        token,
+        Duration::from_millis(150),
+    )
+    .unwrap();
+    assert!(matches!(
+        client.invoke_bytes(STATUS).await,
+        Err(ErrorCode::Reconcile)
+    ));
+    server.abort();
 }
