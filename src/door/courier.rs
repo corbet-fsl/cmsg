@@ -233,6 +233,7 @@ impl Door {
 // ---- internal calls ------------------------------------------------------------
 
 /// Seconds before a vouching sync that failed on both sides runs again.
+const LISTING_RETRY: u64 = 60;
 const VOUCHER_RETRY: u64 = 10;
 
 /// The actions the courier uses; the lease grants nothing else.
@@ -253,6 +254,8 @@ const ACTIONS: &[&str] = &[
     "board.group_message",
     "board.room_serve",
     "board.room_admit",
+    "board.room_listing",
+    "board.room_refs",
     "foyer.refresh",
     "foyer.voucher_links",
     "foyer.voucher_vouched_by",
@@ -625,6 +628,22 @@ pub(super) async fn group_propose(
     Ok((proposed, events))
 }
 
+/// `board.room_listing`: the listing keys owed to fellow members go to their
+/// direct conversations like a Welcome.
+pub(super) async fn room_listing(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: super::Empty,
+) -> Result<(super::board::RoomsListed, Vec<Event>)> {
+    let (listed, events) = super::board::room_listing(door, key, request).await?;
+    let shares = serde_json::to_value(&listed.shares).unwrap_or(Value::Null);
+    let _ = with_courier(door, key, |door, lease, shared| {
+        Box::pin(async move { queue_texts(door, lease, shared, Some(&shares)).await })
+    })
+    .await;
+    Ok((listed, events))
+}
+
 /// `board.group_answer`: the decision goes back to the actor's conversation.
 pub(super) async fn group_answer(
     door: &mut Door,
@@ -715,6 +734,8 @@ pub struct Config {
     pub scan: u64,
     /// Seconds between room-serving rounds.
     pub serve: u64,
+    /// Seconds between the upkeep of public-room listings (key, publish, share).
+    pub listing: u64,
     /// Seconds between the vouching syncs: the sponsor's (process redemption
     /// notices, create the direct thread, send the Welcome) and the newcomer's
     /// (join from the reply, flush the early messages). Both are idempotent.
@@ -731,6 +752,7 @@ impl Default for Config {
             resend: 20,
             scan: 30,
             serve: 10,
+            listing: 3_600,
             voucher: 30,
             rooms: vec![],
         }
@@ -746,6 +768,7 @@ struct State {
     next_refresh: u64,
     next_scan: u64,
     next_serve: u64,
+    next_listing: u64,
     next_voucher: u64,
     attended: bool,
     started: bool,
@@ -796,9 +819,26 @@ async fn gather(
             state.report.refreshes += 1;
         }
     }
-    if now >= state.next_serve && !config.rooms.is_empty() {
+    if now >= state.next_listing {
+        // A failed pass (not attended yet, no network) is tried again soon.
+        let done = lease.call(door, "board.room_listing", json!({})).await.is_ok();
+        state.next_listing = now + if done { config.listing.max(1) } else { LISTING_RETRY };
+    }
+    if now >= state.next_serve {
         state.next_serve = now + config.serve;
-        for room in &config.rooms {
+        // The rooms this member serves: the configured ones and every public
+        // room whose listing key this device holds.
+        let mut rooms = config.rooms.clone();
+        if let Ok(value) = lease.call(door, "board.room_refs", json!({})).await {
+            if let Ok(found) = serde_json::from_value::<Vec<RoomRef>>(value) {
+                for room in found {
+                    if !rooms.iter().any(|r| r.room == room.room) {
+                        rooms.push(room);
+                    }
+                }
+            }
+        }
+        for room in &rooms {
             let _ = lease
                 .call(
                     door,

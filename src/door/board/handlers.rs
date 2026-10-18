@@ -170,7 +170,7 @@ pub(super) struct OwnedBoard<T, R, O> {
     // attendance attempt is fenced and requires owner reconciliation, not retry.
     attendance_pending: bool,
     pub(super) joins: super::rooms::RoomJoins,
-    desk: GroupDesk,
+    pub(super) desk: GroupDesk,
     desk_loaded: bool,
 }
 
@@ -185,6 +185,14 @@ struct DeskRecord {
     /// Welcomes this member, as creator, still owes to other members.
     #[serde(default)]
     welcomes: Vec<PendingWelcome>,
+    /// This device's listing keys of public rooms (`cgrp::Listings`, encoded;
+    /// holds private keys, lives only in the encrypted owner record).
+    #[serde(default)]
+    listings: Option<Vec<u8>>,
+    /// Members this device, as the creator or last rotator of a room's listing
+    /// key, already sent the key to.
+    #[serde(default)]
+    listing_sent: Vec<([u8; 32], BTreeSet<String>)>,
 }
 
 /// How long after the request's consent window a Welcome stays valid to
@@ -205,11 +213,15 @@ struct PendingWelcome {
 /// answer. Held in memory only: after a restart a pending consent is gone and
 /// the actor must propose again; nothing is ever consented on a member's behalf.
 #[derive(Default)]
-struct GroupDesk {
+pub(super) struct GroupDesk {
     proposals: BTreeMap<[u8; 32], cbrd::GroupProposal>,
     invitations: BTreeMap<[u8; 32], cbrd::Invitation>,
     accepted: BTreeMap<[u8; 32], cbrd::Invitation>,
     welcomes: BTreeMap<[u8; 32], PendingWelcome>,
+    pub(super) listings: Option<cbrd::cgrp::Listings>,
+    pub(super) listing_sent: BTreeMap<[u8; 32], BTreeSet<String>>,
+    /// Rooms whose key this device waited one cycle for (memory only).
+    pub(super) listing_wait: BTreeSet<[u8; 32]>,
 }
 
 /// Open proposals and open invitations each; further ones are refused until
@@ -641,7 +653,7 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
 
     /// Read the durable desk once per binding; a restart keeps every pending
     /// invitation and proposal until its own expiry.
-    async fn load_desk(&mut self) -> Result<()> {
+    pub(super) async fn load_desk(&mut self) -> Result<()> {
         if self.desk_loaded {
             return Ok(());
         }
@@ -669,24 +681,44 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
                 .into_iter()
                 .map(|w| (w.operation, w))
                 .collect();
+            self.desk.listing_sent = record.listing_sent.into_iter().collect();
+            if let Some(bytes) = record.listings {
+                let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+                let me = owner.member().map_err(group_error)?;
+                let snapshot = owner.snapshot().await.map_err(group_error)?;
+                self.desk.listings = Some(
+                    cbrd::cgrp::Listings::decode(snapshot.community(), &me, &bytes)
+                        .map_err(group_error)?,
+                );
+            }
         }
         self.desk_loaded = true;
         Ok(())
     }
 
-    async fn save_desk(&mut self) -> Result<()> {
+    pub(super) async fn save_desk(&mut self) -> Result<()> {
         let record = DeskRecord {
             proposals: self.desk.proposals.values().cloned().collect(),
             invitations: self.desk.invitations.values().cloned().collect(),
             accepted: self.desk.accepted.values().cloned().collect(),
             welcomes: self.desk.welcomes.values().cloned().collect(),
+            listings: match &self.desk.listings {
+                Some(listings) => Some(listings.encode().map_err(group_error)?),
+                None => None,
+            },
+            listing_sent: self
+                .desk
+                .listing_sent
+                .iter()
+                .map(|(group, sent)| (*group, sent.clone()))
+                .collect(),
         };
         let bytes = serde_json::to_vec(&record).map_err(|_| ErrorCode::Reconcile)?;
         let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
         owner.desk_save(&bytes).await.map_err(group_error)
     }
 
-    fn group_clock(&mut self) -> Result<u64> {
+    pub(super) fn group_clock(&mut self) -> Result<u64> {
         self.owner
             .groups()
             .ok_or(ErrorCode::Unavailable)?
@@ -813,6 +845,12 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
             return Box::pin(async move { Err(error) });
         }
         self.inner.execute(prepared, signature)
+    }
+    fn room_refs(&mut self) -> OwnedFuture<'_, Vec<super::rooms::RoomRef>> {
+        Box::pin(self.room_refs_step())
+    }
+    fn room_listing(&mut self) -> OwnedFuture<'_, super::rooms::ListingPlan> {
+        Box::pin(self.room_listing_step())
     }
     fn room_connection(&self, room: [u8; 16]) -> Result<[u8; 16]> {
         self.inner.room_connection(room)
@@ -1017,6 +1055,29 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
                     members,
                 });
             }
+            if let cbrd::GroupMessage::Listing { share, .. } = &message {
+                // A listing key counts only from a current fellow member of that
+                // very room, never from anyone else and never from this device.
+                let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+                let me = owner.member().map_err(group_error)?;
+                let snapshot = owner.snapshot().await.map_err(group_error)?;
+                let sender_is_member = snapshot
+                    .members(&share.group)
+                    .map(|members| members.contains(&from) && members.contains(&me))
+                    .unwrap_or(false);
+                if from == me || !sender_is_member {
+                    return Err(ErrorCode::Refused);
+                }
+                let mut listings = self.desk.listings.take().unwrap_or_else(|| {
+                    cbrd::cgrp::Listings::new(snapshot.community(), &me)
+                });
+                let adopted = listings.adopt(&snapshot, share).map_err(group_error);
+                self.desk.listings = Some(listings);
+                adopted?;
+                let group = share.group;
+                self.save_desk().await?;
+                return Ok(GroupInbound::Listing { group });
+            }
             if let cbrd::GroupMessage::Welcome { request, .. } = &message {
                 // Only an invitation this member accepted can be joined from, and
                 // only the actor's own Welcome (checked again by the join).
@@ -1040,7 +1101,9 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
             let operation = match &message {
                 cbrd::GroupMessage::Consent { consent, .. } => consent.operation,
                 cbrd::GroupMessage::Decline { operation, .. } => *operation,
-                cbrd::GroupMessage::Invite { .. } | cbrd::GroupMessage::Welcome { .. } => {
+                cbrd::GroupMessage::Invite { .. }
+                | cbrd::GroupMessage::Welcome { .. }
+                | cbrd::GroupMessage::Listing { .. } => {
                     return Err(ErrorCode::InvalidRequest);
                 }
             };

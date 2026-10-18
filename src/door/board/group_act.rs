@@ -108,6 +108,8 @@ pub enum GroupInbound {
         /// The Welcome each other member needs, to send in its conversation.
         welcomes: Vec<GroupInvite>,
     },
+    /// A fellow member's listing key of a public room was adopted.
+    Listing { group: [u8; 32] },
     /// This member joined the group from the actor's Welcome.
     Joined {
         operation: [u8; 32],
