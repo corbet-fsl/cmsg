@@ -66,7 +66,7 @@ mod tests {
         Policy {
             epoch: 4,
             valid_until: VALID_UNTIL,
-            cap: 100,
+            cap: 250,
             circle_max: 12,
             ingroup_max: 42,
             shrink_public: 36,
