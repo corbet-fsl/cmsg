@@ -54,6 +54,26 @@ pub struct RoomConnected {
     pub connected: bool,
 }
 
+/// What `board.room_listing` did: public rooms published and the key shares
+/// this device still owes to fellow members (text for each member's direct
+/// conversation, sent unchanged like a Welcome).
+#[derive(Clone, Serialize, JsonSchema)]
+pub struct RoomsListed {
+    pub published: u32,
+    pub shares: Vec<super::GroupInvite>,
+}
+
+/// One forum listing entry to publish under its room.
+pub(in crate::door) struct ListingWork {
+    pub room: [u8; 16],
+    pub entry: cbrd::clnk::cmbl::listing::SignedEntry,
+}
+
+pub(in crate::door) struct ListingPlan {
+    pub work: Vec<ListingWork>,
+    pub shares: Vec<super::GroupInvite>,
+}
+
 #[derive(Clone, Serialize, JsonSchema)]
 pub struct RoomServed {
     /// Requests this call answered.
@@ -280,6 +300,111 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         })
     }
 
+    pub(super) async fn room_refs_step(&mut self) -> Result<Vec<RoomRef>> {
+        self.idle()?;
+        if !R::ROOMS || self.owner.groups().is_none() {
+            return Err(ErrorCode::Unavailable);
+        }
+        self.load_desk().await?;
+        let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+        let snapshot = owner.snapshot().await.map_err(group_error)?;
+        let Some(listings) = &self.desk.listings else {
+            return Ok(vec![]);
+        };
+        Ok(listings
+            .public_groups(&snapshot)
+            .into_iter()
+            .filter_map(|group| {
+                listings
+                    .room_id(&group)
+                    .ok()
+                    .map(|room| RoomRef { room, group })
+            })
+            .collect())
+    }
+
+    /// Keep the listing keys of the public rooms this member belongs to: create
+    /// the key of a room without one, rotate a due one (tombstone for the old
+    /// entry), sign the current entry, and name the fellow members the key must
+    /// still be sent to. Any member holding the key may publish; the entry of a
+    /// window is identical whoever signs it.
+    pub(super) async fn room_listing_step(&mut self) -> Result<ListingPlan> {
+        use cbrd::cgrp::Listings;
+        self.idle()?;
+        if !R::ROOMS || self.owner.groups().is_none() {
+            return Err(ErrorCode::Unavailable);
+        }
+        self.load_desk().await?;
+        let now = self.group_clock()?;
+        let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+        let me = owner.member().map_err(group_error)?;
+        let snapshot = owner.snapshot().await.map_err(group_error)?;
+        let mut listings = self
+            .desk
+            .listings
+            .take()
+            .unwrap_or_else(|| Listings::new(snapshot.community(), &me));
+        listings.prune(&snapshot);
+        self.desk
+            .listing_sent
+            .retain(|group, _| snapshot.members(group).is_ok());
+        let mut work = vec![];
+        let mut shares = vec![];
+        for group in listings.public_groups(&snapshot) {
+            let mut originated = false;
+            if listings.holds(&group) && listings.rotation_due(&snapshot, &group, now) {
+                if let Ok(rotation) = listings.rotate(&snapshot, &group, now) {
+                    work.push(ListingWork {
+                        room: rotation.tombstone.room(),
+                        entry: rotation.tombstone,
+                    });
+                    originated = true;
+                }
+            }
+            if !listings.holds(&group) {
+                // A fellow member may already hold the key and send it; wait one
+                // cycle for that before making a second one.
+                if self.desk.listing_wait.insert(group) {
+                    continue;
+                }
+                if listings.create(&snapshot, &group).is_err() {
+                    continue;
+                }
+                originated = true;
+            }
+            if originated {
+                self.desk.listing_sent.insert(group, BTreeSet::new());
+            }
+            if let Ok(entry) = listings.sign_listing(&snapshot, &group, now, false) {
+                work.push(ListingWork {
+                    room: entry.room(),
+                    entry,
+                });
+            }
+            if let Some(sent) = self.desk.listing_sent.get_mut(&group) {
+                let members = snapshot.members(&group).map_err(group_error)?.clone();
+                let share = listings.share(&group).map_err(group_error)?;
+                let text = cbrd::GroupMessage::Listing {
+                    version: cbrd::INVITE_VERSION,
+                    share,
+                }
+                .to_text()
+                .map_err(group_error)?;
+                for member in members {
+                    if member != me && sent.insert(member.clone()) {
+                        shares.push(super::GroupInvite {
+                            member,
+                            text: text.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        self.desk.listings = Some(listings);
+        self.save_desk().await?;
+        Ok(ListingPlan { work, shares })
+    }
+
     /// Answer the live join requests of `room` with this member's own evidence,
     /// sealed to each request's ephemeral key.
     pub(super) async fn room_serve_step(
@@ -365,4 +490,53 @@ pub(in crate::door) async fn room_admit(
     super::ensure_room(door, key, request.room).await?;
     let (board, expires) = handles(door, key)?;
     Ok((board.room_admit(request, expires).await?, vec![]))
+}
+
+/// `board.room_listing`: publish the listing of every public room this member
+/// belongs to and report the key shares owed to fellow members. Publishing
+/// needs the room connection (the device makes it) and the listing key.
+pub(in crate::door) async fn room_listing(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(RoomsListed, Vec<Event>)> {
+    let (board, _) = handles(door, key)?;
+    let plan = board.room_listing().await?;
+    let mut published = 0;
+    for item in plan.work {
+        if super::ensure_room(door, key, item.room).await.is_err() {
+            continue;
+        }
+        let (board, _) = handles(door, key)?;
+        let mut operation = [0; 16];
+        getrandom::fill(&mut operation).map_err(|_| ErrorCode::Unavailable)?;
+        let sent = board
+            .execute_room(cbrd::clnk::cmbl::Request {
+                room: item.room,
+                operation,
+                action: cbrd::clnk::cmbl::Action::Publish { entry: item.entry },
+            })
+            .await;
+        if sent.is_ok() {
+            published += 1;
+        }
+    }
+    Ok((
+        RoomsListed {
+            published,
+            shares: plan.shares,
+        },
+        vec![],
+    ))
+}
+
+/// `board.room_refs`: the public rooms this member belongs to and holds the
+/// listing key of, as (room, group) pairs, for the serve and admit rounds.
+pub(in crate::door) async fn room_refs(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(Vec<RoomRef>, Vec<Event>)> {
+    let (board, _) = handles(door, key)?;
+    Ok((board.room_refs().await?, vec![]))
 }

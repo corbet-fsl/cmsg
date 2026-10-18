@@ -2,10 +2,10 @@ use super::*;
 use courier::{
     chat_retry as courier_chat_retry, chat_send as courier_chat_send,
     group_answer as courier_group_answer, group_message as courier_group_message,
-    group_propose as courier_group_propose, group_welcome as courier_group_welcome,
+    group_propose as courier_group_propose, room_listing as courier_room_listing, group_welcome as courier_group_welcome,
 };
 use board::{
-    attend as board_attend, depart as board_depart, room_connect as board_room_connect, room_list as board_room_list, discovery as board_discovery,
+    attend as board_attend, depart as board_depart, room_connect as board_room_connect, room_refs as board_room_refs,  room_list as board_room_list, discovery as board_discovery,
     group_act as board_group_act, groups as board_groups, heartbeat as board_heartbeat,
     profile_publish as board_profile_publish, room_admit as board_room_admit, room_join as board_room_join,
     room_leave as board_room_leave, room_serve as board_room_serve, search as board_search,
@@ -427,6 +427,8 @@ actions! {
     "board.room_join" => board_room_join(board::RoomJoin) -> board::RoomJoinStatus, GroupRecord, Board;
     "board.room_leave" => board_room_leave(board::RoomRef) -> Vec<cbrd::GroupView>, GroupRecord, Board;
     "board.room_connect" => board_room_connect(board::RoomRef) -> board::RoomConnected, BoardRecord, Board;
+    "board.room_listing" => courier_room_listing(Empty) -> board::RoomsListed, GroupRecord, Board;
+    "board.room_refs" => board_room_refs(Empty) -> Vec<board::RoomRef>, GroupRecord, Board;
     "board.room_admit" => board_room_admit(board::RoomRef) -> board::RoomAdmitted, GroupRecord, Board;
     "board.room_serve" => board_room_serve(board::RoomRef) -> board::RoomServed, GroupRecord, Board;
     "board.profile_publish" => board_profile_publish(board::ProfilePublish) -> board::ProfilePublished, ProfileRecord, Board;

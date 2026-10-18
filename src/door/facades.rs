@@ -153,6 +153,15 @@ pub(super) trait BoundBoard {
     ) -> rooms::RoomFuture<'_, cbrd::clnk::cmbl::Outcome> {
         Box::pin(async { Err(cbrd::clnk::ErrorCode::Rejected) })
     }
+    /// Bring this device's listing keys of public rooms up to date and return
+    /// what must be published and sent (see `board.room_listing`).
+    fn room_listing(&mut self) -> OwnedFuture<'_, board::ListingPlan> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// The public rooms this device holds the listing key of.
+    fn room_refs(&mut self) -> OwnedFuture<'_, Vec<board::RoomRef>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     /// The live connection of `room`, if this device has connected to it.
     fn room_connection(&self, _room: [u8; 16]) -> Result<[u8; 16]> {
         Err(ErrorCode::Unavailable)
