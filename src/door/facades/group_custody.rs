@@ -459,16 +459,6 @@ where
             .lineage()
             .await
             .map_err(|_| Fail::Authority)?;
-        // The locator of this member's own certified lineage record: read-only,
-        // never secret material. Admitting members read the lineage through it.
-        let locator = custody
-            .vault
-            .keys()
-            .export_lineage_read_capability()
-            .await
-            .map_err(|_| Fail::Authority)?
-            .as_bytes()
-            .to_vec();
         let storage = custody.vault.storage().clone();
         let mut store = storage.lock().await;
         custody
@@ -491,7 +481,6 @@ where
         let source = PolicyRef(task.policy);
         let companion = cbrd::RoomCompanion {
             request: task.request,
-            handle: locator,
         }
         .encode()
         .ok_or(Fail::Invalid)?;
