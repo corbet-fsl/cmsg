@@ -177,6 +177,11 @@ impl<'p> SubmittedEnrollment<'p> {
 }
 
 impl<'p> CurrentEnrollment<'p> {
+    /// End of the checkpoint slot this enrollment (and a proof over it) is bound to.
+    pub fn slot_end(&self) -> u64 {
+        self.publication.expires_at
+    }
+
     /// The device authorization signed with the delegation, unchanged.
     pub(super) fn authorization(&self) -> &admission::DeviceAuthorization {
         &self.enrolled.prepared.delegation.authorization

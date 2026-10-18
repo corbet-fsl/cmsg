@@ -216,6 +216,18 @@ async fn vault_lock(door: &mut Door, key: &[u8; 32], _: Empty) -> Result<(Empty,
     Ok((Empty {}, vec![Event::VaultLocked]))
 }
 
+/// The join's account steps through the origin's actor.
+struct JoinSteps<'a> {
+    door: &'a mut Door,
+    key: &'a [u8; 32],
+}
+
+impl account::Steps for JoinSteps<'_> {
+    async fn call(&mut self, command: account::Command) -> Result<account::Answer> {
+        account_call(self.door, self.key, command).await
+    }
+}
+
 /// Serve one account action through the origin's actor. An actor past its
 /// grant, finished or fenced is dropped here, never reused.
 pub(super) async fn account_call(
@@ -320,16 +332,10 @@ async fn community_join(
         return Ok((account::Joined::NeedsSteps { steps: gate.steps }, vec![]));
     }
     if let account::Checkpoint::Pending { eligible_at } =
-        account_call(door, key, account::Command::Enroll)
-            .await?
-            .enrolled()?
-            .checkpoint
+        account::enroll_and_open(&mut JoinSteps { door, key }).await?
     {
         return Ok((account::Joined::CheckpointPending { eligible_at }, vec![]));
     }
-    account_call(door, key, account::Command::Open)
-        .await?
-        .opened_or_reopened()?;
     let done = account_call(door, key, account::Command::Activate)
         .await?
         .activated()?;

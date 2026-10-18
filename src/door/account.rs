@@ -141,6 +141,10 @@ pub(super) enum Answer {
     Owed(Option<Shared<Applied>>),
     /// The stored update was forgotten.
     Settled,
+    /// Open was refused after the checkpoint slot its proof was bound to had ended
+    /// (`eligible_at` = that slot's end): a crossed scheduled boundary. The join
+    /// restarts enrollment and Open as a fresh operation (`enroll_and_open`).
+    SlotCrossed { eligible_at: u64 },
 }
 
 macro_rules! accessor {
@@ -148,6 +152,8 @@ macro_rules! accessor {
         pub(super) fn $name(self) -> Result<$type> {
             match self {
                 Self::$variant(value) => Ok(value),
+                // A crossed slot not restarted is the refusal it replaced.
+                Self::SlotCrossed { .. } => Err(ErrorCode::Unauthorized),
                 _ => Err(ErrorCode::Unavailable),
             }
         }
@@ -167,7 +173,56 @@ impl Answer {
     pub(super) fn opened_or_reopened(self) -> Result<Opened> {
         match self {
             Self::Opened(value) | Self::Reopened(value) => Ok(value),
+            Self::SlotCrossed { .. } => Err(ErrorCode::Unauthorized),
             _ => Err(ErrorCode::Unavailable),
+        }
+    }
+}
+
+/// The outcome of Open, judged at `now` against the end of the checkpoint slot its
+/// proof was bound to. A refusal once that slot has ended is the crossed scheduled
+/// boundary (the device refresh refuses the next slot's publication), not a verdict
+/// on the member: it becomes `SlotCrossed`, which the join restarts.
+#[cfg_attr(
+    not(all(feature = "native-prover", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+fn open_outcome(result: Result<u64>, slot_end: u64, now: u64) -> Result<Answer> {
+    match result {
+        Ok(accepted_at) => Ok(Answer::Opened(Opened { accepted_at })),
+        Err(ErrorCode::Unauthorized) if now >= slot_end => Ok(Answer::SlotCrossed {
+            eligible_at: slot_end,
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+/// How often one join restarts a crossed checkpoint slot as a fresh operation.
+pub(super) const SLOT_RESTARTS: usize = 2;
+
+/// The account steps a join runs after its gate, one command at a time.
+pub(super) trait Steps {
+    async fn call(&mut self, command: Command) -> Result<Answer>;
+}
+
+/// Enroll, then open. A crossed checkpoint slot restarts both as a fresh operation
+/// (a fresh admission, delegation and proof; the old one is spent), at most
+/// `SLOT_RESTARTS` times. When the fresh enrollment waits for the next slot, the
+/// answer is `Pending`: the join reports `checkpoint_pending` meanwhile and the
+/// next join continues. Any other refusal ends the join as before.
+pub(super) async fn enroll_and_open(steps: &mut impl Steps) -> Result<Checkpoint> {
+    let mut restarts = 0;
+    loop {
+        let checkpoint = steps.call(Command::Enroll).await?.enrolled()?.checkpoint;
+        if let Checkpoint::Pending { .. } = checkpoint {
+            return Ok(checkpoint);
+        }
+        match steps.call(Command::Open).await? {
+            Answer::SlotCrossed { .. } if restarts < SLOT_RESTARTS => restarts += 1,
+            answer => {
+                answer.opened_or_reopened()?;
+                return Ok(Checkpoint::Ready);
+            }
         }
     }
 }
@@ -1244,12 +1299,11 @@ mod run {
                     }
                 };
                 // Whatever happens, the enrollment is consumed; recovery after a
-                // failure is `account_reopen` from the durable state.
+                // failure is `account_reopen` from the durable state, or a fresh
+                // operation when the proof's checkpoint slot has ended meanwhile.
+                let slot_end = current.slot_end();
                 let result = open(current, account, request_intent, prover).await;
-                (
-                    result.map(|at| Answer::Opened(Opened { accepted_at: at })),
-                    Next::Restart,
-                )
+                (open_outcome(result, slot_end, clock()), Next::Restart)
             }
             Command::Reopen => {
                 let Some(admission) = stage.admission() else {
@@ -1309,6 +1363,117 @@ mod run {
 mod tests {
     use super::super::actor::Mailbox;
     use super::*;
+
+    /// Scripted account steps: answers in order, commands recorded.
+    struct Script {
+        answers: std::collections::VecDeque<Result<Answer>>,
+        commands: Vec<Command>,
+    }
+
+    impl Script {
+        fn new(answers: Vec<Result<Answer>>) -> Self {
+            Self {
+                answers: answers.into(),
+                commands: Vec::new(),
+            }
+        }
+    }
+
+    impl Steps for Script {
+        async fn call(&mut self, command: Command) -> Result<Answer> {
+            self.commands.push(command);
+            self.answers.pop_front().expect("scripted answer")
+        }
+    }
+
+    fn ready() -> Result<Answer> {
+        Ok(Answer::Enrolled(Enrolled {
+            checkpoint: Checkpoint::Ready,
+        }))
+    }
+
+    #[test]
+    fn open_refused_after_its_checkpoint_slot_ended_is_a_crossed_slot() {
+        // The injected clock: the proof was bound to the slot ending at 1_800.
+        let end = 1_800;
+        assert_eq!(
+            open_outcome(Ok(1_750), end, 1_810),
+            Ok(Answer::Opened(Opened { accepted_at: 1_750 }))
+        );
+        assert_eq!(
+            open_outcome(Err(ErrorCode::Unauthorized), end, end),
+            Ok(Answer::SlotCrossed { eligible_at: end })
+        );
+        assert_eq!(
+            open_outcome(Err(ErrorCode::Unauthorized), end, end + 45),
+            Ok(Answer::SlotCrossed { eligible_at: end })
+        );
+        // Inside the slot a refusal is a verdict; other refusals never restart.
+        assert_eq!(
+            open_outcome(Err(ErrorCode::Unauthorized), end, end - 1),
+            Err(ErrorCode::Unauthorized)
+        );
+        for error in [ErrorCode::Reconcile, ErrorCode::Unavailable, ErrorCode::Refused] {
+            assert_eq!(open_outcome(Err(error), end, end + 1), Err(error));
+        }
+        // Not restarted, a crossed slot reads as the refusal it replaced.
+        let crossed = || Answer::SlotCrossed { eligible_at: end };
+        assert_eq!(crossed().opened(), Err(ErrorCode::Unauthorized));
+        assert_eq!(crossed().opened_or_reopened(), Err(ErrorCode::Unauthorized));
+    }
+
+    #[test]
+    fn a_crossed_slot_restarts_enrollment_and_open_at_most_twice() {
+        let crossed = || Ok(Answer::SlotCrossed { eligible_at: 1_800 });
+        let opened = || Ok(Answer::Opened(Opened { accepted_at: 2_000 }));
+        // No crossing: one enrollment, one open.
+        let mut steps = Script::new(vec![ready(), opened()]);
+        assert_eq!(block(enroll_and_open(&mut steps)), Ok(Checkpoint::Ready));
+        assert_eq!(steps.commands, [Command::Enroll, Command::Open]);
+        // Two crossings: two fresh operations, then the account opens.
+        let mut steps = Script::new(vec![
+            ready(),
+            crossed(),
+            ready(),
+            crossed(),
+            ready(),
+            opened(),
+        ]);
+        assert_eq!(block(enroll_and_open(&mut steps)), Ok(Checkpoint::Ready));
+        assert_eq!(steps.commands.len(), 6);
+        // A third crossing ends the join with the refusal; no third restart.
+        let mut steps = Script::new(vec![
+            ready(),
+            crossed(),
+            ready(),
+            crossed(),
+            ready(),
+            crossed(),
+        ]);
+        assert_eq!(
+            block(enroll_and_open(&mut steps)),
+            Err(ErrorCode::Unauthorized)
+        );
+        assert!(steps.answers.is_empty());
+        // The fresh enrollment waits for the next slot: checkpoint_pending meanwhile.
+        let pending = Checkpoint::Pending { eligible_at: 2_100 };
+        let mut steps = Script::new(vec![
+            ready(),
+            crossed(),
+            Ok(Answer::Enrolled(Enrolled {
+                checkpoint: pending.clone(),
+            })),
+        ]);
+        assert_eq!(block(enroll_and_open(&mut steps)), Ok(pending));
+        assert_eq!(steps.commands, [Command::Enroll, Command::Open, Command::Enroll]);
+        // Any other refusal ends the join as before, without a restart.
+        let mut steps = Script::new(vec![ready(), Err(ErrorCode::Reconcile)]);
+        assert_eq!(
+            block(enroll_and_open(&mut steps)),
+            Err(ErrorCode::Reconcile)
+        );
+        assert_eq!(steps.commands, [Command::Enroll, Command::Open]);
+    }
 
     #[test]
     fn an_answer_converts_only_to_its_own_result_type() {
