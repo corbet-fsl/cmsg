@@ -291,17 +291,39 @@ pub(super) async fn join<L: Lobby>(
     }
 }
 
-/// Whether the lobby still lists an unsatisfied admission condition. A lobby
-/// without the field is never taken as satisfied.
+/// Whether the lobby still lists an unsatisfied admission condition. When the
+/// lobby says a passport is required, the global requirements it lists are
+/// proven by that fresh passport at admission, so a gate group counts each of
+/// them as passed; the server alone decides at admission. A lobby without the
+/// field, or an entry this device cannot read, is never taken as satisfied.
 #[cfg_attr(
     not(all(feature = "native-prover", not(target_arch = "wasm32"))),
     allow(dead_code)
 )]
 pub(super) fn lacks(lobby: &Value) -> bool {
-    lobby
-        .get("missing")
-        .and_then(Value::as_array)
-        .is_none_or(|missing| !missing.is_empty())
+    let Some(missing) = lobby.get("missing").and_then(Value::as_array) else {
+        return true;
+    };
+    let passport = lobby.get("passport_required").and_then(Value::as_bool) == Some(true);
+    missing.iter().any(|entry| {
+        let needed = entry.get("needed").and_then(Value::as_u64);
+        let (true, Some("gates"), Some(needed)) =
+            (passport, entry.get("kind").and_then(Value::as_str), needed)
+        else {
+            return true;
+        };
+        let global = entry
+            .get("alternatives")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|alternative| {
+                alternative["requirement"]["level"].as_str() == Some("global")
+                    && alternative["reason"].as_str() == Some("proof_required")
+            })
+            .count();
+        needed > global as u64
+    })
 }
 
 /// The inputs the lobby offers, in the server's order. Unreadable entries are
@@ -1618,6 +1640,24 @@ mod tests {
         assert!(lacks(&json!({})));
         assert!(lacks(&json!({"missing": [{"kind": "gates"}]})));
         assert!(!lacks(&json!({"missing": []})));
+        let global = json!({"requirement": {"gate": "development", "level": "global"}, "reason": "proof_required"});
+        let voucher = json!({"requirement": {"gate": "cvch", "level": "community"}, "reason": "proof_required"});
+        let disabled = json!({"requirement": {"gate": "development", "level": "global"}, "reason": "disabled"});
+        let lobby = |passport: bool, needed: u64, alternatives: Value| {
+            json!({"passport_required": passport, "missing": [{"kind": "gates", "needed": needed, "alternatives": alternatives}]})
+        };
+        // The passport proves the global requirement at admission.
+        assert!(!lacks(&lobby(true, 1, json!([global.clone()]))));
+        // Without a required passport, nothing global is assumed.
+        assert!(lacks(&lobby(false, 1, json!([global.clone()]))));
+        // A community requirement still lacks; a disabled global one is not proven.
+        assert!(lacks(&lobby(true, 2, json!([global.clone(), voucher.clone()]))));
+        assert!(lacks(&lobby(true, 1, json!([voucher]))));
+        assert!(lacks(&lobby(true, 1, json!([disabled]))));
+        // Unreadable groups and other kinds of missing never count as satisfied.
+        assert!(lacks(&json!({"passport_required": true, "missing": [{"kind": "gates", "alternatives": [global]}]})));
+        assert!(lacks(&json!({"passport_required": true, "missing": [{"kind": "membership"}]})));
+        assert!(lacks(&json!({"passport_required": true, "missing": [{"kind": "gates", "needed": 1}]})));
         let lobby = json!({
             "steps": [
                 {"gate": "voucher", "provider": "sponsor", "steps": [{"id": "code"}, {"id": 7}]},
