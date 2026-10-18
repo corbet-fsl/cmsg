@@ -838,7 +838,6 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
     fn group_act(
         &mut self,
         intent: cbrd::GroupIntent,
-        visible: bool,
         expires: u64,
     ) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
         Box::pin(async move {
@@ -866,7 +865,7 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
             let source = cbrd::PolicyAt::new(&community, projected);
             let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
             let (views, _) =
-                cbrd::execute_group_intent(owner, &source, intent, visible, MAX_GROUPS)
+                cbrd::execute_group_intent(owner, &source, intent, MAX_GROUPS)
                     .await
                     .map_err(group_error)?;
             Ok(views)
@@ -875,7 +874,6 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
     fn group_propose(
         &mut self,
         intent: cbrd::GroupIntent,
-        visible: bool,
         expires: u64,
     ) -> OwnedFuture<'_, GroupProposed> {
         Box::pin(async move {
@@ -892,7 +890,7 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
             let source = self.group_policy(expires).await?;
             let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
             let command = intent.command(&owner.member().map_err(group_error)?);
-            let proposal = cbrd::propose_group_command(owner, &source, command, visible)
+            let proposal = cbrd::propose_group_command(owner, &source, command)
                 .await
                 .map_err(group_error)?;
             let operation = proposal.operation();
@@ -1021,7 +1019,6 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
         &mut self,
         operation: [u8; 32],
         accept: bool,
-        visible: bool,
         _expires: u64,
     ) -> OwnedFuture<'_, GroupAnswered> {
         Box::pin(async move {
@@ -1036,7 +1033,7 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
                 .ok_or(ErrorCode::Refused)?;
             let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
             let message = invitation
-                .answer(owner, accept, visible)
+                .answer(owner, accept)
                 .await
                 .map_err(group_error)?;
             // A group that needs MLS follows with the actor's Welcome.
