@@ -880,7 +880,7 @@ async fn native_client_refuses_truncated_http_response() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[tokio::test]
-async fn lost_mutation_response_reattaches_and_never_runs_the_action_twice() {
+async fn lost_response_reattaches_to_the_kept_outcome() {
     use axum::{
         body::{Body, Bytes},
         extract::Request,
@@ -928,7 +928,7 @@ async fn lost_mutation_response_reattaches_and_never_runs_the_action_twice() {
                         .headers
                         .insert("content-length", bytes.len().to_string().parse().unwrap());
                     let original: Value = serde_json::from_slice(&bytes).unwrap();
-                    assert_eq!(original["result"]["revoked"], true);
+                    assert_eq!(original["status"], "ok");
                     let short = Bytes::copy_from_slice(&bytes[..bytes.len() - 1]);
                     let body =
                         Body::from_stream(stream::once(
@@ -944,9 +944,19 @@ async fn lost_mutation_response_reattaches_and_never_runs_the_action_twice() {
     );
     let server = tokio::spawn(async move { axum::serve(listener, proxy).await.unwrap() });
     let client = native::Client::new(&format!("http://{address}"), ORIGIN, token).unwrap();
-    // The damaged response is a lost hop: the identical request attaches to the
-    // same device operation and reads its kept outcome. A second execution of
-    // the revoke would have answered Unauthorized.
+    // The damaged response is a lost hop, never an unknown outcome: the
+    // identical request attaches to the same device operation and reads its
+    // kept outcome.
+    assert_eq!(
+        value(
+            client
+                .invoke_bytes(br#"{"action":"runtime.status","version":1,"body":{}}"#)
+                .await
+                .unwrap()
+        )["status"],
+        "ok"
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 2);
     assert_eq!(
         value(
             client
@@ -956,7 +966,6 @@ async fn lost_mutation_response_reattaches_and_never_runs_the_action_twice() {
         )["result"]["revoked"],
         true
     );
-    assert_eq!(count.load(Ordering::SeqCst), 2);
     assert_eq!(
         value(
             client
@@ -966,7 +975,7 @@ async fn lost_mutation_response_reattaches_and_never_runs_the_action_twice() {
         ),
         error(ErrorCode::Unauthorized)
     );
-    assert_eq!(count.load(Ordering::SeqCst), 3);
+    assert_eq!(count.load(Ordering::SeqCst), 4);
     server.abort();
     let _ = server.await;
 }

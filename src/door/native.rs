@@ -94,8 +94,16 @@ struct Operations(std::sync::Mutex<OperationTable>);
 #[derive(Default)]
 struct OperationTable {
     running: std::collections::HashMap<OperationId, watch::Receiver<Option<Output>>>,
-    kept: std::collections::HashMap<OperationId, (u64, Output)>,
+    kept: std::collections::HashMap<OperationId, Kept>,
     sequence: u64,
+    #[cfg(test)]
+    started: usize,
+}
+
+struct Kept {
+    sequence: u64,
+    capability: [u8; 32],
+    output: Output,
 }
 
 enum Attached {
@@ -118,20 +126,32 @@ impl Operations {
         }
     }
 
-    fn attach(self: &Arc<Self>, id: OperationId) -> Attached {
+    /// A capability that is no longer valid loses every outcome kept for it.
+    fn forget(&self, capability: &[u8; 32]) {
+        self.table()
+            .kept
+            .retain(|_, kept| kept.capability != *capability);
+    }
+
+    fn attach(self: &Arc<Self>, id: OperationId, capability: [u8; 32]) -> Attached {
         let mut table = self.table();
-        if let Some((_, output)) = table.kept.get(&id) {
-            return Attached::Kept(output.clone());
+        if let Some(kept) = table.kept.get(&id) {
+            return Attached::Kept(kept.output.clone());
         }
         if let Some(receiver) = table.running.get(&id) {
             return Attached::Running(receiver.clone());
         }
         let (sender, receiver) = watch::channel(None);
         table.running.insert(id, receiver.clone());
+        #[cfg(test)]
+        {
+            table.started += 1;
+        }
         Attached::Started(
             Finish {
                 operations: self.clone(),
                 id,
+                capability,
                 sender: Some(sender),
             },
             receiver,
@@ -144,6 +164,7 @@ impl Operations {
 struct Finish {
     operations: Arc<Operations>,
     id: OperationId,
+    capability: [u8; 32],
     sender: Option<watch::Sender<Option<Output>>>,
 }
 
@@ -161,12 +182,19 @@ impl Finish {
             ) {
                 table.sequence += 1;
                 let sequence = table.sequence;
-                table.kept.insert(self.id, (sequence, output.clone()));
+                table.kept.insert(
+                    self.id,
+                    Kept {
+                        sequence,
+                        capability: self.capability,
+                        output: output.clone(),
+                    },
+                );
                 while table.kept.len() > MAX_KEPT {
                     let oldest = table
                         .kept
                         .iter()
-                        .min_by_key(|(_, (sequence, _))| *sequence)
+                        .min_by_key(|(_, kept)| kept.sequence)
                         .map(|(id, _)| *id)
                         .expect("a table above its bound is not empty");
                     table.kept.remove(&oldest);
@@ -190,7 +218,40 @@ impl Drop for Finish {
 /// Only bounded messages cross threads. Door and all its child facades stay on
 /// their owning thread, including browser-compatible Rc custody adapters.
 #[derive(Clone)]
-struct Owner(mpsc::Sender<Command>);
+struct Owner(mpsc::Sender<Command>, Arc<Grants>);
+
+/// The owner's current client grants (capability hash -> origin, expiry),
+/// refreshed after every owner command. The operation protocol checks it
+/// before serving an attached or kept outcome, without queueing behind the
+/// running action: a revoked or expired capability gets nothing.
+struct Grants {
+    current: std::sync::Mutex<BTreeMap<[u8; 32], (String, u64)>>,
+    clock: Arc<dyn Clock>,
+}
+
+impl Grants {
+    fn refresh(&self, door: Option<&Door>) {
+        let current = door.map_or_else(BTreeMap::new, |door| {
+            door.grants
+                .iter()
+                .map(|(key, grant)| (*key, (grant.origin.clone(), grant.expires)))
+                .collect()
+        });
+        *self
+            .current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = current;
+    }
+
+    fn valid(&self, origin: &str, capability: &[u8; 32]) -> bool {
+        let now = self.clock.now();
+        self.current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(capability)
+            .is_some_and(|(granted, expires)| granted == origin && now < *expires)
+    }
+}
 enum Command {
     Authenticate {
         origin: String,
@@ -294,6 +355,11 @@ impl Owner {
         G: 'static,
     {
         let (sender, mut receiver) = mpsc::channel(MAX_CLIENTS);
+        let grants = Arc::new(Grants {
+            current: std::sync::Mutex::default(),
+            clock: clock.clone(),
+        });
+        let owner_grants = grants.clone();
         let (ready, initialized) = oneshot::channel();
         let thread = std::thread::Builder::new()
             .name("cmsg-owner".into())
@@ -326,6 +392,7 @@ impl Owner {
                                 }
                             };
                             let mut retained = Some(retained);
+                            owner_grants.refresh(Some(&door));
                             if ready.send(Ok(value)).is_err() {
                                 let _ = drain_composer(&mut composer).await;
                                 door.close_owned().await;
@@ -361,6 +428,11 @@ impl Owner {
                                                 }
                                             }
                                         };
+                                        if failed {
+                                            owner_grants.refresh(None);
+                                        } else {
+                                            owner_grants.refresh(Some(&*door.lock().await));
+                                        }
                                         let _ = reply.send(checked);
                                     }
                                     Command::Invoke {
@@ -437,6 +509,11 @@ impl Owner {
                                                 }
                                             }
                                         };
+                                        if failed {
+                                            owner_grants.refresh(None);
+                                        } else {
+                                            owner_grants.refresh(Some(&*door.lock().await));
+                                        }
                                         let _ = reply.send(output);
                                     }
                                 }
@@ -464,7 +541,7 @@ impl Owner {
             })
             .map_err(|_| ErrorCode::Unavailable)?;
         match initialized.await {
-            Ok(Ok(value)) => Ok((Self(sender), value, thread)),
+            Ok(Ok(value)) => Ok((Self(sender, grants), value, thread)),
             failure => {
                 // Failed construction must finish its independent cleanup before
                 // its caller can discard storage or start another owner.
@@ -1000,11 +1077,33 @@ async fn operate(
     };
     state.operations.acknowledge(acknowledged);
     let id = operation_id(&origin, &token, &envelope);
-    let (mut receiver, _permit) = match state.operations.attach(id) {
-        Attached::Kept(output) => return operation_response(&id, Some(output)),
-        Attached::Running(receiver) => (receiver, Some(permit)),
+    let capability = token_hash(&token);
+    let grants = state.runtime.1.clone();
+    // An attached or kept outcome is served only to a capability that is still
+    // valid; a revoked or expired one gets nothing and loses its kept outcomes.
+    let refused = |operations: &Operations| {
+        operations.forget(&capability);
+        response(Output::Error {
+            error: ErrorCode::Unauthorized,
+        })
+    };
+    let (mut receiver, _permit, check) = match state.operations.attach(id, capability) {
+        Attached::Kept(output) => {
+            if !grants.valid(&origin, &capability) {
+                return refused(&state.operations);
+            }
+            return operation_response(&id, Some(output));
+        }
+        Attached::Running(receiver) => {
+            if !grants.valid(&origin, &capability) {
+                return refused(&state.operations);
+            }
+            (receiver, Some(permit), true)
+        }
         Attached::Started(finish, receiver) => {
+            // This hop's own run authenticates inside its task.
             let runtime = state.runtime.clone();
+            let origin = origin.clone();
             tokio::spawn(async move {
                 let output = match runtime.authenticate(&origin, &token).await {
                     Err(error) => Output::Error { error },
@@ -1012,7 +1111,7 @@ async fn operate(
                 };
                 finish.complete(output);
             });
-            (receiver, None)
+            (receiver, None, false)
         }
     };
     let outcome = match tokio::time::timeout(
@@ -1028,6 +1127,9 @@ async fn operate(
         }),
         Err(_) => None,
     };
+    if check && outcome.is_some() && !grants.valid(&origin, &capability) {
+        return refused(&state.operations);
+    }
     operation_response(&id, outcome)
 }
 
