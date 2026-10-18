@@ -12,6 +12,7 @@ pub mod board;
 pub mod browser;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub mod composer;
+pub(crate) mod composer_core;
 mod composition;
 pub mod courier;
 mod communities;
