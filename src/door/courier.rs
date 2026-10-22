@@ -28,6 +28,7 @@ use super::{
 };
 use cmsh::{Address, Scheme};
 use data_encoding::BASE64URL_NOPAD;
+use futures_util::future::LocalBoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -122,6 +123,22 @@ pub trait Directory {
     fn reachability(&self, peer: &str) -> Option<Vec<u8>>;
 }
 
+/// Offline hand-over (GAPMAP 11.4): where a frame goes when its peer cannot be
+/// reached now, and where the frames other members left for this member are
+/// picked up. The embedder implements it over the member's DHT records. The
+/// courier moves only frames it would send over the Mesh anyway (MLS ciphertext
+/// and signed receipts of established contacts; a wave is first contact and
+/// stays live), so a mailbox sees nothing the wire would not show. It grants no
+/// authority, and a lost or repeated frame costs nothing: every receiver is
+/// idempotent and the Pending sends are scanned and left again.
+pub trait Mailbox {
+    /// Leave `frame` for `peer`; false when it could not be stored or queued.
+    fn leave<'a>(&'a self, peer: &'a str, frame: &'a [u8]) -> LocalBoxFuture<'a, bool>;
+    /// The frames other members left for this member. A frame already handed
+    /// over may come again after a restart.
+    fn collect(&self) -> LocalBoxFuture<'_, Vec<Vec<u8>>>;
+}
+
 /// Latest known addresses per peer. Memory only: after a restart the Directory
 /// answers first contact and the next frame from the peer refreshes it.
 #[derive(Default)]
@@ -156,6 +173,7 @@ pub(super) struct Shared {
     pub book: RefCell<Book>,
     pub queue: RefCell<VecDeque<Outgoing>>,
     pub directory: RefCell<Option<Box<dyn Directory>>>,
+    pub mailbox: RefCell<Option<Rc<dyn Mailbox>>>,
     pub closed: Cell<bool>,
     #[cfg(not(target_arch = "wasm32"))]
     pub stop: tokio::sync::Notify,
@@ -169,6 +187,7 @@ impl Shared {
             book: RefCell::default(),
             queue: RefCell::default(),
             directory: RefCell::new(None),
+            mailbox: RefCell::new(None),
             closed: Cell::new(false),
             #[cfg(not(target_arch = "wasm32"))]
             stop: tokio::sync::Notify::new(),
@@ -216,6 +235,15 @@ impl Door {
     pub fn bind_directory(&mut self, origin: &str, directory: Box<dyn Directory>) -> Result<()> {
         let mesh = self.meshes.get(origin).ok_or(ErrorCode::Unavailable)?;
         *mesh.shared.directory.borrow_mut() = Some(directory);
+        Ok(())
+    }
+
+    /// Trusted embedding control: where frames go while their peer is offline
+    /// and where the ones left for this member are picked up. Absent from every
+    /// callable projection.
+    pub fn bind_mailbox(&mut self, origin: &str, mailbox: Rc<dyn Mailbox>) -> Result<()> {
+        let mesh = self.meshes.get(origin).ok_or(ErrorCode::Unavailable)?;
+        *mesh.shared.mailbox.borrow_mut() = Some(mailbox);
         Ok(())
     }
 
@@ -365,6 +393,10 @@ pub struct Report {
     pub failed: u64,
     pub heartbeats: u64,
     pub refreshes: u64,
+    /// Frames left in the mailbox because the peer was not reachable.
+    pub left: u64,
+    /// Frames picked up from the mailbox and handed to the receivers.
+    pub collected: u64,
 }
 
 /// Handle one received payload for `origin`. Returns without error for anything
@@ -771,6 +803,8 @@ pub struct Config {
     pub resend: u64,
     /// Seconds between scans for chat messages still Pending.
     pub scan: u64,
+    /// Seconds between pick-ups of the frames left in the mailbox.
+    pub collect: u64,
     /// Seconds between room-serving rounds.
     pub serve: u64,
     /// Seconds between the upkeep of public-room listings (key, publish, share).
@@ -790,6 +824,7 @@ impl Default for Config {
             refresh: 300,
             resend: 20,
             scan: 30,
+            collect: 30,
             serve: 10,
             listing: 3_600,
             voucher: 30,
@@ -806,6 +841,8 @@ struct State {
     next_heartbeat: u64,
     next_refresh: u64,
     next_scan: u64,
+    next_collect: u64,
+    left: BTreeSet<Vec<u8>>,
     next_serve: u64,
     next_listing: u64,
     next_voucher: u64,
@@ -1006,21 +1043,64 @@ async fn scan_pending(door: &mut Door, lease: &Lease, out: &mut Vec<Outgoing>) {
     }
 }
 
-/// Send one frame; a missing route or a refused send is a failure to retry.
-async fn transmit(shared: &Shared, item: &Outgoing) -> bool {
-    let addresses = shared.route(&item.peer);
-    if addresses.is_empty() {
+/// Frames that may wait in the mailbox: chat wires and receipts of established
+/// contacts. A wave is first contact and stays live.
+fn offline_body(body: &Body) -> bool {
+    matches!(body, Body::Chat { .. } | Body::Receipt { .. })
+}
+
+/// A frame picked up from the mailbox is taken only when it is a current-version
+/// frame of a kind that may wait there; anything else is dropped unread.
+fn accept_left(payload: &[u8]) -> bool {
+    serde_json::from_slice::<Frame>(payload)
+        .is_ok_and(|frame| frame.version == FRAME_VERSION && offline_body(&frame.body))
+}
+
+/// Leave a frame the Mesh could not take, once per session and frame: the
+/// sender's changing reachability is not part of the key, and a repeat would
+/// only cost a write (the receiver is idempotent).
+async fn leave_offline(
+    mailbox: Option<Rc<dyn Mailbox>>,
+    left: &mut BTreeSet<Vec<u8>>,
+    item: &Outgoing,
+    bytes: &[u8],
+) -> bool {
+    let Some(mailbox) = mailbox else {
+        return false;
+    };
+    if !offline_body(&item.body) {
         return false;
     }
+    let key = [item.peer.as_bytes(), &[0], &serde_json::to_vec(&item.body).unwrap_or_default()].concat();
+    if left.contains(&key) {
+        return true;
+    }
+    if !mailbox.leave(&item.peer, bytes).await {
+        return false;
+    }
+    if left.len() >= 4096 {
+        left.clear();
+    }
+    left.insert(key);
+    true
+}
+
+/// Send one frame over the Mesh; when the peer cannot be reached, chat wires and
+/// receipts go to the mailbox. `Some(true)` is sent, `Some(false)` is left in
+/// the mailbox, `None` is a failure to retry.
+async fn deliver(shared: &Shared, item: &Outgoing, left: &mut BTreeSet<Vec<u8>>) -> Option<bool> {
     let frame = Frame {
         version: FRAME_VERSION,
         reach: shared.reachability(),
         body: item.body.clone(),
     };
-    let Ok(bytes) = serde_json::to_vec(&frame) else {
-        return false;
-    };
-    shared.mesh.app_message(&addresses, &bytes).await.is_ok()
+    let bytes = serde_json::to_vec(&frame).ok()?;
+    let addresses = shared.route(&item.peer);
+    if !addresses.is_empty() && shared.mesh.app_message(&addresses, &bytes).await.is_ok() {
+        return Some(true);
+    }
+    let mailbox = shared.mailbox.borrow().clone();
+    leave_offline(mailbox, left, item, &bytes).await.then_some(false)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1085,8 +1165,37 @@ mod run {
                 _ = tokio::time::sleep(tick) => {}
             }
             cycle(&door, &origin, &shared, &config, &mut state).await;
+            collect_left(&door, &origin, &shared, &config, &mut state).await;
         }
         state.report
+    }
+
+    /// Pick up what other members left in the mailbox and give each frame to the
+    /// same receivers a Mesh message goes to. Holds the Door only per frame.
+    async fn collect_left(
+        door: &SharedDoor,
+        origin: &str,
+        shared: &Shared,
+        config: &Config,
+        state: &mut State,
+    ) {
+        let now = now();
+        if now < state.next_collect {
+            return;
+        }
+        state.next_collect = now + config.collect;
+        let Some(mailbox) = shared.mailbox.borrow().clone() else {
+            return;
+        };
+        for payload in mailbox.collect().await {
+            if !accept_left(&payload) {
+                state.report.dropped += 1;
+                continue;
+            }
+            state.report.collected += 1;
+            let mut guard = door.lock().await;
+            receive(&mut guard, origin, shared, &payload, now, &mut state.report).await;
+        }
     }
 
     /// Gather under the lock, then send without it, then record what left.
@@ -1103,19 +1212,21 @@ mod run {
             gather(&mut guard, origin, shared, config, state, now).await
         };
         for item in batch {
-            if transmit(shared, &item).await {
-                state.report.sent += 1;
-                if let Body::Wave { envelope } = &item.body {
-                    let id = [
-                        b"w".as_slice(),
-                        envelope.message.nonce(),
-                        kind_of(&envelope.message).as_bytes(),
-                    ]
-                    .concat();
-                    state.sent.insert(id, now);
+            match deliver(shared, &item, &mut state.left).await {
+                Some(true) => {
+                    state.report.sent += 1;
+                    if let Body::Wave { envelope } = &item.body {
+                        let id = [
+                            b"w".as_slice(),
+                            envelope.message.nonce(),
+                            kind_of(&envelope.message).as_bytes(),
+                        ]
+                        .concat();
+                        state.sent.insert(id, now);
+                    }
                 }
-            } else {
-                state.report.failed += 1;
+                Some(false) => state.report.left += 1,
+                None => state.report.failed += 1,
             }
         }
         if state.sent.len() > 4096 {
