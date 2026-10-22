@@ -200,6 +200,50 @@ mod isolation {
         assert_ne!(door.reachability(&a), door.reachability(&b));
     }
 
+    /// 11.4: a peer without a route gets chat wires and receipts through the
+    /// mailbox the embedder bound; a wave never waits there.
+    #[tokio::test]
+    async fn a_frame_for_an_unreachable_peer_waits_in_the_bound_mailbox() {
+        let a = "http://127.0.0.1:1".to_owned();
+        let config = Configuration::new(
+            "community".into(),
+            [(Role::Member, [a.clone()].into())].into(),
+        )
+        .unwrap();
+        let mut door = Door::new(config);
+        let mailbox = Rc::new(offline::Stub::default());
+        assert_eq!(
+            door.bind_mailbox(&a, mailbox.clone()),
+            Err(ErrorCode::Unavailable)
+        );
+        let counter = Arc::new(AtomicU8::new(20));
+        door.bind_mesh(&a, mesh(&counter)).await.unwrap();
+        let shared = door.courier_shared(&a).unwrap();
+        let mut left = BTreeSet::new();
+        // Nothing bound yet: no route and no mailbox is a failure to retry.
+        assert_eq!(deliver(&shared, &offline::chat("bob"), &mut left).await, None);
+        door.bind_mailbox(&a, mailbox.clone()).unwrap();
+        assert_eq!(deliver(&shared, &offline::chat("bob"), &mut left).await, Some(false));
+        let held = mailbox.left.borrow();
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].0, "bob");
+        // What waits is the versioned frame, with this device's descriptor.
+        let frame: Frame = serde_json::from_slice(&held[0].1).unwrap();
+        assert_eq!(frame.version, FRAME_VERSION);
+        assert_eq!(frame.reach, shared.reachability());
+        assert!(accept_left(&held[0].1));
+        // The frames of one session leave once; a wave never waits.
+        drop(held);
+        assert_eq!(deliver(&shared, &offline::chat("bob"), &mut left).await, Some(false));
+        assert_eq!(mailbox.left.borrow().len(), 1);
+        let wave = Outgoing {
+            peer: "bob".into(),
+            body: Body::WaveAck { nonce: [7; 32], kind: "hello".into() },
+        };
+        assert_eq!(deliver(&shared, &wave, &mut left).await, None);
+        assert_eq!(mailbox.left.borrow().len(), 1);
+    }
+
     #[tokio::test]
     async fn an_external_token_cannot_reach_the_internal_grant() {
         let a = "http://127.0.0.1:1".to_owned();
@@ -215,5 +259,103 @@ mod isolation {
         let out = door.dispatch(&a, &"A".repeat(43), br#"{"action":"inbox.waves","version":1,"body":{}}"#, now()).await;
         assert!(matches!(out, crate::door::Output::Error { error: ErrorCode::Unauthorized }));
         lease.close(&mut door);
+    }
+}
+
+mod offline {
+    use super::*;
+    use std::cell::RefCell;
+
+    /// Keeps what is left; `full` makes every leave fail.
+    #[derive(Default)]
+    pub(super) struct Stub {
+        pub left: RefCell<Vec<(String, Vec<u8>)>>,
+        pub full: Cell<bool>,
+        pub waiting: RefCell<Vec<Vec<u8>>>,
+    }
+    impl Mailbox for Stub {
+        fn leave<'a>(&'a self, peer: &'a str, frame: &'a [u8]) -> LocalBoxFuture<'a, bool> {
+            Box::pin(async move {
+                if self.full.get() {
+                    return false;
+                }
+                self.left.borrow_mut().push((peer.to_owned(), frame.to_vec()));
+                true
+            })
+        }
+        fn collect(&self) -> LocalBoxFuture<'_, Vec<Vec<u8>>> {
+            Box::pin(async move { self.waiting.borrow_mut().drain(..).collect() })
+        }
+    }
+
+    pub(super) fn chat(peer: &str) -> Outgoing {
+        Outgoing {
+            peer: peer.into(),
+            body: Body::Chat { conversation: [1; 32], wire: vec![9] },
+        }
+    }
+
+    #[test]
+    fn only_chat_wires_and_receipts_may_wait() {
+        assert!(offline_body(&chat("p").body));
+        assert!(offline_body(&Body::Receipt { conversation: [1; 32], wire: vec![] }));
+        assert!(!offline_body(&Body::WaveAck { nonce: [0; 32], kind: "x".into() }));
+    }
+
+    #[test]
+    fn only_current_chat_and_receipt_frames_are_taken_from_the_mailbox() {
+        let frame = |version: u8, body: Body| {
+            serde_json::to_vec(&Frame { version, reach: vec![], body }).unwrap()
+        };
+        let chat_body = || Body::Chat { conversation: [1; 32], wire: vec![1] };
+        assert!(accept_left(&frame(FRAME_VERSION, chat_body())));
+        assert!(accept_left(&frame(
+            FRAME_VERSION,
+            Body::Receipt { conversation: [1; 32], wire: vec![1] }
+        )));
+        // A wave is first contact: a mailbox cannot carry one into the Door.
+        assert!(!accept_left(&frame(
+            FRAME_VERSION,
+            Body::WaveAck { nonce: [0; 32], kind: "x".into() }
+        )));
+        assert!(!accept_left(&frame(FRAME_VERSION + 1, chat_body())));
+        assert!(!accept_left(b"not a frame"));
+    }
+
+    #[tokio::test]
+    async fn a_mailbox_that_cannot_store_is_a_failure_that_is_tried_again() {
+        let stub = Rc::new(Stub::default());
+        stub.full.set(true);
+        let mut left = BTreeSet::new();
+        let item = chat("bob");
+        let mailbox: Rc<dyn Mailbox> = stub.clone();
+        assert!(!leave_offline(Some(mailbox.clone()), &mut left, &item, b"f").await);
+        assert!(left.is_empty());
+        stub.full.set(false);
+        assert!(leave_offline(Some(mailbox.clone()), &mut left, &item, b"f").await);
+        // The same frame for the same peer is not left twice; another peer's is.
+        assert!(leave_offline(Some(mailbox.clone()), &mut left, &item, b"f").await);
+        assert_eq!(stub.left.borrow().len(), 1);
+        assert!(leave_offline(Some(mailbox), &mut left, &chat("carol"), b"f").await);
+        assert_eq!(stub.left.borrow().len(), 2);
+        assert!(!leave_offline(None, &mut left, &item, b"f").await);
+    }
+
+    #[tokio::test]
+    async fn the_set_of_left_frames_is_bounded() {
+        let stub = Rc::new(Stub::default());
+        let mailbox: Rc<dyn Mailbox> = stub.clone();
+        let mut left: BTreeSet<Vec<u8>> = (0..4096u32).map(|n| n.to_be_bytes().to_vec()).collect();
+        assert!(leave_offline(Some(mailbox), &mut left, &chat("bob"), b"f").await);
+        assert_eq!(left.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_mailbox_hands_over_each_waiting_frame_once() {
+        let stub = Stub::default();
+        stub.waiting.borrow_mut().push(vec![1]);
+        stub.waiting.borrow_mut().push(vec![2]);
+        assert_eq!(stub.collect().await, vec![vec![1], vec![2]]);
+        assert!(stub.collect().await.is_empty());
     }
 }
