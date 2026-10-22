@@ -196,7 +196,7 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
                     candidate,
                     request,
                     evidence: &state.evidence,
-                    transport: &cbrd::TransportKey::from_bytes(state.transport),
+                    transport: &cbrd::TransportKey::from_keys(&state.transport),
                     policy: &source,
                 },
             )
