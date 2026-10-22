@@ -175,6 +175,9 @@ pub(super) struct Book {
     /// The member read the one-time explanation of vouching and confirmed it.
     #[serde(default)]
     pub explained: bool,
+    /// Communities this Vault created and finished creating (`foyer.communities`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub communities: Vec<super::communities::Entry>,
 }
 
 impl Drop for Book {
@@ -535,17 +538,72 @@ fn info(link: &Issued, admitted: u32, waiting: u32, now: u64) -> LinkInfo {
     }
 }
 
-/// Which open links must be revoked because the allowance is used up.
-fn exhausted(book: &Book, remaining: Option<u32>, now: u64) -> Vec<String> {
-    match remaining {
-        Some(0) => book
-            .issued
-            .iter()
-            .filter(|link| !link.pending && !link.revoked && now < link.expires_at)
+/// Which open links must be revoked because the allowance is used up: nothing
+/// is left once the admissions through this device's links are counted (`unspent`
+/// is `Some(0)`). Unknown (`None`) stops nothing.
+fn exhausted(book: &Book, unspent: Option<u64>, now: u64) -> Vec<String> {
+    match unspent {
+        Some(0) => open_links(book, now)
+            .filter(|link| !link.pending)
             .map(|link| link.id.clone())
             .collect(),
         _ => Vec::new(),
     }
+}
+
+/// Links that can still admit someone: not revoked and not expired (a pending
+/// one may exist at the community already).
+fn open_links(book: &Book, now: u64) -> impl Iterator<Item = &Issued> {
+    book.issued
+        .iter()
+        .filter(move |link| !link.revoked && now < link.expires_at)
+}
+
+/// The member's sponsor role class as its own lobby names it: member 0, admin 1,
+/// root 2. A lobby without one (not admitted, or held there) names none.
+pub(super) fn lobby_role(lobby: &Value) -> Option<u8> {
+    match lobby.get("role").and_then(Value::as_str)? {
+        "member" => Some(czkp::voucher::MEMBER),
+        "admin" => Some(czkp::voucher::ADMIN),
+        "root" => Some(czkp::voucher::ROOT),
+        _ => None,
+    }
+}
+
+/// What this device's own links hold against the account's allowance: `spent`,
+/// the admissions through any link it issued, and `reserved`, the still unused
+/// uses of every link that can admit. Both count here because no reserve or admit
+/// transition is proven on this device yet, so the account state carries neither
+/// (once it does, these units move into the account's `reserved` and `away`).
+fn held(book: &Book, now: u64) -> (u64, u64) {
+    let admitted = |link: &Issued| {
+        book.bonds
+            .iter()
+            .filter(|bond| bond.sponsor && bond.link == link.id)
+            .count() as u64
+    };
+    let spent = book.issued.iter().map(admitted).sum();
+    let reserved = open_links(book, now)
+        .map(|link| u64::from(link.uses).saturating_sub(admitted(link)))
+        .sum();
+    (spent, reserved)
+}
+
+/// Vouchers a new link may still offer: the account's remaining allowance less
+/// what this device's links hold.
+fn issuable(remaining: u64, book: &Book, now: u64) -> u64 {
+    let (spent, reserved) = held(book, now);
+    remaining.saturating_sub(spent).saturating_sub(reserved)
+}
+
+/// The accepted account's remaining allowance in the member's own role (the
+/// lobby names it), read on this device from the committed account state. A
+/// member without a role has no allowance to spend (`Refused`).
+async fn account_remaining(door: &mut Door, origin: &str, lobby: &Value) -> Result<u64> {
+    let role = lobby_role(lobby).ok_or(ErrorCode::Refused)?;
+    super::registry::account_call_at(door, origin, account::Command::VoucherRemaining(role))
+        .await?
+        .remaining()
 }
 
 /// The issuer's open custody record, read together with its raw bytes so the
@@ -960,9 +1018,20 @@ async fn sync(door: &mut Door, origin: &str, loaded: &mut Loaded) -> Result<Vec<
         let link = loaded.book.issued(&id).ok_or(ErrorCode::Unavailable)?;
         infos.push(info(link, admitted, waiting, started));
     }
-    // The allowance is used up: stop every open link.
-    let remaining = door.voucher_allowance;
-    for id in exhausted(&loaded.book, remaining, started) {
+    // The allowance is used up: stop every open link. Read only when a link is
+    // open; an allowance that cannot be read stops nothing.
+    let unspent = if open_links(&loaded.book, started).any(|link| !link.pending) {
+        match owner::<Value>(door, origin, "lobby", serde_json::json!({})).await {
+            Ok(lobby) => account_remaining(door, origin, &lobby)
+                .await
+                .ok()
+                .map(|remaining| remaining.saturating_sub(held(&loaded.book, started).0)),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+    for id in exhausted(&loaded.book, unspent, started) {
         let body = manage_body(&loaded.book, &id)?;
         let released: Result<WireRevoked> = owner(door, origin, "voucher_link_revoke", body).await;
         match released {
@@ -1243,16 +1312,22 @@ pub(super) async fn link_create(
     request: LinkCreate,
 ) -> Result<(LinkInfo, Vec<Event>)> {
     let origin = origin_of(door, key)?;
-    if let Some(remaining) = door.voucher_allowance {
-        if remaining == 0 || request.uses > remaining {
-            return Err(ErrorCode::Refused);
-        }
-    }
     let started = now()?;
     // The link text carries the issuer's opaque community member id so the
     // newcomer's account can bind its sponsor at admission; the community never
     // sees the text.
     let lobby: Value = owner(door, &origin, "lobby", serde_json::json!({})).await?;
+    // The allowance is checked on this device at issuance, against the account's
+    // current state in the member's current role: what is left after the open
+    // links' reservations and the admissions so far must cover every use.
+    let remaining = account_remaining(door, &origin, &lobby).await?;
+    {
+        let loaded = load(door, &origin).await?;
+        let free = issuable(remaining, &loaded.book, started);
+        if request.uses == 0 || u64::from(request.uses) > free {
+            return Err(ErrorCode::Refused);
+        }
+    }
     let sponsor: [u8; 32] = lobby
         .get("member_id")
         .and_then(Value::as_str)

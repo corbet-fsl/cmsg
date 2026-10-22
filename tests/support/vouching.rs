@@ -179,6 +179,63 @@ fn an_exhausted_allowance_stops_only_open_links() {
 }
 
 #[test]
+fn the_lobby_names_the_sponsor_role_class() {
+    let role = |value: serde_json::Value| lobby_role(&serde_json::json!({ "role": value }));
+    assert_eq!(role("member".into()), Some(0));
+    assert_eq!(role("admin".into()), Some(1));
+    assert_eq!(role("root".into()), Some(2));
+    assert_eq!(role("owner".into()), None);
+    assert_eq!(role(serde_json::Value::Null), None);
+    assert_eq!(lobby_role(&serde_json::json!({})), None);
+}
+
+#[test]
+fn open_links_reserve_their_unused_uses_and_admissions_stay_spent() {
+    let (token, secret) = link();
+    let mut book = Book::decode(None).unwrap();
+    let open = issued_with(&token, &secret);
+    let mut ended = open.clone();
+    ended.id = "e".into();
+    ended.expires_at = 15;
+    let mut revoked = open.clone();
+    revoked.id = "r".into();
+    revoked.revoked = true;
+    let mut pending = open.clone();
+    pending.id = "p".into();
+    pending.pending = true;
+    pending.uses = 1;
+    book.issued = vec![open.clone(), ended, revoked, pending];
+    let bond = |link: &str, member: &str| BondEntry {
+        sponsor: true,
+        link: link.into(),
+        member: member.into(),
+        bond: member.repeat(64),
+        sponsor_id: String::new(),
+        ..BondEntry::default()
+    };
+    // One admission through the open link, one through the ended one.
+    assert!(book.add_bond(bond(&open.id, "a")).unwrap());
+    assert!(book.add_bond(bond("e", "b")).unwrap());
+    // Spent: both admissions. Reserved: 3 - 1 of the open link, 1 of the pending
+    // one; the ended and the revoked links reserve nothing.
+    assert_eq!(held(&book, 20), (2, 3));
+    assert_eq!(issuable(50, &book, 20), 45);
+    assert_eq!(issuable(5, &book, 20), 0);
+    assert_eq!(issuable(4, &book, 20), 0);
+    // After every link ended only the admissions remain held.
+    assert_eq!(held(&book, 1000), (2, 0));
+    assert_eq!(issuable(5, &book, 1000), 3);
+}
+
+#[test]
+fn an_unproven_member_cannot_issue_and_an_admin_can_at_once() {
+    let book = Book::decode(None).unwrap();
+    // The account reports none for an unproven member, the role's allowance for an admin.
+    assert_eq!(issuable(0, &book, 20), 0);
+    assert_eq!(issuable(50, &book, 20), 50);
+}
+
+#[test]
 fn applicant_ids_split_into_link_and_member() {
     let link = "a".repeat(64);
     let id = applicant_id(&link, "member-1");

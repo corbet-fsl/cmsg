@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "cmsg"
 version = "0.2.0"
 edition = "2021"
@@ -139,6 +140,34 @@ required-features = ["conformance"]
 
 # v01 integration: first-party dependencies point directly at v01 branches; no [patch] tables.
 
+# Integration tests: ONE native binary (tests/cmsg.rs) instead of one link per file. The browser/wasm-capable
+# suites keep their own target (each needs its own wasm_bindgen_test_configure!), and ohttp_keys keeps its own
+# because the ohttp feature changes the types the other suites compile against.
+[[test]]
+name = "cmsg"
+path = "tests/cmsg.rs"
+
+[[test]]
+name = "browser_bridge"
+path = "tests/browser_bridge.rs"
+
+[[test]]
+name = "door"
+path = "tests/door.rs"
+
+[[test]]
+name = "facades"
+path = "tests/facades.rs"
+
+[[test]]
+name = "foyer"
+path = "tests/foyer.rs"
+
+[[test]]
+name = "foyer_browser"
+path = "tests/foyer_browser.rs"
+
 [[test]]
 name = "ohttp_keys"
+path = "tests/ohttp_keys.rs"
 required-features = ["ohttp"]

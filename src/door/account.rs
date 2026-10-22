@@ -119,6 +119,9 @@ pub(super) enum Command {
     Resume,
     /// The caller applied the acceptance of this request: forget the stored bytes.
     Settle([u8; 32]),
+    /// How many vouchers the accepted account may still hand out in this sponsor
+    /// role (member 0, admin 1, root 2), read from its committed state. Reads only.
+    VoucherRemaining(u8),
 }
 
 /// Typed answer of one command.
@@ -141,6 +144,12 @@ pub(super) enum Answer {
     Owed(Option<Shared<Applied>>),
     /// The stored update was forgotten.
     Settled,
+    /// Vouchers the account may still hand out (before the device's open links).
+    Remaining(u64),
+    /// Open was refused after the checkpoint slot its proof was bound to had ended
+    /// (`eligible_at` = that slot's end): a crossed scheduled boundary. The join
+    /// restarts enrollment and Open as a fresh operation (`enroll_and_open`).
+    SlotCrossed { eligible_at: u64 },
 }
 
 macro_rules! accessor {
@@ -148,6 +157,8 @@ macro_rules! accessor {
         pub(super) fn $name(self) -> Result<$type> {
             match self {
                 Self::$variant(value) => Ok(value),
+                // A crossed slot not restarted is the refusal it replaced.
+                Self::SlotCrossed { .. } => Err(ErrorCode::Unauthorized),
                 _ => Err(ErrorCode::Unavailable),
             }
         }
@@ -161,13 +172,63 @@ impl Answer {
     accessor!(gate, Gate, Gate);
     accessor!(updated, Updated, Shared<Applied>);
     accessor!(owed, Owed, Option<Shared<Applied>>);
+    accessor!(remaining, Remaining, u64);
 
     /// The open step answers `Opened`, or `Reopened` when a pending request was
     /// resumed; either way the request is accepted.
     pub(super) fn opened_or_reopened(self) -> Result<Opened> {
         match self {
             Self::Opened(value) | Self::Reopened(value) => Ok(value),
+            Self::SlotCrossed { .. } => Err(ErrorCode::Unauthorized),
             _ => Err(ErrorCode::Unavailable),
+        }
+    }
+}
+
+/// The outcome of Open, judged at `now` against the end of the checkpoint slot its
+/// proof was bound to. A refusal once that slot has ended is the crossed scheduled
+/// boundary (the device refresh refuses the next slot's publication), not a verdict
+/// on the member: it becomes `SlotCrossed`, which the join restarts.
+#[cfg_attr(
+    not(all(feature = "native-prover", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+fn open_outcome(result: Result<u64>, slot_end: u64, now: u64) -> Result<Answer> {
+    match result {
+        Ok(accepted_at) => Ok(Answer::Opened(Opened { accepted_at })),
+        Err(ErrorCode::Unauthorized) if now >= slot_end => Ok(Answer::SlotCrossed {
+            eligible_at: slot_end,
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+/// How often one join restarts a crossed checkpoint slot as a fresh operation.
+pub(super) const SLOT_RESTARTS: usize = 2;
+
+/// The account steps a join runs after its gate, one command at a time.
+pub(super) trait Steps {
+    async fn call(&mut self, command: Command) -> Result<Answer>;
+}
+
+/// Enroll, then open. A crossed checkpoint slot restarts both as a fresh operation
+/// (a fresh admission, delegation and proof; the old one is spent), at most
+/// `SLOT_RESTARTS` times. When the fresh enrollment waits for the next slot, the
+/// answer is `Pending`: the join reports `checkpoint_pending` meanwhile and the
+/// next join continues. Any other refusal ends the join as before.
+pub(super) async fn enroll_and_open(steps: &mut impl Steps) -> Result<Checkpoint> {
+    let mut restarts = 0;
+    loop {
+        let checkpoint = steps.call(Command::Enroll).await?.enrolled()?.checkpoint;
+        if let Checkpoint::Pending { .. } = checkpoint {
+            return Ok(checkpoint);
+        }
+        match steps.call(Command::Open).await? {
+            Answer::SlotCrossed { .. } if restarts < SLOT_RESTARTS => restarts += 1,
+            answer => {
+                answer.opened_or_reopened()?;
+                return Ok(Checkpoint::Ready);
+            }
         }
     }
 }
@@ -211,7 +272,11 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
     // an active member whose community changed its gates is held there.
     if matches!(
         command,
-        Command::Update(_) | Command::Resume | Command::Settle(_) | Command::Join(_)
+        Command::Update(_)
+            | Command::Resume
+            | Command::Settle(_)
+            | Command::Join(_)
+            | Command::VoucherRemaining(_)
     ) {
         return Repeat::As(command);
     }
@@ -228,7 +293,11 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
             }),
             Command::Activate => Answer::Activated(active),
             Command::Creation(_) => Answer::Noted,
-            Command::Join(_) | Command::Update(_) | Command::Resume | Command::Settle(_) => {
+            Command::Join(_)
+            | Command::Update(_)
+            | Command::Resume
+            | Command::Settle(_)
+            | Command::VoucherRemaining(_) => {
                 unreachable!("returned above")
             }
         });
@@ -277,17 +346,39 @@ pub(super) async fn join<L: Lobby>(
     }
 }
 
-/// Whether the lobby still lists an unsatisfied admission condition. A lobby
-/// without the field is never taken as satisfied.
+/// Whether the lobby still lists an unsatisfied admission condition. When the
+/// lobby says a passport is required, the global requirements it lists are
+/// proven by that fresh passport at admission, so a gate group counts each of
+/// them as passed; the server alone decides at admission. A lobby without the
+/// field, or an entry this device cannot read, is never taken as satisfied.
 #[cfg_attr(
     not(all(feature = "native-prover", not(target_arch = "wasm32"))),
     allow(dead_code)
 )]
 pub(super) fn lacks(lobby: &Value) -> bool {
-    lobby
-        .get("missing")
-        .and_then(Value::as_array)
-        .is_none_or(|missing| !missing.is_empty())
+    let Some(missing) = lobby.get("missing").and_then(Value::as_array) else {
+        return true;
+    };
+    let passport = lobby.get("passport_required").and_then(Value::as_bool) == Some(true);
+    missing.iter().any(|entry| {
+        let needed = entry.get("needed").and_then(Value::as_u64);
+        let (true, Some("gates"), Some(needed)) =
+            (passport, entry.get("kind").and_then(Value::as_str), needed)
+        else {
+            return true;
+        };
+        let global = entry
+            .get("alternatives")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|alternative| {
+                alternative["requirement"]["level"].as_str() == Some("global")
+                    && alternative["reason"].as_str() == Some("proof_required")
+            })
+            .count();
+        needed > global as u64
+    })
 }
 
 /// The inputs the lobby offers, in the server's order. Unreadable entries are
@@ -356,7 +447,7 @@ mod run {
     use super::super::vouching::Book;
     use super::super::{
         accounting::{
-            existing_active, has_pending, issue_account_admission, AccountAdmission,
+            existing_active, has_pending, issue_account_admission, voucher_remaining, AccountAdmission,
             AccountingIntents, CheckpointAcquisition, CommunityAccount, CurrentEnrollment,
             SubmittedEnrollment, AcceptedResponse, SignedApplyExtended,
         },
@@ -1059,6 +1150,13 @@ mod run {
                     mailbox.reply(reply.map(|()| Answer::Settled));
                     continue;
                 }
+                Command::VoucherRemaining(role) => {
+                    let reply = voucher_remaining(&mut account, *role, clock())
+                        .await
+                        .map(Answer::Remaining);
+                    mailbox.reply(reply);
+                    continue;
+                }
                 _ => {}
             }
             let admission = match admit(
@@ -1089,6 +1187,17 @@ mod run {
             let mut stage = Stage::Admitted(admission);
             let mut command = first;
             loop {
+                // A join re-presents the same creation id on every call; while a
+                // registered enrollment is held it is already admitted with it.
+                if let Command::Creation(id) = &command {
+                    if creation.as_deref() == Some(id.as_str())
+                        && matches!(stage, Stage::Waiting(_) | Stage::Ready(_))
+                    {
+                        mailbox.reply(Ok(Answer::Noted));
+                        command = mailbox.next().await;
+                        continue;
+                    }
+                }
                 let (reply, next) = serve(
                     &mut stage,
                     command.clone(),
@@ -1222,12 +1331,11 @@ mod run {
                     }
                 };
                 // Whatever happens, the enrollment is consumed; recovery after a
-                // failure is `account_reopen` from the durable state.
+                // failure is `account_reopen` from the durable state, or a fresh
+                // operation when the proof's checkpoint slot has ended meanwhile.
+                let slot_end = current.slot_end();
                 let result = open(current, account, request_intent, prover).await;
-                (
-                    result.map(|at| Answer::Opened(Opened { accepted_at: at })),
-                    Next::Restart,
-                )
+                (open_outcome(result, slot_end, clock()), Next::Restart)
             }
             Command::Reopen => {
                 let Some(admission) = stage.admission() else {
@@ -1238,11 +1346,22 @@ mod run {
                     Err(error) => (Err(error), Next::Restart),
                 }
             }
+            // A registered enrollment (waiting for its checkpoint slot, or ready) was
+            // admitted through the gates: the next join continues it. Dropping it for
+            // a fresh admission would need a second custody round for one join.
+            Command::Join(_) if matches!(stage, Stage::Waiting(_) | Stage::Ready(_)) => (
+                Ok(Answer::Gate(Gate {
+                    ready: true,
+                    steps: Vec::new(),
+                })),
+                Next::Stay,
+            ),
             Command::Join(_)
             | Command::Creation(_)
             | Command::Update(_)
             | Command::Resume
-            | Command::Settle(_) => (Err(ErrorCode::Unavailable), Next::Carry),
+            | Command::Settle(_)
+            | Command::VoucherRemaining(_) => (Err(ErrorCode::Unavailable), Next::Carry),
             Command::Activate => {
                 let Some(admission) = stage.admission() else {
                     return (Err(ErrorCode::Unavailable), Next::Carry);
@@ -1287,6 +1406,117 @@ mod run {
 mod tests {
     use super::super::actor::Mailbox;
     use super::*;
+
+    /// Scripted account steps: answers in order, commands recorded.
+    struct Script {
+        answers: std::collections::VecDeque<Result<Answer>>,
+        commands: Vec<Command>,
+    }
+
+    impl Script {
+        fn new(answers: Vec<Result<Answer>>) -> Self {
+            Self {
+                answers: answers.into(),
+                commands: Vec::new(),
+            }
+        }
+    }
+
+    impl Steps for Script {
+        async fn call(&mut self, command: Command) -> Result<Answer> {
+            self.commands.push(command);
+            self.answers.pop_front().expect("scripted answer")
+        }
+    }
+
+    fn ready() -> Result<Answer> {
+        Ok(Answer::Enrolled(Enrolled {
+            checkpoint: Checkpoint::Ready,
+        }))
+    }
+
+    #[test]
+    fn open_refused_after_its_checkpoint_slot_ended_is_a_crossed_slot() {
+        // The injected clock: the proof was bound to the slot ending at 1_800.
+        let end = 1_800;
+        assert_eq!(
+            open_outcome(Ok(1_750), end, 1_810),
+            Ok(Answer::Opened(Opened { accepted_at: 1_750 }))
+        );
+        assert_eq!(
+            open_outcome(Err(ErrorCode::Unauthorized), end, end),
+            Ok(Answer::SlotCrossed { eligible_at: end })
+        );
+        assert_eq!(
+            open_outcome(Err(ErrorCode::Unauthorized), end, end + 45),
+            Ok(Answer::SlotCrossed { eligible_at: end })
+        );
+        // Inside the slot a refusal is a verdict; other refusals never restart.
+        assert_eq!(
+            open_outcome(Err(ErrorCode::Unauthorized), end, end - 1),
+            Err(ErrorCode::Unauthorized)
+        );
+        for error in [ErrorCode::Reconcile, ErrorCode::Unavailable, ErrorCode::Refused] {
+            assert_eq!(open_outcome(Err(error), end, end + 1), Err(error));
+        }
+        // Not restarted, a crossed slot reads as the refusal it replaced.
+        let crossed = || Answer::SlotCrossed { eligible_at: end };
+        assert_eq!(crossed().opened(), Err(ErrorCode::Unauthorized));
+        assert_eq!(crossed().opened_or_reopened(), Err(ErrorCode::Unauthorized));
+    }
+
+    #[test]
+    fn a_crossed_slot_restarts_enrollment_and_open_at_most_twice() {
+        let crossed = || Ok(Answer::SlotCrossed { eligible_at: 1_800 });
+        let opened = || Ok(Answer::Opened(Opened { accepted_at: 2_000 }));
+        // No crossing: one enrollment, one open.
+        let mut steps = Script::new(vec![ready(), opened()]);
+        assert_eq!(block(enroll_and_open(&mut steps)), Ok(Checkpoint::Ready));
+        assert_eq!(steps.commands, [Command::Enroll, Command::Open]);
+        // Two crossings: two fresh operations, then the account opens.
+        let mut steps = Script::new(vec![
+            ready(),
+            crossed(),
+            ready(),
+            crossed(),
+            ready(),
+            opened(),
+        ]);
+        assert_eq!(block(enroll_and_open(&mut steps)), Ok(Checkpoint::Ready));
+        assert_eq!(steps.commands.len(), 6);
+        // A third crossing ends the join with the refusal; no third restart.
+        let mut steps = Script::new(vec![
+            ready(),
+            crossed(),
+            ready(),
+            crossed(),
+            ready(),
+            crossed(),
+        ]);
+        assert_eq!(
+            block(enroll_and_open(&mut steps)),
+            Err(ErrorCode::Unauthorized)
+        );
+        assert!(steps.answers.is_empty());
+        // The fresh enrollment waits for the next slot: checkpoint_pending meanwhile.
+        let pending = Checkpoint::Pending { eligible_at: 2_100 };
+        let mut steps = Script::new(vec![
+            ready(),
+            crossed(),
+            Ok(Answer::Enrolled(Enrolled {
+                checkpoint: pending.clone(),
+            })),
+        ]);
+        assert_eq!(block(enroll_and_open(&mut steps)), Ok(pending));
+        assert_eq!(steps.commands, [Command::Enroll, Command::Open, Command::Enroll]);
+        // Any other refusal ends the join as before, without a restart.
+        let mut steps = Script::new(vec![ready(), Err(ErrorCode::Reconcile)]);
+        assert_eq!(
+            block(enroll_and_open(&mut steps)),
+            Err(ErrorCode::Reconcile)
+        );
+        assert_eq!(steps.commands, [Command::Enroll, Command::Open]);
+    }
 
     #[test]
     fn an_answer_converts_only_to_its_own_result_type() {
@@ -1596,6 +1826,24 @@ mod tests {
         assert!(lacks(&json!({})));
         assert!(lacks(&json!({"missing": [{"kind": "gates"}]})));
         assert!(!lacks(&json!({"missing": []})));
+        let global = json!({"requirement": {"gate": "development", "level": "global"}, "reason": "proof_required"});
+        let voucher = json!({"requirement": {"gate": "cvch", "level": "community"}, "reason": "proof_required"});
+        let disabled = json!({"requirement": {"gate": "development", "level": "global"}, "reason": "disabled"});
+        let lobby = |passport: bool, needed: u64, alternatives: Value| {
+            json!({"passport_required": passport, "missing": [{"kind": "gates", "needed": needed, "alternatives": alternatives}]})
+        };
+        // The passport proves the global requirement at admission.
+        assert!(!lacks(&lobby(true, 1, json!([global.clone()]))));
+        // Without a required passport, nothing global is assumed.
+        assert!(lacks(&lobby(false, 1, json!([global.clone()]))));
+        // A community requirement still lacks; a disabled global one is not proven.
+        assert!(lacks(&lobby(true, 2, json!([global.clone(), voucher.clone()]))));
+        assert!(lacks(&lobby(true, 1, json!([voucher]))));
+        assert!(lacks(&lobby(true, 1, json!([disabled]))));
+        // Unreadable groups and other kinds of missing never count as satisfied.
+        assert!(lacks(&json!({"passport_required": true, "missing": [{"kind": "gates", "alternatives": [global]}]})));
+        assert!(lacks(&json!({"passport_required": true, "missing": [{"kind": "membership"}]})));
+        assert!(lacks(&json!({"passport_required": true, "missing": [{"kind": "gates", "needed": 1}]})));
         let lobby = json!({
             "steps": [
                 {"gate": "voucher", "provider": "sponsor", "steps": [{"id": "code"}, {"id": 7}]},

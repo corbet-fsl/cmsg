@@ -1,5 +1,8 @@
 //! Actual owner-accepted session writes with transport faults. No session is synthesized.
 use super::*;
+
+#[path = "foyer_fixture.rs"]
+mod foyer_fixture;
 use serde_json::{json, Value};
 const ORIGIN: &str = "https://alpha.example.test";
 
@@ -139,7 +142,7 @@ fn ceremony_expiry_keeps_a_started_server_write_fenced_until_reconciliation() {
 
 #[tokio::test]
 async fn unknown_session_result_and_cancelled_reply_fence_original_foyer() {
-    let path = std::env::var("CMSG_FOYER_FIXTURE").expect("use the original owner fixture");
+    let path = foyer_fixture::fixture_path();
     let fixture: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let now = fixture["now"].as_u64().unwrap();
     let fault = &fixture["login_faults"];

@@ -14,6 +14,7 @@ pub mod browser;
 pub mod composer;
 mod composition;
 pub mod courier;
+mod communities;
 mod creating;
 mod device_session;
 pub mod device_join;
@@ -277,10 +278,6 @@ pub struct Door {
     /// Lent by the trusted embedder: proves a new community's accounting genesis
     /// on this device (see `creating`). Absent in a frontend that cannot prove.
     activation_prover: Option<std::sync::Arc<dyn accounting::ActivationProver>>,
-    /// Vouchers the member may still spend, as last reported by the accounting
-    /// owner. `None` until one is known; links are then limited only by the
-    /// community's own (alpha) allowance.
-    voucher_allowance: Option<u32>,
     wave_ports: BTreeMap<String, Box<dyn inbox_waves::WavePorts>>,
     login_configuration: BTreeMap<String, login::Configuration>,
     logins: BTreeMap<[u8; 32], login::session::State>,
@@ -306,7 +303,6 @@ impl Door {
             vaults: BTreeMap::new(),
             accounts: BTreeMap::new(),
             activation_prover: None,
-            voucher_allowance: None,
             wave_ports: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
             logins: BTreeMap::new(),
@@ -325,14 +321,6 @@ impl Door {
         prover: std::sync::Arc<dyn accounting::ActivationProver>,
     ) {
         self.activation_prover = Some(prover);
-    }
-
-    /// Trusted embedding control: the accounting owner reports how many vouchers
-    /// the member may still spend. At zero every open link is stopped and no new
-    /// one is issued; a link may not offer more uses than remain. Absent from
-    /// every callable projection.
-    pub fn set_voucher_allowance(&mut self, remaining: Option<u32>) {
-        self.voucher_allowance = remaining;
     }
 
     /// Trusted embedding control: the runtime reports the network connection

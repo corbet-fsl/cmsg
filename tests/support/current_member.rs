@@ -1,6 +1,9 @@
 //! Genuine source-owner cancellation at the original final Keys read.
 //! This fresh holder fixture is not durable Wallet, Tor or account qualification.
 use super::*;
+
+#[path = "foyer_fixture.rs"]
+mod foyer_fixture;
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 #[path = "common_record.rs"]
@@ -131,7 +134,7 @@ async fn genuine_holder_presentation(
 async fn cancelled_final_store_read_discards_the_genuine_ordinary_member_lease() {
     tokio::time::timeout(Duration::from_secs(180), async {
         let fixture: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(std::env::var("CMSG_FOYER_FIXTURE").unwrap()).unwrap(),
+            &std::fs::read(foyer_fixture::fixture_path()).unwrap(),
         )
         .unwrap();
         let fixture = &fixture["certified_wallet"];

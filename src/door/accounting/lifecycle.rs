@@ -33,6 +33,32 @@ where
     AccountAdmission::already_active(account).await.ok()
 }
 
+/// How many vouchers the accepted account may still hand out at `now` in the
+/// sponsor role `role`, from its committed state (cwlt `voucher_remaining`). An
+/// account that is not active has none to read: `Unavailable`.
+pub async fn voucher_remaining<B, C, E, A, R>(
+    account: &mut CommunityAccount<B, C, E, A, R>,
+    role: u8,
+    now: u64,
+) -> Result<u64>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+{
+    let accepted = account
+        .vault()
+        .await?
+        .restore_accepted_account()
+        .await
+        .map_err(|_| ErrorCode::Unavailable)?;
+    accepted
+        .voucher_remaining(role, now)
+        .map_err(|_| ErrorCode::Unavailable)
+}
+
 /// Whether a durable pending request already exists (the member enrolled and
 /// opened before; a repeat resumes it instead of preparing a new request).
 pub async fn has_pending<B, C, E, A, R>(account: &mut CommunityAccount<B, C, E, A, R>) -> bool

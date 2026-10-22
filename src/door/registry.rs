@@ -11,6 +11,7 @@ use board::{
     room_leave as board_room_leave, room_serve as board_room_serve, search as board_search,
     watch as board_watch,
 };
+use communities::communities;
 use creating::{
     community_create, community_creation, community_creation_claim, community_creation_finish,
 };
@@ -216,6 +217,18 @@ async fn vault_lock(door: &mut Door, key: &[u8; 32], _: Empty) -> Result<(Empty,
     Ok((Empty {}, vec![Event::VaultLocked]))
 }
 
+/// The join's account steps through the origin's actor.
+struct JoinSteps<'a> {
+    door: &'a mut Door,
+    key: &'a [u8; 32],
+}
+
+impl account::Steps for JoinSteps<'_> {
+    async fn call(&mut self, command: account::Command) -> Result<account::Answer> {
+        account_call(self.door, self.key, command).await
+    }
+}
+
 /// Serve one account action through the origin's actor. An actor past its
 /// grant, finished or fenced is dropped here, never reused.
 pub(super) async fn account_call(
@@ -227,7 +240,7 @@ pub(super) async fn account_call(
     account_call_at(door, &origin, command).await
 }
 
-async fn account_call_at(
+pub(super) async fn account_call_at(
     door: &mut Door,
     origin: &str,
     command: account::Command,
@@ -320,16 +333,10 @@ async fn community_join(
         return Ok((account::Joined::NeedsSteps { steps: gate.steps }, vec![]));
     }
     if let account::Checkpoint::Pending { eligible_at } =
-        account_call(door, key, account::Command::Enroll)
-            .await?
-            .enrolled()?
-            .checkpoint
+        account::enroll_and_open(&mut JoinSteps { door, key }).await?
     {
         return Ok((account::Joined::CheckpointPending { eligible_at }, vec![]));
     }
-    account_call(door, key, account::Command::Open)
-        .await?
-        .opened_or_reopened()?;
     let done = account_call(door, key, account::Command::Activate)
         .await?
         .activated()?;
@@ -468,6 +475,7 @@ actions! {
     "foyer.community_create" => community_create(creating::Create) -> creating::Created, VaultAccess, Foyer;
     "foyer.community_creation" => community_creation(Empty) -> creating::Draft, VaultAccess, Foyer;
     "foyer.community_creation_finish" => community_creation_finish(Empty) -> Empty, VaultAccess, Foyer;
+    "foyer.communities" => communities(Empty) -> communities::Communities, VaultAccess, Foyer;
     "foyer.community_creation_claim" => community_creation_claim(creating::Claim) -> creating::Claimed, VaultAccess, Foyer;
     "foyer.voucher_link_create" => voucher_link_create(vouching::LinkCreate) -> vouching::LinkInfo, VaultAccess, Foyer;
     "foyer.voucher_links" => voucher_links(Empty) -> vouching::Links, VaultAccess, Foyer;

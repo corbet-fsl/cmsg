@@ -497,7 +497,13 @@ pub(super) async fn community_creation_finish(
 ) -> Result<(Empty, Vec<Event>)> {
     let origin = origin_of(door, key)?;
     let mut loaded = vouching::load(door, &origin).await?;
-    if loaded.book.creation.take().is_some() {
+    if let Some(record) = loaded.book.creation.take() {
+        if let Some(created) = &record.created {
+            super::communities::remember(
+                &mut loaded.book.communities,
+                super::communities::created_entry(created),
+            );
+        }
         loaded.save(door, &origin).await?;
     }
     Ok((Empty {}, vec![]))
