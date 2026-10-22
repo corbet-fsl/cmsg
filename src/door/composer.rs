@@ -790,21 +790,12 @@ where
     // channel to the global service; both are lent to this Door for that use only.
     // The wallet Door's own session is locked by the global passport's recovery
     // lease for the device's life (it must outlive this call), so creation gets the
-    // independent companion session that signed in for the wallet restore.
+    // wallet companion, its sibling of the same family (no further ceremony).
     Box::leak(Box::new(
         wallet_door
             .take_global(global_origin)
             .map_err(step("global session"))?,
     ));
-    // A registered device's start opened no second wallet session (its one confirmation is
-    // the wallet Door's login); the native Door still lends one, at one more ceremony.
-    let global_companion = match global_companion {
-        Some(companion) => companion,
-        None => {
-            keys.limit(1);
-            wallet_companion(services, keys).await?
-        }
-    };
     let public = services.public(Service::Global).await?;
     door.lend_global(community_origin, global_companion, public)
         .map_err(step("global session"))?;
