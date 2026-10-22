@@ -56,6 +56,32 @@ fn frames_are_versioned_and_strict() {
 }
 
 #[test]
+fn only_the_own_sends_waiting_for_a_receipt_are_scanned_and_newest_first() {
+    let entry = |id: u8, status: Value| {
+        json!({
+            "message": {"id": vec![id; 32], "sender": "x", "epoch": 1, "bytes": [], "accepted_at": 0},
+            "status": status,
+        })
+    };
+    let thread = json!([
+        entry(1, json!("Accepted")),
+        entry(2, json!("Pending")),
+        entry(3, json!(null)),
+        entry(4, json!("CanceledUnconfirmed")),
+        entry(5, json!("Pending")),
+    ]);
+    assert_eq!(pending_ids(&thread), vec![[5; 32], [2; 32]]);
+    // Anything that is not a thread, or an entry without an id, yields nothing.
+    assert!(pending_ids(&json!({"history": []})).is_empty());
+    assert!(pending_ids(&json!([{"status": "Pending"}, {"message": {"id": "x"}, "status": "Pending"}])).is_empty());
+    // The scan is bounded to the newest sends.
+    let many: Vec<Value> = (0..=u8::MAX).map(|id| entry(id, json!("Pending"))).collect();
+    let found = pending_ids(&Value::Array(many));
+    assert_eq!(found.len(), MAX_SCAN_MESSAGES);
+    assert_eq!(found[0], [u8::MAX; 32]);
+}
+
+#[test]
 fn defaults_keep_presence_inside_a_short_lease() {
     let config = Config::default();
     assert!(config.heartbeat <= 30 && config.resend > config.tick);

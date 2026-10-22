@@ -955,44 +955,34 @@ async fn gather(
     out
 }
 
+/// Ids of the own sends that still wait for their receipt in an `inbox.thread`
+/// answer (a list of messages with their delivery status), newest first and
+/// bounded. Such a send is not in the accepted history, only in the thread.
+fn pending_ids(thread: &Value) -> Vec<[u8; 32]> {
+    let Some(entries) = thread.as_array() else {
+        return vec![];
+    };
+    entries
+        .iter()
+        .rev()
+        .filter(|entry| entry.get("status") == Some(&json!("Pending")))
+        .filter_map(|entry| serde_json::from_value(entry.get("message")?.get("id")?.clone()).ok())
+        .take(MAX_SCAN_MESSAGES)
+        .collect()
+}
+
 async fn scan_pending(door: &mut Door, lease: &Lease, out: &mut Vec<Outgoing>) {
     let Ok(all) = conversations(lease, door).await else {
         return;
     };
     for (peer, conversation) in all {
-        let Ok(view) = lease
-            .call(
-                door,
-                "inbox.snapshot",
-                json!({"peer": peer, "conversation": conversation}),
-            )
+        let Ok(thread) = lease
+            .call(door, "inbox.thread", json!({"conversation": conversation}))
             .await
         else {
             continue;
         };
-        let ids: Vec<[u8; 32]> = view
-            .get("history")
-            .and_then(Value::as_array)
-            .map(|h| {
-                h.iter()
-                    .rev()
-                    .take(MAX_SCAN_MESSAGES)
-                    .filter_map(|m| serde_json::from_value(m.get("id")?.clone()).ok())
-                    .collect()
-            })
-            .unwrap_or_default();
-        for id in ids {
-            let pending = lease
-                .call(
-                    door,
-                    "inbox.delivery_status",
-                    json!({"conversation": conversation, "message": id}),
-                )
-                .await
-                .is_ok_and(|status| status == json!("Pending"));
-            if !pending {
-                continue;
-            }
+        for id in pending_ids(&thread) {
             if let Ok((retried, _)) = super::inbox_conversation::retry(
                 door,
                 &lease.key,
