@@ -84,6 +84,9 @@ pub struct EnvelopeWindow {
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "browser-tor"))]
+pub(crate) use runtime::RefuseWatches;
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-tor"))]
 mod runtime {
     use super::*;
     use crate::door::{browser, network_browser, ErrorCode, Result};
@@ -93,6 +96,13 @@ mod runtime {
     /// No member watch signer is available to this deployment. Forced restore
     /// reads do not require watches; never substitute node signing for one.
     pub struct RefuseWatches;
+
+    struct Validated {
+        transport: network_browser::Configuration,
+        records: browser::records::Configuration,
+        window: cdht::rpc::envelope::TimeWindow,
+        database: String,
+    }
 
     impl TorWatcher for RefuseWatches {
         fn public_key(
@@ -114,13 +124,8 @@ mod runtime {
     }
 
     impl Configuration {
-        /// Validate deployment shape before attaching; original constructors
-        /// still validate again when real custody starts Tor and Records.
-        pub(crate) fn composer(
-            self,
-            community: &str,
-            board: Option<crate::door::board::PendingBoard>,
-        ) -> Result<Box<dyn crate::door::VaultComposer>> {
+        /// Every budget checked and converted once, for restore and for a bootstrap client.
+        fn validated(self) -> Result<Validated> {
             if !(1..=64).contains(&self.transport.streams)
                 || !(1..=600_000).contains(&self.transport.bootstrap_ms)
                 || !(1..=60_000).contains(&self.transport.operation_ms)
@@ -175,6 +180,49 @@ mod runtime {
                     .map_err(|_| ErrorCode::InvalidRequest)?;
                 bootstrap.push(peer);
             }
+            Ok(Validated {
+                transport: network_browser::Configuration {
+                    limits: ctrn::Limits {
+                        streams: self.transport.streams,
+                        bootstrap_ms: self.transport.bootstrap_ms,
+                        operation_ms: self.transport.operation_ms,
+                    },
+                    messages,
+                },
+                records: browser::records::Configuration {
+                    discovery: cmsh::tor_discovery::TorDiscoveryLimits {
+                        peers: self.discovery.peers,
+                        lanes: self.discovery.lanes,
+                        timeout_ms: self.discovery.timeout_ms,
+                    },
+                    records: cmsh::tor_records::TorRecordLimits {
+                        consensus_width: self.records.consensus_width,
+                        watches: self.records.watches,
+                    },
+                    storage,
+                    bootstrap,
+                    maximum_bootstrap_bytes: self.maximum_bootstrap_bytes,
+                    record_concurrency: self.record_concurrency,
+                    application_queue: self.application_queue,
+                    application_payload: self.application_payload,
+                    startup_millis: self.startup_millis,
+                },
+                window: cdht::rpc::envelope::TimeWindow {
+                    behind_us: self.window.behind_us,
+                    ahead_us: self.window.ahead_us,
+                },
+                database: self.database,
+            })
+        }
+
+        /// Validate deployment shape before attaching; original constructors
+        /// still validate again when real custody starts Tor and Records.
+        pub(crate) fn composer(
+            self,
+            community: &str,
+            board: Option<crate::door::board::PendingBoard>,
+        ) -> Result<Box<dyn crate::door::VaultComposer>> {
+            let validated = self.validated()?;
             // Fixed domain plus the immutable Door community, never a second
             // caller-selected scope. This namespace is public, not key material.
             let mut scope = Sha256::new();
@@ -182,41 +230,38 @@ mod runtime {
             scope.update(community.as_bytes());
             Ok(Box::new(
                 browser::restore::Composer::new(browser::restore::Configuration {
-                    transport: network_browser::Configuration {
-                        limits: ctrn::Limits {
-                            streams: self.transport.streams,
-                            bootstrap_ms: self.transport.bootstrap_ms,
-                            operation_ms: self.transport.operation_ms,
-                        },
-                        messages,
-                    },
-                    records: browser::records::Configuration {
-                        discovery: cmsh::tor_discovery::TorDiscoveryLimits {
-                            peers: self.discovery.peers,
-                            lanes: self.discovery.lanes,
-                            timeout_ms: self.discovery.timeout_ms,
-                        },
-                        records: cmsh::tor_records::TorRecordLimits {
-                            consensus_width: self.records.consensus_width,
-                            watches: self.records.watches,
-                        },
-                        storage,
-                        bootstrap,
-                        maximum_bootstrap_bytes: self.maximum_bootstrap_bytes,
-                        record_concurrency: self.record_concurrency,
-                        application_queue: self.application_queue,
-                        application_payload: self.application_payload,
-                        startup_millis: self.startup_millis,
-                    },
+                    transport: validated.transport,
+                    records: validated.records,
                     scope: ctrn::Scope(scope.finalize().into()),
-                    window: cdht::rpc::envelope::TimeWindow {
-                        behind_us: self.window.behind_us,
-                        ahead_us: self.window.ahead_us,
-                    },
+                    window: validated.window,
                     watcher: RefuseWatches,
-                    database: self.database,
+                    database: validated.database,
                 })
                 .with_board(board),
+            ))
+        }
+
+        /// The same deployment budgets for a registration's dial-only bootstrap client: its
+        /// engine limits, its lookup and record limits and bootstrap peers, and the envelope
+        /// window. A client stores nothing and runs no application port, so the storage and
+        /// application budgets do not apply to it.
+        pub(crate) fn bootstrap(
+            &self,
+        ) -> Result<(
+            network_browser::Configuration,
+            browser::records::ClientConfiguration,
+            cdht::rpc::envelope::TimeWindow,
+        )> {
+            let validated = self.clone().validated()?;
+            Ok((
+                validated.transport,
+                browser::records::ClientConfiguration {
+                    discovery: validated.records.discovery,
+                    records: validated.records.records,
+                    bootstrap: validated.records.bootstrap,
+                    maximum_bootstrap_bytes: validated.records.maximum_bootstrap_bytes,
+                },
+                validated.window,
             ))
         }
     }

@@ -43,10 +43,16 @@ impl Isolation {
     }
 }
 
-/// Opens the records network of one scope on its own isolation.
+/// Opens the records network of one scope on its own isolation. Opening may start a Tor
+/// engine, so it is async; a refusal happens before any ceremony.
+#[allow(async_fn_in_trait)]
 pub trait Open {
     type Network: cdht::Network + Clone + 'static;
-    fn open(&mut self, scope: Scope, isolation: Isolation) -> Result<Self::Network, ComposeError>;
+    async fn open(
+        &mut self,
+        scope: Scope,
+        isolation: Isolation,
+    ) -> Result<Self::Network, ComposeError>;
 }
 
 /// One registration's circuits: each scope is lent once, on a fresh isolation.
@@ -68,25 +74,25 @@ impl<O: Open> Circuits<O> {
     }
 
     /// The network of `scope`. A scope lent before is refused instead of sharing its circuit.
-    pub fn lend(&mut self, scope: Scope) -> Result<O::Network, ComposeError> {
+    pub async fn lend(&mut self, scope: Scope) -> Result<O::Network, ComposeError> {
         if self.lent.contains(&scope) {
             return Err(refused("a scope is lent once per registration"));
         }
         let isolation =
             Isolation(u32::try_from(self.lent.len()).map_err(|_| refused("too many scopes"))?);
-        let network = self.open.open(scope, isolation)?;
+        let network = self.open.open(scope, isolation).await?;
         self.lent.push(scope);
         Ok(network)
     }
 
     /// The wallet's and one community's networks, for `compose_device`.
-    pub fn registration(
+    pub async fn registration(
         &mut self,
         fingerprint: [u8; 32],
     ) -> Result<Networks<O::Network>, ComposeError> {
         Ok(Networks {
-            wallet: self.lend(Scope::Wallet)?,
-            community: self.lend(Scope::Community(fingerprint))?,
+            wallet: self.lend(Scope::Wallet).await?,
+            community: self.lend(Scope::Community(fingerprint)).await?,
         })
     }
 }
@@ -112,19 +118,50 @@ pub fn relay_endpoint(endpoint: &str) -> Result<url::Url, ComposeError> {
     Ok(url)
 }
 
-/// The deployment's lent network as an `Open`.
-pub struct Deployment<'a>(pub &'a Lent);
+/// The deployment's lent network as an `Open`, with the deployment's browser Tor budgets
+/// (`VaultHostConfiguration::browser_tor`) that a bootstrap client runs on.
+pub struct Deployment<'a>(
+    pub &'a Lent,
+    pub Option<&'a crate::door::browser::deployment::Configuration>,
+);
+
+/// The fresh transport identity of one scope's bootstrap client and the public namespace of
+/// its engine. The keys come from the platform CSPRNG on every call (never from the scope),
+/// so two scopes, or two registrations, never share an identity; the namespace is public and
+/// not key material.
+pub fn bootstrap_identity(
+    scope: Scope,
+) -> Result<(ckmg::EphemeralTransport, [u8; 32]), ComposeError> {
+    use sha2::{Digest, Sha256};
+    let mut engine = Sha256::new();
+    engine.update(b"cmsg.tor.bootstrap.v1\0");
+    let label = match scope {
+        Scope::Wallet => "registration.wallet",
+        Scope::Community(fingerprint) => {
+            engine.update(fingerprint);
+            "registration.community"
+        }
+    };
+    engine.update(label.as_bytes());
+    let transport =
+        ckmg::EphemeralTransport::new(label).map_err(|_| refused("bootstrap transport keys"))?;
+    Ok((transport, engine.finalize().into()))
+}
 
 impl Open for Deployment<'_> {
     type Network = Network;
-    fn open(&mut self, scope: Scope, isolation: Isolation) -> Result<Network, ComposeError> {
+    async fn open(&mut self, scope: Scope, isolation: Isolation) -> Result<Network, ComposeError> {
         match self.0 {
-            // The bootstrap client needs a transport identity that no vault derives: a fresh
-            // ephemeral node key for the browser Tor engine (ckmg/ctrn). Until that exists the
-            // registration refuses here, before any ceremony; nothing substitutes for Tor.
-            Lent::Bootstrap {} => Err(refused(
-                "bootstrap Tor client: no ephemeral transport identity yet",
-            )),
+            // A dial-only Tor client per scope, on its own ephemeral identity and engine (so
+            // its own circuits): it never listens or advertises. Without the deployment's
+            // browser Tor budgets the registration refuses here, before any ceremony.
+            Lent::Bootstrap {} => {
+                let tor = self.1.ok_or_else(|| {
+                    refused("bootstrap Tor client: the deployment has no browser Tor budgets")
+                })?;
+                let _ = isolation;
+                bootstrap(tor, scope).await
+            }
             Lent::Relay { endpoint } => Ok(Network::Relay(Relay {
                 endpoint: relay_endpoint(endpoint)?.to_string(),
                 scope,
@@ -134,10 +171,47 @@ impl Open for Deployment<'_> {
     }
 }
 
+#[cfg(all(target_arch = "wasm32", feature = "browser-tor"))]
+async fn bootstrap(
+    tor: &crate::door::browser::deployment::Configuration,
+    scope: Scope,
+) -> Result<Network, ComposeError> {
+    use crate::door::browser::{deployment::RefuseWatches, identity::BootstrapClient, records};
+    let (budgets, client, window) = tor
+        .bootstrap()
+        .map_err(|e| refused(&format!("bootstrap Tor budgets: {e:?}")))?;
+    let (transport, engine) = bootstrap_identity(scope)?;
+    let identity = BootstrapClient::start(transport, ctrn::Scope(engine), budgets, window)
+        .await
+        .map_err(|e| refused(&format!("bootstrap Tor client: {e:?}")))?;
+    let client = records::Client::new(identity, RefuseWatches, client)
+        .map_err(|e| refused(&format!("bootstrap records client: {e:?}")))?;
+    Ok(Network::Bootstrap(std::rc::Rc::new(client)))
+}
+
+#[cfg(not(all(target_arch = "wasm32", feature = "browser-tor")))]
+async fn bootstrap(
+    _: &crate::door::browser::deployment::Configuration,
+    scope: Scope,
+) -> Result<Network, ComposeError> {
+    // Native embedders lend their own network; the bootstrap client is the browser's.
+    let _ = bootstrap_identity(scope)?;
+    Err(refused("bootstrap Tor client: browser only"))
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-tor"))]
+type BootstrapClient = crate::door::browser::records::Client<
+    crate::door::browser::identity::BootstrapClient,
+    crate::door::browser::deployment::RefuseWatches,
+>;
+
 /// The records network of one scope.
 #[derive(Clone)]
 pub enum Network {
     Relay(Relay),
+    /// The scope's dial-only Tor records client (dropped with the last clone, at `Done`).
+    #[cfg(all(target_arch = "wasm32", feature = "browser-tor"))]
+    Bootstrap(std::rc::Rc<BootstrapClient>),
 }
 
 /// The toy stack's records helper: five validating nodes in one process, one JSON request per
@@ -237,23 +311,19 @@ impl Relay {
     }
 }
 
-impl cdht::Network for Network {
+impl cdht::Network for Relay {
     fn now_ms(&self) -> u64 {
-        match self {
-            Network::Relay(_) => 1,
-        }
+        1
     }
     async fn closest(&self, _: &cdht::RecordKey) -> Result<Vec<cdht::NodeId>, cdht::Error> {
-        match self {
-            Network::Relay(_) => Ok((0..NODES).map(|index| [index; 32]).collect()),
-        }
+        Ok((0..NODES).map(|index| [index; 32]).collect())
     }
     async fn descriptor(
         &self,
         node: &cdht::NodeId,
         key: &cdht::RecordKey,
     ) -> Result<Option<cdht::Descriptor>, cdht::Error> {
-        let Network::Relay(relay) = self;
+        let relay = self;
         let mut call = request("descriptor", node)?;
         call["key"] = serde_json::json!(key.0);
         serde_json::from_value(relay.call(call).await?).map_err(|_| cdht::Error::Encoding)
@@ -264,7 +334,7 @@ impl cdht::Network for Network {
         key: &cdht::RecordKey,
         subkey: u32,
     ) -> Result<Option<cdht::SignedValue>, cdht::Error> {
-        let Network::Relay(relay) = self;
+        let relay = self;
         let mut call = request("get", node)?;
         call["key"] = serde_json::json!(key.0);
         call["subkey"] = serde_json::json!(subkey);
@@ -277,7 +347,7 @@ impl cdht::Network for Network {
         subkey: u32,
         value: &cdht::SignedValue,
     ) -> Result<cdht::SetOutcome, cdht::Error> {
-        let Network::Relay(relay) = self;
+        let relay = self;
         let encode = |_| cdht::Error::Encoding;
         let mut call = request("set", node)?;
         call["subkey"] = serde_json::json!(subkey);
@@ -310,21 +380,101 @@ impl cdht::Network for Network {
     }
 }
 
+/// Each method goes to the scope's relay or to its bootstrap client's records.
+macro_rules! lent {
+    ($network:expr, $network_ref:ident => $call:expr) => {
+        match $network {
+            Network::Relay($network_ref) => $call,
+            #[cfg(all(target_arch = "wasm32", feature = "browser-tor"))]
+            Network::Bootstrap(client) => {
+                let $network_ref = &**client.records();
+                $call
+            }
+        }
+    };
+}
+
+impl cdht::Network for Network {
+    fn now_ms(&self) -> u64 {
+        lent!(self, network => cdht::Network::now_ms(network))
+    }
+    fn hints(&self, key: &cdht::RecordKey) -> Result<Vec<cdht::NodeId>, cdht::Error> {
+        lent!(self, network => cdht::Network::hints(network, key))
+    }
+    async fn closest(&self, key: &cdht::RecordKey) -> Result<Vec<cdht::NodeId>, cdht::Error> {
+        lent!(self, network => cdht::Network::closest(network, key).await)
+    }
+    async fn descriptor(
+        &self,
+        node: &cdht::NodeId,
+        key: &cdht::RecordKey,
+    ) -> Result<Option<cdht::Descriptor>, cdht::Error> {
+        lent!(self, network => cdht::Network::descriptor(network, node, key).await)
+    }
+    async fn get(
+        &self,
+        node: &cdht::NodeId,
+        key: &cdht::RecordKey,
+        subkey: u32,
+    ) -> Result<Option<cdht::SignedValue>, cdht::Error> {
+        lent!(self, network => cdht::Network::get(network, node, key, subkey).await)
+    }
+    async fn set(
+        &self,
+        node: &cdht::NodeId,
+        descriptor: &cdht::Descriptor,
+        subkey: u32,
+        value: &cdht::SignedValue,
+    ) -> Result<cdht::SetOutcome, cdht::Error> {
+        lent!(self, network => cdht::Network::set(network, node, descriptor, subkey, value).await)
+    }
+    async fn watch(
+        &self,
+        node: &cdht::NodeId,
+        key: &cdht::RecordKey,
+    ) -> Result<cdht::WatchId, cdht::Error> {
+        lent!(self, network => cdht::Network::watch(network, node, key).await)
+    }
+    async fn cancel_watch(
+        &self,
+        node: &cdht::NodeId,
+        watch: cdht::WatchId,
+    ) -> Result<(), cdht::Error> {
+        lent!(self, network => cdht::Network::cancel_watch(network, node, watch).await)
+    }
+    async fn changes(
+        &self,
+        node: &cdht::NodeId,
+        watch: cdht::WatchId,
+    ) -> Result<Vec<cdht::Change>, cdht::Error> {
+        lent!(self, network => cdht::Network::changes(network, node, watch).await)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_executor::block_on;
 
     /// Records which isolation every opened scope got.
     #[derive(Default)]
     struct Recorder(Vec<(Scope, Isolation)>);
     impl Open for &mut Recorder {
         type Network = Network;
-        fn open(&mut self, scope: Scope, isolation: Isolation) -> Result<Network, ComposeError> {
+        async fn open(
+            &mut self,
+            scope: Scope,
+            isolation: Isolation,
+        ) -> Result<Network, ComposeError> {
             self.0.push((scope, isolation));
-            Deployment(&Lent::Relay {
-                endpoint: "http://127.0.0.1:9".into(),
-            })
+            Deployment(
+                &Lent::Relay {
+                    endpoint: "http://127.0.0.1:9".into(),
+                },
+                None,
+            )
             .open(scope, isolation)
+            .await
         }
     }
 
@@ -332,10 +482,8 @@ mod tests {
     fn every_scope_gets_its_own_circuit_and_none_is_shared() {
         let mut recorder = Recorder::default();
         let mut circuits = Circuits::new(&mut recorder);
-        let first = circuits.registration([1; 32]).expect("registration");
-        let other = circuits
-            .lend(Scope::Community([2; 32]))
-            .expect("second community");
+        let first = block_on(circuits.registration([1; 32])).expect("registration");
+        let other = block_on(circuits.lend(Scope::Community([2; 32]))).expect("second community");
         let Network::Relay(wallet) = &first.wallet;
         let Network::Relay(community) = &first.community;
         let Network::Relay(other) = &other;
@@ -348,20 +496,54 @@ mod tests {
             }
         }
         // A scope is never lent twice, so its circuit is never handed to a second user.
-        assert!(circuits.lend(Scope::Wallet).is_err());
-        assert!(circuits.lend(Scope::Community([1; 32])).is_err());
-        assert!(circuits.registration([2; 32]).is_err());
+        assert!(block_on(circuits.lend(Scope::Wallet)).is_err());
+        assert!(block_on(circuits.lend(Scope::Community([1; 32]))).is_err());
+        assert!(block_on(circuits.registration([2; 32])).is_err());
         drop(circuits);
         assert_eq!(recorder.0.len(), 3, "a refused scope opens nothing");
     }
 
     #[test]
     fn a_refused_open_lends_nothing() {
-        let mut circuits = Circuits::new(Deployment(&Lent::Bootstrap {}));
-        let refused = circuits.lend(Scope::Wallet).err().map(|e| e.to_string());
-        assert!(refused.is_some_and(|e| e.contains("ephemeral transport identity")));
+        // Without the deployment's browser Tor budgets the bootstrap refuses before any
+        // ceremony; natively it refuses too (the bootstrap client is the browser's).
+        let mut circuits = Circuits::new(Deployment(&Lent::Bootstrap {}, None));
+        let refused = block_on(circuits.lend(Scope::Wallet))
+            .err()
+            .map(|e| e.to_string());
+        assert!(refused.is_some_and(|e| e.contains("no browser Tor budgets")));
         // The bootstrap refusal is not a lent scope: nothing half-opened stays behind.
         assert!(circuits.lent.is_empty());
+    }
+
+    #[test]
+    fn every_bootstrap_scope_gets_its_own_identity_and_engine() {
+        let scopes = [
+            Scope::Wallet,
+            Scope::Community([1; 32]),
+            Scope::Community([2; 32]),
+        ];
+        let first: Vec<_> = scopes
+            .iter()
+            .map(|scope| bootstrap_identity(*scope).expect("identity"))
+            .collect();
+        let keys: Vec<_> = first
+            .iter()
+            .map(|(transport, _)| transport.public_key().expect("key"))
+            .collect();
+        for (i, a) in first.iter().enumerate() {
+            for (j, b) in first.iter().enumerate().skip(i + 1) {
+                assert_ne!(keys[i], keys[j], "two scopes share a transport identity");
+                assert_ne!(a.1, b.1, "two scopes share an engine namespace");
+            }
+        }
+        // The same scope in another registration: a new identity, never one derived from it.
+        let (again, engine) = bootstrap_identity(Scope::Wallet).expect("again");
+        assert_ne!(again.public_key().expect("key"), keys[0]);
+        assert_eq!(
+            engine, first[0].1,
+            "the namespace is public and per scope only"
+        );
     }
 
     #[test]

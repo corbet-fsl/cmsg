@@ -147,17 +147,6 @@ fn bounded(bytes: &[u8]) -> Result<(), Error> {
         Ok(())
     }
 }
-impl TransportClient {
-    async fn sign(&self, bytes: &[u8], destination: &NodeId) -> Result<SignedOperation, Error> {
-        bounded(bytes)?;
-        self.transport
-            .with_node(|signer, _| {
-                SignedOperation::sign(bytes.to_vec(), destination, &Signer(signer))
-            })
-            .await
-            .map_err(|_| Error::Unavailable)?
-    }
-}
 impl Identity for TransportClient {
     type Clock = custody::SystemClock;
     type Authority = custody::TransportAuthority<custody::SystemClock>;
@@ -187,86 +176,148 @@ impl Identity for TransportClient {
         })
     }
 }
-impl TorNodeIdentity for TransportClient {
-    fn node_id(&self) -> NodeId {
-        *self.transport.public_key().value()
-    }
-    fn question<'a>(
-        &'a self,
-        value: &'a Question,
-        destination: &'a NodeId,
-    ) -> cmsh::BoxFuture<'a, Result<SignedOperation, Error>> {
-        Box::pin(self.sign(value.as_bytes(), destination))
-    }
-    fn answer<'a>(
-        &'a self,
-        value: &'a FindAnswer,
-        destination: &'a NodeId,
-    ) -> cmsh::BoxFuture<'a, Result<SignedOperation, Error>> {
-        Box::pin(self.sign(value.as_bytes(), destination))
-    }
-    fn record_answer<'a>(
-        &'a self,
-        value: &'a Answer,
-        destination: &'a NodeId,
-    ) -> cmsh::BoxFuture<'a, Result<SignedOperation, Error>> {
-        Box::pin(self.sign(value.as_bytes(), destination))
-    }
-    fn statement<'a>(
-        &'a self,
-        value: &'a Statement,
-        destination: &'a NodeId,
-    ) -> cmsh::BoxFuture<'a, Result<SignedOperation, Error>> {
-        Box::pin(self.sign(value.as_bytes(), destination))
-    }
-    fn seal<'a>(
-        &'a self,
-        operation: &'a SignedOperation,
-        destination: &'a NodeId,
-        timestamp_us: u64,
-    ) -> cmsh::BoxFuture<'a, Result<Vec<u8>, Error>> {
-        Box::pin(async move {
-            bounded(operation.as_bytes())?;
-            self.transport
-                .with_node(|signer, cipher| {
-                    let checked = SignedOperation::verify_sender(
-                        operation.as_bytes().to_vec(),
-                        destination,
-                        &Verifier,
-                    )?;
-                    Envelope::seal(
-                        checked.as_bytes(),
-                        destination,
-                        timestamp_us,
-                        &Signer(signer),
-                        &Cipher(cipher),
-                    )
+/// The original node operations of a client over its retained `transport` and `window`:
+/// the vault session (`TransportClient`) and a registration's ephemeral one
+/// (`BootstrapClient`) sign, seal and open the same way.
+macro_rules! node_identity {
+    ($client:ty) => {
+        impl $client {
+            async fn sign(
+                &self,
+                bytes: &[u8],
+                destination: &NodeId,
+            ) -> Result<SignedOperation, Error> {
+                bounded(bytes)?;
+                self.transport
+                    .with_node(|signer, _| {
+                        SignedOperation::sign(bytes.to_vec(), destination, &Signer(signer))
+                    })
+                    .await
+                    .map_err(|_| Error::Unavailable)?
+            }
+        }
+        impl TorNodeIdentity for $client {
+            fn node_id(&self) -> NodeId {
+                *self.transport.public_key().value()
+            }
+            fn question<'a>(
+                &'a self,
+                value: &'a Question,
+                destination: &'a NodeId,
+            ) -> cmsh::BoxFuture<'a, Result<SignedOperation, Error>> {
+                Box::pin(self.sign(value.as_bytes(), destination))
+            }
+            fn answer<'a>(
+                &'a self,
+                value: &'a FindAnswer,
+                destination: &'a NodeId,
+            ) -> cmsh::BoxFuture<'a, Result<SignedOperation, Error>> {
+                Box::pin(self.sign(value.as_bytes(), destination))
+            }
+            fn record_answer<'a>(
+                &'a self,
+                value: &'a Answer,
+                destination: &'a NodeId,
+            ) -> cmsh::BoxFuture<'a, Result<SignedOperation, Error>> {
+                Box::pin(self.sign(value.as_bytes(), destination))
+            }
+            fn statement<'a>(
+                &'a self,
+                value: &'a Statement,
+                destination: &'a NodeId,
+            ) -> cmsh::BoxFuture<'a, Result<SignedOperation, Error>> {
+                Box::pin(self.sign(value.as_bytes(), destination))
+            }
+            fn seal<'a>(
+                &'a self,
+                operation: &'a SignedOperation,
+                destination: &'a NodeId,
+                timestamp_us: u64,
+            ) -> cmsh::BoxFuture<'a, Result<Vec<u8>, Error>> {
+                Box::pin(async move {
+                    bounded(operation.as_bytes())?;
+                    self.transport
+                        .with_node(|signer, cipher| {
+                            let checked = SignedOperation::verify_sender(
+                                operation.as_bytes().to_vec(),
+                                destination,
+                                &Verifier,
+                            )?;
+                            Envelope::seal(
+                                checked.as_bytes(),
+                                destination,
+                                timestamp_us,
+                                &Signer(signer),
+                                &Cipher(cipher),
+                            )
+                        })
+                        .await
+                        .map_err(|_| Error::Unavailable)?
                 })
-                .await
-                .map_err(|_| Error::Unavailable)?
+            }
+            fn open<'a>(
+                &'a self,
+                envelope: &'a Envelope,
+            ) -> cmsh::BoxFuture<'a, Result<AuthenticatedOperation, Error>> {
+                Box::pin(async move {
+                    bounded(envelope.as_bytes())?;
+                    self.transport
+                        .with_node(|_, cipher| {
+                            // The original timestamp is checked AFTER the HTTPS await, so
+                            // queue/authorization time cannot extend ENV0 acceptance.
+                            let envelope = Envelope::verify(
+                                envelope.as_bytes().to_vec(),
+                                cipher.public_key(),
+                                Time.now_us()?,
+                                self.window,
+                                &Verifier,
+                            )?;
+                            envelope.open_operation(&Cipher(cipher), &Verifier)
+                        })
+                        .await
+                        .map_err(|_| Error::Unavailable)?
+                })
+            }
+        }
+    };
+}
+node_identity!(TransportClient);
+node_identity!(BootstrapClient);
+
+/// The dial-only records identity of one registration scope: a fresh
+/// `ckmg::EphemeralTransport` (CSPRNG keys, memory only) in its own client-only browser Tor
+/// engine. It takes no CustodyLifetime from any Door and advertises nothing; dropping the
+/// last clone stops the engine and wipes the keys.
+#[derive(Clone)]
+pub struct BootstrapClient {
+    transport: Rc<Transport>,
+    window: TimeWindow,
+}
+impl BootstrapClient {
+    /// Start the client-only engine of one scope on that scope's own fresh transport
+    /// (`registration::network::bootstrap_identity`), so scopes never share an identity.
+    pub async fn start(
+        transport: ckmg::EphemeralTransport,
+        scope: ctrn::Scope,
+        config: network_browser::Configuration,
+        window: TimeWindow,
+    ) -> crate::door::Result<Self> {
+        Ok(Self {
+            transport: Rc::new(Transport::start(transport, scope, config).await?),
+            window,
         })
     }
-    fn open<'a>(
-        &'a self,
-        envelope: &'a Envelope,
-    ) -> cmsh::BoxFuture<'a, Result<AuthenticatedOperation, Error>> {
-        Box::pin(async move {
-            bounded(envelope.as_bytes())?;
-            self.transport
-                .with_node(|_, cipher| {
-                    // The original timestamp is checked AFTER the HTTPS await, so
-                    // queue/authorization time cannot extend ENV0 acceptance.
-                    let envelope = Envelope::verify(
-                        envelope.as_bytes().to_vec(),
-                        cipher.public_key(),
-                        Time.now_us()?,
-                        self.window,
-                        &Verifier,
-                    )?;
-                    envelope.open_operation(&Cipher(cipher), &Verifier)
-                })
-                .await
-                .map_err(|_| Error::Unavailable)?
-        })
+}
+impl super::records::ClientIdentity for BootstrapClient {
+    type Clock = custody::SystemClock;
+    type Authority = custody::TransportAuthority<custody::SystemClock>;
+    fn transport(&self) -> &Rc<Transport> {
+        &self.transport
+    }
+    fn envelope_time(&self) -> Arc<dyn TorEnvelopeTime> {
+        Arc::new(Time)
+    }
+    fn envelope_window(&self) -> TimeWindow {
+        self.window
     }
 }

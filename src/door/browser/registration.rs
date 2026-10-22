@@ -50,17 +50,23 @@ impl Configuration {
     }
 
     /// The registration's records networks: the wallet's and this community's, each on its
-    /// own circuit, as the deployment lends them. Refused before any ceremony when the lent
-    /// network cannot be opened.
-    pub fn networks(
+    /// own circuit, as the deployment lends them (a bootstrap client runs on the deployment's
+    /// browser Tor budgets, `tor`). Refused before any ceremony when the lent network cannot
+    /// be opened.
+    pub async fn networks(
         &self,
+        tor: Option<&super::deployment::Configuration>,
     ) -> Result<
         crate::door::composer_core::Networks<network::Network>,
         crate::door::composer_core::ComposeError,
     > {
         let fingerprint = crate::door::identity::Fingerprint::from_hex(&self.fingerprint)
-            .ok_or_else(|| crate::door::composer_core::ComposeError::Config("fingerprint".into()))?;
-        network::Circuits::new(network::Deployment(&self.records)).registration(fingerprint.0)
+            .ok_or_else(|| {
+                crate::door::composer_core::ComposeError::Config("fingerprint".into())
+            })?;
+        network::Circuits::new(network::Deployment(&self.records, tor))
+            .registration(fingerprint.0)
+            .await
     }
 }
 
@@ -78,8 +84,8 @@ mod runtime {
     use crate::door::{
         browser::open_transport,
         composer_core::{
-            compose_device, now, step, BackendProgress, ComposeError, DeviceKeys, Names,
-            Networks, ProgressFile, Service as Endpoint, Services,
+            compose_device, now, step, BackendProgress, ComposeError, DeviceKeys, Names, Networks,
+            ProgressFile, Service as Endpoint, Services,
         },
         foyer::{Foyer, Transport},
         identity, Door,
@@ -134,12 +140,14 @@ mod runtime {
             }
             .map_err(step("trust"))?;
             trust.start(now).await.map_err(step("trust"))?;
-            let transport = open_transport(self.service(service), &[]).map_err(step("transport"))?;
+            let transport =
+                open_transport(self.service(service), &[]).map_err(step("transport"))?;
             Ok(Foyer::with_trust(transport, trust))
         }
 
         async fn public(&mut self, service: Endpoint) -> Result<Foyer<Transport>, ComposeError> {
-            let transport = open_transport(self.service(service), &[]).map_err(step("transport"))?;
+            let transport =
+                open_transport(self.service(service), &[]).map_err(step("transport"))?;
             Ok(Foyer::new(transport))
         }
     }
@@ -241,9 +249,7 @@ mod tests {
     use super::Configuration;
 
     fn configuration() -> serde_json::Value {
-        let service = |scope: &str, base: &str| {
-            serde_json::json!({"scope": scope, "base": base, "host": base.trim_start_matches("https://")})
-        };
+        let service = |scope: &str, base: &str| serde_json::json!({"scope": scope, "base": base, "host": base.trim_start_matches("https://")});
         let following = serde_json::json!({"retry_entropy":0,"refresh_seconds":30,"poll_seconds":1,
             "request_seconds":30,"initial_backoff_seconds":1,"maximum_backoff_seconds":10,
             "maximum_staleness_seconds":900});
@@ -292,9 +298,13 @@ mod tests {
     fn unknown_registration_fields_are_refused() {
         let mut value = configuration();
         value["session"] = serde_json::json!("x");
-        let refused = serde_json::from_value::<Configuration>(value).err().map(|e| e.to_string());
+        let refused = serde_json::from_value::<Configuration>(value)
+            .err()
+            .map(|e| e.to_string());
         assert!(
-            refused.as_ref().is_some_and(|e| e.contains("unknown field `session`")),
+            refused
+                .as_ref()
+                .is_some_and(|e| e.contains("unknown field `session`")),
             "{refused:?}"
         );
     }
