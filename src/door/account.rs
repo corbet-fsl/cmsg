@@ -1187,6 +1187,17 @@ mod run {
             let mut stage = Stage::Admitted(admission);
             let mut command = first;
             loop {
+                // A join re-presents the same creation id on every call; while a
+                // registered enrollment is held it is already admitted with it.
+                if let Command::Creation(id) = &command {
+                    if creation.as_deref() == Some(id.as_str())
+                        && matches!(stage, Stage::Waiting(_) | Stage::Ready(_))
+                    {
+                        mailbox.reply(Ok(Answer::Noted));
+                        command = mailbox.next().await;
+                        continue;
+                    }
+                }
                 let (reply, next) = serve(
                     &mut stage,
                     command.clone(),
