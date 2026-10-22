@@ -34,8 +34,10 @@ pub struct Delivery {
     pub message: [u8; 32],
 }
 
-/// One message of a direct thread with the delivery state of this member's
-/// own sends (`None` for received messages and for sends not yet tracked).
+/// One message of a direct thread with its delivery state: `Accepted` for a
+/// received message and for a send whose receipt arrived, `Pending` for a send
+/// that still waits for the receipt. `None` only for a message the delivery
+/// journal does not know.
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ThreadEntry {
@@ -274,7 +276,8 @@ pub(super) trait BoundVault {
     fn current_identity(&mut self) -> OwnedFuture<'_, VaultIdentity>;
     fn snapshot(&mut self, request: Relation) -> OwnedFuture<'_, cnbx::ConversationView>;
     fn history(&mut self, request: Conversation) -> OwnedFuture<'_, Vec<cnbx::Message>>;
-    /// The whole thread, oldest first, each message with its delivery status.
+    /// The accepted history, oldest first, then the own sends still waiting for
+    /// their receipt, each message with its delivery status.
     fn thread(&mut self, request: Conversation) -> OwnedFuture<'_, Vec<ThreadEntry>>;
     fn relation(&mut self, request: Relation) -> OwnedFuture<'_, cnbx::Relation>;
     fn delivery(&mut self, request: Delivery) -> OwnedFuture<'_, Option<cnbx::DeliveryStatus>>;
@@ -555,6 +558,7 @@ where
             Ok(view
                 .history()
                 .iter()
+                .chain(view.pending())
                 .map(|message| ThreadEntry {
                     status: view.delivery_status(&message.id),
                     message: message.clone(),

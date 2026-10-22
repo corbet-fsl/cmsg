@@ -207,6 +207,7 @@ async fn signed_minimum_version_guards_every_inbox_action_without_disabling_clea
     for action in [
         "inbox.snapshot",
         "inbox.history",
+        "inbox.thread",
         "inbox.relation",
         "inbox.delivery_status",
     ] {
@@ -240,6 +241,7 @@ async fn signed_minimum_version_guards_every_inbox_action_without_disabling_clea
     for action in [
         "inbox.snapshot",
         "inbox.history",
+        "inbox.thread",
         "inbox.relation",
         "inbox.delivery_status",
     ] {

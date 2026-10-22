@@ -295,13 +295,15 @@ enum Read {
     Identity,
     Snapshot,
     History,
+    Thread,
     Relation,
     Delivery,
 }
-const READS: [Read; 5] = [
+const READS: [Read; 6] = [
     Read::Identity,
     Read::Snapshot,
     Read::History,
+    Read::Thread,
     Read::Relation,
     Read::Delivery,
 ];
@@ -325,6 +327,12 @@ async fn read(owner: &mut FixtureOwner, operation: Read) -> Result<()> {
         }
         Read::History => assert!(owner
             .history(Conversation {
+                conversation: [1; 32]
+            })
+            .await?
+            .is_empty()),
+        Read::Thread => assert!(owner
+            .thread(Conversation {
                 conversation: [1; 32]
             })
             .await?
@@ -354,10 +362,18 @@ async fn open_shared_vault_returns_original_owner_views() {
     for operation in READS {
         read(&mut owner, operation).await.unwrap();
     }
-    assert_eq!(checks.get(), 6); // identity checks lineage and device separately
+    assert_eq!(checks.get(), 7); // identity checks lineage and device separately
     assert!(matches!(
         owner
             .history(Conversation {
+                conversation: [0; 32]
+            })
+            .await,
+        Err(ErrorCode::Refused)
+    ));
+    assert!(matches!(
+        owner
+            .thread(Conversation {
                 conversation: [0; 32]
             })
             .await,
