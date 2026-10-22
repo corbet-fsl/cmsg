@@ -45,9 +45,10 @@ pub const REGISTERED_CONFIRMATIONS: u32 = 1;
 
 /// The most wallet ceremonies a registration (fresh or resumed at any marker) starts on the
 /// current wallet protocol: registration (create with PRF), wallet login, the device
-/// authorization step-up, the wallet lineage's passkey evidence, the second wallet session
-/// (the passport's recovery lease holds the first for the device's life) and the join stamp.
-pub const REGISTRATION_CONFIRMATIONS: u32 = 6;
+/// authorization step-up, the wallet lineage's passkey evidence and the join stamp. The
+/// companion beside the passport's recovery lease is a fork of the login (`session_fork`), no
+/// ceremony.
+pub const REGISTRATION_CONFIRMATIONS: u32 = 5;
 
 impl<A: cfyr::passkeys::Authenticator> DeviceKeys<A> {
     pub fn new(global: Client<A>) -> Self {
@@ -403,20 +404,19 @@ pub(crate) async fn login<A: cfyr::passkeys::Authenticator>(
     Ok(unlock)
 }
 
-/// A second wallet session (one counted ceremony): the passport's recovery lease holds the
-/// wallet Door's session for the device's life, so the passport issue, the join stamp and a
-/// lent creation channel need their own.
-pub(crate) async fn wallet_companion<A, S>(
+/// The wallet companion: a sibling of the live wallet session `api` in the same family (cvld
+/// `session_fork`, no ceremony). The passport's recovery lease holds the wallet Door's session
+/// for the device's life, so the passport issue, the join stamp and the creation channel lent
+/// to the community Door use this one. Both end together (logout, revocation, deadline).
+pub(crate) async fn wallet_sibling<S: Services>(
     services: &mut S,
-    keys: &mut DeviceKeys<A>,
-) -> Result<Foyer<Transport>, ComposeError>
-where
-    A: cfyr::passkeys::Authenticator,
-    S: Services,
-{
-    let mut api = services.foyer(Service::Global).await?;
-    drop(login(&mut api, keys.confirm("wallet session")?).await?);
-    Ok(api)
+    api: &mut Foyer<Transport>,
+) -> Result<Foyer<Transport>, ComposeError> {
+    let mut sibling = services.foyer(Service::Global).await?;
+    api.fork_into(&mut sibling)
+        .await
+        .map_err(step("wallet session"))?;
+    Ok(sibling)
 }
 
 /// A fresh user-verifying assertion for exactly one action (`step_up`).
@@ -472,8 +472,11 @@ pub(crate) struct Driven {
     /// The PRF unlock of the wallet login (the composition's unlock for every vault).
     unlock: Option<cfyr::passkeys::UnlockSecret>,
     /// The wallet's stamp trust, read over this session before any lease holds it (a
-    /// registered wallet only; a registration reads it over the second session).
+    /// registered wallet only; a registration reads it over the companion).
     stamps: Option<cvlt::StampTrust>,
+    /// The wallet companion (`wallet_sibling`), forked before the Door takes this session;
+    /// `None` for a community lineage.
+    companion: Option<Foyer<Transport>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -582,6 +585,13 @@ where
     } else {
         None
     };
+    // The companion is forked while this session is still free: once bound, the passport's
+    // recovery lease holds it.
+    let companion = if wallet {
+        Some(wallet_sibling(services, &mut api).await?)
+    } else {
+        None
+    };
 
     let door = bound(
         scope,
@@ -607,6 +617,7 @@ where
             policy,
             unlock,
             stamps,
+            companion,
         });
     }
 
@@ -700,6 +711,7 @@ where
         policy,
         unlock,
         stamps,
+        companion,
     })
 }
 
@@ -817,7 +829,7 @@ pub(crate) async fn drive_device<A, B, N, S, P, WB, WC, WE, WA, WR>(
     origin: &str,
     member: Option<String>,
     open: &dyn Fn() -> Result<cvlt::PreparedOpen, ComposeError>,
-    wallet_api: Option<&Foyer<Transport>>,
+    wallet_api: &Foyer<Transport>,
     stamps: &cvlt::StampTrust,
     wallet_origin: &str,
     wallet: &mut super::passport::GlobalPassport<WB, WC, WE, WA, WR>,
@@ -901,9 +913,6 @@ where
                     .lineage_genesis_action(gsalt)
                     .map_err(step("genesis action"))?;
                 let seed = enrollment.seed().map_err(step("join"))?;
-                let wallet_api = wallet_api.ok_or(ComposeError::Inconsistent(
-                    "a join without a wallet session",
-                ))?;
                 // The join's wallet confirmation: a wallet passkey assertion for the stamp.
                 let assertion = |options: Value| async move {
                     let (credential, _) = wallet_keys
@@ -1248,9 +1257,9 @@ pub(crate) struct Composed<B: cwst::backend::Backend + 'static, N: cdht::Network
     pub(crate) door: Door,
     /// The wallet Door: the global passport's recovery lease holds its session.
     pub(crate) wallet_door: Door,
-    /// The independent wallet session of a registration (passport issue, join stamp); `None`
-    /// on a registered device's start, whose one confirmation opened only the wallet Door's.
-    pub(crate) global_companion: Option<Foyer<Transport>>,
+    /// The wallet companion, a sibling of the wallet Door's session (passport issue, join
+    /// stamp, the creation channel lent to the community Door).
+    pub(crate) global_companion: Foyer<Transport>,
     pub(crate) owner: MemberOwner<B, N>,
     pub(crate) account: custody::AccountWiring,
     /// The account actor's admission (a second session of the same device key).
@@ -1312,6 +1321,7 @@ where
         policy,
         unlock,
         stamps,
+        companion,
     } = drive(
         services,
         api,
@@ -1354,25 +1364,16 @@ where
             .await,
         Ok(true)
     );
-    // The second wallet session only where a step needs one beside the passport's lease: a
-    // passport issue, a community join not yet applied, or a stamp trust not yet read.
-    let mut global_companion = if !holds
-        || progress.value.community_user.is_none()
-        || stamps.is_none()
-    {
-        Some(wallet_companion(services, keys).await?)
-    } else {
-        None
-    };
-    let stamps = match (stamps, global_companion.as_ref()) {
-        (Some(stamps), _) => stamps,
-        (None, Some(companion)) => stamp_trust(companion, global_origin).await?,
-        (None, None) => return Err(ComposeError::Inconsistent("no wallet stamp trust")),
+    // The wallet companion, forked from the login before the lease held it: the passport issue,
+    // the join stamp and a stamp trust not yet read use it, without a ceremony of their own.
+    let mut global_companion =
+        companion.ok_or(ComposeError::Inconsistent("a wallet lineage without its companion"))?;
+    let stamps = match stamps {
+        Some(stamps) => stamps,
+        None => stamp_trust(&global_companion, global_origin).await?,
     };
     if !holds {
         let issuance = global_companion
-            .as_mut()
-            .ok_or(ComposeError::Inconsistent("a passport issue without a wallet session"))?
             .live_global_wallet(global_origin.into())
             .observe_lease(now)
             .await
@@ -1521,7 +1522,7 @@ where
         community_origin,
         member,
         &open,
-        global_companion.as_ref(),
+        &global_companion,
         &stamps,
         global_origin,
         &mut global,
