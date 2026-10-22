@@ -224,16 +224,17 @@ mod isolation {
         assert_eq!(deliver(&shared, &offline::chat("bob"), &mut left).await, None);
         door.bind_mailbox(&a, mailbox.clone()).unwrap();
         assert_eq!(deliver(&shared, &offline::chat("bob"), &mut left).await, Some(false));
-        let held = mailbox.left.borrow();
-        assert_eq!(held.len(), 1);
-        assert_eq!(held[0].0, "bob");
-        // What waits is the versioned frame, with this device's descriptor.
-        let frame: Frame = serde_json::from_slice(&held[0].1).unwrap();
-        assert_eq!(frame.version, FRAME_VERSION);
-        assert_eq!(frame.reach, shared.reachability());
-        assert!(accept_left(&held[0].1));
+        {
+            let held = mailbox.left.borrow();
+            assert_eq!(held.len(), 1);
+            assert_eq!(held[0].0, "bob");
+            // What waits is the versioned frame, with this device's descriptor.
+            let frame: Frame = serde_json::from_slice(&held[0].1).unwrap();
+            assert_eq!(frame.version, FRAME_VERSION);
+            assert_eq!(frame.reach, shared.reachability());
+            assert!(accept_left(&held[0].1));
+        }
         // The frames of one session leave once; a wave never waits.
-        drop(held);
         assert_eq!(deliver(&shared, &offline::chat("bob"), &mut left).await, Some(false));
         assert_eq!(mailbox.left.borrow().len(), 1);
         let wave = Outgoing {
