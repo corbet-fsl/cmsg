@@ -127,6 +127,15 @@ fn final_cut(
     Ok(completed.now)
 }
 
+/// Whether less than half of the publication's checkpoint slot remains at `now`.
+/// Open proves, signs and sends over this slot and is refused once it ends; started
+/// late it rarely finishes in time, so the member waits for the next slot instead
+/// (the registered delegation stays and is read again from the next publication).
+fn late_in_slot(publication: &enrollment::EnrollmentPublication, now: u64) -> bool {
+    let half = publication.expires_at.saturating_sub(publication.not_before) / 2;
+    now.saturating_add(half) > publication.expires_at
+}
+
 impl<'p> SubmittedEnrollment<'p> {
     /// The retained admission owner of this registered delegation.
     pub fn admission_mut(&mut self) -> &mut AccountAdmission<'p> {
@@ -160,7 +169,7 @@ impl<'p> SubmittedEnrollment<'p> {
             &self.entry,
         )?;
         final_cut(&mut self.prepared.admission, &current, &publication)?;
-        if selected.is_none() {
+        if selected.is_none() || late_in_slot(&publication, current.now) {
             return Ok(CheckpointAcquisition::Pending {
                 eligible_at: publication.expires_at,
                 enrollment: self,
@@ -316,5 +325,34 @@ impl CurrentEnrollment<'_> {
         )?;
         self.failed = false;
         Ok((output, completed_at))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slot(not_before: u64, expires_at: u64) -> enrollment::EnrollmentPublication {
+        enrollment::EnrollmentPublication {
+            version: 1,
+            domain: String::new(),
+            community_id: String::new(),
+            policy_digest: String::new(),
+            slot: 0,
+            not_before,
+            expires_at,
+            root: [0; 32],
+            delegations: Vec::new(),
+            signature: String::new(),
+        }
+    }
+
+    #[test]
+    fn open_waits_for_the_next_slot_in_the_second_half_of_a_slot() {
+        let publication = slot(1_000, 1_300);
+        assert!(!late_in_slot(&publication, 1_000));
+        assert!(!late_in_slot(&publication, 1_150));
+        assert!(late_in_slot(&publication, 1_151));
+        assert!(late_in_slot(&publication, 1_299));
     }
 }
