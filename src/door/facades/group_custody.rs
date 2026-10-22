@@ -259,6 +259,9 @@ pub struct VaultGroupOwner<B: cwst::backend::Backend, C, E, A, R, W> {
     version: u64,
     /// Handles the signers attached to their own consents; they win over the journal.
     provided: BTreeMap<String, Vec<u8>>,
+    /// Tests only: members treated as established contacts.
+    #[cfg(test)]
+    assumed_contacts: BTreeSet<String>,
 }
 
 impl<B: cwst::backend::Backend, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W> {
@@ -283,7 +286,15 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
             cache,
             version: 0,
             provided: BTreeMap::new(),
+            #[cfg(test)]
+            assumed_contacts: BTreeSet::new(),
         }
+    }
+    /// Tests only: treat these members as established contacts, as if the
+    /// Contacts journal held them (the contact exchange is not under test).
+    #[cfg(test)]
+    pub(crate) fn assume_contacts(&mut self, contacts: impl IntoIterator<Item = String>) {
+        self.assumed_contacts.extend(contacts);
     }
     fn open(&self) -> cgrp::Result<()> {
         if self.lifetime.is_closed() {
@@ -364,15 +375,34 @@ where
                     matches!(effect.event(), cgrp::Effect::Membership { group: g, .. } if g == &group)
                 })
                 .ok_or(cgrp::Error::Authority)?;
-            match step {
-                MlsStep::Create(packages) => {
+            // A room (a fork that opens, or a public room) is a different MLS
+            // genesis from a hidden group; the level of the decision tells which.
+            let room = matches!(
+                decision.event(),
+                cgrp::Effect::Membership {
+                    level: cgrp::Level::Opening | cgrp::Level::Public,
+                    ..
+                }
+            );
+            match (step, room) {
+                (MlsStep::Create(packages), false) => {
                     threads
                         .create_fork(&mut port, decision, packages, &mut clock)
                         .await
                 }
-                MlsStep::Join(welcome) => {
+                (MlsStep::Create(packages), true) => {
+                    threads
+                        .create_room(&mut port, decision, packages, &mut clock)
+                        .await
+                }
+                (MlsStep::Join(welcome), false) => {
                     threads
                         .join_fork(&mut port, decision, welcome, &mut clock)
+                        .await
+                }
+                (MlsStep::Join(welcome), true) => {
+                    threads
+                        .join_room(&mut port, decision, welcome, &mut clock)
                         .await
                 }
             }
@@ -410,6 +440,11 @@ pub struct RoomJoinTask<'a> {
     /// consent from it and its lineage through the handle.
     pub request: cgrp::Request,
     pub evidence: &'a cthr::ParentEvidence,
+    /// The state `verify_room_state` authenticated: the only parent this Join may name.
+    pub parent: &'a cgrp::GroupState,
+    /// The lineage-read handles of the room's roster from the sealed room
+    /// state (locators only; every lineage is read and Charter-verified).
+    pub handles: &'a BTreeMap<String, Vec<u8>>,
     /// The room's transport key from the sealed room state.
     pub transport: &'a cbrd::TransportKey,
     pub policy: &'a dyn cgrp::PolicySource,
@@ -423,6 +458,68 @@ where
     A: ckmg::Authority,
     R: cvlt::Records,
 {
+    /// Newcomer: authenticate the delivered room state against its MLS evidence
+    /// (same group, state commitment carried in the authenticated GroupInfo
+    /// context, roster certified) before anything is prepared, sent or stored.
+    pub async fn verify_room_state(
+        &mut self,
+        group: cgrp::Id,
+        evidence: &cthr::ParentEvidence,
+        handles: &BTreeMap<String, Vec<u8>>,
+    ) -> std::result::Result<cgrp::GroupState, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        // The handles are locators only; every lineage they yield is read and
+        // Charter-verified, and must bind to the roster member asked for. The
+        // state decoded here only selects whom to read; Threads authenticates it.
+        let roster = cgrp::GroupState::decode(&evidence.state)
+            .map_err(|_| Fail::Authority)?
+            .members()
+            .clone();
+        cbrd::GroupOwner::provide_handles(self, handles.clone());
+        let read = cbrd::GroupOwner::refresh(self, &BTreeSet::new(), &roster).await;
+        self.provided.clear();
+        if read.is_err() {
+            *self.cache.borrow_mut() = Cache::default();
+            return Err(Fail::Authority);
+        }
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let handle = custody
+            .vault
+            .keys()
+            .key(cnbx::threads_purpose())
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let own = custody
+            .vault
+            .keys()
+            .lineage()
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let storage = custody.vault.storage().clone();
+        let store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let mut devices = GroupDevices {
+            own,
+            cache: self.cache.clone(),
+        };
+        let mut port = cnbx::KeyPort {
+            keys: custody.vault.keys(),
+            handle: &handle,
+            devices: &mut devices,
+        };
+        let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
+        let state = threads.verify_room_state(&mut port, evidence).await;
+        *self.cache.borrow_mut() = Cache::default();
+        state.map_err(|_| Fail::Authority)
+    }
+
     /// Ordered external commit into a member room. Keys custody, the Store
     /// guard and this member's Threads come from the retained Vault; Groups,
     /// Threads and the Attend checkpoint become visible in ONE Store commit
@@ -445,6 +542,16 @@ where
             getrandom::fill(&mut bytes).map_err(|_| Fail::Unavailable)?;
             bytes
         };
+        // The roster's lineages are read and Charter-verified again for this
+        // operation (the cache never outlives one): Threads certifies every leaf
+        // of the room's tree against them.
+        cbrd::GroupOwner::provide_handles(self, task.handles.clone());
+        let read = cbrd::GroupOwner::refresh(self, &BTreeSet::new(), task.parent.members()).await;
+        self.provided.clear();
+        if read.is_err() {
+            *self.cache.borrow_mut() = Cache::default();
+            return Err(Fail::Authority);
+        }
         let mut retained = self.retained.lock().await;
         self.open().map_err(|_| Fail::Authority)?;
         let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
@@ -499,7 +606,7 @@ where
                 groups: task.candidate,
                 evidence: task.evidence,
                 source: &source,
-                authority: &self.authority,
+                authority: &cbrd::JoinParent::new(&self.authority, task.parent),
                 handover: vec![],
                 companion,
                 operation,
@@ -532,6 +639,38 @@ where
     ) -> std::result::Result<cbrd::RoomState, ctnd::Error> {
         use ctnd::Error as Fail;
         self.open().map_err(|_| Fail::Authority)?;
+        // The roster's current lineages are read first (Charter-verified), so
+        // Threads can certify every leaf of the room against them.
+        let (roster, mut handles) = {
+            let mut retained = self.retained.lock().await;
+            let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+            let storage = custody.vault.storage().clone();
+            let store = storage.lock().await;
+            let roster = cgrp::Snapshot::load(custody.binding.community(), &store)
+                .map_err(|_| Fail::Storage)?
+                .members(&group)
+                .map_err(|_| Fail::Authority)?
+                .clone();
+            // Lineage-read handles of the roster this member holds: a locator
+            // for the newcomer, who reads and Charter-verifies each lineage itself.
+            let journal = custody.inbox.contacts(&store).map_err(|_| Fail::Storage)?;
+            let mut handles = BTreeMap::new();
+            for peer in roster.iter().filter(|peer| **peer != self.member) {
+                if let Some(handle) = self.provided.get(peer) {
+                    handles.insert(peer.clone(), handle.clone());
+                } else if let Some(handle) = journal.handle(peer).map_err(|_| Fail::Storage)? {
+                    handles.insert(peer.clone(), handle);
+                }
+            }
+            (roster, handles)
+        };
+        let own_handle = cbrd::GroupOwner::own_handle(self)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        handles.insert(self.member.clone(), own_handle);
+        cbrd::GroupOwner::refresh(self, &BTreeSet::new(), &roster)
+            .await
+            .map_err(|_| Fail::Authority)?;
         let mut retained = self.retained.lock().await;
         self.open().map_err(|_| Fail::Authority)?;
         let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
@@ -573,6 +712,7 @@ where
         Ok(cbrd::RoomState {
             evidence: evidence?,
             transport: threads.transport_keys().map_err(|_| Fail::Authority)?,
+            handles,
         })
     }
 
@@ -741,7 +881,7 @@ where
             .map_err(|_| Fail::Authority)?;
         let authority = RoomAuthority {
             member: request.actor.clone(),
-            device: *credential.key.value(),
+            device: *credential.device.value(),
         };
         let source = PolicyRef(task.policy);
         let now = ckmg::Clock::now(&mut clock).map_err(|_| Fail::Unavailable)?;
@@ -957,10 +1097,18 @@ where
                 }
                 let mut cache = self.cache.borrow_mut();
                 for peer in contacts {
+                    // The own journal holds no relation to oneself.
+                    if peer == &self.member {
+                        continue;
+                    }
                     let relation = journal
                         .relation(peer)
                         .map_err(|_| cgrp::Error::Unavailable)?;
                     if relation.state == ctcs::State::Established && !relation.conflicted {
+                        cache.contacts.insert(peer.clone());
+                    }
+                    #[cfg(test)]
+                    if self.assumed_contacts.contains(peer) {
                         cache.contacts.insert(peer.clone());
                     }
                 }

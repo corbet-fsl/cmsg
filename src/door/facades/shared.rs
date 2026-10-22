@@ -114,6 +114,20 @@ where
             groups.join_room(board, task).await.map_err(room_error)
         })
     }
+    fn verify_room_state<'a>(
+        &'a mut self,
+        group: cbrd::cgrp::Id,
+        evidence: &'a cthr::ParentEvidence,
+        handles: &'a std::collections::BTreeMap<String, Vec<u8>>,
+    ) -> board::OwnerFuture<'a, cbrd::cgrp::GroupState> {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            groups
+                .verify_room_state(group, evidence, handles)
+                .await
+                .map_err(room_error)
+        })
+    }
     fn leave_room<'a>(
         &'a mut self,
         task: super::RoomLeaveTask<'a>,
