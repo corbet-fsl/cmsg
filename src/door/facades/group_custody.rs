@@ -572,7 +572,7 @@ where
         *self.cache.borrow_mut() = Cache::default();
         Ok(cbrd::RoomState {
             evidence: evidence?,
-            transport: threads.transport_key().map_err(|_| Fail::Authority)?,
+            transport: threads.transport_keys().map_err(|_| Fail::Authority)?,
         })
     }
 
@@ -595,8 +595,8 @@ where
             .await
             .map_err(|_| Fail::Authority)?;
         let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
-        let key = threads.transport_key().map_err(|_| Fail::Authority)?;
-        Ok(cbrd::TransportKey::from_bytes(key))
+        let key = threads.transport_keys().map_err(|_| Fail::Authority)?;
+        Ok(cbrd::TransportKey::from_keys(&key))
     }
 }
 
