@@ -104,6 +104,7 @@ pub trait RoomLink: Sized + 'static {
         _board: &'a cbrd::Board<T, Self>,
         _room: cmbl::Id,
         _after: u64,
+        _key: &'a cbrd::TransportKey,
     ) -> RoomFuture<'a, cbrd::JoinsRead> {
         Box::pin(async { Err(LinkError::Rejected) })
     }
@@ -222,8 +223,9 @@ impl<R: clnk::Transport + 'static> RoomLink for clnk::AnonymousRooms<R> {
         board: &'a cbrd::Board<T, Self>,
         room: cmbl::Id,
         after: u64,
+        key: &'a cbrd::TransportKey,
     ) -> RoomFuture<'a, cbrd::JoinsRead> {
-        Box::pin(board.room_joins(room, after))
+        Box::pin(board.room_joins(room, after, key))
     }
     fn request_room_join<'a, T: clnk::Transport>(
         board: &'a cbrd::Board<T, Self>,
