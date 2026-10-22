@@ -1335,6 +1335,16 @@ mod run {
                     Err(error) => (Err(error), Next::Restart),
                 }
             }
+            // A registered enrollment (waiting for its checkpoint slot, or ready) was
+            // admitted through the gates: the next join continues it. Dropping it for
+            // a fresh admission would need a second custody round for one join.
+            Command::Join(_) if matches!(stage, Stage::Waiting(_) | Stage::Ready(_)) => (
+                Ok(Answer::Gate(Gate {
+                    ready: true,
+                    steps: Vec::new(),
+                })),
+                Next::Stay,
+            ),
             Command::Join(_)
             | Command::Creation(_)
             | Command::Update(_)
