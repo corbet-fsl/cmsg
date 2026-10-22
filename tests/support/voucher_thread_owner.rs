@@ -298,3 +298,161 @@ async fn a_kill_between_the_flushed_send_and_the_queue_delete_sends_once() {
         .unwrap()
         .is_empty());
 }
+
+/// Two members with an established direct thread (the admission steps of the
+/// vouching, nothing sent yet).
+struct Chatters {
+    sponsor: ProfileOwner,
+    newcomer: ProfileOwner,
+    sponsor_id: String,
+    newcomer_id: String,
+    sponsor_ports: Ports,
+    newcomer_ports: Ports,
+    conversation: [u8; 32],
+}
+
+async fn established(bond: [u8; 32]) -> Chatters {
+    let (sponsor_id, newcomer_id) = (member("ab"), member("cd"));
+    let (mut sponsor, _, _) = open_as(&sponsor_id, false).await;
+    let (mut newcomer, _, _) = open_as(&newcomer_id, false).await;
+    let sponsor_ports = Ports {
+        lineage: lineage_of(&newcomer).await,
+        lifetime: 3600,
+    };
+    let newcomer_ports = Ports {
+        lineage: lineage_of(&sponsor).await,
+        lifetime: 3600,
+    };
+    let conversation = sponsor.contact_by_voucher(&newcomer_id, bond).await.unwrap();
+    newcomer.contact_by_voucher(&sponsor_id, bond).await.unwrap();
+    let package = newcomer
+        .voucher_key_package(conversation, &newcomer_ports)
+        .await
+        .unwrap();
+    let welcome = sponsor
+        .voucher_create(&newcomer_id, conversation, &package, &sponsor_ports)
+        .await
+        .unwrap();
+    assert!(newcomer
+        .voucher_join(&sponsor_id, conversation, &welcome, &newcomer_ports)
+        .await
+        .unwrap()
+        .is_empty());
+    Chatters {
+        sponsor,
+        newcomer,
+        sponsor_id,
+        newcomer_id,
+        sponsor_ports,
+        newcomer_ports,
+        conversation,
+    }
+}
+
+/// The thread of `owner` as (sender, text, state) rows. Checks that the thread
+/// starts with the accepted history, that every row carries exactly the delivery
+/// state `inbox.delivery_status` reports, and that the rows after the history
+/// are the own sends still waiting for their receipt.
+async fn rows(
+    owner: &mut ProfileOwner,
+    conversation: [u8; 32],
+) -> Vec<(String, Vec<u8>, Option<cnbx::DeliveryStatus>)> {
+    use crate::door::facades::{Conversation, Delivery};
+    let thread = owner.thread(Conversation { conversation }).await.unwrap();
+    let history = owner.history(Conversation { conversation }).await.unwrap();
+    assert!(thread.len() >= history.len());
+    let mut out = Vec::new();
+    for (position, entry) in thread.iter().enumerate() {
+        if let Some(message) = history.get(position) {
+            assert_eq!(entry.message.id, message.id);
+            assert_eq!(entry.message.sender, message.sender);
+            assert_eq!(entry.message.bytes, message.bytes);
+            assert_eq!(entry.status, Some(cnbx::DeliveryStatus::Accepted));
+        } else {
+            assert_eq!(entry.status, Some(cnbx::DeliveryStatus::Pending));
+            assert_eq!(entry.message.accepted_at, 0);
+        }
+        let status = owner
+            .delivery(Delivery {
+                conversation,
+                message: entry.message.id,
+            })
+            .await
+            .unwrap();
+        assert_eq!(entry.status, status);
+        out.push((
+            entry.message.sender.clone(),
+            entry.message.bytes.clone(),
+            entry.status,
+        ));
+    }
+    out
+}
+
+#[tokio::test]
+async fn the_thread_lists_every_message_with_its_delivery_state() {
+    use cnbx::DeliveryStatus::{Accepted, Pending};
+    let mut c = established([5; 32]).await;
+    let (sponsor_id, newcomer_id) = (c.sponsor_id.clone(), c.newcomer_id.clone());
+
+    // An established thread with nothing in it lists nothing.
+    assert!(rows(&mut c.sponsor, c.conversation).await.is_empty());
+    assert!(rows(&mut c.newcomer, c.conversation).await.is_empty());
+
+    // A sent message waits for the receipt: Pending on the sender, absent for
+    // the recipient.
+    let one = say(&mut c.sponsor, &c.sponsor_ports, &newcomer_id, c.conversation, "one").await;
+    assert_eq!(
+        rows(&mut c.sponsor, c.conversation).await,
+        vec![(sponsor_id.clone(), b"one".to_vec(), Some(Pending))]
+    );
+    assert!(rows(&mut c.newcomer, c.conversation).await.is_empty());
+
+    // The recipient holds it as Accepted once it is committed; the signed receipt
+    // turns the sender's copy to Accepted.
+    let text = deliver(
+        (&mut c.sponsor, &c.sponsor_ports, &sponsor_id),
+        (&mut c.newcomer, &c.newcomer_ports, &newcomer_id),
+        c.conversation,
+        one.wire,
+    )
+    .await;
+    assert_eq!(text, b"one");
+    let expected = vec![(sponsor_id.clone(), b"one".to_vec(), Some(Accepted))];
+    assert_eq!(rows(&mut c.sponsor, c.conversation).await, expected);
+    assert_eq!(rows(&mut c.newcomer, c.conversation).await, expected);
+
+    // A reply in flight appears after the first message, only on its sender, and
+    // the thread keeps the order of the history.
+    let two = say(&mut c.newcomer, &c.newcomer_ports, &sponsor_id, c.conversation, "two").await;
+    assert_eq!(
+        rows(&mut c.newcomer, c.conversation).await,
+        vec![
+            (sponsor_id.clone(), b"one".to_vec(), Some(Accepted)),
+            (newcomer_id.clone(), b"two".to_vec(), Some(Pending)),
+        ]
+    );
+    assert_eq!(rows(&mut c.sponsor, c.conversation).await, expected);
+    deliver(
+        (&mut c.newcomer, &c.newcomer_ports, &newcomer_id),
+        (&mut c.sponsor, &c.sponsor_ports, &sponsor_id),
+        c.conversation,
+        two.wire,
+    )
+    .await;
+    let both = vec![
+        (sponsor_id.clone(), b"one".to_vec(), Some(Accepted)),
+        (newcomer_id.clone(), b"two".to_vec(), Some(Accepted)),
+    ];
+    assert_eq!(rows(&mut c.sponsor, c.conversation).await, both);
+    assert_eq!(rows(&mut c.newcomer, c.conversation).await, both);
+}
+
+#[tokio::test]
+async fn the_thread_of_another_conversation_stays_empty() {
+    let mut c = established([6; 32]).await;
+    let newcomer_id = c.newcomer_id.clone();
+    say(&mut c.sponsor, &c.sponsor_ports, &newcomer_id, c.conversation, "private").await;
+    assert_eq!(rows(&mut c.sponsor, c.conversation).await.len(), 1);
+    assert!(rows(&mut c.sponsor, [9; 32]).await.is_empty());
+}

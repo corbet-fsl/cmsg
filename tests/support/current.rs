@@ -204,6 +204,7 @@ async fn minimum_version_guards_every_inbox_action() {
     for action in [
         "inbox.snapshot",
         "inbox.history",
+        "inbox.thread",
         "inbox.relation",
         "inbox.delivery_status",
     ] {
@@ -238,6 +239,7 @@ async fn minimum_version_guards_every_inbox_action() {
     for action in [
         "inbox.snapshot",
         "inbox.history",
+        "inbox.thread",
         "inbox.relation",
         "inbox.delivery_status",
     ] {

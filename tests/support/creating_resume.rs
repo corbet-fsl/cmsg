@@ -156,6 +156,9 @@ impl BoundVault for Custody {
     fn history(&mut self, _: facades::Conversation) -> OwnedFuture<'_, Vec<cnbx::Message>> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    fn thread(&mut self, _: facades::Conversation) -> OwnedFuture<'_, Vec<facades::ThreadEntry>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn relation(&mut self, _: facades::Relation) -> OwnedFuture<'_, cnbx::Relation> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
