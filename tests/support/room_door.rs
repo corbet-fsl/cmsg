@@ -20,6 +20,8 @@ use std::{
 const COMMUNITY: &str = "alpha";
 const ROOM: cmbl::Id = [7; 16];
 const GROUP: cgrp::Id = [9; 32];
+const CIRCLE: cgrp::Id = [7; 32];
+const INGROUP: cgrp::Id = [8; 32];
 const NOW_MS: u64 = 2_000_000_000_000;
 
 fn member_id(letter: &str) -> String {
@@ -46,15 +48,16 @@ fn policy() -> Policy {
         epoch: 1,
         valid_until: 4_000_000_000,
         cap: 100,
-        circle_max: 12,
-        ingroup_max: 42,
-        shrink_public: 36,
-        shrink_ingroup: 10,
+        // Toy growth thresholds: three in a circle, up to five in an in-group.
+        circle_max: 3,
+        ingroup_max: 5,
+        shrink_public: 4,
+        shrink_ingroup: 2,
         open_seconds: 21 * DAY,
         fork_cooldown: 14 * DAY,
         retarget_cooldown: 28 * DAY,
         listing_wait: 72 * 3_600,
-        split_public_min: 43,
+        split_public_min: 5,
         bands: std::array::from_fn(|i| Band {
             lower: edges[i],
             enter_up: edges[i],
@@ -131,7 +134,7 @@ fn router() -> Arc<Router> {
             cmmr::Scope::new(COMMUNITY, "boot").unwrap(),
             cmmr::Limits {
                 records: 8,
-                value_bytes: 4_000_000,
+                value_bytes: 1_000_000,
                 batch: 8,
                 indexes_per_record: 1,
                 page: 8,
@@ -278,7 +281,7 @@ async fn board(router: &Arc<Router>, slow: usize, resume: bool) -> RoomBoard {
         })
         .await
         .unwrap();
-    board.enter(vec![0; 64]).await.unwrap();
+    board.enter(vec![0; 64], vec![]).await.unwrap();
     let request = board.prepare_room_epoch([1; 16]).unwrap();
     board.receive_room_epoch(request, vec![0; 64]).await.unwrap();
     let request = board.prepare_room_pass(ROOM, [2; 16], [3; 16]).unwrap();
@@ -323,7 +326,6 @@ impl GroupPeers for Directory {
 async fn owner(letter: &str, prf: u8, directory: &Directory) -> ProfileOwner {
     let (mut owner, _, _) = open_with(&member_id(letter), true, prf).await;
     owner.enable_groups(Some(Box::new(directory.clone()))).unwrap();
-    owner.groups.as_mut().unwrap().found_rooms();
     owner
 }
 
@@ -361,27 +363,95 @@ async fn standing(owner: &ProfileOwner) -> (BTreeSet<String>, u64) {
     (members, epoch)
 }
 
-/// The member of the room: it holds the standing room alone.
+/// The unix seconds the owners themselves read.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// The member of the room. The product has no seed rooms: the room grows out of
+/// a circle of three (`a`, `x`, `y`), an in-group of four (a fourth, `z`, joins
+/// by consent) and a consent fork that opens the room with the first three, who
+/// each agree to be seen. The others only lend their consent and key package
+/// (their devices are not part of the scene afterwards).
 async fn founder(directory: &Directory) -> ProfileOwner {
     let mut founder = owner("a", 31, directory).await;
-    let id = member_id("a");
-    let groups = founder.groups.as_mut().unwrap();
     let policy = policy_at();
-    let proposal = cbrd::propose_group_command(
-        groups,
-        &policy,
+    let mut lenders = BTreeMap::new();
+    for (letter, prf) in [("x", 34u8), ("y", 35u8), ("z", 36u8)] {
+        let lender = owner(letter, prf, directory).await;
+        let (lineage, handle) = own_lineage(&lender).await;
+        directory.0.borrow_mut().insert(handle, lineage);
+        lenders.insert(member_id(letter), lender);
+    }
+    // The founder is in contact with everyone it creates a group with or adds.
+    founder
+        .groups
+        .as_mut()
+        .unwrap()
+        .assume_contacts([member_id("x"), member_id("y"), member_id("z")]);
+    let ids = |letters: &[&str]| -> BTreeSet<String> {
+        letters.iter().map(|letter| member_id(letter)).collect()
+    };
+    for (step, command) in [
         cgrp::Command::Create {
-            id: GROUP,
-            members: BTreeSet::from([id]),
-            seed: true,
+            id: CIRCLE,
+            members: ids(&["a", "x", "y"]),
         },
-        true,
-    )
-    .await
-    .unwrap();
-    cbrd::commit_group_proposal(groups, &policy, &proposal, 10)
-        .await
-        .unwrap();
+        cgrp::Command::Fork {
+            id: INGROUP,
+            parents: vec![CIRCLE],
+            members: ids(&["a", "x", "y", "z"]),
+            kind: cgrp::ForkKind::Add,
+        },
+        cgrp::Command::Fork {
+            id: GROUP,
+            parents: vec![INGROUP],
+            members: ids(&["a", "x", "y"]),
+            kind: cgrp::ForkKind::Open,
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let others: Vec<String> = match &command {
+            cgrp::Command::Create { members, .. } | cgrp::Command::Fork { members, .. } => {
+                members.iter().filter(|m| **m != member_id("a")).cloned().collect()
+            }
+            _ => unreachable!(),
+        };
+        let mut proposal =
+            cbrd::propose_group_command(founder.groups.as_mut().unwrap(), &policy, command)
+                .await
+                .unwrap();
+        // Each lender answers for itself over an invitation built from the exact
+        // request (a conversation is not part of this scene).
+        let mut open = proposal.request().clone();
+        open.consents.clear();
+        for member in others {
+            let lender = lenders.get_mut(&member).unwrap();
+            let invitation = cbrd::Invitation::from_bytes(
+                &serde_json::to_vec(&serde_json::json!({
+                    "request": open,
+                    "community": COMMUNITY,
+                    "epoch": 1,
+                    "member": member,
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            let reply = invitation
+                .answer(lender.groups.as_mut().unwrap(), true)
+                .await
+                .unwrap();
+            proposal.admit(&member, reply, unix_now()).unwrap();
+        }
+        cbrd::commit_group_proposal(founder.groups.as_mut().unwrap(), &policy, &proposal, 10)
+            .await
+            .unwrap_or_else(|error| panic!("growth step {step}: {error:?}"));
+    }
     founder
 }
 
@@ -390,7 +460,7 @@ async fn founder(directory: &Directory) -> ProfileOwner {
 async fn attempt(
     newcomer: &mut ProfileOwner,
     newcomer_board: &RoomBoard,
-    evidence: &cthr::ParentEvidence,
+    evidence: &cbrd::RoomState,
     member: &mut ProfileOwner,
     member_board: &RoomBoard,
     cursor: &mut u64,
@@ -399,15 +469,32 @@ async fn attempt(
     Vec<Result<cgrp::Snapshot, ctnd::Error>>,
 ) {
     let policy = policy_at();
+    let join_key = cbrd::TransportKey::from_keys(&evidence.transport);
     let groups = newcomer.groups.as_mut().unwrap();
-    let (candidate, _, _, request) = cbrd::prepare_group_intent(
+    // A relay that swaps the state next to genuine MLS evidence is refused
+    // before anything is prepared, signed or sent.
+    let mut swapped = cthr::ParentEvidence {
+        state: evidence.evidence.state.clone(),
+        group_info: evidence.evidence.group_info.clone(),
+        ratchet_tree: evidence.evidence.ratchet_tree.clone(),
+    };
+    *swapped.state.last_mut().unwrap() ^= 1;
+    assert!(
+        groups
+            .verify_room_state(GROUP, &swapped, &evidence.handles)
+            .await
+            .is_err()
+    );
+    let verified = groups
+        .verify_room_state(GROUP, &evidence.evidence, &evidence.handles)
+        .await
+        .unwrap();
+    let (candidate, _, _, request) = cbrd::prepare_join_from_state(
         groups,
         &policy,
-        cbrd::GroupIntent::Join {
-            group: GROUP,
-            vouches: Default::default(),
-        },
-        true,
+        GROUP,
+        Default::default(),
+        &verified,
         10,
     )
     .await
@@ -419,15 +506,19 @@ async fn attempt(
             group: GROUP,
             candidate,
             request,
-            evidence,
+            evidence: &evidence.evidence,
+            parent: &verified,
+            handles: &evidence.handles,
+            transport: &join_key,
             policy: &policy,
         },
     );
     let admit = async {
         let groups = member.groups.as_mut().unwrap();
+        let transport = groups.room_transport_key(GROUP).await.unwrap();
         let mut results = vec![];
         for _ in 0..400 {
-            let read = member_board.room_joins(ROOM, *cursor).await.unwrap();
+            let read = member_board.room_joins(ROOM, *cursor, &transport).await.unwrap();
             for frame in &read.joins {
                 results.push(
                     groups
@@ -438,6 +529,7 @@ async fn attempt(
                                 group: GROUP,
                                 frame,
                                 max_groups: 10,
+                                transport: &transport,
                                 policy: &policy,
                             },
                         )
@@ -460,7 +552,12 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
     let router = router();
     let directory = Directory::default();
     let mut member = founder(&directory).await;
-    let (member_lineage, _) = own_lineage(&member).await;
+    let (member_lineage, member_handle) = own_lineage(&member).await;
+    // The room's members publish their lineage records under their handles.
+    directory
+        .0
+        .borrow_mut()
+        .insert(member_handle, member_lineage.clone());
     let member_board = board(&router, 0, true).await;
     let evidence = member
         .groups
@@ -494,7 +591,7 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
     assert_eq!(admitted.len(), 1);
     assert!(admitted[0].is_err());
     let (members, epoch) = standing(&member).await;
-    assert_eq!(members, BTreeSet::from([member_id("a")]));
+    assert_eq!(members.len(), 3);
     assert_eq!(epoch, epoch_before);
 
     // The stranger that supplies the handle of its OWN record is admitted.
@@ -517,7 +614,7 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
     joined.unwrap();
     assert_eq!(admitted.len(), 1);
     admitted[0].as_ref().unwrap();
-    let both = BTreeSet::from([member_id("a"), member_id("b")]);
+    let both = BTreeSet::from([member_id("a"), member_id("x"), member_id("y"), member_id("b")]);
     let (joiner_members, joiner_epoch) = standing(&joiner).await;
     let (member_members, member_epoch) = standing(&member).await;
     assert_eq!(joiner_members, both);

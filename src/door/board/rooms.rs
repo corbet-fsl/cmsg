@@ -170,15 +170,19 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         expires: u64,
     ) -> Result<Vec<cbrd::GroupView>> {
         let source = self.group_policy(expires).await?;
+        // Nothing is prepared, signed or sent before the delivered state is
+        // authenticated against the MLS evidence it came with.
+        let verified = self
+            .owner
+            .verify_room_state(join.group, &state.evidence, &state.handles)
+            .await?;
         let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
-        let intent = cbrd::GroupIntent::Join {
-            group: join.group,
-            vouches: Default::default(),
-        };
-        let (candidate, current, now, request) = cbrd::prepare_group_intent(
+        let (candidate, current, now, request) = cbrd::prepare_join_from_state(
             owner,
             &source,
-            intent,
+            join.group,
+            Default::default(),
+            &verified,
             MAX_GROUPS,
         )
         .await
@@ -196,6 +200,8 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
                     candidate,
                     request,
                     evidence: &state.evidence,
+                    parent: &verified,
+                    handles: &state.handles,
                     transport: &cbrd::TransportKey::from_keys(&state.transport),
                     policy: &source,
                 },
