@@ -410,6 +410,8 @@ pub struct RoomJoinTask<'a> {
     /// consent from it and its lineage through the handle.
     pub request: cgrp::Request,
     pub evidence: &'a cthr::ParentEvidence,
+    /// The room's transport key from the sealed room state.
+    pub transport: &'a cbrd::TransportKey,
     pub policy: &'a dyn cgrp::PolicySource,
 }
 
@@ -503,6 +505,7 @@ where
                 operation,
                 attempts: ROOM_CONTEXT_ATTEMPTS,
                 pause: crate::door::rooms::NoPause,
+                transport: task.transport,
             },
         )
         .await;
@@ -526,7 +529,7 @@ where
         &mut self,
         group: cgrp::Id,
         policy: &dyn cgrp::PolicySource,
-    ) -> std::result::Result<cthr::ParentEvidence, ctnd::Error> {
+    ) -> std::result::Result<cbrd::RoomState, ctnd::Error> {
         use ctnd::Error as Fail;
         self.open().map_err(|_| Fail::Authority)?;
         let mut retained = self.retained.lock().await;
@@ -567,7 +570,33 @@ where
             .await
             .map_err(|_| Fail::Authority);
         *self.cache.borrow_mut() = Cache::default();
-        evidence
+        Ok(cbrd::RoomState {
+            evidence: evidence?,
+            transport: threads.transport_key().map_err(|_| Fail::Authority)?,
+        })
+    }
+
+    /// The transport key of this member's current epoch of `group`: it opens
+    /// the ordered join frames of the newcomers waiting at that epoch.
+    pub async fn room_transport_key(
+        &mut self,
+        group: cgrp::Id,
+    ) -> std::result::Result<cbrd::TransportKey, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let storage = custody.vault.storage().clone();
+        let store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
+        let key = threads.transport_key().map_err(|_| Fail::Authority)?;
+        Ok(cbrd::TransportKey::from_bytes(key))
     }
 }
 
@@ -578,6 +607,8 @@ pub struct RoomAdmitTask<'a> {
     pub group: cgrp::Id,
     pub frame: &'a cbrd::JoinFrame,
     pub max_groups: usize,
+    /// The room's transport key at the epoch the newcomer joins from.
+    pub transport: &'a cbrd::TransportKey,
     pub policy: &'a dyn cgrp::PolicySource,
 }
 
@@ -730,6 +761,7 @@ where
                 source: &source,
                 authority: &authority,
                 operation,
+                transport: task.transport,
             },
         )
         .await?;

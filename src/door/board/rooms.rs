@@ -143,7 +143,7 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             let Some(plain) = pending.key.open(&join.room, request, &sealed) else {
                 continue;
             };
-            if let Ok(parsed) = serde_json::from_slice::<cthr::ParentEvidence>(&plain) {
+            if let Ok(parsed) = serde_json::from_slice::<cbrd::RoomState>(&plain) {
                 evidence.push(parsed);
             }
         }
@@ -166,7 +166,7 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
     async fn join_with(
         &mut self,
         join: &RoomJoin,
-        evidence: &cthr::ParentEvidence,
+        state: &cbrd::RoomState,
         expires: u64,
     ) -> Result<Vec<cbrd::GroupView>> {
         let source = self.group_policy(expires).await?;
@@ -195,7 +195,8 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
                     group: join.group,
                     candidate,
                     request,
-                    evidence,
+                    evidence: &state.evidence,
+                    transport: &cbrd::TransportKey::from_bytes(state.transport),
                     policy: &source,
                 },
             )
@@ -261,7 +262,8 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             .get(&room.room)
             .copied()
             .unwrap_or(0);
-        let read = R::room_joins(&self.inner.board, room.room, after)
+        let transport = self.owner.room_transport_key(room.group).await?;
+        let read = R::room_joins(&self.inner.board, room.room, after, &transport)
             .await
             .map_err(link)?;
         let source = self.group_policy(expires).await?;
@@ -273,6 +275,7 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
                 group: room.group,
                 frame,
                 max_groups: MAX_GROUPS,
+                transport: &transport,
                 policy: &source,
             };
             match self.owner.admit_room(&self.inner.board, task).await {

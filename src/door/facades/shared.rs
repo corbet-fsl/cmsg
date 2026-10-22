@@ -141,13 +141,22 @@ where
         &'a mut self,
         group: cbrd::cgrp::Id,
         policy: &'a dyn cbrd::cgrp::PolicySource,
-    ) -> board::OwnerFuture<'a, cthr::ParentEvidence> {
+    ) -> board::OwnerFuture<'a, cbrd::RoomState> {
         Box::pin(async move {
             let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
             groups
                 .room_evidence(group, policy)
                 .await
                 .map_err(room_error)
+        })
+    }
+    fn room_transport_key<'a>(
+        &'a mut self,
+        group: cbrd::cgrp::Id,
+    ) -> board::OwnerFuture<'a, cbrd::TransportKey> {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            groups.room_transport_key(group).await.map_err(room_error)
         })
     }
     fn with_current<'a, T: 'a, F>(&'a mut self, read: F) -> board::OwnerFuture<'a, T>

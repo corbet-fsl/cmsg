@@ -139,7 +139,16 @@ pub trait CommittedOwner {
         &'a mut self,
         _group: cbrd::cgrp::Id,
         _policy: &'a dyn cbrd::cgrp::PolicySource,
-    ) -> OwnerFuture<'a, cthr::ParentEvidence> {
+    ) -> OwnerFuture<'a, cbrd::RoomState> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
+    /// The room transport key of this member's current epoch of `group`: it
+    /// opens the ordered join frames of the newcomers waiting at that epoch.
+    fn room_transport_key<'a>(
+        &'a mut self,
+        _group: cbrd::cgrp::Id,
+    ) -> OwnerFuture<'a, cbrd::TransportKey> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
 
