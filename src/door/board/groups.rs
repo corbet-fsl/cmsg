@@ -200,6 +200,45 @@ mod tests {
     }
 
     #[test]
+    fn growth_thresholds_are_settings_a_test_community_can_shrink() {
+        // The thresholds travel in the signed settings; a small test community
+        // walks the same ladder with the same code (no special case for 12/42/36).
+        let small = [
+            ("groups.cap", json!(20)),
+            ("groups.circle_max", json!(4)),
+            ("groups.ingroup_max", json!(8)),
+            ("groups.shrink_public", json!(6)),
+            ("groups.shrink_ingroup", json!(3)),
+            ("groups.split_public_min", json!(8)),
+            ("seats.n_lo", json!(5)),
+            ("seats.n_hi", json!(15)),
+        ];
+        let mut content = snapshot();
+        for (key, value) in small {
+            content.content.insert(key.into(), value);
+        }
+        let source = cbrd::SettingsPolicy::new(&content, VALID_UNTIL);
+        let policy = source.current(COMMUNITY, 10).unwrap();
+        assert_eq!(
+            (policy.cap, policy.circle_max, policy.ingroup_max),
+            (20, 4, 8)
+        );
+        assert_eq!((policy.shrink_public, policy.shrink_ingroup), (6, 3));
+        // Above the decided ceilings, or out of ladder order, it still refuses.
+        for (key, value) in [
+            ("groups.circle_max", json!(13)),
+            ("groups.ingroup_max", json!(43)),
+            ("groups.shrink_public", json!(8)),
+            ("groups.shrink_ingroup", json!(4)),
+        ] {
+            let mut bad = content.clone();
+            bad.content.insert(key.into(), value);
+            let refused = cbrd::SettingsPolicy::new(&bad, VALID_UNTIL).current(COMMUNITY, 10);
+            assert_eq!(refused, Err(cgrp::Error::Policy), "{key}");
+        }
+    }
+
+    #[test]
     fn source_refuses_foreign_community_expiry_and_invalid_policy() {
         let binding = snapshot();
         let source = cbrd::SettingsPolicy::new(&binding, VALID_UNTIL);
