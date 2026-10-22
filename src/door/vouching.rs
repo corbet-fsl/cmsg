@@ -1328,11 +1328,12 @@ pub(super) async fn link_create(
             return Err(ErrorCode::Refused);
         }
     }
-    let sponsor: [u8; 32] = lobby
+    // The account owner (cblc's member id of the pseudonym the lobby names): the id
+    // the newcomer's account binds as its sponsor and the ledger knows members by.
+    let sponsor = lobby
         .get("member_id")
         .and_then(Value::as_str)
-        .and_then(from_hex)
-        .and_then(|bytes| bytes.try_into().ok())
+        .and_then(super::record::account_owner)
         .ok_or(ErrorCode::Unavailable)?;
     let (token, secret) = Token::generate(sponsor).map_err(|_| ErrorCode::Unavailable)?;
     let registration = token.registration();
