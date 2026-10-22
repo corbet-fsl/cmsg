@@ -122,10 +122,62 @@ impl Drivers {
     }
 }
 
+/// The transport custody one BrowserTor owns: the vault-derived epoch-zero session, or a
+/// fresh registration's ephemeral keys (before any vault exists; in memory only, one per
+/// scope, dropped at `Done`).
+pub enum Session<C, A> {
+    Vault(ckmg::TransportSession<C, A>),
+    Ephemeral(ckmg::EphemeralTransport),
+}
+impl<C, A> From<ckmg::TransportSession<C, A>> for Session<C, A> {
+    fn from(session: ckmg::TransportSession<C, A>) -> Self {
+        Self::Vault(session)
+    }
+}
+impl<C, A> From<ckmg::EphemeralTransport> for Session<C, A> {
+    fn from(transport: ckmg::EphemeralTransport) -> Self {
+        Self::Ephemeral(transport)
+    }
+}
+impl<C: ckmg::Clock, A: ckmg::Authority> Session<C, A> {
+    async fn browser_initializer(
+        &mut self,
+        scope: ctrn::Scope,
+    ) -> std::result::Result<ckmg::BrowserTorInitializer, ckmg::Error> {
+        match self {
+            Self::Vault(session) => session.browser_initializer(scope).await,
+            Self::Ephemeral(transport) => transport.browser_initializer(scope),
+        }
+    }
+    fn public_key(&self) -> std::result::Result<ckmg::PublicKey, ckmg::Error> {
+        match self {
+            Self::Vault(session) => session.public_key(),
+            Self::Ephemeral(transport) => transport.public_key(),
+        }
+    }
+    async fn with_node<T>(
+        &mut self,
+        operation: impl for<'key> FnOnce(ckmg::Vld0Signer<'key>, ckmg::Vld0NodeCipher<'key>) -> T,
+    ) -> std::result::Result<T, ckmg::Error> {
+        match self {
+            Self::Vault(session) => session.with_node(operation).await,
+            Self::Ephemeral(transport) => transport.with_node(operation),
+        }
+    }
+}
+impl<C, A> Session<C, A> {
+    fn lock(&mut self) {
+        match self {
+            Self::Vault(session) => session.lock(),
+            Self::Ephemeral(transport) => transport.lock(),
+        }
+    }
+}
+
 /// Owns the sole epoch-zero transport session, independently of member Keys and
 /// the serial Door queue. No root, PRF or purpose seed is exposed by this port.
 pub struct BrowserTor<C, A> {
-    session: Mutex<ckmg::TransportSession<C, A>>,
+    session: Mutex<Session<C, A>>,
     node: Arc<ctrn::Node>,
     messages: Arc<ctrn::messages::Messages>,
     clock: Arc<Clock>,
@@ -156,15 +208,17 @@ impl Drop for Starting {
 }
 
 impl<C: ckmg::Clock, A: ckmg::Authority> BrowserTor<C, A> {
-    /// Consume the session produced by PreparedOpen.transport. Never replace it
+    /// Consume the session produced by PreparedOpen.transport, or a registration's
+    /// `ckmg::EphemeralTransport` before any vault exists. Never replace a vault session
     /// with a legacy member Keys initializer after restoring the checkpoint.
     /// Startup owns cancellation: any failure/drop stops the original engine.
     #[allow(clippy::arc_with_non_send_sync)]
     pub async fn start(
-        mut session: ckmg::TransportSession<C, A>,
+        session: impl Into<Session<C, A>>,
         scope: ctrn::Scope,
         configuration: Configuration,
     ) -> Result<Self> {
+        let mut session = session.into();
         let limits = configuration.limits;
         // TorJS has a smaller stream bound than the cross-platform Node.
         if !(1..=64).contains(&limits.streams)

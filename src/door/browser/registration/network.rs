@@ -46,8 +46,7 @@ impl Isolation {
 /// Opens the records network of one scope on its own isolation.
 pub trait Open {
     type Network: cdht::Network + Clone + 'static;
-    fn open(&mut self, scope: Scope, isolation: Isolation)
-        -> Result<Self::Network, ComposeError>;
+    fn open(&mut self, scope: Scope, isolation: Isolation) -> Result<Self::Network, ComposeError>;
 }
 
 /// One registration's circuits: each scope is lent once, on a fresh isolation.
@@ -73,9 +72,8 @@ impl<O: Open> Circuits<O> {
         if self.lent.contains(&scope) {
             return Err(refused("a scope is lent once per registration"));
         }
-        let isolation = Isolation(
-            u32::try_from(self.lent.len()).map_err(|_| refused("too many scopes"))?,
-        );
+        let isolation =
+            Isolation(u32::try_from(self.lent.len()).map_err(|_| refused("too many scopes"))?);
         let network = self.open.open(scope, isolation)?;
         self.lent.push(scope);
         Ok(network)
@@ -210,8 +208,8 @@ impl Relay {
         init.set_mode(web_sys::RequestMode::Cors);
         init.set_credentials(web_sys::RequestCredentials::Omit);
         init.set_body(&wasm_bindgen::JsValue::from_str(&request.to_string()));
-        let request = web_sys::Request::new_with_str_and_init(&self.endpoint, &init)
-            .map_err(unavailable)?;
+        let request =
+            web_sys::Request::new_with_str_and_init(&self.endpoint, &init).map_err(unavailable)?;
         let window = web_sys::window().ok_or(cdht::Error::Unavailable)?;
         let response: web_sys::Response =
             wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&request))
@@ -335,7 +333,9 @@ mod tests {
         let mut recorder = Recorder::default();
         let mut circuits = Circuits::new(&mut recorder);
         let first = circuits.registration([1; 32]).expect("registration");
-        let other = circuits.lend(Scope::Community([2; 32])).expect("second community");
+        let other = circuits
+            .lend(Scope::Community([2; 32]))
+            .expect("second community");
         let Network::Relay(wallet) = &first.wallet;
         let Network::Relay(community) = &first.community;
         let Network::Relay(other) = &other;
@@ -401,12 +401,25 @@ mod tests {
 
     #[test]
     fn helper_answers_map_to_record_errors() {
-        assert_eq!(answer(r#"{"ok":"accepted"}"#).ok(), Some(serde_json::json!("accepted")));
-        assert_eq!(answer(r#"{"err":"BadSignature"}"#).err(), Some(cdht::Error::BadSignature));
-        assert_eq!(answer(r#"{"err":"other"}"#).err(), Some(cdht::Error::Unavailable));
+        assert_eq!(
+            answer(r#"{"ok":"accepted"}"#).ok(),
+            Some(serde_json::json!("accepted"))
+        );
+        assert_eq!(
+            answer(r#"{"err":"BadSignature"}"#).err(),
+            Some(cdht::Error::BadSignature)
+        );
+        assert_eq!(
+            answer(r#"{"err":"other"}"#).err(),
+            Some(cdht::Error::Unavailable)
+        );
         assert_eq!(answer("garbage").err(), Some(cdht::Error::Encoding));
         assert!(index(&[5; 32]).is_err());
-        assert!(index(&[1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]).is_err());
+        assert!(index(&[
+            1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+            2, 2, 2
+        ])
+        .is_err());
         assert_eq!(index(&[4; 32]).ok(), Some(4));
     }
 }
