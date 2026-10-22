@@ -1221,6 +1221,25 @@ pub(crate) type MemberOwner<B, N> = super::facades::VaultBoardOwner<
 /// A composed device with its community vault bound to the Door (steps 1-7). The native
 /// composer binds the account actor from these parts; the browser keeps the Door.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+/// The records networks a registration publishes to and recovers from, one per scope: the
+/// wallet lineage and global passport use `wallet`, the community lineage and vault
+/// `community`. A browser registration lends one isolated circuit per scope
+/// (`registration::network`), so the two lineages never share a circuit; a native embedder
+/// lends one network to both (`Networks::shared`).
+pub struct Networks<N> {
+    pub wallet: N,
+    pub community: N,
+}
+
+impl<N: Clone> Networks<N> {
+    pub fn shared(network: N) -> Self {
+        Self {
+            wallet: network.clone(),
+            community: network,
+        }
+    }
+}
+
 pub(crate) struct Composed<B: cwst::backend::Backend + 'static, N: cdht::Network + 'static> {
     pub(crate) door: Door,
     /// The wallet Door: the global passport's recovery lease holds its session.
@@ -1257,7 +1276,7 @@ pub(crate) async fn compose_device<A, B, N, S, P>(
     global_storage: B,
     community_storage: B,
     progress: &mut ProgressFile<P>,
-    network: N,
+    networks: Networks<N>,
 ) -> Result<Composed<B, N>, ComposeError>
 where
     A: cfyr::passkeys::Authenticator,
@@ -1271,6 +1290,12 @@ where
         community_origin,
         community_name,
     } = names;
+    // Each scope has its own records network (the browser lends one isolated circuit per
+    // scope; native lends one network to both).
+    let Networks {
+        wallet: network,
+        community: community_network,
+    } = networks;
 
     // A registered device's start has ONE wallet confirmation; a registration at most
     // REGISTRATION_CONFIRMATIONS. Nothing over the budget is ever prompted.
@@ -1414,7 +1439,7 @@ where
         &mut global,
         keys,
         community_storage.clone(),
-        &network,
+        &community_network,
         progress,
     )
     .await?;
@@ -1426,7 +1451,7 @@ where
         unlock
             .community_opening(&fingerprint, community_name)
             .map_err(step("community opening"))?,
-        &network,
+        &community_network,
     )
     .await?;
     // The recovery lease holds its session for the device's life: it gets a third session of
@@ -1462,7 +1487,7 @@ where
         .device_initial_creation(vault_policy, now)
         .await
         .map_err(step("lease_creation"))?;
-    let owners = custody::prepare_device_initial_recovery(recovered, held, network.clone(), &stamps)
+    let owners = custody::prepare_device_initial_recovery(recovered, held, community_network.clone(), &stamps)
         .await
         .map_err(step("community recovery"))?;
     // One owner per Store: the Door holds the community Vault (voucher custody,
@@ -1473,7 +1498,7 @@ where
         account,
         lifetime,
     } = owners
-        .open_member_vault(network, community_storage)
+        .open_member_vault(community_network, community_storage)
         .await
         .map_err(step("community vault"))?;
     let owner = door

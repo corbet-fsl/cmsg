@@ -155,6 +155,9 @@ pub struct VaultHost {
     hello: Closure<dyn FnMut(MessageEvent)>,
     leaving: Closure<dyn FnMut(web_sys::Event)>,
     done: Completion,
+    /// A registration's wallet parts (passport, wallet Door, companion), kept for the frame's
+    /// life and dropped with it, after everything above.
+    retained: Option<super::super::registration::Retained>,
 }
 impl VaultHost {
     /// Trusted Rust composition inside the pinned vault frame. Ceremony results
@@ -341,6 +344,7 @@ impl VaultHost {
             done: async move { completion.await.map_err(|_| ErrorCode::Reconcile)? }
                 .boxed_local()
                 .shared(),
+            retained: None,
         };
         // Construct the Drop guard before registering either listener: every
         // later setup failure removes both callbacks and drains the real owner.
@@ -459,17 +463,19 @@ impl VaultHost {
             .map_err(|_| refused("passkey context"))?;
         let mut keys =
             DeviceKeys::new(cfyr::passkeys::Client::new(context, cfyr::passkeys::browser::Browser));
-        let network = super::super::registration::network(&registration)?;
-        let door = super::super::registration::compose_browser_device(
+        let networks = registration.networks()?;
+        let (door, retained) = super::super::registration::compose_browser_device(
             &registration,
             &wallet_origin,
             &config.runtime.community,
             &mut keys,
-            network,
+            networks,
         )
         .await?;
-        Self::attach_wallet(door, config.member_origin, wallet_origin, None)
-            .map_err(|e| ComposeError::Step("attach", format!("{e:?}")))
+        let mut host = Self::attach_wallet(door, config.member_origin, wallet_origin, None)
+            .map_err(|e| ComposeError::Step("attach", format!("{e:?}")))?;
+        host.retained = Some(retained);
+        Ok(host)
     }
 
     pub fn dispose(&self) -> js_sys::Promise {

@@ -7,6 +7,11 @@
 //!
 //! The account actor (step 8) needs a prover the browser does not have yet; the composed Door
 //! stops after `bind_vault_with_board_owner`.
+//!
+//! The records network both lineages publish to before the vault exists is lent by the
+//! deployment (`network`), one isolated circuit per scope.
+pub mod network;
+
 use super::{Service, TrustConfiguration};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -31,6 +36,9 @@ pub struct Configuration {
     pub rp_id: String,
     /// IndexedDB namespace of this deployment's device vaults (not a URL).
     pub storage: String,
+    /// The records network the deployment lends the registration (production: the bootstrap
+    /// Tor client; toy: the stack's records helper).
+    pub records: network::Lent,
 }
 
 impl Configuration {
@@ -39,6 +47,20 @@ impl Configuration {
     /// vault.
     pub fn databases(&self) -> [String; 3] {
         databases(&self.storage, &self.fingerprint)
+    }
+
+    /// The registration's records networks: the wallet's and this community's, each on its
+    /// own circuit, as the deployment lends them. Refused before any ceremony when the lent
+    /// network cannot be opened.
+    pub fn networks(
+        &self,
+    ) -> Result<
+        crate::door::composer_core::Networks<network::Network>,
+        crate::door::composer_core::ComposeError,
+    > {
+        let fingerprint = crate::door::identity::Fingerprint::from_hex(&self.fingerprint)
+            .ok_or_else(|| crate::door::composer_core::ComposeError::Config("fingerprint".into()))?;
+        network::Circuits::new(network::Deployment(&self.records)).registration(fingerprint.0)
     }
 }
 
@@ -57,7 +79,7 @@ mod runtime {
         browser::open_transport,
         composer_core::{
             compose_device, now, step, BackendProgress, ComposeError, DeviceKeys, Names,
-            ProgressFile, Service as Endpoint, Services,
+            Networks, ProgressFile, Service as Endpoint, Services,
         },
         foyer::{Foyer, Transport},
         identity, Door,
@@ -135,15 +157,16 @@ mod runtime {
     /// wallet frame's origin `door_origin`, with the community vault bound. Resumable at every
     /// step from the two IndexedDB vault checkpoints and the progress marker beside them; a
     /// half-registered device never registers twice. `keys` is the wallet passkey client of
-    /// this frame (`cpky::Context::new(passkey_origin, rp_id)`), `network` the records network
-    /// the lineages publish to and recover from.
+    /// this frame (`cpky::Context::new(passkey_origin, rp_id)`), `networks` the records
+    /// networks the wallet and community lineages publish to and recover from, one isolated
+    /// circuit per scope (`network::Circuits::registration`).
     pub async fn compose_browser_device<A, N>(
         configuration: &Configuration,
         door_origin: &str,
         community_name: &str,
         keys: &mut DeviceKeys<A>,
-        network: N,
-    ) -> Result<Door, ComposeError>
+        networks: Networks<N>,
+    ) -> Result<(Door, super::Retained), ComposeError>
     where
         A: cfyr::passkeys::Authenticator,
         N: cdht::Network + Clone + 'static,
@@ -176,88 +199,42 @@ mod runtime {
             wallet,
             community,
             &mut progress,
-            network,
+            networks,
         )
         .await?;
-        // The wallet Door's session is held by the global passport's recovery lease for the
-        // frame's life; the companion and the passport stay with it.
-        Box::leak(Box::new((composed.wallet_door, composed.global_companion)));
-        Box::leak(Box::new(composed.global));
+        // The wallet Door's session is held by the global passport's recovery lease; the
+        // frame keeps both and the companion for its life (`Retained`), as native keeps them
+        // in the account actor. The board owner ends here exactly as in compose_native_device.
         drop(composed.owner);
-        Ok(composed.door)
+        // The account actor's parts end unused until a browser build can bind the actor
+        // (`Retained`); the next start reserves its intents again.
+        drop((
+            composed.account,
+            composed.actor_membership,
+            composed.actor_policy,
+            composed.device,
+        ));
+        Ok((
+            composed.door,
+            super::Retained(Box::new((
+                composed.global,
+                composed.wallet_door,
+                composed.global_companion,
+            ))),
+        ))
     }
 }
 #[cfg(target_arch = "wasm32")]
 pub use runtime::{compose_browser_device, BrowserServices};
 
-/// The records network of a fresh browser registration. OPEN (W2b-SPEC decision 1a/1b): both
-/// lineages publish to and recover from the records network before any vault-derived browser
-/// Tor identity exists (`prepare_browser_transport` needs an opened vault and a session), and
-/// no substituted transport may stand in. Until the manager decides, no network can be built
-/// and the wallet frame refuses before its first ceremony, so nothing is half registered.
-pub enum NoRecordsNetwork {}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn network(
-    _configuration: &Configuration,
-) -> Result<NoRecordsNetwork, crate::door::composer_core::ComposeError> {
-    Err(crate::door::composer_core::ComposeError::Step(
-        "records network",
-        "no records identity exists before the wallet vault (W2b decision 1a/1b)".into(),
-    ))
-}
-
-impl Clone for NoRecordsNetwork {
-    fn clone(&self) -> Self {
-        match *self {}
-    }
-}
-
-impl cdht::Network for NoRecordsNetwork {
-    fn now_ms(&self) -> u64 {
-        match *self {}
-    }
-    async fn closest(&self, _: &cdht::RecordKey) -> Result<Vec<cdht::NodeId>, cdht::Error> {
-        match *self {}
-    }
-    async fn descriptor(
-        &self,
-        _: &cdht::NodeId,
-        _: &cdht::RecordKey,
-    ) -> Result<Option<cdht::Descriptor>, cdht::Error> {
-        match *self {}
-    }
-    async fn get(
-        &self,
-        _: &cdht::NodeId,
-        _: &cdht::RecordKey,
-        _: u32,
-    ) -> Result<Option<cdht::SignedValue>, cdht::Error> {
-        match *self {}
-    }
-    async fn set(
-        &self,
-        _: &cdht::NodeId,
-        _: &cdht::Descriptor,
-        _: u32,
-        _: &cdht::SignedValue,
-    ) -> Result<cdht::SetOutcome, cdht::Error> {
-        match *self {}
-    }
-    async fn watch(&self, _: &cdht::NodeId, _: &cdht::RecordKey) -> Result<cdht::WatchId, cdht::Error> {
-        match *self {}
-    }
-    async fn cancel_watch(&self, _: &cdht::NodeId, _: cdht::WatchId) -> Result<(), cdht::Error> {
-        match *self {}
-    }
-    async fn changes(
-        &self,
-        _: &cdht::NodeId,
-        _: cdht::WatchId,
-    ) -> Result<Vec<cdht::Change>, cdht::Error> {
-        match *self {}
-    }
-}
+/// What a browser registration keeps beside the community Door for the wallet frame's life:
+/// the global passport, the wallet Door (the passport's recovery lease holds its session) and
+/// the wallet companion. The frame's `VaultHost` owns it and drops it with itself; nothing is
+/// leaked. Natively the account actor holds the passport (`bind_member_account_with`); a
+/// browser build cannot bind that actor yet because the account engine it drives (cwlt-engine
+/// `account`, cwlt `account_owner`, cvlt's pending account) is compiled only with the native
+/// prover.
+pub struct Retained(#[allow(dead_code)] Box<dyn std::any::Any>);
 
 #[cfg(test)]
 mod tests {
@@ -273,7 +250,7 @@ mod tests {
         serde_json::json!({
             "wallet": service("global", "https://api.wallet.toy.test"),
             "wallet_trust": {"publishing": {"origin": "https://api.wallet.toy.test", "community": "wallet",
-                "key_ring": null, "minimum_revision": 1, "ring_revision": 0}, "following": following},
+                "key_ring": [], "minimum_revision": 1, "ring_revision": 0}, "following": following},
             "community": service("community", "https://api.omega.toy.test"),
             "community_scope": "omega",
             "fingerprint": "ab".repeat(32),
@@ -281,6 +258,7 @@ mod tests {
             "passkey_origin": "https://wallet.toy.test",
             "rp_id": "toy.test",
             "storage": "cmeet",
+            "records": {"kind": "relay", "endpoint": "http://127.0.0.1:7000/"},
         })
     }
 
@@ -302,10 +280,22 @@ mod tests {
     }
 
     #[test]
+    fn a_registration_names_its_records_network() {
+        let parsed: Configuration = serde_json::from_value(configuration()).expect("configuration");
+        assert!(matches!(parsed.records, super::network::Lent::Relay { .. }));
+        let mut value = configuration();
+        value.as_object_mut().expect("object").remove("records");
+        assert!(serde_json::from_value::<Configuration>(value).is_err());
+    }
+
+    #[test]
     fn unknown_registration_fields_are_refused() {
         let mut value = configuration();
         value["session"] = serde_json::json!("x");
         let refused = serde_json::from_value::<Configuration>(value).err().map(|e| e.to_string());
-        assert!(refused.is_some_and(|e| e.contains("unknown field `session`")));
+        assert!(
+            refused.as_ref().is_some_and(|e| e.contains("unknown field `session`")),
+            "{refused:?}"
+        );
     }
 }

@@ -14,6 +14,40 @@ use super::*;
 mod update;
 pub use update::{Applied, Shared};
 
+/// The account actor's prover, lent by the embedder (decision 2026-10-22): a native device
+/// lends its bounded `NativeProver`; a browser lends [`RefusingProver`] until the wasm32
+/// prover lands. The port only answers which prover a proof runs on; the proof itself stays
+/// inside the account vault.
+pub trait AccountProver: Send + Sync {
+    /// The prover of an account open's genesis proof, or the build's honest refusal.
+    fn genesis(&self) -> Result<GenesisProver<'_>>;
+}
+
+/// What a genesis proof runs on. A build without the native prover has no inhabited variant.
+pub enum GenesisProver<'a> {
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    Native(&'a ckmg::wallet_engine::native_prover::NativeProver),
+    #[doc(hidden)]
+    None(std::convert::Infallible, std::marker::PhantomData<&'a ()>),
+}
+
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+impl AccountProver for ckmg::wallet_engine::native_prover::NativeProver {
+    fn genesis(&self) -> Result<GenesisProver<'_>> {
+        Ok(GenesisProver::Native(self))
+    }
+}
+
+/// The browser's port until the wasm32 prover (W3) lands: every proof is refused with
+/// `Unavailable` before any vault or network step; nothing is faked.
+pub struct RefusingProver;
+
+impl AccountProver for RefusingProver {
+    fn genesis(&self) -> Result<GenesisProver<'_>> {
+        Err(ErrorCode::Unavailable)
+    }
+}
+
 /// Where the current common checkpoint stands for this member.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "checkpoint", rename_all = "snake_case", deny_unknown_fields)]
@@ -472,7 +506,7 @@ mod run {
         pub intents: AccountingIntents,
         pub request_intent: ckmg::IntentAdmission,
         pub rng: G,
-        pub prover: ckmg::wallet_engine::native_prover::NativeProver,
+        pub prover: std::sync::Arc<dyn AccountProver>,
     }
 
     fn clock() -> u64 {
@@ -887,7 +921,7 @@ mod run {
             cvlt::PasskeyRecords<cvlt::TorPasskeyRecord<'static, N>>,
         >,
         device: [u8; 32],
-        prover: ckmg::wallet_engine::native_prover::NativeProver,
+        prover: std::sync::Arc<dyn AccountProver>,
     ) -> super::super::Result<()>
     where
         B: cwst::backend::Backend + 'static,
@@ -1204,7 +1238,7 @@ mod run {
                     &mut account,
                     &mut intents,
                     &mut request_intent,
-                    &prover,
+                    &*prover,
                 )
                 .await;
                 match next {
@@ -1256,7 +1290,7 @@ mod run {
         account: &mut CommunityAccount<B, C, E, A, R>,
         intents: &mut AccountingIntents,
         request_intent: &mut ckmg::IntentAdmission,
-        prover: &ckmg::wallet_engine::native_prover::NativeProver,
+        prover: &dyn AccountProver,
     ) -> (Reply, Next)
     where
         B: cwst::backend::Backend,
@@ -1386,7 +1420,7 @@ mod run {
         current: CurrentEnrollment<'p>,
         account: &mut CommunityAccount<B, C, E, A, R>,
         intent: &mut ckmg::IntentAdmission,
-        prover: &ckmg::wallet_engine::native_prover::NativeProver,
+        prover: &dyn AccountProver,
     ) -> Result<u64>
     where
         B: cwst::backend::Backend,
@@ -1516,6 +1550,12 @@ mod tests {
             Err(ErrorCode::Reconcile)
         );
         assert_eq!(steps.commands, [Command::Enroll, Command::Open]);
+    }
+
+    #[test]
+    fn the_browser_port_refuses_every_proof_honestly() {
+        let port: std::sync::Arc<dyn AccountProver> = std::sync::Arc::new(RefusingProver);
+        assert!(matches!(port.genesis(), Err(ErrorCode::Unavailable)));
     }
 
     #[test]

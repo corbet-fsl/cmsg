@@ -607,7 +607,7 @@ where
         storage.global,
         storage.community,
         &mut progress,
-        network,
+        Networks::shared(network),
     )
     .await?;
     // 8. The account actor with its three single-use intents (needs the native prover).
@@ -620,7 +620,7 @@ where
         actor_policy,
         global,
         *device.value(),
-        prover,
+        std::sync::Arc::new(prover),
     )
     .await
     .map_err(step("bind account"))?;
