@@ -7,7 +7,7 @@ are required. Retain the resolved Cargo.lock from each Crow run.
 
 The repository-owned `v01-push` job runs automatically on every push to a
 `v01` branch, including first-party dependency branch pushes. It uses
-the existing worker compiler and `/caches/cargo/cmsg-v01/target`, with a bounded
+the CI cache and compiler, with a bounded
 job lock and two Cargo workers by default. It resolves once, checks all targets,
 runs Clippy with warnings denied and executes unit tests. No browser, Tor
 network or coverage runs are part of this loop. Main's verify job is unchanged.
