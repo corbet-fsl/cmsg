@@ -104,6 +104,15 @@ pub(crate) fn confirmation_budget<P: ProgressStore>(progress: &ProgressFile<P>) 
     }
 }
 
+/// Whether a composition is a registration and so issues the birth items (Q5, C5): any
+/// marker short of a registered start, on the device that registers. A restored device
+/// (`restore_native_device`) is not one: its lineages were born on the first device, whose
+/// birth items are closed, so it takes the normal passport issue.
+pub(crate) fn registration_start<P: ProgressStore>(progress: &ProgressFile<P>) -> bool {
+    !progress.value.restored
+        && !(progress.stage(true) == Stage::Done && progress.stage(false) == Stage::Done)
+}
+
 /// Opens a Foyer client for one service (fresh session each time).
 #[allow(async_fn_in_trait)]
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -1474,7 +1483,7 @@ where
     keys.limit(confirmation_budget(progress));
     // A registration (any marker short of a registered start) issues its passport and join
     // stamp under the birth grant of its one confirmation (Q5, C5), without an assertion.
-    let birth = confirmation_budget(progress) == REGISTRATION_CONFIRMATIONS;
+    let birth = registration_start(progress);
 
     // 1-2. The wallet lineage.
     let api = services.foyer(Service::Global).await?;
