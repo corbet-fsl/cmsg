@@ -1536,7 +1536,7 @@ where
                 clock: &mut clock,
                 operation,
                 // The room's profile keys leave with the room, in the same commit.
-                dependents: &[room_keys::OWNER],
+                dependents: &[room_keys::OWNER, LEAVING_OWNER],
             },
         )
         .await;
@@ -1785,6 +1785,299 @@ where
             self.roster.borrow_mut().forget();
         }
         Ok(removed?.snapshot)
+    }
+}
+
+/// Store owner of the pending-leave record (one per room group, keyed by the
+/// group id, dropped in the same commit that finishes the leave).
+const LEAVING_OWNER: &str = "room.leaving";
+
+/// How many notices a leaver issues, each bound to a newer state, before it
+/// gives up waiting for a remaining member to commit its removal and leaves
+/// locally anyway (the leaf may then stay listed until it resyncs).
+pub const MAX_LEAVE_NOTICES: u8 = 8;
+
+/// The minimal record of a leave in progress: no content keys, nothing the
+/// room sent. It only remembers which notice was issued at which epoch.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Leaving {
+    room: [u8; 16],
+    attempts: u8,
+    epoch: u64,
+}
+
+/// Where a leave in progress stands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LeaveProgress {
+    /// A remaining member has not committed the removal yet; `attempts` notices
+    /// were issued so far.
+    Pending { attempts: u8 },
+    /// A remaining member committed the removal and this device dropped its room
+    /// records in one commit.
+    Left,
+    /// No member removed this device within [`MAX_LEAVE_NOTICES`] notices: it
+    /// dropped its room records anyway.
+    Abandoned,
+}
+
+/// What advancing a leave in progress takes.
+pub struct RoomLeaveSyncTask<'a> {
+    pub room: [u8; 16],
+    pub group: cgrp::Id,
+    pub max_groups: usize,
+    pub policy: &'a dyn cgrp::PolicySource,
+    pub refused: &'a mut super::room_sync::RefusedJoins,
+}
+
+impl<B, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
+where
+    B: cwst::backend::Backend,
+    C: ckmg::Clock,
+    E: ckmg::Entropy,
+    A: ckmg::Authority,
+    R: cvlt::Records,
+{
+    /// The notices issued so far when a leave of `group` is in progress.
+    pub async fn room_leaving(
+        &mut self,
+        group: cgrp::Id,
+    ) -> std::result::Result<Option<u8>, ctnd::Error> {
+        Ok(self.read_leaving(group).await?.map(|record| record.attempts))
+    }
+
+    async fn read_leaving(
+        &mut self,
+        group: cgrp::Id,
+    ) -> std::result::Result<Option<Leaving>, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let mut retained = self.retained.lock().await;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let storage = custody.vault.storage().clone();
+        let store = storage.lock().await;
+        store
+            .read(LEAVING_OWNER, &group)
+            .map_err(|_| Fail::Storage)?
+            .map(|bytes| serde_json::from_slice(bytes).map_err(|_| Fail::Storage))
+            .transpose()
+    }
+
+    async fn write_leaving(
+        &mut self,
+        group: cgrp::Id,
+        record: &Leaving,
+    ) -> std::result::Result<(), ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let bytes = serde_json::to_vec(record).map_err(|_| Fail::Storage)?;
+        let mut operation = [0; 32];
+        getrandom::fill(&mut operation).map_err(|_| Fail::Unavailable)?;
+        let mut retained = self.retained.lock().await;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let storage = custody.vault.storage().clone();
+        let mut store = storage.lock().await;
+        let version = store.version().map_err(|_| Fail::Storage)?;
+        store
+            .commit(
+                version,
+                operation,
+                &[cwst::Change::Put {
+                    owner: LEAVING_OWNER,
+                    key: &group,
+                    value: &bytes,
+                }],
+                &[],
+            )
+            .await
+            .map_err(|_| Fail::Reconcile)?;
+        Ok(())
+    }
+
+    /// Start leaving a member room without leaving a ghost leaf: relay the
+    /// signed Groups `Leave` to the room and keep a minimal pending-leave record
+    /// (nothing is dropped yet). The device keeps following the room's commits
+    /// (`advance_room_leave`) until a remaining member commits its removal.
+    /// `Ok(false)` when this device holds no Attend record for the room (it
+    /// never joined through a room): the caller then leaves in Groups alone.
+    pub async fn begin_room_leave<T, L>(
+        &mut self,
+        board: &cbrd::Board<T, L>,
+        room: [u8; 16],
+        request: &cgrp::Request,
+    ) -> std::result::Result<bool, ctnd::Error>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        use ctnd::Error as Fail;
+        let cgrp::Command::Leave { group } = request.command else {
+            return Err(Fail::Invalid);
+        };
+        let epoch = {
+            self.open().map_err(|_| Fail::Authority)?;
+            let mut retained = self.retained.lock().await;
+            let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+            let binding = custody.binding.clone();
+            let storage = custody.vault.storage().clone();
+            let store = storage.lock().await;
+            let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
+            if threads
+                .stored_attend(&store)
+                .map_err(|_| Fail::Storage)?
+                .is_none()
+            {
+                return Ok(false);
+            }
+            threads.epoch().map_err(|_| Fail::Storage)?
+        };
+        self.announce_leave(board, room, request).await?;
+        self.write_leaving(
+            group,
+            &Leaving {
+                room,
+                attempts: 1,
+                epoch,
+            },
+        )
+        .await?;
+        Ok(true)
+    }
+
+    /// Whether `commit` is an authentic member commit of this device's epoch that
+    /// removes this device's own leaf (see `cthr::Threads::room_removes_me`).
+    pub(super) async fn confirm_room_removal(
+        &mut self,
+        group: cgrp::Id,
+        commit: &[u8],
+    ) -> std::result::Result<bool, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let roster = {
+            let mut retained = self.retained.lock().await;
+            let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+            let storage = custody.vault.storage().clone();
+            let store = storage.lock().await;
+            cgrp::Snapshot::load(custody.binding.community(), &store)
+                .map_err(|_| Fail::Storage)?
+                .members(&group)
+                .map_err(|_| Fail::Authority)?
+                .clone()
+        };
+        if self.ensure_roster(&roster).await.is_err() {
+            *self.cache.borrow_mut() = Cache::default();
+            return Err(Fail::Unavailable);
+        }
+        let mut retained = self.retained.lock().await;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let handle = custody
+            .vault
+            .keys()
+            .key(cnbx::threads_purpose())
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let own = custody
+            .vault
+            .keys()
+            .lineage()
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let storage = custody.vault.storage().clone();
+        let store = storage.lock().await;
+        let mut devices = GroupDevices {
+            own,
+            cache: self.cache.clone(),
+            roster: Some(self.roster.clone()),
+        };
+        let mut port = cnbx::KeyPort {
+            keys: custody.vault.keys(),
+            handle: &handle,
+            devices: &mut devices,
+        };
+        let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
+        let seen = threads.room_removes_me(&mut port, commit).await;
+        *self.cache.borrow_mut() = Cache::default();
+        seen.map_err(|_| Fail::Authority)
+    }
+
+    /// Advance a leave in progress: follow the room's commits like any member
+    /// (but adopt no content key and send nothing), finish as soon as a remaining
+    /// member committed the removal, and otherwise re-issue the notice bound to
+    /// the state this device holds now whenever its epoch moved on (a notice
+    /// bound to an older state is refused). After [`MAX_LEAVE_NOTICES`] notices
+    /// it leaves locally anyway.
+    pub async fn advance_room_leave<T, L>(
+        &mut self,
+        board: &cbrd::Board<T, L>,
+        task: RoomLeaveSyncTask<'_>,
+    ) -> std::result::Result<LeaveProgress, ctnd::Error>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        use ctnd::Error as Fail;
+        let RoomLeaveSyncTask {
+            room,
+            group,
+            max_groups,
+            policy,
+            refused,
+        } = task;
+        let Some(mut record) = self.read_leaving(group).await? else {
+            return Err(Fail::Invalid);
+        };
+        let synced = self
+            .sync_room(
+                board,
+                super::room_sync::RoomSyncTask {
+                    room,
+                    group,
+                    max_groups,
+                    policy,
+                    refused,
+                },
+            )
+            .await?;
+        let epoch = self.room_keys_standing(group).await?.epoch;
+        let abandoned = !synced.removed && epoch != record.epoch && record.attempts >= MAX_LEAVE_NOTICES;
+        if synced.removed || abandoned {
+            let (candidate, _, _, _) = cbrd::prepare_group_intent(
+                self,
+                policy,
+                cbrd::GroupIntent::Leave { group },
+                max_groups,
+            )
+            .await
+            .map_err(|_| Fail::Authority)?;
+            self.leave_room(RoomLeaveTask {
+                group,
+                candidate,
+                policy,
+            })
+            .await?;
+            return Ok(if synced.removed {
+                LeaveProgress::Left
+            } else {
+                LeaveProgress::Abandoned
+            });
+        }
+        if epoch != record.epoch {
+            let (_, _, _, request) = cbrd::prepare_group_intent(
+                self,
+                policy,
+                cbrd::GroupIntent::Leave { group },
+                max_groups,
+            )
+            .await
+            .map_err(|_| Fail::Authority)?;
+            self.announce_leave(board, room, &request).await?;
+            record.attempts += 1;
+            record.epoch = epoch;
+            self.write_leaving(group, &record).await?;
+        }
+        Ok(LeaveProgress::Pending {
+            attempts: record.attempts,
+        })
     }
 }
 
