@@ -322,7 +322,9 @@ mod proven {
     impl<'p> PreparedAccount<'p> {
         /// Prove the candidate with the bounded original native prover under the
         /// account's Keys authority. Consumes the preparation: a refusal or a
-        /// cancellation ends it for good. Both owners are rechecked afterwards.
+        /// cancellation ends it for good. The preparation was refreshed as the last
+        /// step of `prepare_account`, and `stage` rechecks both owners first thing
+        /// after the proof, so no extra round trip spends the genesis proof window.
         pub async fn prove<B, C, E, A, R>(
             mut self,
             account: &mut CommunityAccount<B, C, E, A, R>,
@@ -335,7 +337,6 @@ mod proven {
             A: Authority,
             R: Records,
         {
-            self.refresh(account).await?;
             let Self {
                 enrollment,
                 candidate,
@@ -355,16 +356,14 @@ mod proven {
                     .map_err(|_| ErrorCode::Unauthorized)?,
                 crate::door::account::GenesisProver::None(never, _) => match never {},
             };
-            let mut proven = ProvenAccount {
+            Ok(ProvenAccount {
                 enrollment,
                 proof,
                 context,
                 material,
                 material_digest,
                 origin,
-            };
-            proven.refresh(account).await?;
-            Ok(proven)
+            })
         }
     }
 

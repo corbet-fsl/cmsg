@@ -401,7 +401,7 @@ impl<'p> CurrentEnrollment<'p> {
                 origin: current.origin.clone(),
                 expires: current.expires,
                 now: current.now,
-                max_authorization: current.material.policy.max_authorization_seconds,
+                max_authorization: cblc::accounting::GENESIS_PROOF_WINDOW_SECONDS,
                 extension_policy: current.material.extension_policy.clone(),
             })
         })??;
