@@ -145,14 +145,14 @@ pub trait CommittedOwner {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
 
-    /// Catch up through an admission another member already ordered; see
-    /// `VaultGroupOwner::catch_up_room`. Owners without Threads custody refuse.
-    fn catch_up_room<'a, T, L>(
+    /// Bring this device up to a member room: apply the admissions other members
+    /// ordered and admit what waits; see `VaultGroupOwner::sync_room`. Owners
+    /// without Threads custody refuse.
+    fn sync_room<'a, T, L>(
         &'a mut self,
         _board: &'a cbrd::Board<T, L>,
-        _task: crate::door::facades::RoomAdmitTask<'a>,
-        _context: &'a [u8],
-    ) -> OwnerFuture<'a, cbrd::cgrp::Snapshot>
+        _task: crate::door::facades::RoomSyncTask<'a>,
+    ) -> OwnerFuture<'a, crate::door::facades::RoomSynced>
     where
         T: clnk::Transport,
         L: crate::door::RoomLink,

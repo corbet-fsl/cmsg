@@ -50,9 +50,10 @@ fn policy() -> Policy {
         epoch: 1,
         valid_until: 4_000_000_000,
         cap: 100,
-        // Toy growth thresholds: three in a circle, up to five in an in-group.
+        // Toy growth thresholds: three in a circle, up to eight in an in-group
+        // (the catch-up tests admit three newcomers to a room of three).
         circle_max: 3,
-        ingroup_max: 5,
+        ingroup_max: 8,
         shrink_public: 4,
         shrink_ingroup: 2,
         open_seconds: 21 * DAY,
@@ -221,7 +222,10 @@ impl clnk::Transport for Forum {
 struct Rooms {
     router: Arc<Router>,
     slow: usize,
+    /// What a hostile or lossy relay does to what a Read returns.
+    tamper: Option<Tamper>,
 }
+type Tamper = std::rc::Rc<dyn Fn(&mut cmbl::Outcome)>;
 impl clnk::Transport for Rooms {
     async fn post(&self, _: &str, body: Vec<u8>) -> Result<Vec<u8>, clnk::ErrorCode> {
         for _ in 0..self.slow {
@@ -237,7 +241,7 @@ impl clnk::Transport for Rooms {
             _ => return Err(clnk::ErrorCode::InvalidRequest),
         };
         let command: cmbl::Request = serde_json::from_slice(&input.command).unwrap();
-        let Ok(outcome) = self
+        let Ok(mut outcome) = self
             .router
             .assembly
             .execute(&command, &input.room_pass, &self.router.verifier, NOW_MS)
@@ -248,6 +252,9 @@ impl clnk::Transport for Rooms {
             })
             .map_err(|_| clnk::ErrorCode::Transport);
         };
+        if let (Some(tamper), "read") = (&self.tamper, kind) {
+            tamper(&mut outcome);
+        }
         let output = cfrm::RoomOutput {
             result: serde_json::to_vec(&outcome).unwrap(),
         };
@@ -265,6 +272,16 @@ type RoomBoard = cbrd::Board<Forum, clnk::AnonymousRooms<Rooms>>;
 
 /// A Board with presence, the common epoch and a pass for the room.
 async fn board(router: &Arc<Router>, slow: usize, resume: bool) -> RoomBoard {
+    board_through(router, slow, resume, None).await
+}
+
+/// The same Board over a relay that changes what its reads return.
+async fn board_through(
+    router: &Arc<Router>,
+    slow: usize,
+    resume: bool,
+    tamper: Option<Tamper>,
+) -> RoomBoard {
     let link = clnk::Link::at(
         Forum(router.clone()),
         COMMUNITY.into(),
@@ -275,6 +292,7 @@ async fn board(router: &Arc<Router>, slow: usize, resume: bool) -> RoomBoard {
     .with_anonymous_rooms(Rooms {
         router: router.clone(),
         slow,
+        tamper,
     });
     let mut board = cbrd::Board::new(COMMUNITY.into(), link).unwrap();
     board
@@ -938,3 +956,6 @@ async fn a_refused_admission_makes_the_member_read_the_roster_again() {
     assert_eq!(standing(&second).await.0, both);
     assert!(member_view.reads.borrow().contains(&second_handle));
 }
+
+#[path = "room_catch_up.rs"]
+mod catch_up;

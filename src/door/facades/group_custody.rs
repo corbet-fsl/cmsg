@@ -1213,6 +1213,13 @@ where
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Seconds a test adds to the time a newcomer's consent is judged at, to
+    /// let it expire without waiting (never compiled outside tests).
+    pub(crate) static TEST_CONSENT_AGE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// What admitting a newcomer to a member room takes: its ordered external
 /// commit with the companion (the signed Groups `Join` request).
 pub struct RoomAdmitTask<'a> {
@@ -1415,6 +1422,8 @@ where
         };
         let source = PolicyRef(task.policy);
         let now = ckmg::Clock::now(&mut clock).map_err(|_| Fail::Unavailable)?;
+        #[cfg(test)]
+        let now = now + TEST_CONSENT_AGE.with(std::cell::Cell::get);
         let snapshot = Snapshot::load(binding.community(), &store).map_err(|_| Fail::Storage)?;
         let groups = cgrp::prepare(&snapshot, request, &source, &authority, now, task.max_groups)
             .map_err(|_| Fail::Authority)?;
