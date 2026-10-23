@@ -128,9 +128,8 @@ impl DeviceUnlock {
 }
 
 /// The OS key store service under which the native persistent unlock keeps its wrapping
-/// key (feature `os-keyring`, OFF by default).
-/// PLACEHOLDER: Julian names this service; until then the feature stays off.
-pub const KEYRING_SERVICE: &str = "KEYRING-SERVICE-PLACEHOLDER";
+/// key: the client binary's name.
+pub const KEYRING_SERVICE: &str = "cmeet";
 
 /// Persistent unlock (DESIGN-secure-convenience part 4): a device stays unlocked across
 /// restarts. The persisted bundle holds only the openings of the communities this
@@ -175,12 +174,11 @@ impl UnlockStore for cvlt::BrowserResume {
 }
 
 /// The native persistent unlock of one wallet binding (wallet host and account) in the
-/// device's private vault directory: OS key store under [`KEYRING_SERVICE`] with feature
-/// `os-keyring`, else the user-only key file.
+/// device's private vault directory: the OS key store under [`KEYRING_SERVICE`] where one
+/// is usable, else the user-only key file.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn native_store(dir: &std::path::Path, binding: &[u8]) -> cvlt::NativeResume {
-    let service = cfg!(feature = "os-keyring").then_some(KEYRING_SERVICE);
-    cvlt::NativeResume::new(dir, binding, service)
+    cvlt::NativeResume::new(dir, binding, Some(KEYRING_SERVICE))
 }
 
 /// This device's local data, erased when the device learns it was revoked.
@@ -384,8 +382,16 @@ mod tests {
 
     const JOINED: [([u8; 32], &str); 2] = [([1; 32], "garden"), ([2; 32], "orchard")];
 
+    /// Tests keep the wrapping key in the user-only file: never the real OS key store.
     fn store(dir: &std::path::Path) -> cvlt::NativeResume {
-        native_store(dir, b"wallet.example.test\0member")
+        cvlt::NativeResume::new(dir, b"wallet.example.test\0member", None)
+    }
+
+    #[test]
+    fn native_store_names_the_client_binary_service() {
+        assert_eq!(KEYRING_SERVICE, "cmeet");
+        let dir = tempfile::tempdir().unwrap();
+        let _ = native_store(dir.path(), b"binding");
     }
 
     #[test]

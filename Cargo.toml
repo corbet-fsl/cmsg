@@ -42,7 +42,9 @@ cshm = { git = "https://git.corbet.ch/corbet-foss/cshm", branch = "main" }
 cmmr = { git = "https://git.corbet.ch/corbet-foss/cmmr.git", branch = "main" }
 cdht = { git = "https://git.corbet.ch/corbet-foss/cdht.git", branch = "main" }
 cmsh = { git = "https://git.corbet.ch/corbet-libs/cmsh.git", branch = "main" }
-cvlt = { git = "https://git.corbet.ch/corbet-libs/cvlt.git", branch = "main", features = ["wallet"] }
+# os-keyring: the native persistent unlock keeps its wrapping key in the OS key store
+# (cvlt pulls keyring only for Linux and Apple targets, never for wasm).
+cvlt = { git = "https://git.corbet.ch/corbet-libs/cvlt.git", branch = "main", features = ["wallet", "os-keyring"] }
 cnbx = { git = "https://git.corbet.ch/corbet-libs/cnbx.git", branch = "main" }
 ctcs = { git = "https://git.corbet.ch/corbet-foss/ctcs.git", branch = "main" }
 cthr = { git = "https://git.corbet.ch/corbet-foss/cthr.git", branch = "main" }
@@ -131,9 +133,6 @@ private-tor-fixture = ["native-tor"]
 # Test only: named interruption points in the composer (door::interrupt) for kill-and-resume
 # harnesses. Production builds never enable it.
 interrupt-points = []
-# Native persistent unlock keeps its wrapping key in the OS key store. OFF until the
-# keyring service name (door::unlock_once::KEYRING_SERVICE) is named.
-os-keyring = ["cvlt/os-keyring"]
 browser-tor = ["ckmg/browser-tor", "cmsh/tor-records", "dep:ctrn"]
 
 [[example]]
