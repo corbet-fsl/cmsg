@@ -311,14 +311,31 @@ async fn board(router: &Arc<Router>, slow: usize, resume: bool) -> RoomBoard {
 /// registered for it, the way a hostile or confused locator target would, and
 /// the owner must still bind the result to the member it asked about.
 #[derive(Clone, Default)]
-struct Directory(Rc<RefCell<BTreeMap<Vec<u8>, ckmg::Lineage>>>);
+struct Directory {
+    records: Rc<RefCell<BTreeMap<Vec<u8>, ckmg::Lineage>>>,
+    /// The handles read through THIS view, in order (a clone shares the log).
+    reads: Rc<RefCell<Vec<Vec<u8>>>>,
+}
+impl Directory {
+    /// The same records, a log of its own: one owner's reads, told apart.
+    fn separate(&self) -> Directory {
+        Directory {
+            records: self.records.clone(),
+            reads: Rc::default(),
+        }
+    }
+    fn publish(&self, handle: Vec<u8>, lineage: ckmg::Lineage) {
+        self.records.borrow_mut().insert(handle, lineage);
+    }
+}
 impl GroupPeers for Directory {
     fn lineage<'a>(
         &'a mut self,
         _: &'a ckmg::Binding,
         handle: &'a [u8],
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<ckmg::Lineage>> + 'a>> {
-        let found = self.0.borrow().get(handle).cloned();
+        self.reads.borrow_mut().push(handle.to_vec());
+        let found = self.records.borrow().get(handle).cloned();
         Box::pin(async move { found })
     }
 }
@@ -376,14 +393,14 @@ fn unix_now() -> u64 {
 /// by consent) and a consent fork that opens the room with the first three, who
 /// each agree to be seen. The others only lend their consent and key package
 /// (their devices are not part of the scene afterwards).
-async fn founder(directory: &Directory) -> ProfileOwner {
-    let mut founder = owner("a", 31, directory).await;
+async fn founder(directory: &Directory, own_view: &Directory) -> ProfileOwner {
+    let mut founder = owner("a", 31, own_view).await;
     let policy = policy_at();
     let mut lenders = BTreeMap::new();
     for (letter, prf) in [("x", 34u8), ("y", 35u8), ("z", 36u8)] {
         let lender = owner(letter, prf, directory).await;
         let (lineage, handle) = own_lineage(&lender).await;
-        directory.0.borrow_mut().insert(handle, lineage);
+        directory.publish(handle, lineage);
         lenders.insert(member_id(letter), lender);
     }
     // The founder is in contact with everyone it creates a group with or adds.
@@ -547,18 +564,55 @@ async fn attempt(
     futures_util::future::join(join, admit).await
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle_is_refused() {
+/// The room a member holds, its first evidence and a board to admit from.
+struct Scene {
+    router: Arc<Router>,
+    directory: Directory,
+    /// The reads of the admitting member `a` (founding included).
+    member_view: Directory,
+    member: ProfileOwner,
+    member_board: RoomBoard,
+}
+
+async fn scene() -> Scene {
     let router = router();
     let directory = Directory::default();
-    let mut member = founder(&directory).await;
+    let member_view = directory.separate();
+    let member = founder(&directory, &member_view).await;
     let (member_lineage, member_handle) = own_lineage(&member).await;
     // The room's members publish their lineage records under their handles.
-    directory
-        .0
-        .borrow_mut()
-        .insert(member_handle, member_lineage.clone());
+    directory.publish(member_handle, member_lineage);
     let member_board = board(&router, 0, true).await;
+    Scene {
+        router,
+        directory,
+        member_view,
+        member,
+        member_board,
+    }
+}
+
+/// A stranger owner whose lineage is published under its own handle.
+async fn stranger(directory: &Directory, letter: &str, prf: u8) -> (ProfileOwner, Vec<u8>) {
+    let owner = owner(letter, prf, directory).await;
+    let (lineage, handle) = own_lineage(&owner).await;
+    directory.publish(handle.clone(), lineage);
+    (owner, handle)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle_is_refused() {
+    let Scene {
+        router,
+        directory,
+        member_view,
+        mut member,
+        member_board,
+    } = scene().await;
+    let (member_lineage, _) = own_lineage(&member).await;
+    // What the member read while the room was founded: it holds the roster
+    // since then (row 14.8) and never reads it again for an admission.
+    let founded = member_view.reads.borrow().len();
     let evidence = member
         .groups
         .as_mut()
@@ -566,6 +620,10 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
         .room_evidence(GROUP, &policy_at())
         .await
         .unwrap();
+    assert_eq!(
+        member.groups.as_ref().unwrap().roster_members(),
+        BTreeSet::from([member_id("x"), member_id("y"), member_id("z")])
+    );
     let (_, epoch_before) = standing(&member).await;
     let mut cursor = 0;
 
@@ -573,10 +631,7 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
     // room is left exactly as it was.
     let mut impostor = owner("c", 33, &directory).await;
     let (_, impostor_handle) = own_lineage(&impostor).await;
-    directory
-        .0
-        .borrow_mut()
-        .insert(impostor_handle, member_lineage);
+    directory.publish(impostor_handle.clone(), member_lineage);
     let impostor_board = board(&router, 60, false).await;
     let (joined, admitted) = attempt(
         &mut impostor,
@@ -597,10 +652,7 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
     // The stranger that supplies the handle of its OWN record is admitted.
     let mut joiner = owner("b", 32, &directory).await;
     let (joiner_lineage, joiner_handle) = own_lineage(&joiner).await;
-    directory
-        .0
-        .borrow_mut()
-        .insert(joiner_handle, joiner_lineage);
+    directory.publish(joiner_handle.clone(), joiner_lineage);
     let joiner_board = board(&router, 60, false).await;
     let (joined, admitted) = attempt(
         &mut joiner,
@@ -621,4 +673,103 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
     assert_eq!(member_members, both);
     assert_eq!(joiner_epoch, member_epoch);
     assert!(member_epoch > epoch_before);
+
+    // Two evidences and two admissions later the member has read NOTHING of
+    // the roster again: only the newcomers, fresh, every time. The newcomer
+    // is in the roster now.
+    let later: Vec<Vec<u8>> = member_view.reads.borrow()[founded..].to_vec();
+    assert!(!later.is_empty());
+    assert!(
+        later
+            .iter()
+            .all(|handle| *handle == impostor_handle || *handle == joiner_handle),
+        "the roster was read again: {later:?}"
+    );
+    assert!(later.contains(&joiner_handle));
+    assert!(
+        member
+            .groups
+            .as_ref()
+            .unwrap()
+            .roster_members()
+            .contains(&member_id("b"))
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_refused_admission_makes_the_member_read_the_roster_again() {
+    let Scene {
+        router,
+        directory,
+        member_view,
+        mut member,
+        member_board,
+    } = scene().await;
+    let evidence = member
+        .groups
+        .as_mut()
+        .unwrap()
+        .room_evidence(GROUP, &policy_at())
+        .await
+        .unwrap();
+    let (_, epoch_before) = standing(&member).await;
+    let mut cursor = 0;
+
+    // One roster lineage moved on since the member read it: Threads refuses the
+    // leaf it certifies, the admission is refused and the roster is forgotten.
+    member
+        .groups
+        .as_mut()
+        .unwrap()
+        .make_roster_lineage_stale(&member_id("x"));
+    let (mut joiner, _) = stranger(&directory, "b", 32).await;
+    let joiner_board = board(&router, 60, false).await;
+    let (joined, admitted) = attempt(
+        &mut joiner,
+        &joiner_board,
+        &evidence,
+        &mut member,
+        &member_board,
+        &mut cursor,
+    )
+    .await;
+    assert!(joined.is_err());
+    assert_eq!(admitted.len(), 1);
+    assert!(admitted[0].is_err());
+    let (members, epoch) = standing(&member).await;
+    assert_eq!(members.len(), 3);
+    assert_eq!(epoch, epoch_before);
+    assert!(member.groups.as_ref().unwrap().roster_members().is_empty());
+
+    // The next attempt reads the roster again (Charter-verified) and succeeds.
+    let reads_before = member_view.reads.borrow().len();
+    let evidence = member
+        .groups
+        .as_mut()
+        .unwrap()
+        .room_evidence(GROUP, &policy_at())
+        .await
+        .unwrap();
+    assert_eq!(
+        member.groups.as_ref().unwrap().roster_members(),
+        BTreeSet::from([member_id("x"), member_id("y")])
+    );
+    assert_eq!(member_view.reads.borrow().len() - reads_before, 2);
+    let (mut second, second_handle) = stranger(&directory, "d", 37).await;
+    let second_board = board(&router, 60, false).await;
+    let (joined, admitted) = attempt(
+        &mut second,
+        &second_board,
+        &evidence,
+        &mut member,
+        &member_board,
+        &mut cursor,
+    )
+    .await;
+    joined.unwrap();
+    admitted[0].as_ref().unwrap();
+    let both = BTreeSet::from([member_id("a"), member_id("x"), member_id("y"), member_id("d")]);
+    assert_eq!(standing(&member).await.0, both);
+    assert_eq!(standing(&second).await.0, both);
+    assert!(member_view.reads.borrow().contains(&second_handle));
 }

@@ -119,7 +119,7 @@ struct Cache {
 /// the certification of MLS leaves (`GroupDevices`), never a consent decision
 /// (those use the per-operation `Cache`, read fresh every time). It is dropped
 /// whenever Threads refuses a certification (the lineage moved on), so the next
-/// attempt reads it again.
+/// attempt reads it again through the handles, which are kept.
 #[derive(Default)]
 struct Roster {
     handles: BTreeMap<String, Vec<u8>>,
@@ -127,9 +127,10 @@ struct Roster {
 }
 
 impl Roster {
-    /// Forget everything learned; the next operation reads again.
+    /// Forget the lineages; the next room operation reads them again. The
+    /// handles stay: they are locators only (a read still has to bind to the
+    /// member asked for), and without them nothing could be read again.
     fn forget(&mut self) {
-        self.handles.clear();
         self.lineages.clear();
     }
 }
@@ -328,6 +329,18 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
     #[cfg(test)]
     pub(crate) fn assume_contacts(&mut self, contacts: impl IntoIterator<Item = String>) {
         self.assumed_contacts.extend(contacts);
+    }
+    /// Tests only: the members whose lineage this device holds in its roster.
+    #[cfg(test)]
+    pub(crate) fn roster_members(&self) -> BTreeSet<String> {
+        self.roster.borrow().lineages.keys().cloned().collect()
+    }
+    /// Tests only: make the roster's lineage of `member` stale (its devices are
+    /// gone), as if the member's lineage moved on after this device read it.
+    #[cfg(test)]
+    pub(crate) fn make_roster_lineage_stale(&mut self, member: &str) {
+        let mut roster = self.roster.borrow_mut();
+        roster.lineages.get_mut(member).unwrap().devices.clear();
     }
     fn open(&self) -> cgrp::Result<()> {
         if self.lifetime.is_closed() {
@@ -1529,3 +1542,7 @@ where
         })
     }
 }
+
+#[cfg(test)]
+#[path = "../../../tests/support/group_roster.rs"]
+mod roster_tests;
