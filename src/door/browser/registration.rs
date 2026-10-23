@@ -5,8 +5,10 @@
 //! vault; the community joins by device key (`device_join`) and its sessions open by the device
 //! key's signature. No community frame ever runs a WebAuthn ceremony.
 //!
-//! The account actor (step 8) needs a prover the browser does not have yet; the composed Door
-//! stops after `bind_vault_with_board_owner`.
+//! The account actor (step 8) needs a prover. A deployment that ships the browser prover names it
+//! (`prover`); the wallet frame then lends the `BrowserProver` (`prover::lend`) and the composed
+//! Door binds its account actor, so the account genesis proves in a Web Worker of this origin. A
+//! deployment without one lends nothing: the Door stops after `bind_vault_with_board_owner`.
 //!
 //! The records network both lineages publish to before the vault exists is lent by the
 //! deployment (`network`), one isolated circuit per scope.
@@ -39,6 +41,33 @@ pub struct Configuration {
     /// The records network the deployment lends the registration (production: the bootstrap
     /// Tor client; toy: the stack's records helper).
     pub records: network::Lent,
+    /// The browser prover this deployment ships, or none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prover: Option<ProverDeployment>,
+}
+
+/// Where the wallet origin serves the browser prover's circuit group (the published circuits).
+pub const PROVER_CIRCUIT_PATH: &str = "/prover/circuit.json";
+/// Where the wallet origin serves the browser prover's verification-key group.
+pub const PROVER_KEYS_PATH: &str = "/prover/keys.json";
+/// Where the wallet origin serves the dummy input of the calibration proof (public test data).
+pub const PROVER_CALIBRATION_PATH: &str = "/prover/calibration.json";
+
+/// Public data of the browser prover this deployment ships. The files sit at fixed paths of the
+/// wallet origin; the deployment pins their digests, so a file the origin serves differently is
+/// refused before any proof. The setup (`/prover/srs/g1-<points>.dat`, `g2.dat`) is pinned by the
+/// engine itself, never by this configuration.
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProverDeployment {
+    /// SHA-256 (64 lowercase hex digits) of `/prover/circuit.json`.
+    pub circuit_sha256: String,
+    /// SHA-256 of `/prover/keys.json`.
+    pub keys_sha256: String,
+    /// SHA-256 of `/prover/calibration.json`.
+    pub calibration_sha256: String,
+    /// The dyadic number of setup points the circuit needs (the engine pins 2^19 and 2^20).
+    pub points: u32,
 }
 
 impl Configuration {
@@ -174,6 +203,7 @@ mod runtime {
         community_name: &str,
         keys: &mut DeviceKeys<A>,
         networks: Networks<N>,
+        prover: Option<std::sync::Arc<dyn crate::door::account::AccountProver>>,
     ) -> Result<(Door, super::Retained), ComposeError>
     where
         A: cfyr::passkeys::Authenticator,
@@ -211,37 +241,65 @@ mod runtime {
         )
         .await?;
         // The wallet Door's session is held by the global passport's recovery lease; the
-        // frame keeps both and the companion for its life (`Retained`), as native keeps them
-        // in the account actor. The board owner ends here exactly as in compose_native_device.
-        drop(composed.owner);
-        // The account actor's parts end unused until a browser build can bind the actor
-        // (`Retained`); the next start reserves its intents again.
-        drop((
-            composed.account,
-            composed.actor_membership,
-            composed.actor_policy,
-            composed.device,
-        ));
-        Ok((
-            composed.door,
-            super::Retained(Box::new((
-                composed.global,
-                composed.wallet_door,
-                composed.global_companion,
-            ))),
-        ))
+        // frame keeps the wallet Door and the companion for its life (`Retained`), as native
+        // keeps them in the account actor. The board owner ends here exactly as in
+        // compose_native_device.
+        let mut door = composed.door;
+        match prover {
+            // 8. The account actor with its three single-use intents, proving in the Web
+            //    Worker. It holds the global passport, as natively.
+            #[cfg(feature = "browser-prover")]
+            Some(prover) => {
+                crate::door::account_open::bind_member_account_with(
+                    &mut door,
+                    door_origin,
+                    &composed.owner,
+                    composed.account,
+                    composed.actor_membership,
+                    composed.actor_policy,
+                    composed.global,
+                    *composed.device.value(),
+                    prover,
+                )
+                .await
+                .map_err(step("bind account"))?;
+                drop(composed.owner);
+                Ok((
+                    door,
+                    super::Retained(Box::new((composed.wallet_door, composed.global_companion))),
+                ))
+            }
+            // No prover lent: the actor's parts end unused, the passport stays in `Retained`
+            // and the next start reserves the intents again.
+            _ => {
+                let _ = prover;
+                drop(composed.owner);
+                drop((
+                    composed.account,
+                    composed.actor_membership,
+                    composed.actor_policy,
+                    composed.device,
+                ));
+                Ok((
+                    door,
+                    super::Retained(Box::new((
+                        composed.global,
+                        composed.wallet_door,
+                        composed.global_companion,
+                    ))),
+                ))
+            }
+        }
     }
 }
 #[cfg(target_arch = "wasm32")]
 pub use runtime::{compose_browser_device, BrowserServices};
 
 /// What a browser registration keeps beside the community Door for the wallet frame's life:
-/// the global passport, the wallet Door (the passport's recovery lease holds its session) and
-/// the wallet companion. The frame's `VaultHost` owns it and drops it with itself; nothing is
-/// leaked. Natively the account actor holds the passport (`bind_member_account_with`); a
-/// browser build cannot bind that actor yet because the account engine it drives (cwlt-engine
-/// `account`, cwlt `account_owner`, cvlt's pending account) is compiled only with the native
-/// prover.
+/// the wallet Door (the passport's recovery lease holds its session), the wallet companion and,
+/// when no prover is lent, the global passport. The frame's `VaultHost` owns it and drops it
+/// with itself; nothing is leaked. With a prover the account actor holds the passport
+/// (`bind_member_account_with`), exactly as natively.
 pub struct Retained(#[allow(dead_code)] Box<dyn std::any::Any>);
 
 #[cfg(test)]

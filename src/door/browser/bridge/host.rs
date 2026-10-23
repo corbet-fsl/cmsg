@@ -433,6 +433,50 @@ impl VaultHost {
         })
     }
 
+    /// Calibrate this device for the deployment's browser prover (decided 2026-10-23): once per
+    /// circuit version, when the page is idle, with a shipped dummy input; the measurement stays in
+    /// this origin. Resolves to the forecast JSON (`class`, `predicted_millis`, `window_seconds`,
+    /// `fits`) or `null` when the device was needed for a real proof first. Call from the wallet
+    /// frame on its first open; it does nothing for a deployment without a prover.
+    pub fn calibrate(configuration: String) -> js_sys::Promise {
+        future_to_promise(async move {
+            #[cfg(feature = "browser-prover")]
+            {
+                if configuration.len() > MAX_BODY_BYTES {
+                    return Err(error(ErrorCode::Capacity));
+                }
+                let config: VaultHostConfiguration = serde_json::from_str(&configuration)
+                    .map_err(|_| error(ErrorCode::InvalidRequest))?;
+                let (Some(wallet_origin), Some(registration)) =
+                    (config.wallet_origin, config.registration)
+                else {
+                    return Err(error(ErrorCode::InvalidRequest));
+                };
+                if actual_origin().map_err(error)? != wallet_origin {
+                    return Err(error(ErrorCode::Unauthorized));
+                }
+                let Some(deployment) = &registration.prover else {
+                    return Ok(JsValue::NULL);
+                };
+                let forecast = super::super::prover::calibrate(deployment)
+                    .await
+                    .map_err(|_| error(ErrorCode::Unavailable))?;
+                Ok(match forecast {
+                    Some(forecast) => JsValue::from_str(
+                        &serde_json::to_string(&forecast)
+                            .map_err(|_| error(ErrorCode::Unavailable))?,
+                    ),
+                    None => JsValue::NULL,
+                })
+            }
+            #[cfg(not(feature = "browser-prover"))]
+            {
+                let _ = configuration;
+                Ok(JsValue::NULL)
+            }
+        })
+    }
+
     async fn wallet_inner(
         configuration: String,
     ) -> std::result::Result<VaultHost, crate::door::composer_core::ComposeError> {
@@ -467,12 +511,23 @@ impl VaultHost {
             &registration.passkey_origin,
         );
         let networks = registration.networks(config.browser_tor.as_ref()).await?;
+        // The deployment's browser prover, authenticated against its pinned digests before any
+        // ceremony: the account genesis then proves in a Web Worker of this origin. Without one
+        // the account actor is not bound.
+        #[cfg(feature = "browser-prover")]
+        let prover = match &registration.prover {
+            Some(deployment) => Some(super::super::prover::lend_deployed(deployment).await?),
+            None => None,
+        };
+        #[cfg(not(feature = "browser-prover"))]
+        let prover = None;
         let (door, retained) = super::super::registration::compose_browser_device(
             &registration,
             &wallet_origin,
             &config.runtime.community,
             &mut keys,
             networks,
+            prover,
         )
         .await?;
         let mut host = Self::attach_wallet(door, config.member_origin, wallet_origin, None)

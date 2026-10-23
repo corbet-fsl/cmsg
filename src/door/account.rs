@@ -582,10 +582,18 @@ impl AccountActor {
     }
 }
 
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    all(feature = "browser-prover", target_arch = "wasm32")
+))]
+pub use run::{bind_account_actor, AccountParts};
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
-pub use run::{bind_account_actor, bind_native_account, AccountParts};
+pub use run::bind_native_account;
 
-#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    all(feature = "browser-prover", target_arch = "wasm32")
+))]
 mod run {
     use super::super::vouching::Book;
     use super::super::{
@@ -1019,6 +1027,7 @@ mod run {
         door.bind_account(origin, AccountActor::start(parts, expires))
     }
 
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
     /// Production composer of the native path: recover the community account
     /// from the original recovery owners, reserve the THREE distinct single-use
     /// intents (root, device delegation, account request; each admits exactly

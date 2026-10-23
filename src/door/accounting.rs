@@ -10,7 +10,10 @@ mod activation;
 mod checkpoint;
 mod custody;
 mod genesis;
-#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    all(feature = "browser-prover", target_arch = "wasm32")
+))]
 mod lifecycle;
 mod pending;
 mod recipient;
@@ -28,7 +31,10 @@ pub use genesis::PreparedAccount;
     feature = "browser-prover"
 ))]
 pub use genesis::{ProvenAccount, StagedRequest};
-#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    all(feature = "browser-prover", target_arch = "wasm32")
+))]
 pub use lifecycle::{existing_active, has_pending, voucher_remaining, Activated, Elapsed};
 pub use pending::PendingBinding;
 #[cfg(test)]
