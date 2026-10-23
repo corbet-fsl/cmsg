@@ -1020,10 +1020,9 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
                 .await?;
             let source = cbrd::PolicyAt::new(&community, projected);
             let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
-            let (views, _) =
-                cbrd::execute_group_intent(owner, &source, intent, MAX_GROUPS)
-                    .await
-                    .map_err(group_error)?;
+            let (views, _) = cbrd::execute_group_intent(owner, &source, intent, MAX_GROUPS)
+                .await
+                .map_err(group_error)?;
             Ok(views)
         })
     }
@@ -1129,9 +1128,11 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
                 if from == me || !sender_is_member {
                     return Err(ErrorCode::Refused);
                 }
-                let mut listings = self.desk.listings.take().unwrap_or_else(|| {
-                    cbrd::cgrp::Listings::new(snapshot.community(), &me)
-                });
+                let mut listings = self
+                    .desk
+                    .listings
+                    .take()
+                    .unwrap_or_else(|| cbrd::cgrp::Listings::new(snapshot.community(), &me));
                 let adopted = listings.adopt(&snapshot, share).map_err(group_error);
                 self.desk.listings = Some(listings);
                 adopted?;

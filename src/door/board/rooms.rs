@@ -7,10 +7,10 @@ use super::handlers::{group_error, with_context, OwnedBoard, MAX_GROUPS};
 use super::room_keys;
 use super::ProfileParts;
 use super::*;
+pub use crate::door::facades::RoomSync;
 use crate::door::RoomLink;
 use cbrd::cgrp::PolicySource as _;
 use cbrd::join_seal::{self, JoinKey};
-pub use crate::door::facades::RoomSync;
 use std::collections::BTreeMap;
 
 /// A room is named by its opaque identifier from the listing and by the group
@@ -150,7 +150,10 @@ fn own_handover<B: cwst::backend::Backend>(
     let verified = committed.verified();
     let wrapped = context
         .store
-        .read("profile.keys", &verified.transcript().revision.to_be_bytes())
+        .read(
+            "profile.keys",
+            &verified.transcript().revision.to_be_bytes(),
+        )
         .map_err(|_| ErrorCode::Reconcile)?
         .ok_or(ErrorCode::Unavailable)?;
     let key = custody
@@ -286,7 +289,8 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             .await?;
         // The joined member is in; delivering the hand-over is best effort and
         // is repeated by every admit call until it reaches the room.
-        self.deliver_handover(join.room, join.group, &joined.handover).await;
+        self.deliver_handover(join.room, join.group, &joined.handover)
+            .await;
         joined.snapshot.views(&current, now).map_err(group_error)
     }
 
@@ -303,9 +307,14 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             .owner
             .with_profile(|parts| {
                 let ProfileParts { read, custody, .. } = parts;
-                with_context(current, policy, &community, expires, read, |context, now| {
-                    own_handover(context, &custody, now)
-                })
+                with_context(
+                    current,
+                    policy,
+                    &community,
+                    expires,
+                    read,
+                    |context, now| own_handover(context, &custody, now),
+                )
             })
             .await;
         match made {
@@ -355,12 +364,26 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         let _ = self
             .send_own_room_key(room, source, expires, standing.epoch, &transport)
             .await;
-        let after = self.joins.secrets_through.get(&room.room).copied().unwrap_or(0);
+        let after = self
+            .joins
+            .secrets_through
+            .get(&room.room)
+            .copied()
+            .unwrap_or(0);
         let read = R::room_secrets(&self.inner.board, room.room, after, &transport)
             .await
             .map_err(link)?;
-        let messages: Vec<Vec<u8>> = read.secrets.into_iter().map(|frame| frame.message).collect();
-        let joined = self.joins.joined_in.get(&room.room).cloned().unwrap_or_default();
+        let messages: Vec<Vec<u8>> = read
+            .secrets
+            .into_iter()
+            .map(|frame| frame.message)
+            .collect();
+        let joined = self
+            .joins
+            .joined_in
+            .get(&room.room)
+            .cloned()
+            .unwrap_or_default();
         let received = self
             .owner
             .receive_room_secrets(crate::door::facades::RoomSecretsTask {
@@ -435,10 +458,9 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             Some(snapshot) => snapshot.views(&current, now).map_err(group_error),
             None => {
                 let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
-                let (views, _) =
-                    cbrd::execute_group_intent(owner, &source, intent, MAX_GROUPS)
-                        .await
-                        .map_err(group_error)?;
+                let (views, _) = cbrd::execute_group_intent(owner, &source, intent, MAX_GROUPS)
+                    .await
+                    .map_err(group_error)?;
                 Ok(views)
             }
         }
@@ -492,8 +514,12 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             // unreadable before: read the room's secrets again from the start.
             self.joins.secrets_through.remove(&room.room);
         }
-        let (admitted, caught_up, refused, sync) =
-            (synced.admitted, synced.caught_up, synced.refused, synced.sync);
+        let (admitted, caught_up, refused, sync) = (
+            synced.admitted,
+            synced.caught_up,
+            synced.refused,
+            synced.sync,
+        );
         // Profile keys follow the admissions in the same call. A failure here
         // never undoes an admission (it is committed); the next call repeats it.
         let (keys_adopted, keys_refused) = self

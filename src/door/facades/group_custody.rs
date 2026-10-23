@@ -689,11 +689,7 @@ where
                 evidence: task.evidence,
                 source: &source,
                 authority: &cbrd::JoinParent::new(&self.authority, task.parent),
-                handover: task
-                    .handover
-                    .iter()
-                    .map(|item| item.to_vec())
-                    .collect(),
+                handover: task.handover.iter().map(|item| item.to_vec()).collect(),
                 companion,
                 operation,
                 attempts: ROOM_CONTEXT_ATTEMPTS,
@@ -955,9 +951,7 @@ where
         let record = store
             .read(room_keys::OWNER, &group)
             .map_err(|_| Fail::Storage)?;
-        let held = Keyring::decode(record)
-            .map_err(|_| Fail::Storage)?
-            .owners();
+        let held = Keyring::decode(record).map_err(|_| Fail::Storage)?.owners();
         Ok(RoomKeysStanding { epoch, held })
     }
 
@@ -1198,7 +1192,9 @@ where
                 devices: &mut devices,
             };
             candidate
-                .commit_room_secret(&mut port, &mut store, operation, &source, &mut clock, &changes)
+                .commit_room_secret(
+                    &mut port, &mut store, operation, &source, &mut clock, &changes,
+                )
                 .await
                 .map_err(thread_fail)?;
             match verdict {
@@ -1331,12 +1327,9 @@ where
             .handles
             .insert(newcomer.clone(), handle.clone());
         self.provided = BTreeMap::from([(newcomer.clone(), handle)]);
-        let read = cbrd::GroupOwner::refresh(
-            self,
-            &BTreeSet::new(),
-            &BTreeSet::from([newcomer.clone()]),
-        )
-        .await;
+        let read =
+            cbrd::GroupOwner::refresh(self, &BTreeSet::new(), &BTreeSet::from([newcomer.clone()]))
+                .await;
         self.provided.clear();
         if read.is_err() {
             *self.cache.borrow_mut() = Cache::default();
@@ -1425,8 +1418,15 @@ where
         #[cfg(test)]
         let now = now + TEST_CONSENT_AGE.with(std::cell::Cell::get);
         let snapshot = Snapshot::load(binding.community(), &store).map_err(|_| Fail::Storage)?;
-        let groups = cgrp::prepare(&snapshot, request, &source, &authority, now, task.max_groups)
-            .map_err(|_| Fail::Authority)?;
+        let groups = cgrp::prepare(
+            &snapshot,
+            request,
+            &source,
+            &authority,
+            now,
+            task.max_groups,
+        )
+        .map_err(|_| Fail::Authority)?;
         let admitted = match context {
             // The room already holds the member commit: apply it, order nothing.
             Some(context) => {

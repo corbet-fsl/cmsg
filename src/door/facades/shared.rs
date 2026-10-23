@@ -325,8 +325,8 @@ where
     ) -> board::OwnerFuture<'a, Vec<u8>> {
         Box::pin(async move {
             // Untrusted service bytes; the Wallet owner bounds them against the epoch.
-            let context: czkp::record::Context =
-                serde_json::from_slice(challenge.record_context()).map_err(|_| ErrorCode::Refused)?;
+            let context: czkp::record::Context = serde_json::from_slice(challenge.record_context())
+                .map_err(|_| ErrorCode::Refused)?;
             if self.lifetime.is_closed() {
                 return Err(ErrorCode::Unauthorized);
             }
@@ -870,7 +870,10 @@ impl<B: cwst::backend::Backend, C, E, A, R> AccountPort<B, C, E, A, R> {
 impl<B: cwst::backend::Backend, C, E, A, R> VaultBoardOwner<B, C, E, A, R, cvlt::WalletCustody> {
     /// The account actor's port on this Vault. `arm` is the handle the member
     /// authority of this same Vault gave out with its account channels.
-    pub fn account_port(&self, arm: crate::door::custody::AccountArm) -> AccountPort<B, C, E, A, R> {
+    pub fn account_port(
+        &self,
+        arm: crate::door::custody::AccountArm,
+    ) -> AccountPort<B, C, E, A, R> {
         AccountPort {
             retained: self.retained.clone(),
             lifetime: self.lifetime.clone(),
