@@ -942,7 +942,7 @@ mod tests {
             )
             .unwrap();
             let mut keys =
-                DeviceKeys::new(Client::new(cfyr::passkeys::Context::new(ORIGIN, RP).unwrap(), platform));
+                DeviceKeys::new(Client::new(cfyr::passkeys::Context::new(ORIGIN, RP).unwrap(), platform), ORIGIN);
             let mut progress =
                 ProgressFile::load(BackendProgress::new(cwst::backend::Memory::new())).await.unwrap();
 

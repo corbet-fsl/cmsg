@@ -35,14 +35,39 @@ pub async fn reopen_initial_publication<'p, B: cwst::backend::Backend>(
     cvlt::InitialError,
 > {
     let (credential, vault) = authentication.into_parts();
-    if credential.credential_id().map_err(|_| refused())?
-        != initial.credential_id().map_err(|_| refused())?
-    {
-        return Err(refused());
-    }
+    let id = credential.credential_id().map_err(|_| refused())?;
     let cfyr::passkeys::VaultOutcome::Ready(unlock) = vault else {
         return Err(refused());
     };
+    reopen_initial_publication_opened(&id, Opening::Unlock(unlock), initial, backend, clock).await
+}
+
+/// The PRF of a reopening: a fresh assertion's unlock, or an opening the device already holds
+/// (C7: the restart's one assertion logged in and unlocked; its opening reopens here).
+pub enum Opening {
+    Unlock(cfyr::passkeys::UnlockSecret),
+    Opened(cvlt::PreparedOpen),
+}
+
+/// [`reopen_initial_publication`] from an assertion already split: `id` is its credential id
+/// (the credential went to the login), `opening` its PRF. The same checks apply: the lease's
+/// credential, this scope, this commitment.
+pub async fn reopen_initial_publication_opened<'p, B: cwst::backend::Backend>(
+    id: &[u8],
+    opening: Opening,
+    mut initial: cfyr::membership::InitialCreationLease<'p, Transport>,
+    backend: B,
+    clock: &mut impl Clock,
+) -> Result<
+    (
+        cvlt::InitialCreation<B>,
+        cfyr::membership::InitialCreationLease<'p, Transport>,
+    ),
+    cvlt::InitialError,
+> {
+    if id != initial.credential_id().map_err(|_| refused())? {
+        return Err(refused());
+    }
     let mut clock = SharedClock::new(clock);
     let mut failed = false;
     let scope = initial
@@ -59,10 +84,14 @@ pub async fn reopen_initial_publication<'p, B: cwst::backend::Backend>(
     if failed {
         return Err(cvlt::InitialError::Keys(Error::Clock));
     }
-    let creation = cvlt::PreparedOpen::new(unlock, &scope)
-        .map_err(cvlt::InitialError::Open)?
-        .reopen_initial(backend)
-        .await?;
+    let opening = match opening {
+        Opening::Unlock(unlock) => {
+            cvlt::PreparedOpen::new(unlock, &scope).map_err(cvlt::InitialError::Open)?
+        }
+        // An opening of another scope opens another vault: the reopen below finds nothing.
+        Opening::Opened(opening) => opening,
+    };
+    let creation = opening.reopen_initial(backend).await?;
     if creation.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
         return Err(refused());
     }
@@ -251,6 +280,115 @@ pub async fn prepare_initial_publication<
         return Err(InitialPublicationError::Foyer(cfyr::Error::Reconcile));
     }
     Ok((creation, initial))
+}
+
+/// The one-ceremony twin of [`prepare_initial_publication`] for the wallet scope (C4): no
+/// passkey prompt. The wallet signs the birth statement for this creation's receipt
+/// (`wallet_birth_genesis`, under the birth grant), the device checks it offline under the
+/// current wallet Charter (it names this account, this creation's device key and its seed
+/// commitment), retains the publication with that Birth evidence, and binds it through the
+/// wallet's birth bind (the server verifies the same evidence before its CAS). `initial` is
+/// the Door's own lease (current Charter, member, deadline); `wallet` a lease of the wallet
+/// companion, the same session family. Returns the Prepared creation; the caller retains it
+/// under a fresh lease.
+pub async fn prepare_birth_publication<B: cwst::backend::Backend>(
+    creation: cvlt::InitialCreation<B>,
+    mut initial: cfyr::membership::InitialCreationLease<'_, Transport>,
+    mut wallet: cfyr::membership::GlobalWalletLease<Transport>,
+    clock: &mut impl Clock,
+    entropy: &mut impl ckmg::Entropy,
+) -> Result<cvlt::InitialCreation<B>, InitialPublicationError> {
+    let mut clock = SharedClock::new(clock);
+    let seed = initial.seed().map_err(|_| refused())?;
+    if creation.enrollment_commitment()? != seed {
+        return Err(refused().into());
+    }
+    let member = initial.observation().map_err(|_| refused())?.member.clone();
+    if wallet.user().map_err(|_| refused())? != member {
+        return Err(refused().into());
+    }
+    let digest = creation
+        .receipt()
+        .passkey_challenge()
+        .map_err(cvlt::InitialError::Keys)?;
+    let mut failed = false;
+    let (statement, at) = wallet
+        .birth_genesis(digest, || {
+            clock.now().unwrap_or_else(|_| {
+                failed = true;
+                u64::MAX
+            })
+        })
+        .await
+        .map_err(InitialPublicationError::Foyer)?
+        .into_parts();
+    if failed {
+        return Err(InitialPublicationError::Foyer(cfyr::Error::Reconcile));
+    }
+    let evidence = cchr::BirthGenesisEvidence::new(creation.receipt().clone(), statement, at);
+    let evidence_bytes = evidence.to_bytes().map_err(|_| refused())?;
+    let expires = initial.expires().map_err(|_| refused())?;
+    let (_, author) = creation
+        .receipt()
+        .attested_lineage()
+        .map_err(cvlt::InitialError::Keys)?;
+    let device = *author.value();
+    let now = clock.now().map_err(cvlt::InitialError::Keys)?;
+    let prepared = initial
+        .with_current(
+            || {
+                clock.now().unwrap_or_else(|_| {
+                    failed = true;
+                    u64::MAX
+                })
+            },
+            |current| {
+                if current.revocations().device_revoked(&device) {
+                    return Err(refused());
+                }
+                let verified = cchr::verify_birth_genesis(
+                    current.key_ring(),
+                    &evidence,
+                    &cchr::wallet_fingerprint(None),
+                    &member,
+                    now,
+                )
+                .map_err(|_| refused())?;
+                if verified.statement().device() != &device
+                    || verified.statement().commitment() != &seed
+                {
+                    return Err(refused());
+                }
+                cvlt::LineageEvidence::prepare_birth(current, evidence, &member, now)
+                    .map_err(|_| refused())
+            },
+        )
+        .map_err(|_| refused())??;
+    if failed {
+        return Err(cvlt::InitialError::Keys(Error::Clock).into());
+    }
+    // The Door's lease is not held across the wallet's bind; the bind is its own CAS over the
+    // same seed and the server verifies the same evidence first.
+    drop(initial);
+    let creation = creation
+        .prepare(&prepared, expires, &mut clock, entropy)
+        .await?;
+    let publication = creation.publication_commitment()?;
+    drop(
+        wallet
+            .bind_birth_creation(seed, publication, evidence_bytes, || {
+                clock.now().unwrap_or_else(|_| {
+                    failed = true;
+                    u64::MAX
+                })
+            })
+            .await
+            .map_err(InitialPublicationError::Foyer)?,
+    );
+    if failed {
+        return Err(InitialPublicationError::Foyer(cfyr::Error::Reconcile));
+    }
+    Ok(creation)
 }
 
 /// The device-key twin of [`prepare_initial_publication`]: the genesis evidence is the

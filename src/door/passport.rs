@@ -266,8 +266,27 @@ fn operation() -> Result<[u8; 32]> {
 /// this function never retries issuance, cancels it implicitly, or creates a
 /// missing holder. Success means the original verified passport is durable.
 pub async fn issue_global_passport<B, C, E, A, R, G>(
+    issuer: GlobalPassportIssuance<Transport>,
+    wallet: &mut GlobalPassport<B, C, E, A, R>,
+    rng: &mut G,
+) -> Result<()>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+    G: passport::rand::RngCore + passport::rand::CryptoRng,
+{
+    issue_global_passport_with(issuer, wallet, None, rng).await
+}
+
+/// [`issue_global_passport`]; with `birth` (the wallet opening of a registration's one
+/// confirmation) the issue is the registration's birth passport (Q5).
+pub(crate) async fn issue_global_passport_with<B, C, E, A, R, G>(
     mut issuer: GlobalPassportIssuance<Transport>,
     wallet: &mut GlobalPassport<B, C, E, A, R>,
+    birth: Option<&cvlt::PreparedOpen>,
     rng: &mut G,
 ) -> Result<()>
 where
@@ -281,10 +300,22 @@ where
     let request = wallet
         .prepare_global_passport_issuance(&mut issuer, rng)
         .await?;
-    let response = issuer
-        .issue(request.to_bytes(), now)
-        .await
-        .map_err(|_| ErrorCode::Reconcile)?;
+    let request = request.to_bytes();
+    // Q5: during a registration the passport is the birth item bound to the wallet device K:
+    // K signs this exact request (WalletBirthPassport), no further confirmation.
+    let response = match birth {
+        Some(opening) => {
+            let signature = opening
+                .sign_device(
+                    ckmg::DevicePurpose::WalletBirthPassport,
+                    &ckmg::wallet_birth_passport_payload(&request),
+                )
+                .map_err(|_| ErrorCode::Refused)?;
+            issuer.issue_birth(request, signature, now).await
+        }
+        None => issuer.issue(request, now).await,
+    }
+    .map_err(|_| ErrorCode::Reconcile)?;
     wallet
         .same_wallet(&mut issuer)
         .await
