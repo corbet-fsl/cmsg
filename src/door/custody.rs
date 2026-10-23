@@ -23,6 +23,35 @@ pub use genesis::{
     retain_initial_publication,
 };
 mod current_member;
+
+/// Which single-use account channel one account Keys call consumes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AccountChannel {
+    Root,
+    Delegation,
+    Request,
+}
+
+/// A root authorization (`AuthorizeAccountDevice`) consumes the root channel
+/// and starts a new delegation round, the same rule for every custody owner: the first
+/// device signature after it is the delegation (spent by that attempt whatever
+/// its outcome), every later one the account request. Without the reset, a
+/// later round (a record-recipient registration after the account request) would
+/// consult the request channel, find nothing admitted, and the refusal locks
+/// the Keys. The ONE copy of this rule: the member owner (current_member) and
+/// the initial custody owner (initial_recovery) both call it; never copy it.
+pub(super) fn account_channel(authorize: bool, delegation_spent: &mut bool) -> AccountChannel {
+    if authorize {
+        *delegation_spent = false;
+        AccountChannel::Root
+    } else if *delegation_spent {
+        AccountChannel::Request
+    } else {
+        *delegation_spent = true;
+        AccountChannel::Delegation
+    }
+}
+
 mod recovery;
 pub use initial::{
     EnrollmentError, InitialEnrollment, activate_initial, reopen_device_enrollment,
@@ -618,5 +647,28 @@ impl Door {
             last_time: 0,
         };
         Ok((authority, lifetime))
+    }
+}
+
+#[cfg(test)]
+mod account_channel_tests {
+    use super::{AccountChannel::*, account_channel};
+
+    /// Row 17: enrollment (authorize, delegation), the account request, then a
+    /// record-recipient round (authorize, device signature) after activation.
+    /// The second round's device signature is its delegation again, never the
+    /// request channel.
+    #[test]
+    fn every_root_authorization_starts_a_new_delegation_round() {
+        let mut spent = false;
+        let calls = [true, false, false, true, false, false, true, false];
+        let seen: Vec<_> = calls
+            .iter()
+            .map(|authorize| account_channel(*authorize, &mut spent))
+            .collect();
+        assert_eq!(
+            seen,
+            [Root, Delegation, Request, Root, Delegation, Request, Root, Delegation]
+        );
     }
 }

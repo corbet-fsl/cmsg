@@ -225,15 +225,13 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
                 // The account actor armed its own channels: root authorization, then the
                 // delegation (spent by its attempt whatever the outcome), then the request.
                 (Some(account), true) => {
-                    let verifier = if purpose == Purpose::AccountDevice {
-                        // A new root authorization starts a new delegation round.
-                        account.delegation_spent = false;
-                        &mut account.root
-                    } else if account.delegation_spent {
-                        &mut account.request
-                    } else {
-                        account.delegation_spent = true;
-                        &mut account.delegation
+                    let verifier = match super::account_channel(
+                        purpose == Purpose::AccountDevice,
+                        &mut account.delegation_spent,
+                    ) {
+                        super::AccountChannel::Root => &mut account.root,
+                        super::AccountChannel::Delegation => &mut account.delegation,
+                        super::AccountChannel::Request => &mut account.request,
                     };
                     verifier.consume(&request, &origin)?;
                 }
