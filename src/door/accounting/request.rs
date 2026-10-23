@@ -147,6 +147,12 @@ impl SignedApplyExtended {
         self.request.request_id
     }
 
+    /// The end of the signed request's window: from then on the operator can
+    /// only refuse it, so it is never sent again.
+    pub fn expires_at(&self) -> u64 {
+        self.request.expires_at
+    }
+
     /// Plain digest of the signed request, signature included.
     pub fn request_digest(&self) -> [u8; 32] {
         self.request_digest
@@ -354,6 +360,14 @@ fn verify_acceptance(
     acceptance_digest(acceptance)
 }
 
+/// The end of a genesis request's proof window: its proof time plus the shared
+/// code constant the operator's acceptance applies.
+pub(super) fn genesis_window_end(statement: &AccountStatement) -> u64 {
+    statement
+        .now
+        .saturating_add(cblc::accounting::GENESIS_PROOF_WINDOW_SECONDS)
+}
+
 impl<'p> CurrentEnrollment<'p> {
     /// Sign the original account request exactly once and assemble the exact
     /// ApplyExtended outbox. The device signature runs through the account's
@@ -396,6 +410,10 @@ impl<'p> CurrentEnrollment<'p> {
             {
                 return Err(ErrorCode::Unauthorized);
             }
+            // Never sign a request whose proof window has already elapsed.
+            if current.now >= genesis_window_end(statement) {
+                return Err(ErrorCode::ProofWindowElapsed);
+            }
             Ok(Snapshot {
                 grant: current.grant.clone(),
                 origin: current.origin.clone(),
@@ -405,7 +423,8 @@ impl<'p> CurrentEnrollment<'p> {
                 extension_policy: current.material.extension_policy.clone(),
             })
         })??;
-        self.admission_mut()
+        let signed = self
+            .admission_mut()
             .sign_core(
                 account,
                 authorization,
@@ -416,7 +435,16 @@ impl<'p> CurrentEnrollment<'p> {
                 genesis_update(),
                 intent,
             )
-            .await
+            .await;
+        match signed {
+            // The window ran out during the signing awaits: an overrun, not a verdict.
+            Err(ErrorCode::Unauthorized)
+                if self.admission_mut().current()?.now >= genesis_window_end(statement) =>
+            {
+                Err(ErrorCode::ProofWindowElapsed)
+            }
+            signed => signed,
+        }
     }
 
     /// Send the exact stored outbox once through the held HTTPS owner and verify
@@ -655,7 +683,12 @@ impl AccountAdmission<'_> {
             .lease
             .apply_account(wire, now)
             .await
-            .map_err(|_| ErrorCode::Reconcile)?;
+            .map_err(|error| match error {
+                // Refused before commitment (409, reason expired): certain, and the
+                // only answer that lets the device prepare a fresh request.
+                cfyr::Error::Expired => ErrorCode::ProofWindowElapsed,
+                _ => ErrorCode::Reconcile,
+            })?;
         let response: AccountServiceResponse =
             serde_json::from_value(response).map_err(|_| ErrorCode::Reconcile)?;
         let AccountServiceResponse::ApplyExtended {

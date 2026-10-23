@@ -219,6 +219,10 @@ pub(super) enum Answer {
     /// (`eligible_at` = that slot's end): a crossed scheduled boundary. The join
     /// restarts enrollment and Open as a fresh operation (`enroll_and_open`).
     SlotCrossed { eligible_at: u64 },
+    /// Open overran the genesis proof window: the device refused to sign or send
+    /// the elapsed request, or the operator refused it with the reason expired.
+    /// The join re-prepares as a fresh operation at most `GENESIS_REPREPARES` times.
+    WindowElapsed,
 }
 
 macro_rules! accessor {
@@ -228,6 +232,7 @@ macro_rules! accessor {
                 Self::$variant(value) => Ok(value),
                 // A crossed slot not restarted is the refusal it replaced.
                 Self::SlotCrossed { .. } => Err(ErrorCode::Unauthorized),
+                Self::WindowElapsed => Err(ErrorCode::ProofWindowElapsed),
                 _ => Err(ErrorCode::Unavailable),
             }
         }
@@ -249,6 +254,7 @@ impl Answer {
         match self {
             Self::Opened(value) | Self::Reopened(value) => Ok(value),
             Self::SlotCrossed { .. } => Err(ErrorCode::Unauthorized),
+            Self::WindowElapsed => Err(ErrorCode::ProofWindowElapsed),
             _ => Err(ErrorCode::Unavailable),
         }
     }
@@ -265,6 +271,7 @@ impl Answer {
 fn open_outcome(result: Result<u64>, slot_end: u64, now: u64) -> Result<Answer> {
     match result {
         Ok(accepted_at) => Ok(Answer::Opened(Opened { accepted_at })),
+        Err(ErrorCode::ProofWindowElapsed) => Ok(Answer::WindowElapsed),
         Err(ErrorCode::Unauthorized) if now >= slot_end => Ok(Answer::SlotCrossed {
             eligible_at: slot_end,
         }),
@@ -274,6 +281,10 @@ fn open_outcome(result: Result<u64>, slot_end: u64, now: u64) -> Result<Answer> 
 
 /// How often one join restarts a crossed checkpoint slot as a fresh operation.
 pub(super) const SLOT_RESTARTS: usize = 2;
+
+/// How often one join re-prepares after an overrun of the genesis proof window.
+/// A second overrun surfaces `ProofWindowElapsed`.
+pub(super) const GENESIS_REPREPARES: usize = 1;
 
 /// The account steps a join runs after its gate, one command at a time.
 pub(super) trait Steps {
@@ -287,6 +298,7 @@ pub(super) trait Steps {
 /// next join continues. Any other refusal ends the join as before.
 pub(super) async fn enroll_and_open(steps: &mut impl Steps) -> Result<Checkpoint> {
     let mut restarts = 0;
+    let mut reprepares = 0;
     loop {
         let checkpoint = steps.call(Command::Enroll).await?.enrolled()?.checkpoint;
         if let Checkpoint::Pending { .. } = checkpoint {
@@ -294,6 +306,7 @@ pub(super) async fn enroll_and_open(steps: &mut impl Steps) -> Result<Checkpoint
         }
         match steps.call(Command::Open).await? {
             Answer::SlotCrossed { .. } if restarts < SLOT_RESTARTS => restarts += 1,
+            Answer::WindowElapsed if reprepares < GENESIS_REPREPARES => reprepares += 1,
             answer => {
                 answer.opened_or_reopened()?;
                 return Ok(Checkpoint::Ready);
@@ -1659,6 +1672,31 @@ mod tests {
         let crossed = || Answer::SlotCrossed { eligible_at: end };
         assert_eq!(crossed().opened(), Err(ErrorCode::Unauthorized));
         assert_eq!(crossed().opened_or_reopened(), Err(ErrorCode::Unauthorized));
+    }
+
+    #[test]
+    fn an_overrun_re_prepares_once_and_a_second_surfaces_proof_window_elapsed() {
+        assert_eq!(
+            open_outcome(Err(ErrorCode::ProofWindowElapsed), 1_800, 1_000),
+            Ok(Answer::WindowElapsed)
+        );
+        let elapsed = || Ok(Answer::WindowElapsed);
+        let opened = || Ok(Answer::Opened(Opened { accepted_at: 2_000 }));
+        // Expired refusal, one fresh preparation, then the account opens.
+        let mut steps = Script::new(vec![ready(), elapsed(), ready(), opened()]);
+        assert_eq!(block(enroll_and_open(&mut steps)), Ok(Checkpoint::Ready));
+        assert_eq!(
+            steps.commands,
+            [Command::Enroll, Command::Open, Command::Enroll, Command::Open]
+        );
+        // A second overrun surfaces the typed error; no third preparation.
+        let mut steps = Script::new(vec![ready(), elapsed(), ready(), elapsed()]);
+        assert_eq!(
+            block(enroll_and_open(&mut steps)),
+            Err(ErrorCode::ProofWindowElapsed)
+        );
+        assert_eq!(steps.commands.len(), 4);
+        assert_eq!(ErrorCode::ProofWindowElapsed.exit_code(), 75);
     }
 
     #[test]

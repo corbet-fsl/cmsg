@@ -131,6 +131,10 @@ impl AccountAdmission<'_> {
             return Err(ErrorCode::Unauthorized);
         }
         signed.check_binding_digest(opened.binding.acceptance.request_digest)?;
+        // An elapsed request is never re-sent; the guarded discard decides.
+        if current.now >= signed.expires_at() {
+            return Err(ErrorCode::ProofWindowElapsed);
+        }
         let response = self.send_signed(&signed).await?;
         let trust = response_trust(&self.current().map_err(|_| ErrorCode::Reconcile)?.material)
             .map_err(|_| ErrorCode::Reconcile)?;

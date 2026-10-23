@@ -95,6 +95,10 @@ pub enum ErrorCode {
     /// The server holds this member in the lobby: the gates now in force are
     /// not passed. Clients show the lobby.
     HeldInLobby,
+    /// The genesis request's proof window elapsed before the operator could
+    /// accept it, again after the one bounded re-preparation. Nothing was
+    /// accepted; a later join starts a fresh request.
+    ProofWindowElapsed,
 }
 
 impl ErrorCode {
@@ -106,7 +110,7 @@ impl ErrorCode {
             Self::InvalidRequest | Self::UnsupportedAction | Self::UnsupportedVersion => 64,
             Self::Unauthorized | Self::Refused | Self::HeldInLobby => 77,
             Self::Unavailable => 69,
-            Self::Capacity | Self::Clock | Self::Reconcile => 75,
+            Self::Capacity | Self::Clock | Self::Reconcile | Self::ProofWindowElapsed => 75,
         }
     }
 }

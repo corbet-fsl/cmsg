@@ -471,6 +471,12 @@ mod proven {
             A: Authority,
             R: Records,
         {
+            // Never send a request whose window has elapsed: the operator could
+            // only refuse it. State A stays for the guarded discard.
+            let observed = self.enrollment.with_verified(|_, _, _, current| current.now)?;
+            if observed >= staged.signed.expires_at() {
+                return Err(ErrorCode::ProofWindowElapsed);
+            }
             let response = self.enrollment.send_genesis_request(&staged.signed).await?;
             let trust = self
                 .enrollment
