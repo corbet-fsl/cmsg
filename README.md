@@ -13,8 +13,11 @@ Already-enrolled restoration retains the same Vault for Board and Inbox. Search
 and watch results are rechecked against the current signed policy and committed
 profile before disclosure. First enrollment, message mutations, group and room
 journeys, and complete admission/accounting integration remain incomplete.
-Runtime preload stays unavailable; these partial paths do not establish full
-network acceptance.
+Runtime preload starts unavailable and only a completed network bind releases it
+(`Door::network_bound`, called by `bind_native_tor` after Tor bootstrap and onion
+publication; the trusted embedding control `set_preload_ready` does the same). A
+failed or cancelled bind leaves it unavailable. These partial paths do not
+establish full network acceptance.
 
 ## Historical implementation
 

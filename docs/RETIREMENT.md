@@ -47,7 +47,8 @@ Historical browser/Tor success and limitations remain in that source tree's
 Current door CI measures only current door code. Retiring these tests does not
 satisfy or waive their successor regressions, real network integration, active
 member restoration, anonymous settlement, group scenarios or product acceptance.
-Unavailable domain operations remain failures and preload remains unavailable.
+Unavailable domain operations remain failures and preload stays unavailable until a
+completed network bind releases it (`Door::network_bound`).
 
 Historical deterministic-identity vectors must be adapted by their current owner:
 all enrolled passkeys have equal wrapped copies of the common random root in

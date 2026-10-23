@@ -11,9 +11,12 @@ The registry includes local lifecycle actions and original owner views for
 Board, Mesh and Inbox. Trusted Rust composition binds actual facade instances;
 unbound owners refuse. Inbox reads revalidate Keys after acquiring the original
 Vault checkpoint guard. GroupView and Mesh BackendView use original owner types.
-Production login/custody and messaging initialization remain incomplete, so
-preload remains unavailable. No network health report, compile test, transport
-ACK or fixture can create readiness.
+Production login/custody and messaging initialization remain incomplete.
+Preload starts unavailable and only a completed network bind releases it
+(`Door::network_bound` after Tor bootstrap and onion publication; the trusted
+embedding control `set_preload_ready` sets it directly), and nothing callable
+clears it. No network health report, compile test, transport ACK or fixture can
+create readiness.
 Native paired clients use the owned original-byte Client and loopback HTTP;
 capability import from protected inherited transport grants no authority itself.
 
