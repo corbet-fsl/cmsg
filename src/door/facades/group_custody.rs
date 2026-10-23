@@ -112,6 +112,28 @@ struct Cache {
     contacts: BTreeSet<String>,
 }
 
+/// What a member remembers of the other members of the rooms it takes part in,
+/// across operations (row 14.8): the lineage-read handles it was given (locators
+/// only) and the lineages read through them. Every stored lineage was read and
+/// Charter-verified once and is bound to the member it names; it serves ONLY
+/// the certification of MLS leaves (`GroupDevices`), never a consent decision
+/// (those use the per-operation `Cache`, read fresh every time). It is dropped
+/// whenever Threads refuses a certification (the lineage moved on), so the next
+/// attempt reads it again.
+#[derive(Default)]
+struct Roster {
+    handles: BTreeMap<String, Vec<u8>>,
+    lineages: BTreeMap<String, ckmg::Lineage>,
+}
+
+impl Roster {
+    /// Forget everything learned; the next operation reads again.
+    fn forget(&mut self) {
+        self.handles.clear();
+        self.lineages.clear();
+    }
+}
+
 struct CacheDevices(Rc<RefCell<Cache>>);
 impl cbrd::Devices for CacheDevices {
     fn verify(
@@ -189,10 +211,14 @@ impl cgrp::Authority for RoomAuthority {
 }
 
 /// Current lineages for Threads: this member's own and the peers' lineages the
-/// last `refresh` read (Charter-verified, fresh). Anything else is unavailable.
+/// last `refresh` read (Charter-verified, fresh). In a room operation the
+/// roster's lineages verified earlier serve too (`roster`); anything else is
+/// unavailable.
 struct GroupDevices {
     own: ckmg::Lineage,
     cache: Rc<RefCell<Cache>>,
+    /// Set only by room operations: the lineages of the room's members.
+    roster: Option<Rc<RefCell<Roster>>>,
 }
 impl cnbx::DeviceAuthority for GroupDevices {
     async fn current(
@@ -208,14 +234,18 @@ impl cnbx::DeviceAuthority for GroupDevices {
         }
         let now = ckmg::Clock::now(&mut crate::door::custody::SystemClock)
             .map_err(|_| cnbx::ContactError::Unavailable)?;
-        match self.cache.borrow().lineages.get(binding.member()) {
-            Some((lineage, read_at))
-                if lineage.binding == *binding
-                    && now.saturating_sub(*read_at) <= LINEAGE_FRESH_SECONDS =>
+        if let Some((lineage, read_at)) = self.cache.borrow().lineages.get(binding.member()) {
+            if lineage.binding == *binding && now.saturating_sub(*read_at) <= LINEAGE_FRESH_SECONDS
             {
-                Ok(lineage.clone())
+                return Ok(lineage.clone());
             }
-            _ => Err(cnbx::ContactError::Unavailable),
+        }
+        match &self.roster {
+            Some(roster) => match roster.borrow().lineages.get(binding.member()) {
+                Some(lineage) if lineage.binding == *binding => Ok(lineage.clone()),
+                _ => Err(cnbx::ContactError::Unavailable),
+            },
+            None => Err(cnbx::ContactError::Unavailable),
         }
     }
 }
@@ -255,6 +285,8 @@ pub struct VaultGroupOwner<B: cwst::backend::Backend, C, E, A, R, W> {
     member: String,
     peers: Option<Rc<Mutex<Box<dyn GroupPeers>>>>,
     cache: Rc<RefCell<Cache>>,
+    /// Lineages of the rooms' members, kept across operations (row 14.8).
+    roster: Rc<RefCell<Roster>>,
     authority: cbrd::BoardAuthority<CacheDevices, CacheContacts>,
     version: u64,
     /// Handles the signers attached to their own consents; they win over the journal.
@@ -284,6 +316,7 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
             member,
             peers: peers.map(|peers| Rc::new(Mutex::new(peers))),
             cache,
+            roster: Rc::new(RefCell::new(Roster::default())),
             version: 0,
             provided: BTreeMap::new(),
             #[cfg(test)]
@@ -355,6 +388,7 @@ where
         let mut devices = GroupDevices {
             own,
             cache: self.cache.clone(),
+            roster: None,
         };
         let mut port = cnbx::KeyPort {
             keys: custody.vault.keys(),
@@ -458,6 +492,25 @@ where
     A: ckmg::Authority,
     R: cvlt::Records,
 {
+    /// Read the lineages of `members` this device does not hold yet (each
+    /// Charter-verified and bound to its member by `refresh`); the ones it
+    /// holds are kept as they are (row 14.8). Members whose lineage cannot be
+    /// read stay missing, which makes Threads refuse the leaves they own.
+    async fn ensure_roster(&mut self, members: &BTreeSet<String>) -> cgrp::Result<()> {
+        let missing: BTreeSet<String> = {
+            let roster = self.roster.borrow();
+            members
+                .iter()
+                .filter(|member| **member != self.member && !roster.lineages.contains_key(*member))
+                .cloned()
+                .collect()
+        };
+        if missing.is_empty() {
+            return Ok(());
+        }
+        cbrd::GroupOwner::refresh(self, &BTreeSet::new(), &missing).await
+    }
+
     /// Newcomer: authenticate the delivered room state against its MLS evidence
     /// (same group, state commitment carried in the authenticated GroupInfo
     /// context, roster certified) before anything is prepared, sent or stored.
@@ -477,7 +530,7 @@ where
             .members()
             .clone();
         cbrd::GroupOwner::provide_handles(self, handles.clone());
-        let read = cbrd::GroupOwner::refresh(self, &BTreeSet::new(), &roster).await;
+        let read = self.ensure_roster(&roster).await;
         self.provided.clear();
         if read.is_err() {
             *self.cache.borrow_mut() = Cache::default();
@@ -508,6 +561,7 @@ where
         let mut devices = GroupDevices {
             own,
             cache: self.cache.clone(),
+            roster: Some(self.roster.clone()),
         };
         let mut port = cnbx::KeyPort {
             keys: custody.vault.keys(),
@@ -517,6 +571,9 @@ where
         let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
         let state = threads.verify_room_state(&mut port, evidence).await;
         *self.cache.borrow_mut() = Cache::default();
+        if state.is_err() {
+            self.roster.borrow_mut().forget();
+        }
         state.map_err(|_| Fail::Authority)
     }
 
@@ -542,11 +599,11 @@ where
             getrandom::fill(&mut bytes).map_err(|_| Fail::Unavailable)?;
             bytes
         };
-        // The roster's lineages are read and Charter-verified again for this
-        // operation (the cache never outlives one): Threads certifies every leaf
-        // of the room's tree against them.
+        // The roster's lineages are Charter-verified once and kept (row 14.8):
+        // only the ones this device does not hold yet are read here. Threads
+        // certifies every leaf of the room's tree against them.
         cbrd::GroupOwner::provide_handles(self, task.handles.clone());
-        let read = cbrd::GroupOwner::refresh(self, &BTreeSet::new(), task.parent.members()).await;
+        let read = self.ensure_roster(task.parent.members()).await;
         self.provided.clear();
         if read.is_err() {
             *self.cache.borrow_mut() = Cache::default();
@@ -577,6 +634,7 @@ where
         let mut devices = GroupDevices {
             own,
             cache: self.cache.clone(),
+            roster: Some(self.roster.clone()),
         };
         let mut port = cnbx::KeyPort {
             keys: custody.vault.keys(),
@@ -617,6 +675,9 @@ where
         )
         .await;
         *self.cache.borrow_mut() = Cache::default();
+        if joined.is_err() {
+            self.roster.borrow_mut().forget();
+        }
         self.open().map_err(|_| Fail::Authority)?;
         Ok(joined?.snapshot)
     }
@@ -658,6 +719,8 @@ where
             for peer in roster.iter().filter(|peer| **peer != self.member) {
                 if let Some(handle) = self.provided.get(peer) {
                     handles.insert(peer.clone(), handle.clone());
+                } else if let Some(handle) = self.roster.borrow().handles.get(peer) {
+                    handles.insert(peer.clone(), handle.clone());
                 } else if let Some(handle) = journal.handle(peer).map_err(|_| Fail::Storage)? {
                     handles.insert(peer.clone(), handle);
                 }
@@ -668,7 +731,12 @@ where
             .await
             .map_err(|_| Fail::Authority)?;
         handles.insert(self.member.clone(), own_handle);
-        cbrd::GroupOwner::refresh(self, &BTreeSet::new(), &roster)
+        // What the handles above name is kept, so the lineages are read once.
+        self.roster
+            .borrow_mut()
+            .handles
+            .extend(handles.iter().map(|(m, h)| (m.clone(), h.clone())));
+        self.ensure_roster(&roster)
             .await
             .map_err(|_| Fail::Authority)?;
         let mut retained = self.retained.lock().await;
@@ -696,6 +764,7 @@ where
         let mut devices = GroupDevices {
             own,
             cache: self.cache.clone(),
+            roster: Some(self.roster.clone()),
         };
         let mut port = cnbx::KeyPort {
             keys: custody.vault.keys(),
@@ -709,6 +778,9 @@ where
             .await
             .map_err(|_| Fail::Authority);
         *self.cache.borrow_mut() = Cache::default();
+        if evidence.is_err() {
+            self.roster.borrow_mut().forget();
+        }
         Ok(cbrd::RoomState {
             evidence: evidence?,
             transport: threads.transport_keys().map_err(|_| Fail::Authority)?,
@@ -784,8 +856,27 @@ where
         if newcomer == self.member {
             return Err(Fail::Authority);
         }
-        // Read the newcomer's lineage first (a fresh, Charter-verified read
-        // through the locator it supplied); the cache serves only this admission.
+        // The roster's lineages first (read once, kept: row 14.8); they only
+        // certify the leaves already in the tree. A room this device holds has a
+        // roster in Groups.
+        let roster = {
+            let mut retained = self.retained.lock().await;
+            let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+            let storage = custody.vault.storage().clone();
+            let store = storage.lock().await;
+            cgrp::Snapshot::load(custody.binding.community(), &store)
+                .map_err(|_| Fail::Storage)?
+                .members(&task.group)
+                .map_err(|_| Fail::Authority)?
+                .clone()
+        };
+        if self.ensure_roster(&roster).await.is_err() {
+            *self.cache.borrow_mut() = Cache::default();
+            return Err(Fail::Unavailable);
+        }
+        // Then the newcomer's lineage (ALWAYS a fresh, Charter-verified read
+        // through the locator it supplied); the per-operation cache serves only
+        // this admission and the consent decision.
         // The newcomer's own handle rides inside its signed consent.
         let handle = companion
             .request
@@ -795,6 +886,10 @@ where
             .map(|consent| consent.lineage_handle.clone())
             .filter(|handle| !handle.is_empty())
             .ok_or(Fail::Authority)?;
+        self.roster
+            .borrow_mut()
+            .handles
+            .insert(newcomer.clone(), handle.clone());
         self.provided = BTreeMap::from([(newcomer.clone(), handle)]);
         let read = cbrd::GroupOwner::refresh(
             self,
@@ -857,6 +952,7 @@ where
         let mut devices = GroupDevices {
             own,
             cache: self.cache.clone(),
+            roster: Some(self.roster.clone()),
         };
         let mut port = cnbx::KeyPort {
             keys: custody.vault.keys(),
@@ -904,8 +1000,14 @@ where
                 transport: task.transport,
             },
         )
-        .await?;
-        Ok(admitted.snapshot)
+        .await;
+        // The leaves of the tree were certified against the roster lineages this
+        // device holds; a refusal here may mean one moved on, so they are read
+        // again next time (the newcomer was verified fresh above).
+        if admitted.is_err() {
+            self.roster.borrow_mut().forget();
+        }
+        Ok(admitted?.snapshot)
     }
 }
 
@@ -1088,6 +1190,8 @@ where
                         // yields is still Charter-verified and must bind to `peer`.
                         if let Some(handle) = self.provided.get(peer) {
                             handles.insert(peer.clone(), handle.clone());
+                        } else if let Some(handle) = self.roster.borrow().handles.get(peer) {
+                            handles.insert(peer.clone(), handle.clone());
                         } else if let Some(handle) =
                             journal.handle(peer).map_err(|_| cgrp::Error::Unavailable)?
                         {
@@ -1138,6 +1242,15 @@ where
                     let read_at = ckmg::Clock::now(&mut crate::door::custody::SystemClock)
                         .map_err(|_| cgrp::Error::Clock)?;
                     let _ = now;
+                    // Verified once: the roster keeps it for the leaf
+                    // certification of later room operations. Consent
+                    // decisions use only the per-operation cache below.
+                    if member != &self.member {
+                        self.roster
+                            .borrow_mut()
+                            .lineages
+                            .insert(member.clone(), lineage.clone());
+                    }
                     self.cache
                         .borrow_mut()
                         .lineages
@@ -1203,6 +1316,11 @@ where
         })
     }
     fn provide_handles(&mut self, handles: BTreeMap<String, Vec<u8>>) {
+        // Locators only, kept beside the lineages read through them.
+        self.roster
+            .borrow_mut()
+            .handles
+            .extend(handles.iter().map(|(m, h)| (m.clone(), h.clone())));
         self.provided = handles;
     }
     fn key_package(
@@ -1238,6 +1356,7 @@ where
             let mut devices = GroupDevices {
                 own,
                 cache: self.cache.clone(),
+                roster: None,
             };
             let mut port = cnbx::KeyPort {
                 keys: custody.vault.keys(),
