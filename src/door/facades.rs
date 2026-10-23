@@ -11,7 +11,7 @@ mod room_sync;
 mod shared;
 use cbrd::clnk;
 pub use group_custody::{
-    GroupPeers, RemoveStep, RoomAdmitTask, RoomJoinTask, RoomJoined, RoomKeySealed, RoomKeyTask,
+    GroupPeers, LeaveProgress, MAX_LEAVE_NOTICES, RemoveStep, RoomLeaveSyncTask, RoomAdmitTask, RoomJoinTask, RoomJoined, RoomKeySealed, RoomKeyTask,
     RoomKeysStanding, RoomLeaveTask, RoomRemoveTask, RoomSecretsReceived, RoomSecretsTask,
     VaultGroupOwner, VerifiedPeers,
 };

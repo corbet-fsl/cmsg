@@ -317,3 +317,68 @@ async fn a_forged_removal_commit_is_refused_untouched_and_the_real_one_still_app
     assert_eq!(real.left, vec![member_id("b")]);
     assert_eq!(standing(&c.owner).await, standing(&room.a).await);
 }
+
+async fn advance(
+    owner: &mut ProfileOwner,
+    board: &RoomBoard,
+    refused: &mut RefusedJoins,
+) -> crate::door::facades::LeaveProgress {
+    let policy = policy_at();
+    owner
+        .groups
+        .as_mut()
+        .unwrap()
+        .advance_room_leave(
+            board,
+            crate::door::facades::RoomLeaveSyncTask {
+                room: ROOM,
+                group: GROUP,
+                max_groups: 10,
+                policy: &policy,
+                refused,
+            },
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_leave_whose_notice_went_stale_is_reissued_until_a_member_removes_it_and_leaves_no_ghost() {
+    use crate::door::facades::LeaveProgress;
+    let mut room = Room::found().await;
+    let mut b = room.admit("b", 32).await;
+    let (_, request) = leave_request(&mut b.owner).await;
+    assert!(
+        b.owner
+            .groups
+            .as_mut()
+            .unwrap()
+            .begin_room_leave(&b.board, ROOM, &request)
+            .await
+            .unwrap()
+    );
+    assert_eq!(b.owner.groups.as_mut().unwrap().room_leaving(GROUP).await.unwrap(), Some(1));
+    // Before any member acted, another newcomer is admitted: b's notice is now
+    // sealed under an epoch the room has left.
+    let c = room.admit("c", 33).await;
+    let mut refused = RefusedJoins::new();
+    // b follows the room (adopts nothing), sees the notice is stale and re-issues.
+    assert_eq!(
+        advance(&mut b.owner, &b.board, &mut refused).await,
+        LeaveProgress::Pending { attempts: 2 }
+    );
+    assert_eq!(standing(&b.owner).await.1, c.epoch);
+    // Nothing new to do until a member acts.
+    assert_eq!(
+        advance(&mut b.owner, &b.board, &mut refused).await,
+        LeaveProgress::Pending { attempts: 2 }
+    );
+    let synced = sync_with(&mut room.a, &room.a_board, &mut RefusedJoins::new()).await;
+    assert_eq!(synced.left, vec![member_id("b")]);
+    assert_eq!(
+        advance(&mut b.owner, &b.board, &mut refused).await,
+        LeaveProgress::Left
+    );
+    assert_eq!(b.owner.groups.as_mut().unwrap().room_leaving(GROUP).await.unwrap(), None);
+    assert_eq!(standing(&room.a).await.0, members(&["a", "x", "y", "c"]));
+}

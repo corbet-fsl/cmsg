@@ -72,6 +72,9 @@ pub struct RoomSynced {
     /// The members this call removed (committed or applied) after they announced
     /// their own leave.
     pub left: Vec<String>,
+    /// A remaining member's authentic commit removed THIS device (it announced
+    /// its own leave); its state was not changed by this call.
+    pub removed: bool,
     /// This device's epoch changed during the call.
     pub advanced: bool,
 }
@@ -125,6 +128,7 @@ where
         let mut joined = vec![];
         let me = self.own_member().to_owned();
         let mut left = vec![];
+        let mut removed = false;
         for _ in 0..MAX_ROOM_APPLY {
             let transport = self.room_transport_key(group).await?;
             let epoch = self.room_keys_standing(group).await?.epoch;
@@ -173,6 +177,19 @@ where
                         }
                     }
                     (done.map(|_| ()), context.is_none())
+                }
+                Next::Removal {
+                    commit, companion, ..
+                } if leaver_of(&companion).as_deref() == Some(me.as_str()) => {
+                    // The commit removes this device: only an authentic one counts.
+                    match self.confirm_room_removal(group, &commit).await {
+                        Ok(true) => {
+                            removed = true;
+                            break;
+                        }
+                        Ok(false) => (Err(Fail::Authority), false),
+                        Err(error) => (Err(error), false),
+                    }
                 }
                 Next::Removal {
                     commit, companion, ..
@@ -291,6 +308,7 @@ where
             sync,
             joined,
             left,
+            removed,
             advanced,
         })
     }
