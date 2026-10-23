@@ -16,10 +16,9 @@ pub use initial_restore::{
 };
 mod initial;
 pub use genesis::{
-    InitialPublicationError, Opening, acknowledge_device_initial_publication,
+    InitialPublicationError, acknowledge_device_initial_publication,
     acknowledge_initial_publication, prepare_device_initial_publication,
-    prepare_birth_publication, prepare_initial_publication, reopen_device_initial_publication,
-    reopen_initial_publication, reopen_initial_publication_opened,
+    prepare_initial_publication, reopen_device_initial_publication, reopen_initial_publication,
     retain_device_initial_publication,
     retain_initial_publication,
 };
@@ -56,8 +55,7 @@ pub(super) fn account_channel(authorize: bool, delegation_spent: &mut bool) -> A
 mod recovery;
 pub use initial::{
     EnrollmentError, InitialEnrollment, activate_initial, reopen_device_enrollment,
-    reopen_initial_enrollment, reopen_initial_enrollment_opened, retain_device_enrollment,
-    retain_global_initial_enrollment, retain_global_initial_enrollment_opened,
+    reopen_initial_enrollment, retain_device_enrollment, retain_global_initial_enrollment,
     retain_initial_enrollment,
 };
 pub use recovery::{

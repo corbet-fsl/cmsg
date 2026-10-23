@@ -141,8 +141,7 @@ pub async fn open_session(
 /// * `wallet_api`/`wallet_origin`: the wallet's authenticated Foyer, for the one stamp.
 /// * `sign`: the community device key's signer for fixed purposes (before activation the
 ///   enrollment's `sign_device`).
-/// * `assertion`: the ONE wallet-passkey assertion for the options it receives, or `None`
-///   without a prompt under a registration's birth grant (C5).
+/// * `assertion`: the ONE wallet-passkey assertion for the options it receives.
 /// * `seed`: the Keys creation receipt's seed commitment (nonzero), made locally first; the
 ///   join's stamp covers it and the community keeps it for `initial_creation`.
 /// * `also`: further actions of this same community the same stamp must cover (the lineage
@@ -175,7 +174,7 @@ where
     A: Authority,
     R: Records,
     F: FnOnce(Value) -> Fut,
-    Fut: Future<Output = Result<Option<Value>>>,
+    Fut: Future<Output = Result<Value>>,
 {
     if seed == [0; 32] {
         return Err(ErrorCode::Unavailable);

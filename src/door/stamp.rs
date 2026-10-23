@@ -124,9 +124,7 @@ where
 /// Obtain one stamp covering `actions` (at most one per community) with ONE confirmation.
 ///
 /// `assertion` performs the one WebAuthn assertion of the wallet passkey for the options it
-/// receives and returns the public credential JSON, or `None` without a prompt when the
-/// wallet session holds the birth grant of a registration (C5: the first stamp is issued
-/// without an assertion; byte-identical stamp, same budget, nonce and holder binding). A pending request of an earlier,
+/// receives and returns the public credential JSON. A pending request of an earlier,
 /// interrupted attempt is dropped first: its nonce was single-use. An unknown issuance outcome
 /// is `Reconcile` and is never retried here.
 pub async fn request_stamp<B, C, E, A, R, G, F, Fut>(
@@ -144,7 +142,7 @@ where
     R: Records,
     G: passport::rand::RngCore + passport::rand::CryptoRng,
     F: FnOnce(Value) -> Fut,
-    Fut: Future<Output = Result<Option<Value>>>,
+    Fut: Future<Output = Result<Value>>,
 {
     if actions.is_empty() {
         return Err(ErrorCode::Unavailable);
@@ -168,14 +166,12 @@ where
     )?;
     super::interrupt::point("stamp-begun");
     super::interrupt::confirmation();
-    let answer = match assertion(options).await? {
-        Some(credential) => {
-            let fields = assertion_fields(credential)?;
-            issuance.issue(request.to_bytes(), fields, now).await
-        }
-        None => issuance.issue_birth(request.to_bytes(), now).await,
-    }
-    .map_err(|_| ErrorCode::Reconcile)?;
+    let credential = assertion(options).await?;
+    let fields = assertion_fields(credential)?;
+    let answer = issuance
+        .issue(request.to_bytes(), fields, now)
+        .await
+        .map_err(|_| ErrorCode::Reconcile)?;
     // The wallet answered; the stamp is not retained yet.
     super::interrupt::point("stamp-answered");
     wallet

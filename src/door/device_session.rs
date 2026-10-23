@@ -106,11 +106,6 @@ impl Door {
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
         let mut rng = cwlt::passport::rand::rngs::OsRng;
-        // An admin session always confirms by assertion: it is never a registration's birth.
-        let assertion = move |options| {
-            let asserted = assertion(options);
-            async move { asserted.await.map(Some) }
-        };
         stamp::request_stamp(issuance, wallet, &actions, assertion, &mut rng).await?;
         let stamp = wallet
             .with_global_passport(|holder| {

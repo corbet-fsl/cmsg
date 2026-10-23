@@ -238,31 +238,6 @@ pub async fn retain_global_initial_enrollment<B: cwst::backend::Backend>(
     clock: &mut impl Clock,
     entropy: &mut impl ckmg::Entropy,
 ) -> Result<InitialEnrollment<B>, EnrollmentError> {
-    let (credential, unlock) = registration.into_parts();
-    let opening = cvlt::PreparedOpen::new(unlock, "wallet")
-        .map_err(|e| EnrollmentError::Vault(cvlt::InitialError::Open(e)))?;
-    retain_global_initial_enrollment_opened(
-        foyer, pending, credential, opening, seed, backend, name, clock, entropy,
-    )
-    .await
-}
-
-/// [`retain_global_initial_enrollment`] with the registration's PRF already held by the
-/// device's unlock (`DeviceUnlock::wallet_opening`): the one-ceremony registration keeps
-/// that unlock for the birth signatures and every vault, so the create ceremony's PRF is
-/// split once and never asked for again. `credential` is the same ceremony's public part.
-#[allow(clippy::too_many_arguments)]
-pub async fn retain_global_initial_enrollment_opened<B: cwst::backend::Backend>(
-    foyer: &cfyr::Foyer<Transport>,
-    pending: cfyr::registration::PendingGlobalInitialRegistration<Transport>,
-    credential: cfyr::passkeys::PublicCredential,
-    opening: cvlt::PreparedOpen,
-    seed: ckmg::EnrollmentSeed,
-    backend: B,
-    name: &str,
-    clock: &mut impl Clock,
-    entropy: &mut impl ckmg::Entropy,
-) -> Result<InitialEnrollment<B>, EnrollmentError> {
     if seed.binding().community() != "wallet"
         || seed.binding().member() != pending.account()
         || seed
@@ -272,6 +247,7 @@ pub async fn retain_global_initial_enrollment_opened<B: cwst::backend::Backend>(
     {
         return Err(EnrollmentError::Vault(cvlt::InitialError::Invalid));
     }
+    let (credential, unlock) = registration.into_parts();
     let id = credential
         .credential_id()
         .map_err(EnrollmentError::Passkey)?;
@@ -294,6 +270,8 @@ pub async fn retain_global_initial_enrollment_opened<B: cwst::backend::Backend>(
         )));
     }
     let bytes = finish.to_bytes().map_err(EnrollmentError::Foyer)?;
+    let opening = cvlt::PreparedOpen::new(unlock, "wallet")
+        .map_err(|e| EnrollmentError::Vault(cvlt::InitialError::Open(e)))?;
     let device = opening
         .device()
         .map_err(|e| EnrollmentError::Vault(cvlt::InitialError::Open(e)))?;
@@ -328,18 +306,6 @@ pub async fn reopen_initial_enrollment<B: cwst::backend::Backend>(
     };
     let opening = cvlt::PreparedOpen::new(unlock, scope)
         .map_err(|e| EnrollmentError::Vault(cvlt::InitialError::Open(e)))?;
-    reopen_initial_enrollment_opened(&id, opening, scope, backend).await
-}
-
-/// [`reopen_initial_enrollment`] from an assertion already split (C7: the restart's ONE
-/// assertion also logs the session in, so its credential goes to the login and only its id
-/// and PRF opening come here). `id` must be the retained original credential.
-pub async fn reopen_initial_enrollment_opened<B: cwst::backend::Backend>(
-    id: &[u8],
-    opening: cvlt::PreparedOpen,
-    scope: &str,
-    backend: B,
-) -> Result<InitialEnrollment<B>, EnrollmentError> {
     let device = opening
         .device()
         .map_err(|e| EnrollmentError::Vault(cvlt::InitialError::Open(e)))?;

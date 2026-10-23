@@ -79,10 +79,7 @@ fn device(
         forum: None,
         record_period_key: None,
     };
-    let keys = composer::DeviceKeys::new(
-        passkeys(&f["wallet"]),
-        f["wallet"]["passkey_origin"].as_str().unwrap(),
-    );
+    let keys = composer::DeviceKeys::new(passkeys(&f["wallet"]));
     (settings, keys)
 }
 
@@ -236,12 +233,11 @@ async fn enroll_open_lose_the_response_reopen_activate_and_repeat_on_the_real_op
 
 /// A restart of a registered device-key member (fresh Door, as `open_native_device_with`
 /// constructs it), with only the wallet passkey: `restore_device_login` does the start's ONE
-/// wallet sign-in with PRF and binds the community Vault and the account actor (C8 A).
+/// wallet sign-in with PRF and retains the community opening.
 async fn restart(
     settings: &composer::DeviceSettings,
-    keys: &mut composer::DeviceKeys<cpky::software::SoftwareAuthenticator>,
-    storage: composer::DeviceStorage<cwst::backend::Memory>,
-    network: initial_network::Nodes,
+    wallet: &mut cpky::Client<cpky::software::SoftwareAuthenticator>,
+    progress: &std::path::Path,
 ) -> (cmsg::door::Door, cmsg::door::ClientToken) {
     use cmsg::door::foyer::{Scope, Sessions};
     let origin = settings.community.origin.as_str();
@@ -256,11 +252,9 @@ async fn restart(
     let community = services.foyer(composer::Service::Community).await.unwrap();
     door.bind_foyer(origin, Role::Member, Sessions::new(Scope::Community, community))
         .unwrap();
-    let before = keys.ceremonies();
-    composer::restore_device_login(&mut door, settings, &mut services, keys, storage, network)
+    composer::restore_device_login(&mut door, settings, &mut services, wallet, progress)
         .await
         .unwrap();
-    assert_eq!(keys.ceremonies(), before + 1, "a registered start is ONE wallet confirmation");
     let actions = BTreeSet::from(["login.start", "login.poll"].map(String::from));
     let token = door
         .pair_client(origin, Role::Member, actions, now(), now() + 1200)
@@ -281,14 +275,15 @@ async fn start_login(door: &mut cmsg::door::Door, origin: &str, token: &cmsg::do
     );
 }
 
-/// d3/d4 + C8 A on the real fixture services: a device-key member (no community passkey)
-/// registers in ONE wallet confirmation; every start is ONE wallet sign-in that binds the
-/// community Vault and the account actor before the app starts, and its login completes by
-/// the device key without a ceremony and without a second recovery. Each interrupted start
-/// only repeats its own one sign-in.
+/// d3/d4 on the real fixture services: a device-key member (no community passkey) registers,
+/// then every start logs in by its device key without a ceremony and recovers its community
+/// vault with the wallet's stamp trust. The login is interrupted after authentication and
+/// again after the Store opened; each restart only repeats its own one wallet sign-in, and no
+/// interrupted step needs anything from the person again. Without the stamp trust the
+/// recovery of the stamp lineage is refused.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_restarted_device_key_member_binds_at_start_and_logs_in_without_a_ceremony() {
-    use cmsg::door::login::Status;
+async fn a_restarted_device_key_member_logs_in_without_a_ceremony_and_recovers_with_its_stamps() {
+    use cmsg::door::{custody, login::Status, ErrorCode};
     tokio::time::timeout(Duration::from_secs(1500), async {
         let f = fixture();
         let config: Value = serde_json::from_slice(
@@ -301,50 +296,117 @@ async fn a_restarted_device_key_member_binds_at_start_and_logs_in_without_a_cere
             .join(format!("device-login-{}-{}", std::process::id(), now()));
         std::fs::create_dir_all(&directory).unwrap();
         let progress = directory.join("composer.json");
-        let global = cwst::backend::Memory::new();
         let community = cwst::backend::Memory::new();
         let network = initial_network::Nodes::new();
-        let storage = || composer::DeviceStorage {
-            global: global.clone(),
-            community: community.clone(),
-            progress: Some(progress.clone()),
-        };
         let registered = composer::compose_native_device(
             &settings,
             &mut Gated(composer::NativeServices(&settings)),
             &mut keys,
-            storage(),
+            composer::DeviceStorage {
+                global: cwst::backend::Memory::new(),
+                community: community.clone(),
+                progress: Some(progress.clone()),
+            },
             network.clone(),
         )
         .await
         .unwrap();
-        assert_eq!(keys.ceremonies(), 1, "a fresh registration is ONE wallet confirmation");
         drop(registered); // The registering process ends.
         let origin = settings.community.origin.clone();
         let origin = origin.as_str();
 
-        // Start 1: bound at start, authenticated without a ceremony, interrupted before the
-        // start restore took its binding.
-        let (mut door, token) = restart(&settings, &mut keys, storage(), network.clone()).await;
+        // Start 1: authenticated without a ceremony, then interrupted before custody.
+        let (mut door, token) = restart(&settings, &mut keys.global, &progress).await;
         start_login(&mut door, origin, &token).await;
         drop(door);
 
-        // Start 2: the start restore takes the eager binding once and never recovers again;
-        // the retained login serves only its transport; the login completes.
-        let (mut door, token) = restart(&settings, &mut keys, storage(), network.clone()).await;
+        // Start 2: the retained login carries the stamp trust; a recovery without it refuses
+        // the member's stamp lineage. The attempt is abandoned (an interruption).
+        let (mut door, token) = restart(&settings, &mut keys.global, &progress).await;
         start_login(&mut door, origin, &token).await;
-        assert!(door.take_eager_binding(origin).is_some());
-        assert!(door.take_eager_binding(origin).is_none(), "taken once");
-        let (_, _, stamps) = door
+        let (prepared, binding, stamps) = door
             .prepare_login_recovery(origin, &token, now())
             .await
             .unwrap();
         assert!(stamps.is_some(), "a device-key login retains the stamp trust");
+        let (authority, _) = door
+            .transport_authority(origin, binding.clone(), prepared.device().unwrap(), custody::SystemClock)
+            .unwrap();
+        let member = door.member_authority_builder(origin, &authority).unwrap();
+        assert!(matches!(
+            door.recover_login_vault(
+                origin,
+                prepared,
+                &binding,
+                None,
+                member,
+                network.clone(),
+                community.clone(),
+                now(),
+            )
+            .await,
+            Err(ErrorCode::Unauthorized)
+        ));
+        drop(door);
+
+        // Start 3: recovered with the stamps, interrupted after the Store opened.
+        let (mut door, token) = restart(&settings, &mut keys.global, &progress).await;
+        start_login(&mut door, origin, &token).await;
+        let (prepared, binding, stamps) = door
+            .prepare_login_recovery(origin, &token, now())
+            .await
+            .unwrap();
+        let (authority, _) = door
+            .transport_authority(origin, binding.clone(), prepared.device().unwrap(), custody::SystemClock)
+            .unwrap();
+        let member = door.member_authority_builder(origin, &authority).unwrap();
+        let restored = door
+            .recover_login_vault(
+                origin,
+                prepared,
+                &binding,
+                stamps,
+                member,
+                network.clone(),
+                community.clone(),
+                now(),
+            )
+            .await
+            .unwrap();
+        drop(restored);
+        drop(door);
+
+        // Start 4: the same login completes: Vault bound, login complete.
+        let (mut door, token) = restart(&settings, &mut keys.global, &progress).await;
+        start_login(&mut door, origin, &token).await;
+        let (prepared, binding, stamps) = door
+            .prepare_login_recovery(origin, &token, now())
+            .await
+            .unwrap();
+        let (authority, _) = door
+            .transport_authority(origin, binding.clone(), prepared.device().unwrap(), custody::SystemClock)
+            .unwrap();
+        let member = door.member_authority_builder(origin, &authority).unwrap();
+        let restored = door
+            .recover_login_vault(
+                origin,
+                prepared,
+                &binding,
+                stamps,
+                member,
+                network.clone(),
+                community.clone(),
+                now(),
+            )
+            .await
+            .unwrap();
+        door.bind_vault_with_board_owner(origin, restored.vault, restored.intent, restored.lifetime)
+            .await
+            .unwrap();
         assert_eq!(
             door.complete_login_recovery(origin, &token, now()).await,
             Ok(Status::Complete)
         );
-        assert_eq!(keys.ceremonies(), 3, "one registration, one confirmation per start");
     })
     .await
     .expect("bounded device-key restarts");

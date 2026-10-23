@@ -126,16 +126,6 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                             request.binding.member(),
                             now,
                         ),
-                        // A one-ceremony registration's wallet lineage (C4): its birth genesis
-                        // evidence names exactly the lease's passkey credential and this device
-                        // key; the passkey certificate does not reauthorize it.
-                        None if candidate.evidence().is_birth() => candidate.reauthorize_birth(
-                            current,
-                            request.binding.member(),
-                            &credential,
-                            &request.device,
-                            now,
-                        ),
                         None => candidate.reauthorize(
                             current,
                             &certificate,

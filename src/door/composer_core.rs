@@ -34,9 +34,6 @@ pub enum Service {
 /// their own on `global` while a composition holds it.
 pub struct DeviceKeys<A: cfyr::passkeys::Authenticator> {
     pub global: Client<A>,
-    /// The wallet passkey origin as the device signs it in its birth signatures (the ASCII
-    /// serialization of `global`'s configured origin: scheme, host, port; no path).
-    signed_origin: String,
     used: u32,
     budget: u32,
 }
@@ -46,26 +43,16 @@ pub struct DeviceKeys<A: cfyr::passkeys::Authenticator> {
 /// holds the wallet passport, and the community sessions open by the device key.
 pub const REGISTERED_CONFIRMATIONS: u32 = 1;
 
-/// The most wallet ceremonies a registration (fresh or resumed at any marker) starts: ONE.
-/// A fresh registration is the create ceremony alone: `register_finish` returns the birth
-/// session (C1), the wallet device binds by the device key's own signature (C3), the wallet
-/// lineage's genesis evidence is the wallet-signed birth statement (C4), the passport and the
-/// join stamp are issued under the birth grant (Q5, C5), and the companion is a fork of the
-/// birth session (C6). A restart at any marker is ONE assertion that both reopens the retained
-/// enrollment and logs the session in (C7). An authenticator that gives no PRF at create
-/// answers one follow-up assertion inside the same confirmation (cpky `register_member`; J1:
-/// two platform prompts, one confirmation of this budget).
-pub const REGISTRATION_CONFIRMATIONS: u32 = 1;
+/// The most wallet ceremonies a registration (fresh or resumed at any marker) starts on the
+/// current wallet protocol: registration (create with PRF), wallet login, the device
+/// authorization step-up, the wallet lineage's passkey evidence, the second wallet session
+/// (the passport's recovery lease holds the first for the device's life) and the join stamp.
+pub const REGISTRATION_CONFIRMATIONS: u32 = 6;
 
 impl<A: cfyr::passkeys::Authenticator> DeviceKeys<A> {
-    /// `passkey_origin` is the origin `global`'s passkey context was built with.
-    pub fn new(global: Client<A>, passkey_origin: &str) -> Self {
-        let signed_origin = url::Url::parse(passkey_origin)
-            .map(|url| url.origin().ascii_serialization())
-            .unwrap_or_else(|_| passkey_origin.to_owned());
+    pub fn new(global: Client<A>) -> Self {
         Self {
             global,
-            signed_origin,
             used: 0,
             budget: u32::MAX,
         }
@@ -416,55 +403,59 @@ pub(crate) async fn login<A: cfyr::passkeys::Authenticator>(
     Ok(unlock)
 }
 
-/// The wallet companion: a sibling of the live wallet session `api` in the same family (cvld
-/// `session_fork`, no ceremony). The passport's recovery lease holds the wallet Door's session
-/// for the device's life, so the passport issue, the join stamp and the creation channel lent
-/// to the community Door use this one. Both end together (logout, revocation, deadline).
-pub(crate) async fn wallet_sibling<S: Services>(
+/// A second wallet session (one counted ceremony): the passport's recovery lease holds the
+/// wallet Door's session for the device's life, so the passport issue, the join stamp and a
+/// lent creation channel need their own.
+pub(crate) async fn wallet_companion<A, S>(
     services: &mut S,
-    api: &mut Foyer<Transport>,
-) -> Result<Foyer<Transport>, ComposeError> {
-    let mut sibling = services.foyer(Service::Global).await?;
-    api.fork_into(&mut sibling)
-        .await
-        .map_err(step("wallet session"))?;
-    Ok(sibling)
+    keys: &mut DeviceKeys<A>,
+) -> Result<Foyer<Transport>, ComposeError>
+where
+    A: cfyr::passkeys::Authenticator,
+    S: Services,
+{
+    let mut api = services.foyer(Service::Global).await?;
+    drop(login(&mut api, keys.confirm("wallet session")?).await?);
+    Ok(api)
 }
 
-/// C3: bind the account's first wallet device `device` (K) by K's own signature over
-/// (WalletBirthDevice, origin, account, credential, seed commitment, K), under the birth grant
-/// of `api`'s session (the registration's birth session or the restart's login). The server
-/// rebuilds the payload from its own records; `signed_origin` is the wallet passkey origin.
-pub(crate) async fn birth_device(
+/// A fresh user-verifying assertion for exactly one action (`step_up`).
+pub(crate) async fn authorize_device<A: cfyr::passkeys::Authenticator, S: Services>(
+    services: &mut S,
     api: &mut Foyer<Transport>,
-    origin: &str,
-    signed_origin: &str,
-    seed: [u8; 32],
-    device: ckmg::PublicKey,
-    unlock: &super::unlock_once::DeviceUnlock,
+    keys: &mut Client<A>,
+    wallet: bool,
+    device: &ckmg::PublicKey,
 ) -> Result<(), ComposeError> {
-    let mut wallet = api
-        .live_global_wallet(origin.into())
-        .observe_lease(now)
+    let begin = api
+        .call(
+            "step_up_begin",
+            json!({"action": {"kind":"device_authorize","key":device.value()}}),
+        )
         .await
         .map_err(step("device authorize"))?;
-    let payload = ckmg::wallet_birth_device_payload(
-        signed_origin,
-        wallet.user().map_err(step("device authorize"))?,
-        wallet.credential_id().map_err(step("device authorize"))?,
-        &seed,
-        device.value(),
-    )
-    .map_err(step("device authorize"))?;
-    let signature = unlock
-        .wallet_opening()
+    let (credential, _) = keys
+        .sign_in(begin["options"].clone())
+        .await
         .map_err(step("device authorize"))?
-        .sign_device(ckmg::DevicePurpose::WalletBirthDevice, &payload)
-        .map_err(step("device authorize"))?;
-    wallet
-        .authorize_birth_device(*device.value(), signature, now)
+        .into_parts();
+    guard(api, credential.as_json())?;
+    let body = json!({
+        "key": device.value(),
+        "step_up": {"ceremony": begin["ceremony"], "credential": credential.into_json()},
+    });
+    let action = if wallet {
+        "wallet_device_authorize"
+    } else {
+        "device_authorize"
+    };
+    api.call(action, body)
         .await
-        .map_err(step("device authorize"))
+        .map_err(step("device authorize"))?;
+    if wallet {
+        services.wallet_authorized(api).await?;
+    }
+    Ok(())
 }
 
 /// What a fresh registration needs beyond the vault.
@@ -478,16 +469,11 @@ pub(crate) enum Entry {
 pub(crate) struct Driven {
     door: Door,
     policy: &'static mut Policy,
-    /// The PRF unlock of this start's one confirmation (the registration's create, the
-    /// restart's assertion or the registered login): the composition's unlock for every vault
-    /// and the signer of the birth signatures.
-    unlock: Option<super::unlock_once::DeviceUnlock>,
+    /// The PRF unlock of the wallet login (the composition's unlock for every vault).
+    unlock: Option<cfyr::passkeys::UnlockSecret>,
     /// The wallet's stamp trust, read over this session before any lease holds it (a
-    /// registered wallet only; a registration reads it over the companion).
+    /// registered wallet only; a registration reads it over the second session).
     stamps: Option<cvlt::StampTrust>,
-    /// The wallet companion (`wallet_sibling`), forked before the Door takes this session;
-    /// `None` for a community lineage.
-    companion: Option<Foyer<Transport>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -518,64 +504,38 @@ where
         .is_some();
     let mut stage = resume_stage(progress.stage(wallet), vault_held || progress.value.restored)?;
 
-    // Registration (fresh) or reopening of the retained enrollment. Every path below has ONE
-    // wallet confirmation: the create, the restart's assertion, or the registered login.
+    // Registration (fresh) or reopening of the retained enrollment.
     let mut enrollment: Option<custody::InitialEnrollment<B>> = None;
-    let mut unlock: Option<super::unlock_once::DeviceUnlock> = None;
-    // The restart's credential id, for reopening an activated creation.
-    let mut credential: Option<Vec<u8>> = None;
     if stage == Stage::Fresh {
         let entry = entry.ok_or(ComposeError::Inconsistent("registration entry"))?;
-        let (retained, opened) = register(
-            &mut api,
-            entry,
-            keys.confirm("register")?,
-            backend.clone(),
-            &mut clock,
-            &mut entropy,
-        )
-        .await?;
-        enrollment = Some(retained);
-        unlock = Some(opened);
+        enrollment = Some(
+            register(
+                &mut api,
+                entry,
+                keys.confirm("register")?,
+                backend.clone(),
+                &mut clock,
+                &mut entropy,
+            )
+            .await?,
+        );
         progress.advance(wallet, Stage::Retained).await?;
         stage = Stage::Retained;
-    } else if stage < Stage::Done {
-        // C7: one assertion reopens the retained enrollment (its PRF) and, from Finished on,
-        // logs the session in (a wallet login: the birth grant's user verification).
+    } else if stage < Stage::Activated {
         let challenge = api.begin_browser_login().await.map_err(step("reopen"))?;
-        let (public, vault) = keys
+        let authentication = keys
             .confirm("reopen")?
             .sign_in(challenge.options)
             .await
-            .map_err(step("reopen"))?
-            .into_parts();
-        let id = public.credential_id().map_err(step("reopen"))?;
-        let cfyr::passkeys::VaultOutcome::Ready(secret) = vault else {
-            return Err(ComposeError::Inconsistent("the authenticator gave no PRF"));
-        };
-        let opened = super::unlock_once::DeviceUnlock::from_unlock(secret);
-        if stage >= Stage::Finished {
-            guard(&mut api, public.as_json())?;
-            api.finish_browser_login(challenge.ceremony, public)
-                .await
-                .map_err(step("login"))?;
+            .map_err(step("reopen"))?;
+        match custody::reopen_initial_enrollment(authentication, scope, backend.clone()).await {
+            Ok(opened) => enrollment = Some(opened),
+            // Activation may have landed before its marker: the creation is then the owner.
+            Err(_) if stage == Stage::Authorized => stage = Stage::Activated,
+            Err(e) => return Err(step("reopen enrollment")(e)),
         }
-        if stage < Stage::Activated {
-            let opening = opened.wallet_opening().map_err(step("reopen"))?;
-            match custody::reopen_initial_enrollment_opened(&id, opening, scope, backend.clone())
-                .await
-            {
-                Ok(reopened) => enrollment = Some(reopened),
-                // Activation may have landed before its marker: the creation is then the owner.
-                Err(_) if stage == Stage::Authorized => stage = Stage::Activated,
-                Err(e) => return Err(step("reopen enrollment")(e)),
-            }
-        }
-        credential = Some(id);
-        unlock = Some(opened);
     }
     if let (Some(retained), Stage::Retained) = (&enrollment, stage) {
-        // C1: the finish answers with the birth session; the Foyer adopts it (no login).
         retained
             .resume_finish(&mut api, now)
             .await
@@ -583,44 +543,42 @@ where
         progress.advance(wallet, Stage::Finished).await?;
         stage = Stage::Finished;
     }
-    if stage == Stage::Done {
+    let mut unlock = None;
+    if stage >= Stage::Finished {
         if let cfyr::passkeys::VaultOutcome::Ready(secret) =
             login(&mut api, keys.confirm("login")?).await?
         {
-            unlock = Some(super::unlock_once::DeviceUnlock::from_unlock(secret));
+            unlock = Some(secret);
         }
     }
     if let (Some(retained), Stage::Finished) = (&enrollment, stage) {
-        // C3: the account's first wallet device binds by that device key's own signature
-        // under the birth grant; no step-up.
-        let opened = unlock
-            .as_ref()
-            .ok_or(ComposeError::Inconsistent("the authenticator gave no PRF"))?;
-        birth_device(
+        authorize_device(
+            services,
             &mut api,
-            origin,
-            &keys.signed_origin,
-            retained.seed().map_err(step("device authorize"))?,
-            retained.device(),
-            opened,
+            keys.confirm("device authorize")?,
+            wallet,
+            &retained.device(),
         )
         .await?;
-        if wallet {
-            services.wallet_authorized(&mut api).await?;
-        }
         progress.advance(wallet, Stage::Authorized).await?;
         stage = Stage::Authorized;
     }
 
-    let stamps = if wallet && stage == Stage::Done {
-        Some(stamp_trust(&api, origin).await?)
+    // The sign-in that reopens an activated creation must be made before the Foyer moves
+    // into the Door.
+    let reopening = if stage == Stage::Activated {
+        let challenge = api.begin_browser_login().await.map_err(step("reopen"))?;
+        Some(
+            keys.confirm("reopen")?
+                .sign_in(challenge.options)
+                .await
+                .map_err(step("reopen"))?,
+        )
     } else {
         None
     };
-    // The companion is forked while this session is still free: once bound, the passport's
-    // recovery lease holds it.
-    let companion = if wallet {
-        Some(wallet_sibling(services, &mut api).await?)
+    let stamps = if wallet && stage == Stage::Done {
+        Some(stamp_trust(&api, origin).await?)
     } else {
         None
     };
@@ -649,7 +607,6 @@ where
             policy,
             unlock,
             stamps,
-            companion,
         });
     }
 
@@ -660,18 +617,12 @@ where
             .map_err(step("activate"))?;
         progress.advance(wallet, Stage::Activated).await?;
         created
-    } else if let (Some(id), Some(opened)) = (&credential, &unlock) {
+    } else if let Some(authentication) = reopening {
         let held = lease(&door, origin, wallet, &mut *policy).await?;
-        custody::reopen_initial_publication_opened(
-            id,
-            custody::Opening::Opened(opened.wallet_opening().map_err(step("reopen"))?),
-            held,
-            backend.clone(),
-            &mut clock,
-        )
-        .await
-        .map_err(step("reopen publication"))?
-        .0
+        custody::reopen_initial_publication(authentication, held, backend.clone(), &mut clock)
+            .await
+            .map_err(step("reopen publication"))?
+            .0
     } else {
         return Err(ComposeError::Inconsistent("no owner for the lineage"));
     };
@@ -679,20 +630,17 @@ where
     let verifier = || cdht::NetworkBackend::new(network.clone(), LineageVerifier);
     let mut phase = creation.phase().map_err(step("phase"))?;
     if phase == cvlt::InitialPhase::Pending {
-        // C4: the wallet's birth statement is the genesis evidence; no passkey prompt.
         let held = lease(&door, origin, wallet, &mut *policy).await?;
-        let birth = companion
-            .as_ref()
-            .ok_or(ComposeError::Inconsistent("a wallet lineage without its companion"))?
-            .live_global_wallet(origin.into())
-            .observe_lease(now)
-            .await
-            .map_err(step("prepare publication"))?;
-        let prepared =
-            custody::prepare_birth_publication(creation, held, birth, &mut clock, &mut entropy)
+        let (prepared, held) =
+            custody::prepare_initial_publication(
+                creation,
+                held,
+                keys.confirm("lineage evidence")?,
+                &mut clock,
+                &mut entropy,
+            )
                 .await
                 .map_err(step("prepare publication"))?;
-        let held = lease(&door, origin, wallet, &mut *policy).await?;
         creation = custody::retain_initial_publication(prepared, held, &mut clock)
             .await
             .map_err(step("retain publication"))?;
@@ -752,7 +700,6 @@ where
         policy,
         unlock,
         stamps,
-        companion,
     })
 }
 
@@ -763,7 +710,7 @@ pub(crate) async fn register<A, B>(
     backend: B,
     clock: &mut SystemClock,
     entropy: &mut ckmg::SystemEntropy,
-) -> Result<(custody::InitialEnrollment<B>, super::unlock_once::DeviceUnlock), ComposeError>
+) -> Result<custody::InitialEnrollment<B>, ComposeError>
 where
     A: cfyr::passkeys::Authenticator,
     B: cwst::backend::Backend,
@@ -785,19 +732,14 @@ where
                 .continue_initial(api, commitment, now)
                 .await
                 .map_err(step("register"))?;
-            let (credential, secret) = keys
+            let registration = keys
                 .register_member(pending.options().clone())
                 .await
-                .map_err(step("register"))?
-                .into_parts();
-            // The create ceremony's PRF is this start's unlock: it opens the wallet vault, derives
-            // every community vault and signs the birth signatures. Never asked for again.
-            let unlock = super::unlock_once::DeviceUnlock::from_unlock(secret);
-            let retained = custody::retain_global_initial_enrollment_opened(
+                .map_err(step("register"))?;
+            custody::retain_global_initial_enrollment(
                 api,
                 pending,
-                credential,
-                unlock.wallet_opening().map_err(step("retain"))?,
+                registration,
                 seed,
                 backend,
                 "original-wallet",
@@ -805,8 +747,7 @@ where
                 entropy,
             )
             .await
-            .map_err(step("retain"))?;
-            Ok((retained, unlock))
+            .map_err(step("retain"))
         }
     }
 }
@@ -876,12 +817,11 @@ pub(crate) async fn drive_device<A, B, N, S, P, WB, WC, WE, WA, WR>(
     origin: &str,
     member: Option<String>,
     open: &dyn Fn() -> Result<cvlt::PreparedOpen, ComposeError>,
-    wallet_api: &Foyer<Transport>,
+    wallet_api: Option<&Foyer<Transport>>,
     stamps: &cvlt::StampTrust,
     wallet_origin: &str,
     wallet: &mut super::passport::GlobalPassport<WB, WC, WE, WA, WR>,
     wallet_keys: &mut DeviceKeys<A>,
-    birth: bool,
     backend: B,
     network: &N,
     progress: &mut ProgressFile<P>,
@@ -961,12 +901,11 @@ where
                     .lineage_genesis_action(gsalt)
                     .map_err(step("genesis action"))?;
                 let seed = enrollment.seed().map_err(step("join"))?;
-                // The join's wallet confirmation: none under a registration's birth grant (C5),
-                // else a wallet passkey assertion for the stamp.
+                let wallet_api = wallet_api.ok_or(ComposeError::Inconsistent(
+                    "a join without a wallet session",
+                ))?;
+                // The join's wallet confirmation: a wallet passkey assertion for the stamp.
                 let assertion = |options: Value| async move {
-                    if birth {
-                        return Ok(None);
-                    }
                     let (credential, _) = wallet_keys
                         .confirm("join stamp")
                         .map_err(|_| super::ErrorCode::Refused)?
@@ -974,7 +913,7 @@ where
                         .await
                         .map_err(|_| super::ErrorCode::Refused)?
                         .into_parts();
-                    Ok(Some(credential.as_json().clone()))
+                    Ok(credential.as_json().clone())
                 };
                 let user = super::device_join::join(
                     &mut api,
@@ -1309,9 +1248,9 @@ pub(crate) struct Composed<B: cwst::backend::Backend + 'static, N: cdht::Network
     pub(crate) door: Door,
     /// The wallet Door: the global passport's recovery lease holds its session.
     pub(crate) wallet_door: Door,
-    /// The wallet companion, a sibling of the wallet Door's session (passport issue, join
-    /// stamp, the creation channel lent to the community Door).
-    pub(crate) global_companion: Foyer<Transport>,
+    /// The independent wallet session of a registration (passport issue, join stamp); `None`
+    /// on a registered device's start, whose one confirmation opened only the wallet Door's.
+    pub(crate) global_companion: Option<Foyer<Transport>>,
     pub(crate) owner: MemberOwner<B, N>,
     pub(crate) account: custody::AccountWiring,
     /// The account actor's admission (a second session of the same device key).
@@ -1319,113 +1258,6 @@ pub(crate) struct Composed<B: cwst::backend::Backend + 'static, N: cdht::Network
     pub(crate) actor_policy: Policy,
     pub(crate) global: WalletPassport<B, N>,
     pub(crate) device: ckmg::PublicKey,
-}
-
-/// The community account a composition bound to its Door (step 5).
-pub(crate) struct CommunityBound<B: cwst::backend::Backend + 'static, N: cdht::Network + 'static> {
-    pub(crate) owner: MemberOwner<B, N>,
-    pub(crate) account: custody::AccountWiring,
-    /// The account actor's admission (a second session of the same device key).
-    pub(crate) actor_membership: cfyr::membership::LiveMembership<Transport>,
-    pub(crate) actor_policy: Policy,
-    pub(crate) device: ckmg::PublicKey,
-}
-
-/// Step 5 of every device composition, shared by a registration (`compose_device`) and every
-/// start of a registered device (`restore_device_login`, C8 A): recover the community vault
-/// from the wallet unlock, hold its initial-creation lease on a third session of the device
-/// key, open the member vault with the accounting intents and bind it to `door`. `companion`
-/// is the community session (by the device key) the account actor admits through. No
-/// ceremony: every session opens by the device key's session signature.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn bind_community<S, B, N>(
-    services: &mut S,
-    door: &mut Door,
-    names: Names<'_>,
-    unlock: &super::unlock_once::DeviceUnlock,
-    fingerprint: &[u8; 32],
-    user: &str,
-    companion: Foyer<Transport>,
-    stamps: &cvlt::StampTrust,
-    community_network: N,
-    community_storage: B,
-) -> Result<CommunityBound<B, N>, ComposeError>
-where
-    S: Services,
-    B: cwst::backend::Backend + Clone + 'static,
-    N: cdht::Network + Clone + 'static,
-{
-    let Names {
-        community_origin,
-        community_name,
-        ..
-    } = names;
-    // The vault opens from the wallet unlock; its stamp genesis is reauthorized at every check.
-    let (device, recovered) = recover(
-        unlock
-            .community_opening(fingerprint, community_name)
-            .map_err(step("community opening"))?,
-        &community_network,
-    )
-    .await?;
-    // The recovery lease holds its session for the device's life: it gets a third session of
-    // the same device key, so the Door's own session stays free for owner actions (creation
-    // claim, vouching), as the wallet Door lends its companion for creation.
-    let mut vault_session = services.foyer(Service::Community).await?;
-    {
-        let opening = unlock
-            .community_opening(fingerprint, community_name)
-            .map_err(step("community opening"))?;
-        super::device_join::open_session(
-            &mut vault_session,
-            community_name,
-            user,
-            &device,
-            &mut session_signer(&opening),
-        )
-        .await
-        .map_err(step("device session"))?;
-    }
-    // The companion session outlives this call: the account actor admits through it.
-    let companion: &'static Foyer<Transport> = Box::leak(Box::new(companion));
-    let actor_membership = companion.live_membership();
-    let actor_policy = companion.current_policy();
-    let vault_session: &'static Foyer<Transport> = Box::leak(Box::new(vault_session));
-    let vault_policy: &'static mut Policy = Box::leak(Box::new(vault_session.current_policy()));
-    let held = vault_session
-        .live_membership()
-        .observe_lease(now)
-        .await
-        .map_err(step("lease_observe"))?
-        .device_initial_creation(vault_policy, now)
-        .await
-        .map_err(step("lease_creation"))?;
-    let owners =
-        custody::prepare_device_initial_recovery(recovered, held, community_network.clone(), stamps)
-            .await
-            .map_err(step("community recovery"))?;
-    // One owner per Store: the Door holds the community Vault (voucher custody,
-    // community creation, ...) and the account actor works through its port.
-    let custody::ComposedMemberVault {
-        vault,
-        intent,
-        account,
-        lifetime,
-    } = owners
-        .open_member_vault(community_network, community_storage)
-        .await
-        .map_err(step("community vault"))?;
-    let owner = door
-        .bind_vault_with_board_owner(community_origin, vault, intent, lifetime)
-        .await
-        .map_err(step("bind vault"))?;
-    Ok(CommunityBound {
-        owner,
-        account,
-        actor_membership,
-        actor_policy,
-        device,
-    })
 }
 
 /// The names a composition needs: the two service origins and the community name.
@@ -1472,9 +1304,6 @@ where
     // A registered device's start has ONE wallet confirmation; a registration at most
     // REGISTRATION_CONFIRMATIONS. Nothing over the budget is ever prompted.
     keys.limit(confirmation_budget(progress));
-    // A registration (any marker short of a registered start) issues its passport and join
-    // stamp under the birth grant of its one confirmation (Q5, C5), without an assertion.
-    let birth = confirmation_budget(progress) == REGISTRATION_CONFIRMATIONS;
 
     // 1-2. The wallet lineage.
     let api = services.foyer(Service::Global).await?;
@@ -1483,7 +1312,6 @@ where
         policy,
         unlock,
         stamps,
-        companion,
     } = drive(
         services,
         api,
@@ -1503,7 +1331,9 @@ where
     // 3. Restore the global holder and make sure it holds one real passport.
     // The wallet login's PRF unlock opens the wallet vault and derives every community vault
     // (unlock once): no community passkey and no second unlock ceremony exist.
-    let unlock = unlock.ok_or(ComposeError::Inconsistent("the authenticator gave no PRF"))?;
+    let unlock = super::unlock_once::DeviceUnlock::from_unlock(
+        unlock.ok_or(ComposeError::Inconsistent("the authenticator gave no PRF"))?,
+    );
     let (_, recovered) = recover(
         unlock.wallet_opening().map_err(step("restore"))?,
         &network,
@@ -1524,16 +1354,25 @@ where
             .await,
         Ok(true)
     );
-    // The wallet companion, forked from the login before the lease held it: the passport issue,
-    // the join stamp and a stamp trust not yet read use it, without a ceremony of their own.
-    let mut global_companion =
-        companion.ok_or(ComposeError::Inconsistent("a wallet lineage without its companion"))?;
-    let stamps = match stamps {
-        Some(stamps) => stamps,
-        None => stamp_trust(&global_companion, global_origin).await?,
+    // The second wallet session only where a step needs one beside the passport's lease: a
+    // passport issue, a community join not yet applied, or a stamp trust not yet read.
+    let mut global_companion = if !holds
+        || progress.value.community_user.is_none()
+        || stamps.is_none()
+    {
+        Some(wallet_companion(services, keys).await?)
+    } else {
+        None
+    };
+    let stamps = match (stamps, global_companion.as_ref()) {
+        (Some(stamps), _) => stamps,
+        (None, Some(companion)) => stamp_trust(companion, global_origin).await?,
+        (None, None) => return Err(ComposeError::Inconsistent("no wallet stamp trust")),
     };
     if !holds {
         let issuance = global_companion
+            .as_mut()
+            .ok_or(ComposeError::Inconsistent("a passport issue without a wallet session"))?
             .live_global_wallet(global_origin.into())
             .observe_lease(now)
             .await
@@ -1541,15 +1380,9 @@ where
             .passport_challenge(now)
             .await
             .map_err(step("passport"))?;
-        let signer = if birth {
-            Some(unlock.wallet_opening().map_err(step("passport issue"))?)
-        } else {
-            None
-        };
-        super::passport::issue_global_passport_with(
+        super::passport::issue_global_passport(
             issuance,
             &mut global,
-            signer.as_ref(),
             &mut cwlt::passport::rand::rngs::OsRng,
         )
         .await
@@ -1688,12 +1521,11 @@ where
         community_origin,
         member,
         &open,
-        &global_companion,
+        global_companion.as_ref(),
         &stamps,
         global_origin,
         &mut global,
         keys,
-        birth,
         community_storage.clone(),
         &community_network,
         progress,
@@ -1701,28 +1533,66 @@ where
     .await?;
     let mut door = door;
 
-    // 5. Recover the community account with the accounting intents (shared with the open
-    //    path's restore_device_login, C8 A).
-    let CommunityBound {
-        owner,
-        account,
-        actor_membership,
-        actor_policy,
-        device,
-    } = bind_community(
-        services,
-        &mut door,
-        names,
-        &unlock,
-        &fingerprint,
-        &user,
-        companion,
-        &stamps,
-        community_network,
-        community_storage,
+    // 5. Recover the community account with the accounting intents. The vault opens from the
+    //    wallet unlock; its stamp genesis is reauthorized at every check.
+    let (device, recovered) = recover(
+        unlock
+            .community_opening(&fingerprint, community_name)
+            .map_err(step("community opening"))?,
+        &community_network,
     )
     .await?;
+    // The recovery lease holds its session for the device's life: it gets a third session of
+    // the same device key, so the Door's own session stays free for owner actions (creation
+    // claim, vouching), as the wallet Door lends its companion for creation.
+    let mut vault_session = services.foyer(Service::Community).await?;
+    {
+        let opening = unlock
+            .community_opening(&fingerprint, community_name)
+            .map_err(step("community opening"))?;
+        super::device_join::open_session(
+            &mut vault_session,
+            community_name,
+            &user,
+            &device,
+            &mut session_signer(&opening),
+        )
+        .await
+        .map_err(step("device session"))?;
+    }
     drop(unlock);
+    // The companion session outlives this call: the account actor admits through it.
+    let companion: &'static Foyer<Transport> = Box::leak(Box::new(companion));
+    let actor_membership = companion.live_membership();
+    let actor_policy = companion.current_policy();
+    let vault_session: &'static Foyer<Transport> = Box::leak(Box::new(vault_session));
+    let vault_policy: &'static mut Policy = Box::leak(Box::new(vault_session.current_policy()));
+    let held = vault_session
+        .live_membership()
+        .observe_lease(now)
+        .await
+        .map_err(step("lease_observe"))?
+        .device_initial_creation(vault_policy, now)
+        .await
+        .map_err(step("lease_creation"))?;
+    let owners = custody::prepare_device_initial_recovery(recovered, held, community_network.clone(), &stamps)
+        .await
+        .map_err(step("community recovery"))?;
+    // One owner per Store: the Door holds the community Vault (voucher custody,
+    // community creation, ...) and the account actor works through its port.
+    let custody::ComposedMemberVault {
+        vault,
+        intent,
+        account,
+        lifetime,
+    } = owners
+        .open_member_vault(community_network, community_storage)
+        .await
+        .map_err(step("community vault"))?;
+    let owner = door
+        .bind_vault_with_board_owner(community_origin, vault, intent, lifetime)
+        .await
+        .map_err(step("bind vault"))?;
     Ok(Composed {
         door,
         wallet_door,
