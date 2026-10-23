@@ -35,6 +35,20 @@ pub struct NativeDeployment {
 pub type DeviceSetup =
     Box<dyn for<'a> FnOnce(&'a mut Door) -> LocalBoxFuture<'a, Result<()>> + Send>;
 
+/// Builds the whole Door on the Door's own thread: for a registered device whose community
+/// Foyer (fingerprint-anchored, started trust) only the embedder's services can build. It grants
+/// no custody; that still begins at login.
+pub type DoorBuilder = Box<dyn FnOnce() -> LocalBoxFuture<'static, Result<Door>> + Send>;
+
+/// Where the Door of a native start comes from.
+pub(super) enum DoorSource {
+    /// Built from the runtime configuration; the setup lends what only the embedder can.
+    Runtime(Option<DeviceSetup>),
+    /// Built by the embedder; the runtime configuration then carries only the checked identity
+    /// (origin, role, community) and the Forum.
+    Built(DoorBuilder),
+}
+
 /// Original public Tor network with explicit resource budgets and local paths.
 /// Private network overrides belong to trusted fixture construction, not JSON.
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
@@ -64,6 +78,13 @@ pub struct TorDeployment {
     #[serde(skip)]
     #[schemars(skip)]
     private_network: Option<arti_client::config::TorClientConfigBuilder>,
+    /// Trusted fixture construction only: where the restoring composer writes this node's own
+    /// signed PeerInfo once its network is up, so a harness can hand it to the next device as
+    /// `bootstrap`. Never read from JSON; the advertisement is public by design.
+    #[cfg(feature = "private-tor-fixture")]
+    #[serde(skip)]
+    #[schemars(skip)]
+    advertisement_file: Option<PathBuf>,
 }
 
 #[cfg(feature = "private-tor-fixture")]
@@ -77,6 +98,12 @@ impl TorDeployment {
         self.private_network = Some(network);
         self
     }
+
+    /// Have the restoring composer write its signed PeerInfo to `file` after its network starts.
+    pub fn with_advertisement_file(mut self, file: PathBuf) -> Self {
+        self.advertisement_file = Some(file);
+        self
+    }
 }
 
 #[cfg(feature = "private-tor-fixture")]
@@ -88,6 +115,13 @@ impl NativeDeployment {
     ) -> Result<Self> {
         let tor = self.native_tor.take().ok_or(ErrorCode::InvalidRequest)?;
         self.native_tor = Some(tor.with_private_network(network));
+        Ok(self)
+    }
+
+    /// See [`TorDeployment::with_advertisement_file`]; refused when no native Tor is configured.
+    pub fn with_advertisement_file(mut self, file: PathBuf) -> Result<Self> {
+        let tor = self.native_tor.take().ok_or(ErrorCode::InvalidRequest)?;
+        self.native_tor = Some(tor.with_advertisement_file(file));
         Ok(self)
     }
 
@@ -123,14 +157,15 @@ impl NativeDeployment {
         lifetime_seconds: u64,
         clock: Arc<dyn Clock>,
     ) -> Result<Embedded> {
-        self.start_with(lifetime_seconds, clock, None).await
+        self.start_with(lifetime_seconds, clock, DoorSource::Runtime(None))
+            .await
     }
 
     pub(super) async fn start_with(
         self,
         lifetime_seconds: u64,
         clock: Arc<dyn Clock>,
-        setup: Option<DeviceSetup>,
+        source: DoorSource,
     ) -> Result<Embedded> {
         let Some(tor) = self.native_tor else {
             return Embedded::configured(self.runtime, lifetime_seconds, clock).await;
@@ -160,10 +195,16 @@ impl NativeDeployment {
                     .take()
                     .map(|forum| forum.prepare(&community, &runtime.origin))
                     .transpose()?;
-                let mut door = runtime.construct_with_roots(&roots)?;
-                if let Some(setup) = setup {
-                    setup(&mut door).await?;
-                }
+                let door = match source {
+                    DoorSource::Runtime(setup) => {
+                        let mut door = runtime.construct_with_roots(&roots)?;
+                        if let Some(setup) = setup {
+                            setup(&mut door).await?;
+                        }
+                        door
+                    }
+                    DoorSource::Built(build) => build().await?,
+                };
                 let composer = tor.composer(&community, board)?;
                 Ok((door, composer))
             },
@@ -217,6 +258,10 @@ impl TorDeployment {
         let private = self.private_network.take();
         #[cfg(not(feature = "private-tor-fixture"))]
         let private: Option<arti_client::config::TorClientConfigBuilder> = None;
+        #[cfg(feature = "private-tor-fixture")]
+        let advertisement_file = self.advertisement_file.take();
+        #[cfg(not(feature = "private-tor-fixture"))]
+        let advertisement_file: Option<PathBuf> = None;
         let messages = ctrn::MessageLimits {
             max_payload: self.messages.max_payload,
             timeout_ms: self.messages.timeout_ms,
@@ -298,6 +343,7 @@ impl TorDeployment {
                 },
                 watcher: RefuseWatches,
                 backend: cwst::native::FileBackend::new(self.store_directory),
+                advertisement_file,
             })
             .with_board(board),
         ))

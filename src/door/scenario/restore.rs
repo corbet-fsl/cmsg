@@ -12,6 +12,8 @@ pub struct Configuration<W: TorWatcher, B: Backend> {
     pub window: cdht::rpc::envelope::TimeWindow,
     pub watcher: W,
     pub backend: B,
+    /// Fixture only: write this node's signed PeerInfo here once the network is up.
+    pub advertisement_file: Option<std::path::PathBuf>,
 }
 
 /// Consumes one login's original recovery custody. Door owns the bound Vault;
@@ -76,6 +78,13 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
         self.network_drain = Some(drain);
         self.network = Some(startup.await?);
         let retained = self.network.as_ref().ok_or(ErrorCode::Unavailable)?;
+        if let Some(file) = &config.advertisement_file {
+            // Public data (a signed PeerInfo); written whole, then renamed, so a reader never sees a part.
+            let temporary = file.with_extension("tmp");
+            std::fs::write(&temporary, retained.advertisement()?.as_bytes())
+                .and_then(|()| std::fs::rename(&temporary, file))
+                .map_err(|_| ErrorCode::Unavailable)?;
+        }
         // C8 A: a registered device-key member's custody was bound when the app started
         // (`composer::restore_device_login`); its Vault is not recovered a second time.
         if let Some(eager) = door.take_eager_binding(origin) {

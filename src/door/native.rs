@@ -17,7 +17,7 @@ use tokio::sync::{mpsc, oneshot, watch, OwnedSemaphorePermit};
 #[cfg(feature = "native-tor")]
 pub mod deployment;
 #[cfg(feature = "native-tor")]
-pub use deployment::{DeviceSetup, NativeDeployment};
+pub use deployment::{DeviceSetup, DoorBuilder, NativeDeployment};
 
 /// Injected trusted clock. Member-controlled request data never supplies time.
 pub trait Clock: Send + Sync {
@@ -735,7 +735,29 @@ impl Embedded {
         setup: DeviceSetup,
     ) -> Result<Self> {
         deployment
-            .start_with(lifetime_seconds, clock, Some(setup))
+            .start_with(
+                lifetime_seconds,
+                clock,
+                deployment::DoorSource::Runtime(Some(setup)),
+            )
+            .await
+    }
+
+    /// Like [`Self::configured_restore_with`], but the embedder builds the whole Door (see
+    /// [`DoorBuilder`]): the runtime configuration then only has to match the device settings.
+    #[cfg(feature = "native-tor")]
+    pub async fn configured_restore_built(
+        deployment: NativeDeployment,
+        lifetime_seconds: u64,
+        clock: Arc<dyn Clock>,
+        build: DoorBuilder,
+    ) -> Result<Self> {
+        deployment
+            .start_with(
+                lifetime_seconds,
+                clock,
+                deployment::DoorSource::Built(build),
+            )
             .await
     }
 

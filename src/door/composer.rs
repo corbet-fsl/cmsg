@@ -533,8 +533,28 @@ where
         records,
         finish,
     } = parts;
-    let setup: super::native::DeviceSetup = Box::new(move |door: &mut Door| {
+    // The Door is built here, from the same services as a registration: its community Foyer has
+    // the founding-fingerprint-anchored, started trust that `restore_device_login` reads (a Foyer
+    // built from the deployment's key-ring trust configuration cannot be anchored).
+    let build: super::native::DoorBuilder = Box::new(move || {
         Box::pin(async move {
+            let origin = settings.community.origin.clone();
+            let community = services.foyer(Service::Community).await.map_err(|e| {
+                eprintln!("device setup: {e}");
+                super::ErrorCode::Unavailable
+            })?;
+            let mut door = Door::new(super::Configuration::new(
+                settings.community_name.clone(),
+                std::collections::BTreeMap::from([(
+                    Role::Member,
+                    std::collections::BTreeSet::from([origin.clone()]),
+                )]),
+            )?);
+            door.bind_foyer(
+                &origin,
+                Role::Member,
+                super::foyer::Sessions::new(Scope::Community, community),
+            )?;
             let context =
                 cpky::Context::new(&settings.global.passkey_origin, &settings.global.rp_id)
                     .map_err(|_| super::ErrorCode::InvalidRequest)?;
@@ -543,7 +563,7 @@ where
                 &settings.global.passkey_origin,
             );
             restore_device_login(
-                door,
+                &mut door,
                 &settings,
                 &mut services,
                 &mut keys,
@@ -556,14 +576,29 @@ where
                 super::ErrorCode::Unavailable
             })?;
             if let Some(finish) = finish {
-                finish(door).await?;
+                finish(&mut door).await?;
             }
-            Ok(())
+            Ok(door)
         })
     });
-    super::native::Embedded::configured_restore_with(deployment, lifetime_seconds, clock, setup)
+    super::native::Embedded::configured_restore_built(deployment, lifetime_seconds, clock, build)
         .await
         .map_err(step("open"))
+}
+
+/// The Door's verified community identity must be the founding fingerprint the device settings
+/// carry; any other community (or settings without a valid fingerprint) is refused.
+fn ensure_founding_identity(
+    configured: Option<&str>,
+    verified: [u8; 32],
+) -> Result<(), ComposeError> {
+    let configured = configured.and_then(identity::Fingerprint::from_hex);
+    if configured.map(|configured| configured.0) != Some(verified) {
+        return Err(ComposeError::Config(
+            "the community's verified identity differs from the device settings".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Every start of a registered device-key member, on its freshly constructed Door (C8 A): ONE
@@ -678,16 +713,7 @@ where
                 "the community trust must be anchored to its founding fingerprint".into(),
             )
         })?;
-    let configured = settings
-        .community
-        .fingerprint
-        .as_deref()
-        .and_then(identity::Fingerprint::from_hex);
-    if configured.map(|configured| configured.0) != Some(fingerprint) {
-        return Err(ComposeError::Config(
-            "the community's verified identity differs from the device settings".into(),
-        ));
-    }
+    ensure_founding_identity(settings.community.fingerprint.as_deref(), fingerprint)?;
     let opening = unlock
         .community_opening(&fingerprint, &settings.community_name)
         .map_err(step("community opening"))?;
@@ -1297,5 +1323,14 @@ mod tests {
         settings.community_name = "omega".into();
         settings.community.origin = settings.global.origin.clone();
         assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn open_path_refuses_a_community_with_another_founding_fingerprint() {
+        let hex = "ab".repeat(32);
+        assert!(ensure_founding_identity(Some(&hex), [0xab; 32]).is_ok());
+        assert!(ensure_founding_identity(Some(&hex), [0xcd; 32]).is_err());
+        assert!(ensure_founding_identity(Some("ab"), [0xab; 32]).is_err());
+        assert!(ensure_founding_identity(None, [0xab; 32]).is_err());
     }
 }
