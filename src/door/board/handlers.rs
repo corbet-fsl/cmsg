@@ -160,6 +160,35 @@ pub trait CommittedOwner {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
 
+    /// Start leaving a member room (see `VaultGroupOwner::begin_room_leave`);
+    /// `false` when this device never joined through a room.
+    fn begin_room_leave<'a, T, L>(
+        &'a mut self,
+        _board: &'a cbrd::Board<T, L>,
+        _room: [u8; 16],
+        _request: &'a cbrd::cgrp::Request,
+    ) -> OwnerFuture<'a, bool>
+    where
+        T: clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        Box::pin(async { Ok(false) })
+    }
+
+    /// Advance a leave in progress, if any (`None` when this device is not
+    /// leaving the room); see `VaultGroupOwner::advance_room_leave`.
+    fn advance_room_leave<'a, T, L>(
+        &'a mut self,
+        _board: &'a cbrd::Board<T, L>,
+        _task: crate::door::facades::RoomLeaveSyncTask<'a>,
+    ) -> OwnerFuture<'a, Option<crate::door::facades::LeaveProgress>>
+    where
+        T: clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        Box::pin(async { Ok(None) })
+    }
+
     /// This member's evidence for a room it belongs to, for answering joins.
     fn room_evidence<'a>(
         &'a mut self,
