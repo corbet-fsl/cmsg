@@ -578,9 +578,75 @@ where
     N: cdht::Network + Clone + 'static,
     S: Services,
 {
+    compose(settings, services, keys, storage, network, false).await
+}
+
+/// Restore on a NEW device (row 11): only the synced wallet passkey and the community's
+/// settings (address and founding fingerprint) are here; the local vault and progress are
+/// empty. ONE wallet sign-in gives `W`; the wallet vault and passport restore from the wallet's
+/// own records; the community opening derives from `W` and the fingerprint, so the device key is
+/// the member's; the creation's seed commitment comes from that community's own checkpoint; and
+/// the community re-confirms the device-key join it already applied (no stamp, nothing changes)
+/// to answer the member id. Then the community vault and account recover exactly as in
+/// `compose_native_device`. Resumable: the progress file marks the device as restored, and
+/// every later start is the unchanged `open_native_device_with`. A device that already holds a
+/// registration is refused (it never restores over its own vault).
+pub async fn restore_native_device<A, B, N, S>(
+    settings: &DeviceSettings,
+    services: &mut S,
+    keys: &mut DeviceKeys<A>,
+    storage: DeviceStorage<B>,
+    network: N,
+) -> Result<Door, ComposeError>
+where
+    A: cfyr::passkeys::Authenticator,
+    B: cwst::backend::Backend + Clone + 'static,
+    N: cdht::Network + Clone + 'static,
+    S: Services,
+{
+    compose(settings, services, keys, storage, network, true).await
+}
+
+async fn compose<A, B, N, S>(
+    settings: &DeviceSettings,
+    services: &mut S,
+    keys: &mut DeviceKeys<A>,
+    storage: DeviceStorage<B>,
+    network: N,
+    restore: bool,
+) -> Result<Door, ComposeError>
+where
+    A: cfyr::passkeys::Authenticator,
+    B: cwst::backend::Backend + Clone + 'static,
+    N: cdht::Network + Clone + 'static,
+    S: Services,
+{
     settings.validate()?;
     let prover = settings.prover.prover()?;
     let mut progress = ProgressFile::open(storage.progress.clone())?;
+    if restore && !progress.value.restored {
+        let held = |backend: &B| {
+            let backend = backend.clone();
+            async move {
+                cwst::backend::Backend::read(&backend)
+                    .await
+                    .map(|read| read.is_some())
+                    .map_err(step("vault"))
+            }
+        };
+        if held(&storage.global).await?
+            || held(&storage.community).await?
+            || progress.stage(true) != Stage::Fresh
+            || progress.stage(false) != Stage::Fresh
+        {
+            return Err(ComposeError::Config(
+                "restore is for a new device: this one already holds a registration".into(),
+            ));
+        }
+        // The wallet lineage exists in its records: sign in, never register again.
+        progress.value.restored = true;
+        progress.advance(true, Stage::Done).await?;
+    }
     let global_origin = settings.global.origin.as_str();
     let community_origin = settings.community.origin.as_str();
 

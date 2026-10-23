@@ -166,6 +166,10 @@ pub(crate) struct Progress {
     /// member opens its sessions under it (the server assigns it; nothing local derives it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) community_user: Option<String>,
+    /// A restored device (`restore_native_device`): its lineages live in their records, not
+    /// (yet) in the local vault, so a marker over an empty local vault is not refused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) restored: bool,
 }
 
 /// Where the progress marker lives. It is written after every step, before the next one
@@ -498,7 +502,7 @@ where
         .await
         .map_err(step("vault"))?
         .is_some();
-    let mut stage = resume_stage(progress.stage(wallet), vault_held)?;
+    let mut stage = resume_stage(progress.stage(wallet), vault_held || progress.value.restored)?;
 
     // Registration (fresh) or reopening of the retained enrollment.
     let mut enrollment: Option<custody::InitialEnrollment<B>> = None;
@@ -840,7 +844,7 @@ where
         .await
         .map_err(step("vault"))?
         .is_some();
-    let mut stage = resume_stage(progress.stage(false), vault_held)?;
+    let mut stage = resume_stage(progress.stage(false), vault_held || progress.value.restored)?;
     if stage == Stage::Done {
         return reopen_device(services, api, name, origin, open()?, stamps.clone(), progress).await;
     }
@@ -1387,12 +1391,13 @@ where
 
     // 4. Join the community by device key: the passport, ONE wallet stamp for the join and
     //    the lineage genesis, sessions by the device key's signature. No community passkey.
-    let community_api = services.foyer(Service::Community).await?;
+    let mut community_api = services.foyer(Service::Community).await?;
     let community_held = cwst::backend::Backend::read(&community_storage)
         .await
         .map_err(step("vault"))?
         .is_some();
-    let fresh = resume_stage(progress.stage(false), community_held)? == Stage::Fresh;
+    let fresh = resume_stage(progress.stage(false), community_held || progress.value.restored)?
+        == Stage::Fresh;
     // The community's identity (its founding fingerprint, as the verified Charter reports
     // it) derives its vault from the wallet unlock; never its reusable address.
     let fingerprint = community_api
@@ -1409,6 +1414,89 @@ where
             .community_opening(&fingerprint, community_name)
             .map_err(step("community opening"))
     };
+    // The wallet membership index (a record only the wallet secret locates) lists this
+    // community BEFORE its first join, so a restore on a new device can find it. A restored
+    // device reads it instead: the community must be listed with the same founding identity.
+    if progress.value.restored && progress.value.community_user.is_none() {
+        let listed = unlock
+            .indexed_memberships(network.clone())
+            .await
+            .map_err(step("membership index"))?
+            .ok_or(ComposeError::Step(
+                "membership index",
+                "the wallet's membership record is unavailable".into(),
+            ))?;
+        let entry = cvlt::MembershipEntry::new(community_name, fingerprint)
+            .map_err(step("membership index"))?;
+        if !listed.contains(&entry) {
+            return Err(ComposeError::Config(
+                "the wallet's membership index does not list this community".into(),
+            ));
+        }
+    } else if fresh && !progress.value.restored {
+        match unlock
+            .index_membership(network.clone(), community_name, &fingerprint)
+            .await
+            .map_err(step("membership index"))?
+        {
+            cvlt::Outcome::Confirmed => {}
+            cvlt::Outcome::Queued => {
+                return Err(ComposeError::Step(
+                    "membership index",
+                    "not replicated yet; resume to continue".into(),
+                ));
+            }
+        }
+    }
+    // A restored device learns its member id from the community: the join it applied for this
+    // passport, device key and the creation's seed commitment (from the community's own
+    // checkpoint) is re-confirmed without a stamp. Then the member reopens like any other.
+    if progress.value.restored && progress.value.community_user.is_none() {
+        // The PRF-authenticated original initial ACK: its seed commitment, and the only
+        // signer of the stamp-less join re-confirmation (the opening never signs a join).
+        let candidate = {
+            let opening = open()?;
+            let locator = opening.locator();
+            let mut records = opening
+                .tor_records(community_network.clone())
+                .await
+                .map_err(step("restore"))?;
+            let checkpoint = records
+                .checkpoint(&locator)
+                .await
+                .map_err(step("restore"))?;
+            drop(records);
+            opening
+                .prepare_initial_recovery(&checkpoint)
+                .map_err(step("restore"))?
+        };
+        let seed = candidate.initial_seed().map_err(step("restore"))?;
+        let opening = open()?;
+        let device = opening.device().map_err(step("restore"))?;
+        let mut sign = |purpose: ckmg::DevicePurpose, payload: Vec<u8>| {
+            let signature = match purpose {
+                ckmg::DevicePurpose::DeviceJoin => candidate.sign_device_join(&payload),
+                _ => opening.sign_device(purpose, &payload),
+            };
+            std::future::ready(
+                signature
+                    .map(|signature| signature.to_vec())
+                    .map_err(|_| super::ErrorCode::Unauthorized),
+            )
+        };
+        let user = super::device_join::reconfirm(
+            &mut community_api,
+            community_name,
+            &mut global,
+            &device,
+            seed,
+            &mut sign,
+        )
+        .await
+        .map_err(step("restore member"))?;
+        progress.value.community_user = Some(user);
+        progress.advance(false, Stage::Done).await?;
+    }
     let member = if fresh {
         let community = cwlt::passport::CommunityId::new(community_name.as_bytes())
             .map_err(step("passport"))?;

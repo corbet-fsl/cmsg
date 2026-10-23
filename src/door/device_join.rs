@@ -241,6 +241,35 @@ where
     .await
 }
 
+/// Restore on a new device: have the community re-confirm the device-key join it already
+/// applied for this passport, this (wallet-derived, hence unchanged) device key and the
+/// creation's seed commitment from its checkpoint. No stamp is sent, nothing changes at the
+/// community and the wallet is not asked: the answer is only the member id that join kept.
+/// A join the community never applied is refused.
+pub async fn reconfirm<B, C, E, A, R>(
+    community: &mut Foyer<Transport>,
+    name: &str,
+    wallet: &mut GlobalPassport<B, C, E, A, R>,
+    device: &ckmg::PublicKey,
+    seed: [u8; 32],
+    sign: &mut impl DeviceSign,
+) -> Result<String>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+{
+    if seed == [0; 32] {
+        return Err(ErrorCode::Unavailable);
+    }
+    let key: [u8; 32] = *device.value();
+    let scope = stamp_scope(community, name).await?;
+    let salt = derived_salt(name, device, b"", sign).await?;
+    send(community, name, wallet, &scope, None, &key, seed, salt, sign).await
+}
+
 /// Send one join: a fresh passport presentation over this community's signed challenge, the
 /// stamp presentation for `action` (none: re-confirm an already applied join), the device
 /// key's signature over the join message.

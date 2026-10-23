@@ -406,3 +406,75 @@ async fn a_restarted_device_key_member_logs_in_without_a_ceremony_and_recovers_w
     .await
     .expect("bounded device-key restarts");
 }
+
+/// Row 11 (restore on a new device): a second device holds only the synced wallet passkey and
+/// the community settings. `restore_native_device` restores the wallet from its records and the
+/// community re-confirms the applied device-key join, so the new device is the same member
+/// without a stamp; a device that already holds a registration never restores over it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_device_with_the_synced_wallet_passkey_restores_the_same_member() {
+    tokio::time::timeout(Duration::from_secs(1500), async {
+        let f = fixture();
+        let config: Value = serde_json::from_slice(
+            &std::fs::read(std::env::var("CMSG_G5_ACCOUNT_CONFIG").unwrap()).unwrap(),
+        )
+        .unwrap();
+        let (mut settings, mut keys) = device(&f, &config);
+        settings.community.fingerprint = Some(community_fingerprint(&f["community"]).await);
+        let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("device-restore-{}-{}", std::process::id(), now()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let original = directory.join("original.json");
+        let network = initial_network::Nodes::new();
+        let storage = |progress: &std::path::Path| composer::DeviceStorage {
+            global: cwst::backend::Memory::new(),
+            community: cwst::backend::Memory::new(),
+            progress: Some(progress.to_owned()),
+        };
+        drop(
+            composer::compose_native_device(
+                &settings,
+                &mut Gated(composer::NativeServices(&settings)),
+                &mut keys,
+                storage(&original),
+                network.clone(),
+            )
+            .await
+            .unwrap(),
+        );
+        let member = |path: &std::path::Path| -> Value {
+            serde_json::from_slice::<Value>(&std::fs::read(path).unwrap()).unwrap()
+                ["community_user"]
+                .clone()
+        };
+
+        // The original device holds a registration: restore refuses it.
+        assert!(composer::restore_native_device(
+            &settings,
+            &mut Gated(composer::NativeServices(&settings)),
+            &mut keys,
+            storage(&original),
+            network.clone(),
+        )
+        .await
+        .is_err());
+
+        // A new device: empty vault, no progress, the same (synced) wallet passkey.
+        let restored = directory.join("restored.json");
+        drop(
+            composer::restore_native_device(
+                &settings,
+                &mut Gated(composer::NativeServices(&settings)),
+                &mut keys,
+                storage(&restored),
+                network.clone(),
+            )
+            .await
+            .unwrap(),
+        );
+        assert!(member(&original).is_string());
+        assert_eq!(member(&restored), member(&original), "the same member id");
+    })
+    .await
+    .unwrap();
+}

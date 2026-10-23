@@ -61,6 +61,42 @@ impl DeviceUnlock {
             .map_err(|_| ErrorCode::InvalidRequest)
     }
 
+    /// Add this community to the wallet's membership index (a record only the wallet
+    /// secret locates) and wait for its replication: a restore on a new device finds the
+    /// community through it. Idempotent; `Queued` means "ask again", never "proceed".
+    pub async fn index_membership<N: cdht::Network>(
+        &self,
+        network: N,
+        address: &str,
+        fingerprint: &[u8; 32],
+    ) -> Result<cvlt::Outcome> {
+        let (mut record, cipher) = self
+            .wallet
+            .index_record(network)
+            .map_err(|_| ErrorCode::Unavailable)?;
+        let entry = cvlt::MembershipEntry::new(address, *fingerprint)
+            .map_err(|_| ErrorCode::InvalidRequest)?;
+        cvlt::add_entry(&mut record, &cipher, &mut ckmg::SystemEntropy, entry)
+            .await
+            .map_err(|_| ErrorCode::Unavailable)
+    }
+
+    /// The memberships the wallet's index lists. `None`: the record is unavailable, which is
+    /// not proof that there are none.
+    pub async fn indexed_memberships<N: cdht::Network>(
+        &self,
+        network: N,
+    ) -> Result<Option<cvlt::MembershipIndex>> {
+        let (mut record, cipher) = self
+            .wallet
+            .index_record(network)
+            .map_err(|_| ErrorCode::Unavailable)?;
+        cvlt::read_index(&mut record, &cipher)
+            .await
+            .map(|read| read.map(|(_, index)| index))
+            .map_err(|_| ErrorCode::Unavailable)
+    }
+
     /// The community device key (lineage device) this device presents in `scope`:
     /// what the community's device-key registry binds at join.
     pub fn community_device(&self, fingerprint: &[u8; 32], scope: &str) -> Result<ckmg::PublicKey> {
