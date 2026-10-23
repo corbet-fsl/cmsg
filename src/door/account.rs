@@ -223,6 +223,12 @@ pub(super) enum Answer {
     /// the elapsed request, or the operator refused it with the reason expired.
     /// The join re-prepares as a fresh operation at most `GENESIS_REPREPARES` times.
     WindowElapsed,
+    /// Reopen found the elapsed state A and the operator's signed status proved it
+    /// can no longer commit: it is discarded, the join prepares a fresh request.
+    Discarded,
+    /// Reopen found the elapsed state A too early for the operator's time to prove
+    /// it; the join reports `checkpoint_pending` until this operator time.
+    ElapsedPending { eligible_at: u64 },
 }
 
 macro_rules! accessor {
@@ -307,6 +313,12 @@ pub(super) async fn enroll_and_open(steps: &mut impl Steps) -> Result<Checkpoint
         match steps.call(Command::Open).await? {
             Answer::SlotCrossed { .. } if restarts < SLOT_RESTARTS => restarts += 1,
             Answer::WindowElapsed if reprepares < GENESIS_REPREPARES => reprepares += 1,
+            // The elapsed state A of the previous attempt is gone; the re-prepare
+            // counted above follows now (a discard needs a state A, so this ends).
+            Answer::Discarded => {}
+            Answer::ElapsedPending { eligible_at } => {
+                return Ok(Checkpoint::Pending { eligible_at })
+            }
             answer => {
                 answer.opened_or_reopened()?;
                 return Ok(Checkpoint::Ready);
@@ -565,6 +577,7 @@ mod run {
     use super::super::{
         accounting::{
             existing_active, has_pending, issue_account_admission, voucher_remaining, AccountAdmission,
+            Elapsed,
             AccountingIntents, CheckpointAcquisition, CommunityAccount, CurrentEnrollment,
             SubmittedEnrollment, AcceptedResponse, SignedApplyExtended,
         },
@@ -1546,6 +1559,20 @@ mod run {
                 };
                 match admission.reopen(account).await {
                     Ok(at) => (Ok(Answer::Reopened(Opened { accepted_at: at })), Next::Stay),
+                    // Elapsed state A: only the operator's signed status settles it.
+                    Err(ErrorCode::ProofWindowElapsed) => {
+                        match admission.settle_elapsed(account, intents, request_intent).await {
+                            Ok(Elapsed::Adopted(at)) => (
+                                Ok(Answer::Reopened(Opened { accepted_at: at })),
+                                Next::Restart,
+                            ),
+                            Ok(Elapsed::Discarded) => (Ok(Answer::Discarded), Next::Restart),
+                            Ok(Elapsed::Wait(eligible_at)) => {
+                                (Ok(Answer::ElapsedPending { eligible_at }), Next::Restart)
+                            }
+                            Err(error) => (Err(error), Next::Restart),
+                        }
+                    }
                     Err(error) => (Err(error), Next::Restart),
                 }
             }
@@ -1697,6 +1724,51 @@ mod tests {
         );
         assert_eq!(steps.commands.len(), 4);
         assert_eq!(ErrorCode::ProofWindowElapsed.exit_code(), 75);
+    }
+
+    #[test]
+    fn an_elapsed_state_a_is_discarded_before_the_one_fresh_preparation() {
+        let elapsed = || Ok(Answer::WindowElapsed);
+        let discarded = || Ok(Answer::Discarded);
+        let opened = || Ok(Answer::Opened(Opened { accepted_at: 2_000 }));
+        // Expired refusal with state A kept: the next open resumes it, the
+        // operator's status discards it, and only then the fresh request opens.
+        let mut steps = Script::new(vec![
+            ready(),
+            elapsed(),
+            ready(),
+            discarded(),
+            ready(),
+            opened(),
+        ]);
+        assert_eq!(block(enroll_and_open(&mut steps)), Ok(Checkpoint::Ready));
+        assert_eq!(steps.commands.len(), 6);
+        // A second overrun after the fresh preparation surfaces the typed error.
+        let mut steps = Script::new(vec![
+            ready(),
+            elapsed(),
+            ready(),
+            discarded(),
+            ready(),
+            elapsed(),
+        ]);
+        assert_eq!(
+            block(enroll_and_open(&mut steps)),
+            Err(ErrorCode::ProofWindowElapsed)
+        );
+        assert_eq!(steps.commands.len(), 6);
+        // Too early for the operator's time: the join waits for that operator time.
+        let mut steps = Script::new(vec![
+            ready(),
+            elapsed(),
+            ready(),
+            Ok(Answer::ElapsedPending { eligible_at: 1_915 }),
+        ]);
+        assert_eq!(
+            block(enroll_and_open(&mut steps)),
+            Ok(Checkpoint::Pending { eligible_at: 1_915 })
+        );
+        assert_eq!(ErrorCode::DiscardedRequestAccepted.exit_code(), 69);
     }
 
     #[test]

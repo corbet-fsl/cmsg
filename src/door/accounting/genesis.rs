@@ -326,7 +326,7 @@ mod proven {
         /// step of `prepare_account`, and `stage` rechecks both owners first thing
         /// after the proof, so no extra round trip spends the genesis proof window.
         pub async fn prove<B, C, E, A, R>(
-            mut self,
+            self,
             account: &mut CommunityAccount<B, C, E, A, R>,
             prover: &dyn crate::door::account::AccountProver,
         ) -> Result<ProvenAccount<'p>>

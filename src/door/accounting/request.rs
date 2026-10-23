@@ -368,6 +368,28 @@ pub(super) fn genesis_window_end(statement: &AccountStatement) -> u64 {
         .saturating_add(cblc::accounting::GENESIS_PROOF_WINDOW_SECONDS)
 }
 
+impl AcceptedResponse {
+    /// The lost response of an accepted request, rebuilt from the issuer evidence
+    /// of an authenticated status: the acceptance is verified exactly as an actual
+    /// response is (`send_signed`); the certificate and ancestry are checked by
+    /// the holder engine when state B is written.
+    pub(super) fn from_status(
+        acceptance: AccountAcceptance,
+        evidence: extensions::ExtendedEvidence,
+        expected: &SignedApplyExtended,
+        policy: &ExtensionPolicy,
+        operator_key: &[u8; 32],
+    ) -> Result<Self> {
+        let digest = verify_acceptance(&acceptance, expected, policy, operator_key)?;
+        Ok(Self {
+            acceptance,
+            certificate: evidence.certificate,
+            ancestry: evidence.ancestry,
+            digest,
+        })
+    }
+}
+
 impl<'p> CurrentEnrollment<'p> {
     /// Sign the original account request exactly once and assemble the exact
     /// ApplyExtended outbox. The device signature runs through the account's

@@ -26,7 +26,7 @@ pub use genesis::PreparedAccount;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub use genesis::{ProvenAccount, StagedRequest};
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
-pub use lifecycle::{existing_active, has_pending, voucher_remaining, Activated};
+pub use lifecycle::{existing_active, has_pending, voucher_remaining, Activated, Elapsed};
 pub use pending::PendingBinding;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub use request::response_trust;

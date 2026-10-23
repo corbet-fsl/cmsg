@@ -99,6 +99,10 @@ pub enum ErrorCode {
     /// accept it, again after the one bounded re-preparation. Nothing was
     /// accepted; a later join starts a fresh request.
     ProofWindowElapsed,
+    /// The operator accepted a genesis request that this device had discarded
+    /// on the operator's own signed proof that it could no longer commit. The
+    /// discard guard failed; the account is not usable from this device.
+    DiscardedRequestAccepted,
 }
 
 impl ErrorCode {
@@ -109,7 +113,7 @@ impl ErrorCode {
         match self {
             Self::InvalidRequest | Self::UnsupportedAction | Self::UnsupportedVersion => 64,
             Self::Unauthorized | Self::Refused | Self::HeldInLobby => 77,
-            Self::Unavailable => 69,
+            Self::Unavailable | Self::DiscardedRequestAccepted => 69,
             Self::Capacity | Self::Clock | Self::Reconcile | Self::ProofWindowElapsed => 75,
         }
     }
