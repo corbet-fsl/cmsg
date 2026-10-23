@@ -81,6 +81,19 @@ where
         .await
 }
 
+/// The stamp epoch the device expects on the stamp it is issued: the epoch of the signed
+/// global status, verified under the global key ring through this same wallet session. It is
+/// the one every member sees and every community verifies stamps at. It never comes from the
+/// wallet's stamp reply: a dishonest wallet that signed a different epoch per member would tag
+/// the member (every presentation reveals the epoch). The answer already arrived, so an
+/// unreadable publication is `Reconcile`, as for every other late failure.
+async fn published_epoch(issuance: &mut GlobalStampIssuance<Transport>) -> Result<u64> {
+    issuance
+        .verified_epoch(now)
+        .await
+        .map_err(|_| ErrorCode::Reconcile)
+}
+
 /// Send the SAME request bytes of an interrupted attempt again (`request` from
 /// [`pending_request`]). The person confirmed them once; within the wallet's replay window
 /// the wallet answers the same request with the same blind stamp without verifying a new
@@ -117,7 +130,8 @@ where
         .await
         .map_err(|_| ErrorCode::Reconcile)?;
     let blind = BlindStamp::from_bytes(&answer).map_err(|_| ErrorCode::Reconcile)?;
-    wallet.finish_stamp(rng, &blind).await?;
+    let epoch = published_epoch(&mut issuance).await?;
+    wallet.finish_stamp(rng, &blind, epoch).await?;
     Ok(true)
 }
 
@@ -183,7 +197,8 @@ where
         .await
         .map_err(|_| ErrorCode::Reconcile)?;
     let blind = BlindStamp::from_bytes(&answer).map_err(|_| ErrorCode::Reconcile)?;
-    wallet.finish_stamp(rng, &blind).await
+    let epoch = published_epoch(&mut issuance).await?;
+    wallet.finish_stamp(rng, &blind, epoch).await
 }
 
 #[cfg(test)]

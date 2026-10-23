@@ -223,13 +223,14 @@ where
         &mut self,
         rng: &mut G,
         blind: &passport::BlindStamp,
+        expected_epoch: u64,
     ) -> Result<()>
     where
         G: passport::rand::RngCore + passport::rand::CryptoRng,
     {
         self.current().await?;
         self.vault
-            .finish_global_stamp(operation()?, rng, blind, now())
+            .finish_global_stamp(operation()?, rng, blind, expected_epoch, now())
             .await
             .map_err(|_| ErrorCode::Reconcile)
     }
