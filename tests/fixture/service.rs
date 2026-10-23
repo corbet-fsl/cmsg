@@ -17,10 +17,15 @@ struct Fault {
     release: tokio::sync::Notify,
 }
 
+/// The admin board is an ordinary community with an ordinary name: `root` and every other
+/// platform host label are reserved community names (cvld `PLATFORM_HOST_LABELS`). Its Root seat
+/// comes from the public descriptor, never from the name.
+const BOARD: &str = "adminboard";
+
 // The exact production root-board constructor, with a fictional public issuer.
 async fn root_board(public: &cvld::api::GlobalPublic, source: &Running) -> Running {
     let dir = tempfile::tempdir().unwrap();
-    let config = community_config(dir.path(), "root", public, 1000);
+    let config = community_config(dir.path(), BOARD, public, 1000);
     let issuer = cpsd::IssuerKey::generate(
         &mut cpsd::rand::rngs::OsRng,
         cpsd::KeyId::new("fixture-root-board").unwrap(),
@@ -29,7 +34,7 @@ async fn root_board(public: &cvld::api::GlobalPublic, source: &Running) -> Runni
     .unwrap();
     let descriptor = cpsd::RootBoardPublicKey::from_authenticated_beacon(
         issuer.public_key().clone(),
-        cpsd::CommunityId::new("root").unwrap(),
+        cpsd::CommunityId::new(BOARD).unwrap(),
         1,
         NOW / cpsd::ROOT_BOARD_COHORT_SECONDS * cpsd::ROOT_BOARD_COHORT_SECONDS,
     )
@@ -329,6 +334,8 @@ async fn entry() {
         .await
         .unwrap();
     let admin_host = "api.admin.alpha.example.test";
+    // The board answers its own admin host (api.admin.<name>.<base>); the platform host `root` is the global door.
+    let board_admin_host = format!("api.admin.{BOARD}.example.test");
     let mut member = enrol_community(&service, member_host, &passport).await;
     let vault_session = login(
         &service,
@@ -475,7 +482,7 @@ async fn entry() {
         "vault": {"base": service.base, "host": member_host, "session": vault_session},
         "admin": {"base": service.base, "host": admin_host, "session": admin.session},
         "root": {"base": service.base, "host": admin_host, "session": root.session},
-        "root_board": {"base": board.base, "host": ROOT, "session": board_root.session},
+        "root_board": {"base": board.base, "host": board_admin_host, "session": board_root.session},
         "global_root": {"base": wallet.base, "host": ROOT, "session": global_root.session},
         "faults": faults.iter().map(|fault| json!({"base":proxy_base,"host":WALLET,"session":fault.session})).collect::<Vec<_>>(),
     });
