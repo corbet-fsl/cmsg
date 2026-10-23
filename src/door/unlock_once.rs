@@ -127,6 +127,11 @@ impl DeviceUnlock {
     }
 }
 
+/// The OS key store service under which the native persistent unlock keeps its wrapping
+/// key (feature `os-keyring`, OFF by default).
+/// PLACEHOLDER: Julian names this service; until then the feature stays off.
+pub const KEYRING_SERVICE: &str = "KEYRING-SERVICE-PLACEHOLDER";
+
 /// Persistent unlock (DESIGN-secure-convenience part 4): a device stays unlocked across
 /// restarts. The persisted bundle holds only the openings of the communities this
 /// device has joined, never the wallet PRF output. There is no automatic lock; the
@@ -167,6 +172,15 @@ impl UnlockStore for cvlt::BrowserResume {
     async fn forget(&self) -> std::result::Result<(), cvlt::ResumeError> {
         cvlt::BrowserResume::forget(self).await
     }
+}
+
+/// The native persistent unlock of one wallet binding (wallet host and account) in the
+/// device's private vault directory: OS key store under [`KEYRING_SERVICE`] with feature
+/// `os-keyring`, else the user-only key file.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn native_store(dir: &std::path::Path, binding: &[u8]) -> cvlt::NativeResume {
+    let service = cfg!(feature = "os-keyring").then_some(KEYRING_SERVICE);
+    cvlt::NativeResume::new(dir, binding, service)
 }
 
 /// This device's local data, erased when the device learns it was revoked.
@@ -371,7 +385,7 @@ mod tests {
     const JOINED: [([u8; 32], &str); 2] = [([1; 32], "garden"), ([2; 32], "orchard")];
 
     fn store(dir: &std::path::Path) -> cvlt::NativeResume {
-        cvlt::NativeResume::new(dir, b"wallet.example.test\0member", None)
+        native_store(dir, b"wallet.example.test\0member")
     }
 
     #[test]

@@ -131,6 +131,9 @@ private-tor-fixture = ["native-tor"]
 # Test only: named interruption points in the composer (door::interrupt) for kill-and-resume
 # harnesses. Production builds never enable it.
 interrupt-points = []
+# Native persistent unlock keeps its wrapping key in the OS key store. OFF until the
+# keyring service name (door::unlock_once::KEYRING_SERVICE) is named.
+os-keyring = ["cvlt/os-keyring"]
 browser-tor = ["ckmg/browser-tor", "cmsh/tor-records", "dep:ctrn"]
 
 [[example]]
