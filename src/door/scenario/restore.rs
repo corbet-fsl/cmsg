@@ -81,6 +81,8 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
         let member = retained.take_member_authority()?;
         let network = retained.records()?.network();
         let peers = network.clone();
+        #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+        let waves = network.clone();
         // A device-key login's stamp trust verifies its stamp checkpoint and lineage.
         let restored = door
             .recover_login_vault(
@@ -99,6 +101,19 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
             .await?;
         // Every native device has groups: peers are verified, never claimed.
         owner.enable_verified_groups(peers, door.current_policy(origin)?)?;
+        // A device the platform equipped with the wave and outcome circuits also runs
+        // waves: the ports and the proof worker read the same verified community trust.
+        #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+        if let Some(device) = door.wave_device(origin) {
+            let charter = door.current_policy(origin)?;
+            crate::door::inbox_waves::native::bind_device(
+                door,
+                origin,
+                &device,
+                crate::door::inbox_lineage::TorHandleOpener::new(waves),
+                charter,
+            )?;
+        }
         if let Some(board) = self.board.take() {
             board.bind(door, origin, owner)?;
         }

@@ -1968,6 +1968,7 @@ dependencies = [
  "ctnd",
  "ctrn",
  "cvch",
+ "cvfy",
  "cvld",
  "cvlt",
  "cwlt",
@@ -2761,6 +2762,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cvfy"
+version = "0.0.0"
+source = "git+https://git.corbet.ch/corbet-foss/cvfy.git?branch=main#9df6ed09fd142d345c56cbfb68629eeac343c79f"
+dependencies = [
+ "czkp",
+ "data-encoding",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+]
+
+[[package]]
 name = "cvld"
 version = "0.2.0"
 source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#fbdd28d35834076e5934e03fa9161b35fb716a78"
@@ -2813,6 +2826,7 @@ dependencies = [
  "blake3",
  "ckmg",
  "cpsd",
+ "cvfy",
  "cwlt-engine",
  "cwst",
  "czkp",
@@ -2919,6 +2933,7 @@ dependencies = [
  "rs_merkle",
  "schemars 1.2.2",
  "serde",
+ "serde_json",
  "sha2 0.11.0",
  "utoipa",
 ]

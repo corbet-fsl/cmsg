@@ -37,6 +37,29 @@ fn verify(
     cohort: &Cohort,
     own: &enrollment::EnrollmentEntry,
 ) -> Result<(enrollment::EnrollmentTree, Option<usize>)> {
+    let tree = verify_tree(publication, current, cohort)?;
+    let index = tree
+        .entries()
+        .iter()
+        .position(|entry| entry.member_id == own.member_id);
+    if let Some(index) = index {
+        let entry = &tree.entries()[index];
+        // A frozen slot may contain an earlier still-current renewal of the SAME
+        // immutable account. Its actual leaf/digest remains the published one.
+        if entry.account_key != own.account_key || entry.secret_hash != own.secret_hash {
+            return Err(ErrorCode::Unauthorized);
+        }
+    }
+    Ok((tree, index))
+}
+
+/// The complete current publication verified at `current`: slot, community, policy,
+/// signature, every delegation and the canonical tree. No member position.
+fn verify_tree(
+    publication: &enrollment::EnrollmentPublication,
+    current: &CurrentAdmission,
+    cohort: &Cohort,
+) -> Result<enrollment::EnrollmentTree> {
     let period = current.material.policy.checkpoint_period_seconds;
     let start = publication
         .slot
@@ -93,19 +116,7 @@ fn verify(
     {
         return Err(ErrorCode::Unauthorized);
     }
-    let index = tree
-        .entries()
-        .iter()
-        .position(|entry| entry.member_id == own.member_id);
-    if let Some(index) = index {
-        let entry = &tree.entries()[index];
-        // A frozen slot may contain an earlier still-current renewal of the SAME
-        // immutable account. Its actual leaf/digest remains the published one.
-        if entry.account_key != own.account_key || entry.secret_hash != own.secret_hash {
-            return Err(ErrorCode::Unauthorized);
-        }
-    }
-    Ok((tree, index))
+    Ok(tree)
 }
 
 // All rows cover the entire publication slot. Reborrow the actual clock and
@@ -325,6 +336,61 @@ impl CurrentEnrollment<'_> {
         )?;
         self.failed = false;
         Ok((output, completed_at))
+    }
+}
+
+/// The verified current common roster as the wave wallet reads it: every row of the
+/// current publication with its leaf and path, under the published root. Public
+/// data only; valid until the publication's slot ends.
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub struct VerifiedRoster {
+    pub checkpoint: std::sync::Arc<ckmg::wallet_engine::account::Checkpoint>,
+    /// Exclusive end of the publication slot.
+    pub expires_at: u64,
+}
+
+/// Every row of a verified tree, in published order, as wallet roster rows.
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+fn roster_rows(
+    tree: &enrollment::EnrollmentTree,
+) -> Result<Vec<ckmg::wallet_engine::account::Enrollment>> {
+    (0..tree.entries().len())
+        .map(|index| super::genesis::roster_row(tree, index))
+        .collect()
+}
+
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+impl AccountAdmission<'_> {
+    /// The complete current common roster for an ACTIVE member, through the fixed
+    /// original registry action of this admission: the same signature, slot, policy
+    /// and per-delegation checks as an enrollment's own checkpoint, and this member's
+    /// own row must be in it (an account outside the current roster has no wave).
+    pub async fn current_roster(&mut self) -> Result<VerifiedRoster> {
+        let response = self
+            .lease
+            .current_enrollment_checkpoint(now)
+            .await
+            .map_err(|_| ErrorCode::Reconcile)?;
+        let publication: Option<enrollment::EnrollmentPublication> =
+            serde_json::from_value(response).map_err(|_| ErrorCode::Reconcile)?;
+        let publication = publication.ok_or(ErrorCode::Unavailable)?;
+        let current = self.current()?;
+        let tree = verify_tree(&publication, &current, &self.cohort)?;
+        if !tree
+            .entries()
+            .iter()
+            .any(|entry| entry.member_id == current.grant.member_id)
+        {
+            return Err(ErrorCode::Unavailable);
+        }
+        let rows = roster_rows(&tree)?;
+        final_cut(self, &current, &publication)?;
+        let checkpoint = ckmg::wallet_engine::account::Checkpoint::from_rows(publication.root, rows)
+            .map_err(|_| ErrorCode::Unauthorized)?;
+        Ok(VerifiedRoster {
+            checkpoint: std::sync::Arc::new(checkpoint),
+            expires_at: publication.expires_at,
+        })
     }
 }
 

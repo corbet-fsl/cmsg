@@ -57,6 +57,27 @@ pub(super) fn engine_extension_policy(
     }
 }
 
+/// The wallet engine's row of one verified roster position: the published entry with
+/// its leaf, index and path in the verified tree. Never built from an unverified tree.
+pub(super) fn roster_row(tree: &enrollment::EnrollmentTree, index: usize) -> Result<Enrollment> {
+    let row = tree.entries().get(index).ok_or(ErrorCode::Unauthorized)?;
+    Ok(Enrollment {
+        member: B64
+            .decode(row.member_id.as_bytes())
+            .map_err(|_| ErrorCode::Unauthorized)?
+            .try_into()
+            .map_err(|_| ErrorCode::Unauthorized)?,
+        key: hex(&row.account_key)?,
+        secret_hash: hex(&row.secret_hash)?,
+        starts_at: row.issued_at,
+        expires_at: row.expires_at,
+        delegation_digest: hex(&row.delegation_digest)?,
+        leaf: *tree.leaves().get(index).ok_or(ErrorCode::Unauthorized)?,
+        index: index.try_into().map_err(|_| ErrorCode::Unauthorized)?,
+        path: *tree.paths().get(index).ok_or(ErrorCode::Unauthorized)?,
+    })
+}
+
 fn context(
     publication: &enrollment::EnrollmentPublication,
     tree: &enrollment::EnrollmentTree,
@@ -88,17 +109,7 @@ fn context(
         // Read once from the vouchee's custody at preparation; refreshes compare
         // against the same value. A founder has none.
         bond,
-        enrollment: Enrollment {
-            member,
-            key: hex(&row.account_key)?,
-            secret_hash: hex(&row.secret_hash)?,
-            starts_at: row.issued_at,
-            expires_at: row.expires_at,
-            delegation_digest: hex(&row.delegation_digest)?,
-            leaf: *tree.leaves().get(index).ok_or(ErrorCode::Unauthorized)?,
-            index: index.try_into().map_err(|_| ErrorCode::Unauthorized)?,
-            path: *tree.paths().get(index).ok_or(ErrorCode::Unauthorized)?,
-        },
+        enrollment: roster_row(tree, index)?,
         enrollment_root: publication.root,
         // Rechecking preserves the original proof time; it never changes the
         // opening's rate window or extends its original validity horizon.

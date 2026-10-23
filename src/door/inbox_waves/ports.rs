@@ -64,6 +64,20 @@ pub struct ReceiptRequest<'a> {
     pub receipt_signature: &'a [u8],
 }
 
+/// One peer's signed handle announcement, as the first wave carries it (the sender's in the
+/// Hello, the recipient's in the Terms).
+#[derive(Clone, Copy, Debug)]
+pub struct HandleRequest<'a> {
+    /// The pseudonym the announcement must be bound to (the counterpart).
+    pub peer: &'a Binding,
+    /// This member's own binding (the verifier).
+    pub own: &'a Binding,
+    /// The wave's conversation the announcement must be bound to.
+    pub conversation: &'a [u8; 32],
+    /// The announcement bytes as received (untrusted).
+    pub announcement: &'a [u8],
+}
+
 /// Methods take `&self`: an implementation keeps its own interior mutability,
 /// so one bundle can serve the verifier, Contacts and Threads adapters at once.
 pub trait WavePorts {
@@ -155,6 +169,20 @@ pub trait WavePorts {
     fn own_record<'a>(&'a self, binding: &'a Binding) -> OwnedFuture<'a, ()>;
     /// The CURRENT lineage of a peer (forced read, never cached).
     fn peer_lineage<'a>(&'a self, binding: &'a Binding) -> OwnedFuture<'a, ckmg::Lineage>;
+    /// The pseudonym is a current member of the verified roster: membership only, never
+    /// its lineage. This is all a first wave to a stranger checks before sending.
+    fn member<'a>(&'a self, _peer: &'a Binding, _now: u64) -> OwnedFuture<'a, ()> {
+        Box::pin(async { Err(super::super::ErrorCode::Unavailable) })
+    }
+    /// Verify a peer's signed handle announcement against the charter-verified lineage
+    /// bound to its pseudonym and retain the handle for later reads. A substituted handle
+    /// is `Refused`; evidence that cannot be read is `Unavailable` (retry).
+    fn accept_handle<'a>(&'a self, _request: HandleRequest<'a>) -> OwnedFuture<'a, ()> {
+        Box::pin(async { Err(super::super::ErrorCode::Unavailable) })
+    }
+    /// Install a handle this device verified earlier (the desk or the Contacts journal) so
+    /// the peer can be read again after a restart. It never verifies anything itself.
+    fn retain_handle(&self, _peer: &Binding, _handle: &[u8]) {}
 }
 
 /// The cwlt verifier is the production implementation of the proof-verifier

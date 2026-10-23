@@ -268,3 +268,106 @@ where
         Ok(())
     }
 }
+
+/// The per-epoch record steps on the account's own Vault (the background job;
+/// the proof itself runs between the two calls, off the Vault).
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+impl<B, C, E, A, R> CommunityAccount<B, C, E, A, R>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+{
+    pub(in crate::door) async fn record_prepare(
+        &mut self,
+        source: cfyr::membership::CommonRecordLease<'_, crate::door::foyer::Transport>,
+        configuration: &crate::door::record::RecordConfiguration,
+        prover: &ckmg::wallet_engine::native_prover::NativeProver,
+    ) -> Result<(
+        crate::door::record::RecordWindow,
+        Option<crate::door::record::RecordWork>,
+    )> {
+        let mut vault = self.vault.open().await?;
+        crate::door::record::prepare_record(source, &mut vault, configuration, prover).await
+    }
+
+    pub(in crate::door) async fn record_finish(
+        &mut self,
+        proof: crate::door::record::RecordProof,
+    ) -> Result<()> {
+        let mut vault = self.vault.open().await?;
+        crate::door::record::finish_record(&mut vault, proof).await
+    }
+
+    /// The member's evolving account witness (the wave wallet's state), reopened under
+    /// `roster`, the caller's verified current common roster. Before the first wave the
+    /// Vault holds no witness yet: it is the accepted account itself. Fresh original
+    /// Keys authority is rechecked first; the sealed bytes open only under this
+    /// device's engine seed and must reproduce the sealed state commitment.
+    pub(in crate::door) async fn witness_load(
+        &mut self,
+        roster: std::sync::Arc<ckmg::wallet_engine::account::Checkpoint>,
+    ) -> Result<ckmg::wallet_engine::account::Account> {
+        let origin = self.origin.clone();
+        self.check(&origin).await?;
+        let mut vault = self.vault.open().await?;
+        let stored = vault
+            .witness_state()
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?;
+        match stored {
+            Some(bytes) => {
+                let sealed = ckmg::wallet_engine::account::SealedAccount::from_bytes(&bytes)
+                    .map_err(|_| ErrorCode::Unauthorized)?;
+                let engine = vault
+                    .keys()
+                    .wallet_engine()
+                    .await
+                    .map_err(|_| ErrorCode::Unauthorized)?;
+                engine
+                    .restore_account(&sealed, roster)
+                    .map_err(|_| ErrorCode::Unauthorized)
+            }
+            None => vault
+                .restore_accepted_account()
+                .await
+                .map_err(|_| ErrorCode::Unauthorized)?
+                .witness(roster)
+                .map_err(|_| ErrorCode::Unauthorized),
+        }
+    }
+
+    /// Make `account` the newest durable witness: sealed under this device's engine
+    /// seed and replaced by compare-and-swap against the stored one. Called after the
+    /// issuer accepted the state and before the next step starts. A lost race writes
+    /// nothing and is `Reconcile`.
+    pub(in crate::door) async fn witness_store(
+        &mut self,
+        account: &ckmg::wallet_engine::account::Account,
+    ) -> Result<()> {
+        let origin = self.origin.clone();
+        self.check(&origin).await?;
+        let mut vault = self.vault.open().await?;
+        let engine = vault
+            .keys()
+            .wallet_engine()
+            .await
+            .map_err(|_| ErrorCode::Unauthorized)?;
+        let sealed = account.seal(&engine).map_err(|_| ErrorCode::Refused)?;
+        let current = vault
+            .witness_state()
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?;
+        match vault
+            .replace_witness_state(current.as_ref().map(|c| c.as_slice()), sealed.as_bytes())
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
+            Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),
+            Err(_) => Err(ErrorCode::Unavailable),
+        }
+    }
+}

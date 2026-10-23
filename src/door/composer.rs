@@ -82,6 +82,23 @@ pub struct ProverArtifacts {
     /// files to the device so the wave prover can take them as a parameter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wave: Option<CircuitFiles>,
+    /// Circuit and verification key of the record epoch (the member's per-epoch
+    /// record proof for Forum entry), when the platform distributes them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record: Option<CircuitFiles>,
+    /// Circuit and verification key of the settled-wave outcome, when the platform
+    /// distributes them (the group's files again: the program selects the member).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<CircuitFiles>,
+    /// The owned `czkp-bb-worker` that checks a counterpart's `wave` and `outcome`
+    /// proofs (not the prover worker above). Absent: this device cannot verify waves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier_executable: Option<PathBuf>,
+    /// The group's manifest. It authenticates the circuit, keys and SRS files above
+    /// and is itself pinned by the community's published wave policy
+    /// (`WavePolicy.manifest_sha256`); a mismatch refuses every counterpart proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_file: Option<PathBuf>,
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u64,
     #[serde(default = "default_threads")]
@@ -117,6 +134,11 @@ pub struct DeviceSettings {
     /// (`board::Configuration` JSON). It is copied into the device deployment on open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forum: Option<Value>,
+    /// Catalogue key of the record period in the community's signed Rulebook
+    /// (trusted deployment configuration). With `prover.record` it starts the
+    /// background record job; without them the device keeps no epoch record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record_period_key: Option<String>,
 }
 
 impl DeviceSettings {
@@ -179,6 +201,55 @@ impl DeviceStorage<cwst::native::FileBackend> {
 impl ProverArtifacts {
     /// The real client prover over the retained extension group.
     pub fn prover(&self) -> Result<ckmg::wallet_engine::native_prover::NativeProver, ComposeError> {
+        // This is the account update prover; wave, outcome and record provers come from
+        // the same group.
+        self.circuit_prover(
+            ckmg::wallet_engine::native_prover::Program::Update,
+            &self.circuit_file,
+            &self.keys_file,
+        )
+    }
+
+    /// The record-epoch prover, when the record circuit was distributed.
+    pub fn record_prover(
+        &self,
+    ) -> Result<Option<ckmg::wallet_engine::native_prover::NativeProver>, ComposeError> {
+        self.record
+            .as_ref()
+            .map(|files| {
+                self.circuit_prover(
+                    ckmg::wallet_engine::native_prover::Program::RecordEpoch,
+                    &files.circuit_file,
+                    &files.keys_file,
+                )
+            })
+            .transpose()
+    }
+
+    /// The provers of the wave worker (account update, `wave`, `outcome`), when both
+    /// wave circuits were distributed; `None` leaves the device without a wave worker.
+    pub fn wave_provers(
+        &self,
+    ) -> Result<Option<super::inbox_waves::native::NativeWaveProver>, ComposeError> {
+        use ckmg::wallet_engine::native_prover::Program;
+        let (Some(wave), Some(outcome)) = (&self.wave, &self.outcome) else {
+            return Ok(None);
+        };
+        super::inbox_waves::native::NativeWaveProver::new(
+            self.prover()?,
+            self.circuit_prover(Program::Wave, &wave.circuit_file, &wave.keys_file)?,
+            self.circuit_prover(Program::Outcome, &outcome.circuit_file, &outcome.keys_file)?,
+        )
+        .map(Some)
+        .map_err(step("wave provers"))
+    }
+
+    fn circuit_prover(
+        &self,
+        program: ckmg::wallet_engine::native_prover::Program,
+        circuit_file: &Path,
+        keys_file: &Path,
+    ) -> Result<ckmg::wallet_engine::native_prover::NativeProver, ComposeError> {
         use ckmg::wallet_engine::native_prover::{NativeProver, NativeProverConfig};
         let read = |path: &Path, maximum: usize| -> Result<Vec<u8>, ComposeError> {
             let bytes = std::fs::read(path).map_err(step("prover artifacts"))?;
@@ -188,8 +259,8 @@ impl ProverArtifacts {
             Ok(bytes)
         };
         let sha = |bytes: &[u8]| -> [u8; 32] { Sha256::digest(bytes).into() };
-        let circuit = read(&self.circuit_file, 64 << 20)?;
-        let keys = read(&self.keys_file, 1 << 20)?;
+        let circuit = read(circuit_file, 64 << 20)?;
+        let keys = read(keys_file, 1 << 20)?;
         let g1 = read(&self.srs_g1_file, 128 << 20)?;
         let g2 = read(&self.srs_g2_file, 128)?;
         let executable = self.worker_executable.clone();
@@ -202,8 +273,7 @@ impl ProverArtifacts {
         NativeProver::new(NativeProverConfig {
             executable,
             executable_digest,
-            // This is the account update prover; wave and outcome provers come from the same group.
-            program: ckmg::wallet_engine::native_prover::Program::Update,
+            program,
             scope: cblc::accounting::AccountProofScope {
                 circuit_digest: sha(&circuit),
                 verifying_key_digest: sha(&keys),
@@ -519,6 +589,32 @@ where
     door.set_activation_prover(std::sync::Arc::new(
         super::accounting::NativeActivationProver::new(settings.prover.clone()),
     ));
+    // G2 for the wave ports: marked by the record job, read by the ports.
+    let record_current = super::record::RecordCurrent::default();
+    if let (Some(key), Some(prover)) = (
+        settings.record_period_key.clone(),
+        settings.prover.record_prover()?,
+    ) {
+        door.set_record_job(
+            community_origin,
+            super::record::RecordJob {
+                configuration: super::record::RecordConfiguration::new(key)
+                    .map_err(step("record configuration"))?,
+                prover,
+                current: record_current.clone(),
+            },
+        );
+    }
+    // The restoring composer binds the wave ports and worker from this, once it holds
+    // the member's network: nothing is installed unless the wave and outcome circuits
+    // were distributed.
+    door.set_wave_device(
+        community_origin,
+        super::inbox_waves::native::WaveDevice {
+            artifacts: settings.prover.clone(),
+            record: record_current.clone(),
+        },
+    );
     let fingerprint = door
         .current_policy(community_origin)
         .map_err(step("community identity"))?
@@ -1014,11 +1110,16 @@ mod tests {
                 srs_g1_file: "/x".into(),
                 srs_g2_file: "/x".into(),
                 wave: None,
+                record: None,
+                outcome: None,
+                verifier_executable: None,
+                manifest_file: None,
                 timeout_seconds: 1,
                 threads: 1,
                 memory_megabytes: 1,
             },
             forum: None,
+            record_period_key: None,
         };
         // Without its founding fingerprint (or with a malformed one) the community is refused.
         assert!(settings.validate().is_err());

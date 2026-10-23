@@ -15,7 +15,12 @@ pub(crate) mod engine;
 mod ports;
 mod signing;
 pub mod account_ports;
+pub mod feed_trust;
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub mod native;
 pub mod production;
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub mod verifier;
 pub mod types;
 pub mod wallet;
 pub mod witness;
@@ -23,7 +28,8 @@ pub mod worker;
 
 use super::*;
 pub use ports::{
-    verify_outcome_with, verify_reservation_with, AccountSigner, ContactRequest, Policy, ReceiptRequest, WavePorts,
+    verify_outcome_with, verify_reservation_with, AccountSigner, ContactRequest, HandleRequest,
+    Policy, ReceiptRequest, WavePorts,
 };
 pub use types::*;
 

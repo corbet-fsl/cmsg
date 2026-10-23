@@ -130,6 +130,7 @@ impl<O: HandleOpener> PeerRecords for StoredHandleRecords<O> {
 /// (exported by the peer's `ckmg::Keys` under current authority). It conveys
 /// decryption of that one record only; every read is a forced network read and
 /// the evidence is copied out, so nothing from the read is retained.
+#[derive(Clone)]
 pub struct TorHandleOpener<N: cdht::Network> {
     network: N,
 }
@@ -265,6 +266,135 @@ fn select(
     Ok(lineage.clone())
 }
 
+/// The handles the wave ports may read peers through: only handles this member
+/// retained after verifying them (Contacts), shared with whoever refreshes them.
+/// Nothing is looked up by pseudonym; a peer without a handle is `Unavailable`.
+#[derive(Clone, Default)]
+pub struct HandleBook(std::rc::Rc<std::cell::RefCell<std::collections::BTreeMap<String, Vec<u8>>>>);
+
+impl HandleBook {
+    /// Replace the book with the handles of one committed Contacts snapshot.
+    pub fn replace(&self, handles: std::collections::BTreeMap<String, Vec<u8>>) {
+        *self.0.borrow_mut() = handles;
+    }
+    fn get(&self, member: &str) -> Option<Vec<u8>> {
+        self.0.borrow().get(member).cloned()
+    }
+    /// Retain the handle of one member whose signed announcement was verified (or that
+    /// the Contacts journal retained after verifying it). It replaces an older one.
+    pub fn learn(&self, member: &str, handle: Vec<u8>) {
+        self.0.borrow_mut().insert(member.to_owned(), handle);
+    }
+}
+
+/// Borrows the door-held trust view only inside one synchronous inspection.
+struct CellView<'a, V>(&'a std::cell::RefCell<V>);
+impl<V: CharterView> CharterView for CellView<'_, V> {
+    fn with_current<T>(
+        &mut self,
+        community: &str,
+        now: u64,
+        inspect: impl FnOnce(&VerifiedCharter) -> Result<T, cnbx::ContactError>,
+    ) -> Result<T, cnbx::ContactError> {
+        let mut view = self.0.try_borrow_mut().map_err(|_| cnbx::ContactError::Unavailable)?;
+        view.with_current(community, now, inspect)
+    }
+}
+
+/// The wave ports' peer lineage: a forced read through the peer's retained handle,
+/// every item reverified against the community Charter (`PeerLineage`). Refused
+/// (`Refused`) only for present negative evidence; anything else is `Unavailable`.
+pub struct WavePeerLineage<O, V> {
+    handles: HandleBook,
+    opener: O,
+    view: std::cell::RefCell<V>,
+}
+
+impl<O, V> WavePeerLineage<O, V> {
+    pub fn new(handles: HandleBook, opener: O, view: V) -> Self {
+        Self {
+            handles,
+            opener,
+            view: std::cell::RefCell::new(view),
+        }
+    }
+}
+
+impl<O, V> super::inbox_waves::production::PeerLineageRead for WavePeerLineage<O, V>
+where
+    O: HandleOpener + Clone,
+    V: CharterView,
+{
+    fn read<'a>(&'a self, binding: &'a Binding) -> super::facades::OwnedFuture<'a, Lineage> {
+        Box::pin(async move {
+            let handle = self
+                .handles
+                .get(binding.member())
+                .ok_or(super::ErrorCode::Unavailable)?;
+            let records = StoredHandleRecords::new(
+                std::collections::BTreeMap::from([(binding.member().to_owned(), handle)]),
+                self.opener.clone(),
+            );
+            let mut port = PeerLineage::new(records, CellView(&self.view), || {
+                ckmg::Clock::now(&mut super::custody::SystemClock).ok()
+            });
+            cnbx::DeviceAuthority::current(&mut port, binding)
+                .await
+                .map_err(|error| match error {
+                    cnbx::ContactError::Authority => super::ErrorCode::Refused,
+                    _ => super::ErrorCode::Unavailable,
+                })
+        })
+    }
+
+    /// The first wave's handle: verified on receipt, before the HandleBook learns it.
+    /// Refused (`Refused`): an announcement that is not for this peer and conversation,
+    /// a handle that is not a read capability for this peer's own record, or one the
+    /// charter-verified lineage read through it does not vouch for. Nothing is read from
+    /// the network for the first three; an unreadable record is `Unavailable` (retry).
+    fn accept<'a>(
+        &'a self,
+        request: super::inbox_waves::HandleRequest<'a>,
+    ) -> super::facades::OwnedFuture<'a, ()> {
+        Box::pin(async move {
+            let refused = super::ErrorCode::Refused;
+            let announcement: cnbx::HandleAnnouncement =
+                serde_json::from_slice(request.announcement).map_err(|_| refused)?;
+            if announcement.binding() != request.peer
+                || announcement.conversation() != request.conversation
+                || ckmg::LineageReadCustody::from_capability(announcement.handle(), request.peer)
+                    .is_err()
+            {
+                return Err(refused);
+            }
+            let records = StoredHandleRecords::new(
+                std::collections::BTreeMap::from([(
+                    request.peer.member().to_owned(),
+                    announcement.handle().to_vec(),
+                )]),
+                self.opener.clone(),
+            );
+            let mut port = PeerLineage::new(records, CellView(&self.view), || {
+                ckmg::Clock::now(&mut super::custody::SystemClock).ok()
+            });
+            announcement
+                .verify(request.own, &mut port)
+                .await
+                .map_err(|error| match error {
+                    cnbx::Error::Contacts(cnbx::ContactError::Authority) => refused,
+                    _ => super::ErrorCode::Unavailable,
+                })?;
+            self.handles
+                .learn(request.peer.member(), announcement.handle().to_vec());
+            Ok(())
+        })
+    }
+
+    fn retain(&self, peer: &Binding, handle: &[u8]) {
+        self.handles.learn(peer.member(), handle.to_vec());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +457,7 @@ mod tests {
         );
     }
 
+    #[derive(Clone)]
     struct NoOpen;
     impl HandleOpener for NoOpen {
         async fn read(
@@ -427,5 +558,194 @@ mod tests {
                 Some(PeerUnavailable)
             );
         }
+    }
+
+    /// Opens every handle to an empty read.
+    #[derive(Clone)]
+    struct Empty;
+    impl HandleOpener for Empty {
+        async fn read(
+            &mut self,
+            _: &Binding,
+            _: &[u8],
+        ) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn the_wave_port_reads_only_peers_with_a_retained_handle() {
+        use crate::door::inbox_waves::production::PeerLineageRead;
+        let binding = Binding::new("c", &"a".repeat(96)).unwrap();
+        let port = WavePeerLineage::new(HandleBook::default(), NoOpen, NoTrust);
+        assert_eq!(
+            block_on(port.read(&binding)).err(),
+            Some(crate::door::ErrorCode::Unavailable)
+        );
+        // A handle of another member does not open this one.
+        let book = HandleBook::default();
+        book.replace(std::collections::BTreeMap::from([("b".repeat(96), vec![1])]));
+        let port = WavePeerLineage::new(book, NoOpen, NoTrust);
+        assert!(block_on(port.read(&binding)).is_err());
+    }
+
+    #[test]
+    fn the_wave_port_is_unavailable_on_a_failed_read_and_refuses_negative_evidence() {
+        use crate::door::inbox_waves::production::PeerLineageRead;
+        let binding = Binding::new("c", &"a".repeat(96)).unwrap();
+        let book = HandleBook::default();
+        book.replace(std::collections::BTreeMap::from([("a".repeat(96), b"not a capability".to_vec())]));
+        let unreadable = WavePeerLineage::new(book.clone(), TorHandleOpener::new(Dead), NoTrust);
+        assert_eq!(
+            block_on(unreadable.read(&binding)).err(),
+            Some(crate::door::ErrorCode::Unavailable)
+        );
+        // Read, then judged by the Charter view: its negative verdict is a refusal.
+        let judged = WavePeerLineage::new(book, Empty, NoTrust);
+        assert_eq!(
+            block_on(judged.read(&binding)).err(),
+            Some(crate::door::ErrorCode::Refused)
+        );
+    }
+
+    /// A read capability shaped as `ckmg` exports it (domain, binding, owner, read key),
+    /// for the base point as record owner: it passes the strict parse, nothing more.
+    fn capability_of(binding: &Binding) -> Vec<u8> {
+        let mut out = b"ckmg.lineage-read.v1\0".to_vec();
+        for part in [binding.community(), binding.member()] {
+            out.extend_from_slice(&(part.len() as u16).to_be_bytes());
+            out.extend_from_slice(part.as_bytes());
+        }
+        out.extend_from_slice(&[
+            0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+            0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+            0x66, 0x66, 0x66, 0x66,
+        ]);
+        out.extend_from_slice(&[7; 32]);
+        out
+    }
+
+    /// A structurally complete announcement with a worthless signature: enough to reach
+    /// every check that runs before the lineage vouches for it.
+    fn announcement(binding: &Binding, conversation: [u8; 32], handle: &[u8]) -> Vec<u8> {
+        let key = ckmg::PublicKey::new(ckmg::VLD0, [3; 32]);
+        let signature = ckmg::Signature::new(ckmg::VLD0, [4; 64]);
+        let certificate = ckmg::KeyCertificate {
+            binding: binding.clone(),
+            epoch: 0,
+            device: key,
+            purpose: ctcs::purpose(),
+            key,
+            signature,
+        };
+        serde_json::to_vec(&serde_json::json!({
+            "binding": binding,
+            "conversation": conversation,
+            "handle": handle,
+            "certificate": certificate,
+            "signature": signature,
+        }))
+        .unwrap()
+    }
+
+    /// Every read is unreadable.
+    #[derive(Clone)]
+    struct Unreadable;
+    impl HandleOpener for Unreadable {
+        async fn read(
+            &mut self,
+            _: &Binding,
+            _: &[u8],
+        ) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable> {
+            Err(PeerUnavailable)
+        }
+    }
+
+    fn request<'a>(
+        peer: &'a Binding,
+        own: &'a Binding,
+        conversation: &'a [u8; 32],
+        announcement: &'a [u8],
+    ) -> crate::door::inbox_waves::HandleRequest<'a> {
+        crate::door::inbox_waves::HandleRequest {
+            peer,
+            own,
+            conversation,
+            announcement,
+        }
+    }
+
+    #[test]
+    fn a_substituted_handle_is_refused_without_reading_anything() {
+        use crate::door::inbox_waves::production::PeerLineageRead;
+        use crate::door::ErrorCode;
+        let (own, peer) = (
+            Binding::new("c", &"b".repeat(96)).unwrap(),
+            Binding::new("c", &"a".repeat(96)).unwrap(),
+        );
+        let stranger = Binding::new("c", &"d".repeat(96)).unwrap();
+        let conversation = [5u8; 32];
+        let book = HandleBook::default();
+        // NoOpen panics on any read: every refusal below happens before the network.
+        let port = WavePeerLineage::new(book.clone(), NoOpen, NoTrust);
+        let genuine = capability_of(&peer);
+        let cases: [(&str, Vec<u8>); 6] = [
+            ("not json", b"not an announcement".to_vec()),
+            // The announcement was made by another member than the one that sent it.
+            ("other member", announcement(&stranger, conversation, &capability_of(&stranger))),
+            // A genuine announcement of the peer, replayed for another conversation.
+            ("other conversation", announcement(&peer, [6; 32], &genuine)),
+            // The peer's announcement carrying a handle that is not a read capability.
+            ("not a capability", announcement(&peer, conversation, b"attacker record")),
+            // The peer's announcement carrying another member's read capability.
+            ("foreign capability", announcement(&peer, conversation, &capability_of(&stranger))),
+            ("empty", Vec::new()),
+        ];
+        for (name, bytes) in cases {
+            assert_eq!(
+                block_on(port.accept(request(&peer, &own, &conversation, &bytes))).err(),
+                Some(ErrorCode::Refused),
+                "{name}"
+            );
+        }
+        assert_eq!(book.get(peer.member()), None);
+    }
+
+    #[test]
+    fn a_handle_the_lineage_does_not_vouch_for_is_never_retained() {
+        use crate::door::inbox_waves::production::PeerLineageRead;
+        use crate::door::ErrorCode;
+        let (own, peer) = (
+            Binding::new("c", &"b".repeat(96)).unwrap(),
+            Binding::new("c", &"a".repeat(96)).unwrap(),
+        );
+        let conversation = [5u8; 32];
+        let bytes = announcement(&peer, conversation, &capability_of(&peer));
+        // Read through the announced handle, the Charter view judges it: negative
+        // evidence refuses; a record that cannot be read is retried later.
+        let book = HandleBook::default();
+        let judged = WavePeerLineage::new(book.clone(), Empty, NoTrust);
+        assert_eq!(
+            block_on(judged.accept(request(&peer, &own, &conversation, &bytes))).err(),
+            Some(ErrorCode::Refused)
+        );
+        let unreadable = WavePeerLineage::new(book.clone(), Unreadable, NoTrust);
+        assert_eq!(
+            block_on(unreadable.accept(request(&peer, &own, &conversation, &bytes))).err(),
+            Some(ErrorCode::Unavailable)
+        );
+        assert_eq!(book.get(peer.member()), None);
+    }
+
+    #[test]
+    fn a_handle_retained_earlier_is_installed_again_and_replaced_by_a_newer_one() {
+        use crate::door::inbox_waves::production::PeerLineageRead;
+        let peer = Binding::new("c", &"a".repeat(96)).unwrap();
+        let book = HandleBook::default();
+        let port = WavePeerLineage::new(book.clone(), NoOpen, NoTrust);
+        port.retain(&peer, b"first");
+        assert_eq!(book.get(peer.member()), Some(b"first".to_vec()));
+        port.retain(&peer, b"second");
+        assert_eq!(book.get(peer.member()), Some(b"second".to_vec()));
     }
 }

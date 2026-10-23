@@ -312,6 +312,27 @@ impl Couriers {
             }
             let courier =
                 super::courier::spawn(door.clone(), &origin, super::courier::Config::default());
+            #[cfg(feature = "native-prover")]
+            if let Some(job) = door.lock().await.record_job(&origin) {
+                let closed = shared.clone();
+                tokio::task::spawn_local(super::record_job::run(
+                    door.clone(),
+                    origin.clone(),
+                    job,
+                    std::rc::Rc::new(move || closed.closed.get()),
+                    super::record_job::Cadence::default(),
+                ));
+            }
+            if let Some(worker) = door.lock().await.wave_worker(&origin) {
+                let closed = shared.clone();
+                tokio::task::spawn_local(super::wave_job::run(
+                    door.clone(),
+                    origin.clone(),
+                    worker,
+                    std::rc::Rc::new(move || closed.closed.get()),
+                    super::wave_job::Cadence::default(),
+                ));
+            }
             self.0.push((origin, shared, courier));
         }
     }

@@ -68,11 +68,16 @@ fn device(
             srs_g1_file: path("srs_g1_file"),
             srs_g2_file: path("srs_g2_file"),
             wave: None,
+            record: None,
+            outcome: None,
+            verifier_executable: None,
+            manifest_file: None,
             timeout_seconds: 300,
             threads: 2,
             memory_megabytes: 4096,
         },
         forum: None,
+        record_period_key: None,
     };
     let keys = composer::DeviceKeys::new(passkeys(&f["wallet"]));
     (settings, keys)

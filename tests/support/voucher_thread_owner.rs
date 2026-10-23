@@ -84,10 +84,14 @@ async fn sponsor_and_newcomer_chat_right_after_the_admission() {
     let sponsor_ports = Ports {
         lineage: lineage_of(&newcomer).await,
         lifetime: 3600,
+        member: true,
+        readable: true,
     };
     let newcomer_ports = Ports {
         lineage: lineage_of(&sponsor).await,
         lifetime: 3600,
+        member: true,
+        readable: true,
     };
     let bond = [7; 32];
 
@@ -179,10 +183,14 @@ async fn a_kill_between_the_flushed_send_and_the_queue_delete_sends_once() {
     let sponsor_ports = Ports {
         lineage: lineage_of(&newcomer).await,
         lifetime: 3600,
+        member: true,
+        readable: true,
     };
     let newcomer_ports = Ports {
         lineage: lineage_of(&sponsor).await,
         lifetime: 3600,
+        member: true,
+        readable: true,
     };
     let bond = [9; 32];
     let conversation = sponsor.contact_by_voucher(&newcomer_id, bond).await.unwrap();

@@ -11,7 +11,8 @@ use super::types::{Hello, Terms};
 use super::ports::AccountSigner;
 use super::{ContactRequest, ReceiptRequest};
 use super::super::{facades::OwnedFuture, ErrorCode, Result};
-use ckmg::wallet_engine::account::{Account, Acknowledgment, Reserve, Resolution};
+use ckmg::wallet_engine::account::{Account, Acknowledgment, Enrollment, Reserve, Resolution};
+use ckmg::Binding;
 use ckmg::SigningPhase;
 
 /// The newest accepted account witness, read afresh for each call.
@@ -63,7 +64,25 @@ pub struct AccountContact<V> {
     pub view: V,
 }
 
+/// Whether `member` has a roster row whose enrollment window covers `now`
+/// (inclusive start, exclusive deadline).
+fn enrolled(rows: &[Enrollment], member: &[u8; 32], now: u64) -> bool {
+    rows.iter()
+        .any(|row| row.member == *member && row.starts_at <= now && now < row.expires_at)
+}
+
+/// The counterpart's enrollment window in the account's verified roster.
+fn current_member(account: &Account, peer: &Binding, now: u64) -> Result<()> {
+    let digest = cnbx::member_digest_of(peer.member()).map_err(|_| ErrorCode::Refused)?;
+    enrolled(account.roster().entries(), &digest, now)
+        .then_some(())
+        .ok_or(ErrorCode::Refused)
+}
+
 impl<V: AccountView> WaveContact for AccountContact<V> {
+    fn member<'a>(&'a self, peer: &'a Binding, now: u64) -> OwnedFuture<'a, ()> {
+        Box::pin(async move { current_member(&self.view.current().await?, peer, now) })
+    }
     fn sign<'a>(
         &'a self,
         request: ContactRequest<'a>,
@@ -188,7 +207,40 @@ impl<V: AccountView, E: Fn() -> Result<[u8; 32]>> WaveTerms for AccountTerms<V, 
                 recipient_authority: account.owner().leaf,
                 recipient_challenge: challenge,
                 contact_signature: vec![],
+                recipient_handle: vec![],
             })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(member: u8, starts_at: u64, expires_at: u64) -> Enrollment {
+        Enrollment {
+            member: [member; 32],
+            key: [0; 64],
+            secret_hash: [0; 32],
+            starts_at,
+            expires_at,
+            delegation_digest: [0; 32],
+            leaf: [0; 32],
+            index: 0,
+            path: [[0; 32]; 32],
+        }
+    }
+
+    #[test]
+    fn a_peer_is_a_member_only_inside_its_enrollment_window() {
+        let rows = [row(1, 10, 20), row(2, 5, 6)];
+        assert!(!enrolled(&rows, &[1; 32], 9));
+        assert!(enrolled(&rows, &[1; 32], 10));
+        assert!(enrolled(&rows, &[1; 32], 19));
+        assert!(!enrolled(&rows, &[1; 32], 20));
+        // Another row's window never admits this member; an unknown member never matches.
+        assert!(!enrolled(&rows, &[2; 32], 10));
+        assert!(!enrolled(&rows, &[3; 32], 5));
+        assert!(!enrolled(&[], &[1; 32], 10));
     }
 }

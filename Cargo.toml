@@ -65,6 +65,7 @@ hpke = { version = "0.14", default-features = false, features = ["alloc", "x2551
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "main", optional = true, features = ["embedded-authenticator"] }
 ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "main", optional = true }
+cvfy = { git = "https://git.corbet.ch/corbet-foss/cvfy.git", branch = "main", optional = true }
 arti-client = { version = "0.46", default-features = false, optional = true }
 tor-rtcompat = { version = "0.46", default-features = false, features = ["tokio", "rustls"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
@@ -126,7 +127,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(owned_browser_coverage)"] 
 ohttp = ["cfyr/ohttp", "cbrd/ohttp", "dep:cblv", "cblv/client", "reqwest/rustls"]
 embedded-authenticator = ["dep:cpky"]
 conformance = []
-native-prover = ["cwlt/native-prover", "cvlt/wallet-native-prover", "ckmg/wallet-native-prover"]
+native-prover = ["cwlt/native-prover", "cwlt/native-verifier", "dep:cvfy", "czkp/native", "cvlt/wallet-native-prover", "ckmg/wallet-native-prover"]
 native-tor = ["ckmg/native-tor", "cmsh/tor", "cmsh/tor-records", "dep:ctrn", "dep:arti-client", "dep:tor-rtcompat", "dep:rustls"]
 # Test/fixture only: a private Tor network supplied by embedding code. Production builds never enable it.
 private-tor-fixture = ["native-tor"]

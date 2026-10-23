@@ -153,6 +153,23 @@ pub(super) enum Command {
     Resume,
     /// The caller applied the acceptance of this request: forget the stored bytes.
     Settle([u8; 32]),
+    /// Background record job, step 1: begin this epoch's record unless it is
+    /// cached (the trusted embedding's record configuration rides along).
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    RecordPrepare(Shared<super::record::RecordJob>),
+    /// Background record job, step 2: commit the proof made off the actor.
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    RecordFinish(Shared<std::cell::Cell<Option<super::record::RecordProof>>>),
+    /// Wave wallet: reopen the account witness under this verified current roster.
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    WitnessLoad(Shared<std::sync::Arc<ckmg::wallet_engine::account::Checkpoint>>),
+    /// Wave wallet: make this accepted witness state the durable one.
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    WitnessStore(Shared<ckmg::wallet_engine::account::Account>),
+    /// Wave wallet: the verified current common roster, read through a fresh
+    /// admission of this active member (never from a cache of the actor).
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    Roster,
     /// How many vouchers the accepted account may still hand out in this sponsor
     /// role (member 0, admin 1, root 2), read from its committed state. Reads only.
     VoucherRemaining(u8),
@@ -178,6 +195,24 @@ pub(super) enum Answer {
     Owed(Option<Shared<Applied>>),
     /// The stored update was forgotten.
     Settled,
+    /// Record job: the work to prove off the actor, or nothing (cached).
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    RecordWork(
+        super::record::RecordWindow,
+        Option<Shared<std::cell::Cell<Option<super::record::RecordWork>>>>,
+    ),
+    /// Record job: the epoch's record is cached.
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    RecordCached,
+    /// Wave wallet: the reopened account witness.
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    Witness(Shared<ckmg::wallet_engine::account::Account>),
+    /// Wave wallet: the witness state is durable.
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    WitnessStored,
+    /// Wave wallet: the verified current common roster.
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    Roster(Shared<super::accounting::VerifiedRoster>),
     /// Vouchers the account may still hand out (before the device's open links).
     Remaining(u64),
     /// Open was refused after the checkpoint slot its proof was bound to had ended
@@ -301,17 +336,28 @@ pub(super) enum Repeat {
     not(all(feature = "native-prover", not(target_arch = "wasm32"))),
     allow(dead_code)
 )]
+/// Commands with their own path in the actor (never answered from standing).
+fn own_path(command: &Command) -> bool {
+    match command {
+        Command::Update(_)
+        | Command::Resume
+        | Command::Settle(_)
+        | Command::Join(_)
+        | Command::VoucherRemaining(_) => true,
+        #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+        Command::RecordPrepare(_)
+        | Command::RecordFinish(_)
+        | Command::WitnessLoad(_)
+        | Command::WitnessStore(_)
+        | Command::Roster => true,
+        _ => false,
+    }
+}
+
 pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repeat {
     // Updates have their own path, and the lobby is asked again on every join:
     // an active member whose community changed its gates is held there.
-    if matches!(
-        command,
-        Command::Update(_)
-            | Command::Resume
-            | Command::Settle(_)
-            | Command::Join(_)
-            | Command::VoucherRemaining(_)
-    ) {
+    if own_path(&command) {
         return Repeat::As(command);
     }
     if let Some(active) = state.active().await {
@@ -334,6 +380,12 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
             | Command::VoucherRemaining(_) => {
                 unreachable!("returned above")
             }
+            #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+            Command::RecordPrepare(_)
+            | Command::RecordFinish(_)
+            | Command::WitnessLoad(_)
+            | Command::WitnessStore(_)
+            | Command::Roster => unreachable!("returned above"),
         });
     }
     match command {
@@ -1194,6 +1246,84 @@ mod run {
                     mailbox.reply(reply.map(Answer::Owed));
                     continue;
                 }
+                #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+                Command::RecordPrepare(job) => {
+                    // The actor's own session is the independent same-key source
+                    // the reception needs (the Door's is held by the recovery lease).
+                    let reply = match membership.observe_lease(clock).await {
+                        Ok(lease) => match lease.common_record(&mut policy, clock) {
+                            Ok(source) => account
+                                .record_prepare(source, &job.configuration, &job.prover)
+                                .await
+                                .map(|(window, work)| {
+                                    Answer::RecordWork(
+                                        window,
+                                        work.map(|work| {
+                                            Shared::new(std::cell::Cell::new(Some(work)))
+                                        }),
+                                    )
+                                }),
+                            Err(_) => Err(ErrorCode::Unavailable),
+                        },
+                        Err(_) => Err(ErrorCode::Unavailable),
+                    };
+                    mailbox.reply(reply);
+                    continue;
+                }
+                #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+                Command::RecordFinish(proof) => {
+                    let reply = match proof.take() {
+                        Some(proof) => account.record_finish(proof).await.map(|()| Answer::RecordCached),
+                        None => Err(ErrorCode::InvalidRequest),
+                    };
+                    mailbox.reply(reply);
+                    continue;
+                }
+                #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+                Command::WitnessLoad(roster) => {
+                    let reply = account
+                        .witness_load(std::sync::Arc::clone(roster))
+                        .await
+                        .map(|witness| Answer::Witness(Shared::new(witness)));
+                    mailbox.reply(reply);
+                    continue;
+                }
+                #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+                Command::WitnessStore(witness) => {
+                    let reply = account
+                        .witness_store(witness)
+                        .await
+                        .map(|()| Answer::WitnessStored);
+                    mailbox.reply(reply);
+                    continue;
+                }
+                #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+                Command::Roster => {
+                    // Only an active member reads the roster; the admission is fresh
+                    // and is dropped with this reply.
+                    let reply = if existing_active(&mut account).await.is_none() {
+                        Err(ErrorCode::Unavailable)
+                    } else {
+                        match admit(
+                            &mut membership,
+                            &mut policy,
+                            &mut global,
+                            device,
+                            &mut rng,
+                            creation.as_deref(),
+                        )
+                        .await
+                        {
+                            Ok(mut admission) => admission
+                                .current_roster()
+                                .await
+                                .map(|roster| Answer::Roster(Shared::new(roster))),
+                            Err(error) => Err(error),
+                        }
+                    };
+                    mailbox.reply(reply);
+                    continue;
+                }
                 Command::Settle(id) => {
                     let reply = update::settle(&mut Custodian(&mut account), *id).await;
                     if reply.is_ok() && owed.as_ref().is_some_and(|done| done.request_id() == *id) {
@@ -1422,6 +1552,12 @@ mod run {
             | Command::Resume
             | Command::Settle(_)
             | Command::VoucherRemaining(_) => (Err(ErrorCode::Unavailable), Next::Carry),
+            #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+            Command::RecordPrepare(_)
+            | Command::RecordFinish(_)
+            | Command::WitnessLoad(_)
+            | Command::WitnessStore(_)
+            | Command::Roster => (Err(ErrorCode::Unavailable), Next::Carry),
             Command::Activate => {
                 let Some(admission) = stage.admission() else {
                     return (Err(ErrorCode::Unavailable), Next::Carry);

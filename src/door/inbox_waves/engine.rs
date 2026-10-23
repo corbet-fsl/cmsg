@@ -8,7 +8,7 @@
 //! done), so a crash between the two is repaired by running the step again.
 use super::super::*;
 use super::desk::{Desk, Session, KEY, OWNER};
-use super::ports::{ContactRequest, Policy, ReceiptRequest, WavePorts};
+use super::ports::{ContactRequest, HandleRequest, Policy, ReceiptRequest, WavePorts};
 use super::signing::EngineSigner;
 
 /// How many times a wave may silently replace a Hello whose Terms came too late.
@@ -233,7 +233,9 @@ where
         Ok(())
     }
 
-    async fn check_peer(&mut self, peer: &str) -> Result<()> {
+    /// The counterpart's binding, after the checks that need no evidence: it is another
+    /// member and this member did not block it.
+    fn peer_binding(&self, peer: &str) -> Result<Binding> {
         let peer_binding =
             Binding::new(self.binding.community(), peer).map_err(|_| ErrorCode::InvalidRequest)?;
         if peer == self.binding.member() {
@@ -241,7 +243,104 @@ where
         }
         cnbx::member_digest_of(peer).map_err(inbox_error)?;
         self.refuse_blocked(peer)?;
+        Ok(peer_binding)
+    }
+
+    /// The gate of a FIRST wave message (Hello, Terms, or sending a Hello): the peer is a
+    /// current member of the verified roster. Its lineage is NOT read here; the handle that
+    /// makes it readable arrives signed inside the message and is verified on receipt.
+    async fn check_member(&mut self, peer: &str) -> Result<Binding> {
+        let peer_binding = self.peer_binding(peer)?;
+        self.ports.member(&peer_binding, now()?).await?;
+        Ok(peer_binding)
+    }
+
+    /// The gate of every later message: the peer's CURRENT lineage, read through the handle
+    /// that was verified and retained in the first exchange.
+    async fn check_peer(&mut self, peer: &str) -> Result<()> {
+        let peer_binding = self.peer_binding(peer)?;
         self.ports.peer_lineage(&peer_binding).await.map(|_| ())
+    }
+
+    /// This member's own lineage-read handle for `conversation`, signed with the Contacts
+    /// purpose key: the sender's goes into the Hello, the recipient's into the Terms.
+    async fn own_handle(&mut self, conversation: [u8; 32]) -> Result<Vec<u8>> {
+        let capability = self
+            .keys
+            .export_lineage_read_capability()
+            .await
+            .map_err(facades::keys_error)?;
+        let announcement = cnbx::HandleAnnouncement::sign(
+            &mut *self.keys,
+            self.contacts,
+            self.binding,
+            conversation,
+            capability.as_bytes().to_vec(),
+        )
+        .await
+        .map_err(inbox_error)?;
+        serde_json::to_vec(&announcement).map_err(|_| ErrorCode::InvalidRequest)
+    }
+
+    /// The newest announcement of `peer` that was verified on receipt and is still held by
+    /// a wave of the desk (the recipient keeps the Hello's, the sender the Terms'). A wave
+    /// enters the desk with it only after the ports accepted it.
+    fn desk_announcement(desk: &Desk, peer: &str) -> Option<cnbx::HandleAnnouncement> {
+        desk.waves
+            .iter()
+            .rev()
+            .filter(|session| session.peer == peer)
+            .find_map(|session| {
+                let announcement = match session.role {
+                    0 => &session.terms.as_ref()?.recipient_handle,
+                    _ => &session.hello.sender_handle,
+                };
+                serde_json::from_slice(announcement).ok()
+            })
+    }
+
+    /// Once the release created the Pending relation, the verified handle also goes into
+    /// the Contacts journal (re-verified there against the peer's lineage), where every
+    /// later device start finds it. Best effort: the release is already committed and its
+    /// desk still holds the announcement, so a peer that cannot be read right now costs
+    /// only this copy, never the wave.
+    async fn retain_peer_handle(
+        &mut self,
+        announcement: Option<cnbx::HandleAnnouncement>,
+        devices: &mut Devices<'a>,
+    ) {
+        let Some(announcement) = announcement else {
+            return;
+        };
+        if let Ok(contacts) = self.inbox.contacts(self.store) {
+            let _ = contacts
+                .retain_handle(
+                    &announcement,
+                    devices,
+                    &mut *self.keys,
+                    self.contacts,
+                    self.store,
+                )
+                .await;
+        }
+    }
+
+    /// Re-install the handle verified for `peer` earlier, after a restart: the Contacts
+    /// journal's newest one, else the one a wave of the desk holds. Nothing is looked up
+    /// by pseudonym: without either, the peer stays unreadable.
+    fn prime(&self, desk: &Desk, peer: &str) -> Result<()> {
+        let binding =
+            Binding::new(self.binding.community(), peer).map_err(|_| ErrorCode::InvalidRequest)?;
+        let retained = self
+            .inbox
+            .contacts(self.store)
+            .and_then(|contacts| contacts.handle(peer))
+            .map_err(inbox_error)?;
+        let held = || Self::desk_announcement(desk, peer).map(|a| a.handle().to_vec());
+        if let Some(handle) = retained.or_else(held) {
+            self.ports.retain_handle(&binding, &handle);
+        }
+        Ok(())
     }
 
     // ---- member actions ---------------------------------------------------
@@ -249,13 +348,15 @@ where
     /// Start a wave to `peer`. Returns at once; the reservation proof follows
     /// in the background.
     pub async fn send(&mut self, peer: &str) -> Result<WaveStatus> {
-        self.check_peer(peer).await?;
+        self.check_member(peer).await?;
         let now = now()?;
         let policy: Policy = self.ports.policy(now)?;
         let mut desk = Desk::load(self.store)?;
         let nonce = random()?;
+        let conversation = random()?;
+        let sender_handle = self.own_handle(conversation).await?;
         let hello = Hello {
-            conversation: random()?,
+            conversation,
             group: policy.group,
             contact_policy: policy.contact_policy,
             history: policy.history,
@@ -265,6 +366,7 @@ where
                 .ok_or(ErrorCode::InvalidRequest)?,
             sender_authority: policy.authority,
             sender_challenge: random()?,
+            sender_handle,
         };
         desk.add(Session {
             nonce,
@@ -302,6 +404,7 @@ where
             return Err(ErrorCode::Refused);
         }
         self.refuse_blocked(&session.peer)?;
+        self.prime(&desk, &session.peer)?;
         match decision {
             Decision::Close => {
                 if !matches!(
@@ -450,7 +553,9 @@ where
             .await
             .map_err(inbox_error)?;
         drop(released);
+        let announcement = Self::desk_announcement(&next, &session.peer);
         *desk = next;
+        self.retain_peer_handle(announcement, &mut devices).await;
         Ok(())
     }
 
@@ -537,7 +642,19 @@ where
     // ---- messages from the other device -------------------------------------
 
     pub async fn receive(&mut self, peer: &str, envelope: Envelope) -> Result<WaveStatus> {
-        self.check_peer(peer).await?;
+        let mut desk = Desk::load(self.store)?;
+        // The first messages of a wave carry the sender's own signed handle, so they are
+        // gated by roster membership only; everything later reads the peer's lineage
+        // through the handle retained from them.
+        if matches!(
+            envelope.message,
+            WaveMessage::Hello { .. } | WaveMessage::Terms { .. }
+        ) {
+            self.check_member(peer).await?;
+        } else {
+            self.prime(&desk, peer)?;
+            self.check_peer(peer).await?;
+        }
         // Unknown versions, a foreign sender and a mis-bound conversation are
         // refused before anything is read from the message.
         if envelope.version != WAVE_VERSION || envelope.sender != peer {
@@ -547,7 +664,6 @@ where
         let conversation = envelope.conversation;
         let message = envelope.message.clone();
         let nonce = *message.nonce();
-        let mut desk = Desk::load(self.store)?;
         if let WaveMessage::Hello { hello, .. } = &message {
             if hello.conversation != conversation {
                 return Err(ErrorCode::Refused);
@@ -638,6 +754,18 @@ where
         {
             return Err(ErrorCode::Refused);
         }
+        // The sender's own handle is verified against the charter-verified lineage bound to
+        // its pseudonym before anything is countersigned; a substituted handle is refused.
+        let peer_binding =
+            Binding::new(self.binding.community(), peer).map_err(|_| ErrorCode::InvalidRequest)?;
+        self.ports
+            .accept_handle(HandleRequest {
+                peer: &peer_binding,
+                own: self.binding,
+                conversation: &hello.conversation,
+                announcement: &hello.sender_handle,
+            })
+            .await?;
         let ports = self.ports;
         let signer = EngineSigner::new(
             &mut *self.keys,
@@ -647,7 +775,9 @@ where
         );
         let made = ports.terms(&nonce, &hello, peer, now, &signer).await;
         desk.ledger = signer.into_ledger();
-        let terms = made?;
+        let mut terms = made?;
+        // The countersign carries the recipient's own handle for the same conversation.
+        terms.recipient_handle = self.own_handle(hello.conversation).await?;
         if terms.contact_signature.len() != CONTACT_SIGNATURE_BYTES {
             return Err(ErrorCode::Refused);
         }
@@ -683,11 +813,13 @@ where
         if session.rehellos >= MAX_REHELLOS {
             return Err(ErrorCode::Refused);
         }
-        self.check_peer(&session.peer).await?;
+        self.check_member(&session.peer).await?;
         let policy = self.ports.policy(now)?;
         let nonce = random()?;
+        let conversation = random()?;
+        let sender_handle = self.own_handle(conversation).await?;
         let hello = Hello {
-            conversation: random()?,
+            conversation,
             group: policy.group,
             contact_policy: policy.contact_policy,
             history: policy.history,
@@ -697,6 +829,7 @@ where
                 .ok_or(ErrorCode::InvalidRequest)?,
             sender_authority: policy.authority,
             sender_challenge: random()?,
+            sender_handle,
         };
         let old = session.nonce;
         let rehellos = session.rehellos + 1;
@@ -749,6 +882,18 @@ where
         if terms.contact_signature.len() != CONTACT_SIGNATURE_BYTES {
             return Err(ErrorCode::Refused);
         }
+        // The recipient's own handle is verified before its consent is accepted or anything
+        // is offered; a substituted handle is refused.
+        let peer_binding = Binding::new(self.binding.community(), &session.peer)
+            .map_err(|_| ErrorCode::InvalidRequest)?;
+        self.ports
+            .accept_handle(HandleRequest {
+                peer: &peer_binding,
+                own: self.binding,
+                conversation: &session.hello.conversation,
+                announcement: &terms.recipient_handle,
+            })
+            .await?;
         let request = ContactRequest {
             nonce: &nonce,
             hello: &session.hello,
@@ -967,9 +1112,12 @@ where
             self.binding.member(),
             WaveMessage::Welcome { nonce, welcome },
         );
+        let announcement = Self::desk_announcement(&next, &session.peer);
         *desk = next;
         self.write_desk(desk, operation(&nonce, "welcome-queued"))
-            .await
+            .await?;
+        self.retain_peer_handle(announcement, &mut devices).await;
+        Ok(())
     }
 
     async fn on_welcome(

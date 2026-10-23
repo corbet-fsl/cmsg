@@ -101,13 +101,38 @@ fn bridge<S: serde::Serialize, D: serde::de::DeserializeOwned>(value: &S) -> Res
         .map_err(|_| ErrorCode::Refused)
 }
 
+/// The ledger reads the proof of every extended update as the extension bundle: one
+/// step from the update's inbox to its next state, the proof in lower hex (the same
+/// shape an activation sends from the empty inbox).
+fn update_bundle(
+    statement: &cblc::accounting::AccountStatement,
+    update: &cblc::extensions::ExtendedUpdate,
+    proof: &[u8],
+) -> Result<Vec<u8>> {
+    if proof.is_empty() {
+        return Err(ErrorCode::Refused);
+    }
+    serde_json::to_vec(&serde_json::json!({
+        "version": 1,
+        "proofs": [{
+            "state": statement.next_state,
+            "inbox": update.inbox.root,
+            "proof": data_encoding::HEXLOWER.encode(proof),
+        }],
+    }))
+    .map_err(|_| ErrorCode::Refused)
+}
+
 impl<T: UpdateTransport> UpdateSink for DoorUpdateSink<T> {
     async fn apply(&mut self, candidate: &Candidate, proof: Vec<u8>) -> Result<Certificate> {
+        let statement: cblc::accounting::AccountStatement = bridge(&candidate.statement)?;
+        let update: cblc::extensions::ExtendedUpdate = bridge(&candidate.update)?;
+        let proof = update_bundle(&statement, &update, &proof)?;
         let proven = ProvenUpdate {
-            statement: bridge(&candidate.statement)?,
+            statement,
             scope: self.scope.clone(),
             proof,
-            update: bridge(&candidate.update)?,
+            update,
         };
         let applied = self.transport.update(proven).await?;
         let certificate = applied.response().certificate();
@@ -149,6 +174,31 @@ mod tests {
         let mut extra = fixture["statement"].clone();
         extra["unexpected"] = serde_json::json!(1);
         assert!(bridge::<_, cblc::accounting::AccountStatement>(&extra).is_err());
+    }
+
+    #[test]
+    fn an_update_proof_travels_as_the_one_step_extension_bundle() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../../tests/fixture/witness-statement.json"))
+                .unwrap();
+        let statement: cblc::accounting::AccountStatement =
+            bridge(&fixture["statement"]).unwrap();
+        let update: cblc::extensions::ExtendedUpdate = bridge(&serde_json::json!({
+            "previousInbox": {"root": vec![1u8; 32]},
+            "inbox": {"root": vec![2u8; 32]},
+            "effect": {"kind": "consume", "obligation": vec![3u8; 32]},
+        }))
+        .unwrap();
+        let bytes = super::update_bundle(&statement, &update, &[0xab, 0x01]).unwrap();
+        let bundle: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(bundle["version"], 1);
+        let step = &bundle["proofs"][0];
+        assert_eq!(step["proof"], "ab01");
+        assert_eq!(step["inbox"], serde_json::json!(vec![2u8; 32]));
+        assert_eq!(step["state"], serde_json::to_value(statement.next_state).unwrap());
+        assert_eq!(bundle["proofs"].as_array().unwrap().len(), 1);
+        // No proof, no update.
+        assert!(super::update_bundle(&statement, &update, &[]).is_err());
     }
 
     #[test]

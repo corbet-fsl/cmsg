@@ -310,6 +310,7 @@ mod tests {
                 expires_at: 20,
                 sender_authority: [4; 32],
                 sender_challenge: [5; 32],
+                sender_handle: vec![],
             },
             terms: None,
             own_signature: None,

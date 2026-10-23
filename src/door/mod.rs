@@ -50,10 +50,14 @@ pub mod pairing_publish;
 pub mod passport;
 pub mod portal;
 pub mod record;
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub mod record_job;
 mod registry;
 pub(crate) mod rooms;
 mod voucher_thread;
 mod vouching;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod wave_job;
 pub use rooms::RoomLink;
 #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
 pub mod scenario;
@@ -280,6 +284,16 @@ pub struct Door {
     /// on this device (see `creating`). Absent in a frontend that cannot prove.
     activation_prover: Option<std::sync::Arc<dyn accounting::ActivationProver>>,
     wave_ports: BTreeMap<String, Box<dyn inbox_waves::WavePorts>>,
+    /// The background record job per community origin (trusted embedding only).
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    record_jobs: BTreeMap<String, account::Shared<record::RecordJob>>,
+    /// The background wave proof worker per community origin (trusted embedding only).
+    #[cfg(not(target_arch = "wasm32"))]
+    wave_workers: BTreeMap<String, std::rc::Rc<dyn wave_job::WaveWorker>>,
+    /// What the restoring composer binds into ports and a worker per community origin
+    /// (trusted embedding only).
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    wave_devices: BTreeMap<String, inbox_waves::native::WaveDevice>,
     login_configuration: BTreeMap<String, login::Configuration>,
     logins: BTreeMap<[u8; 32], login::session::State>,
     /// Device-key members' retained logins of this start, per origin (no community passkey).
@@ -304,6 +318,12 @@ impl Door {
             vaults: BTreeMap::new(),
             accounts: BTreeMap::new(),
             activation_prover: None,
+            #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+            record_jobs: BTreeMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            wave_workers: BTreeMap::new(),
+            #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+            wave_devices: BTreeMap::new(),
             wave_ports: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
             logins: BTreeMap::new(),
@@ -314,6 +334,58 @@ impl Door {
             #[cfg(target_arch = "wasm32")]
             browser_gesture: None,
         }
+    }
+
+    /// Trusted embedding control: run the background record job for `origin`
+    /// while its courier runs (the record-period key and the record prover).
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    pub fn set_record_job(&mut self, origin: &str, job: record::RecordJob) {
+        self.record_jobs
+            .insert(origin.to_owned(), account::Shared::new(job));
+    }
+
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    pub(crate) fn record_job(&self, origin: &str) -> Option<account::Shared<record::RecordJob>> {
+        self.record_jobs.get(origin).cloned()
+    }
+
+    /// Trusted embedding control: run the background wave proof worker for `origin`
+    /// while its courier runs. Set once per origin; the worker cannot be replaced.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_wave_worker(
+        &mut self,
+        origin: &str,
+        worker: std::rc::Rc<dyn wave_job::WaveWorker>,
+    ) -> Result<()> {
+        if self.wave_workers.contains_key(origin) {
+            return Err(ErrorCode::Unauthorized);
+        }
+        self.wave_workers.insert(origin.to_owned(), worker);
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn wave_worker(&self, origin: &str) -> Option<std::rc::Rc<dyn wave_job::WaveWorker>> {
+        self.wave_workers.get(origin).cloned()
+    }
+
+    /// Whether the embedding already installed the wave ports or the wave worker of
+    /// `origin` (both are set once and never replaced).
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    pub(crate) fn waves_installed(&self, origin: &str) -> bool {
+        self.wave_ports.contains_key(origin) || self.wave_workers.contains_key(origin)
+    }
+
+    /// Trusted embedding control: the wave stack of `origin` (the retained extension group
+    /// and the record-currency mark) for the restoring composer to bind.
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    pub fn set_wave_device(&mut self, origin: &str, device: inbox_waves::native::WaveDevice) {
+        self.wave_devices.insert(origin.to_owned(), device);
+    }
+
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    pub(crate) fn wave_device(&self, origin: &str) -> Option<inbox_waves::native::WaveDevice> {
+        self.wave_devices.get(origin).cloned()
     }
 
     /// Trusted embedding control: lend the prover for new communities' accounting.

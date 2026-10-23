@@ -44,6 +44,12 @@ pub struct Hello {
     pub expires_at: u64,
     pub sender_authority: [u8; 32],
     pub sender_challenge: [u8; 32],
+    /// The sender's own lineage-read handle as a signed `cnbx::HandleAnnouncement`
+    /// (JSON bytes, opaque to the wire type). The recipient verifies it against the
+    /// charter-verified lineage bound to the sender's pseudonym on receipt; a first
+    /// wave to a stranger therefore needs no handle retained beforehand.
+    #[serde(default)]
+    pub sender_handle: Vec<u8>,
 }
 
 /// Public terms the recipient fixes for its own reservation.
@@ -56,6 +62,11 @@ pub struct Terms {
     /// A private witness of the sender's reservation proof, never public input.
     #[serde(default)]
     pub contact_signature: Vec<u8>,
+    /// The recipient's own lineage-read handle as a signed `cnbx::HandleAnnouncement`
+    /// (the countersign of the first wave). The engine fills it after the ports made
+    /// the terms; the sender verifies it before it offers anything.
+    #[serde(default)]
+    pub recipient_handle: Vec<u8>,
 }
 
 /// Length of a contact signature (P-256, r then s).

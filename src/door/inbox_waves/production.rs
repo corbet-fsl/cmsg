@@ -18,7 +18,7 @@
 //! prove it WITHOUT holding the Door, hand the result back, until the queue is empty.
 use super::super::{facades::OwnedFuture, Door, ErrorCode, Result};
 use super::{
-    ports::{verify_outcome_with, verify_reservation_with, AccountSigner},
+    ports::{verify_outcome_with, verify_reservation_with, AccountSigner, HandleRequest},
     types::{Hello, ProveJob, Proved, Terms},
     worker, ContactRequest, Policy, ReceiptRequest, WavePorts,
 };
@@ -72,6 +72,11 @@ pub trait WaveContact {
         signature: &'a [u8],
         now: u64,
     ) -> OwnedFuture<'a, ()>;
+    /// The counterpart is a current member of the verified roster (membership window
+    /// only). Refuses until an implementation supplies it.
+    fn member<'a>(&'a self, _peer: &'a Binding, _now: u64) -> OwnedFuture<'a, ()> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     /// The receipt and acknowledgment signatures, behind the Keys `SignResolution` and
     /// `SignAcknowledgment` admissions. They refuse unless an implementation supplies them.
     fn sign_resolution<'a>(
@@ -113,9 +118,16 @@ pub trait OwnRecordCheck {
     fn check<'a>(&'a self, binding: &'a Binding) -> OwnedFuture<'a, ()>;
 }
 
-/// The current lineage of a peer, read afresh every time.
+/// The current lineage of a peer, read afresh every time, and the signed handle
+/// announcements that make a peer readable in the first place.
 pub trait PeerLineageRead {
     fn read<'a>(&'a self, binding: &'a Binding) -> OwnedFuture<'a, Lineage>;
+    /// See [`WavePorts::accept_handle`]. Refuses until an implementation supplies it.
+    fn accept<'a>(&'a self, _request: HandleRequest<'a>) -> OwnedFuture<'a, ()> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// See [`WavePorts::retain_handle`].
+    fn retain(&self, _peer: &Binding, _handle: &[u8]) {}
 }
 
 /// Builds the counterpart verifier for one trusted policy and instant. The native build
@@ -285,6 +297,15 @@ impl<C: ProofCheck + 'static> WavePorts for ProductionPorts<C> {
     }
     fn peer_lineage<'a>(&'a self, binding: &'a Binding) -> OwnedFuture<'a, Lineage> {
         self.lineage.read(binding)
+    }
+    fn member<'a>(&'a self, peer: &'a Binding, now: u64) -> OwnedFuture<'a, ()> {
+        self.contact.member(peer, now)
+    }
+    fn accept_handle<'a>(&'a self, request: HandleRequest<'a>) -> OwnedFuture<'a, ()> {
+        self.lineage.accept(request)
+    }
+    fn retain_handle(&self, peer: &Binding, handle: &[u8]) {
+        self.lineage.retain(peer, handle)
     }
 }
 
@@ -634,6 +655,7 @@ mod tests {
             expires_at: NOW + 100,
             sender_authority: [4; 32],
             sender_challenge: [5; 32],
+            sender_handle: vec![],
         };
         assert!(p.terms(&[0; 32], &hello, "peer", NOW, &NoSigner).await.is_err());
     }

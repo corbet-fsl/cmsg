@@ -19,6 +19,8 @@ mod request;
 pub use activation::{prove as prove_activation, NativeActivationProver};
 pub use activation::{Activation, ActivationPoll, ActivationProver};
 pub use checkpoint::{CheckpointAcquisition, CurrentEnrollment, SubmittedEnrollment};
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub use checkpoint::VerifiedRoster;
 pub use custody::{AccountVault, CommunityAccount};
 pub use genesis::PreparedAccount;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]

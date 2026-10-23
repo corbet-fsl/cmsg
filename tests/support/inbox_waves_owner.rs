@@ -4,8 +4,8 @@
 use super::profile_owner_tests::{open_as, ProfileOwner};
 use super::*;
 use crate::door::inbox_waves::{
-    Answer, Command, ContactRequest, Decision, Delivered, Envelope, Hello, JobDone, JobResult,
-    Policy, Stage, Terms, WaveDecide, WaveIncoming, WaveMessage, WavePorts, WavePunish, WaveSend,
+    Answer, Command, ContactRequest, Decision, Delivered, Envelope, HandleRequest, Hello, JobDone,
+    JobResult, Policy, Stage, Terms, WaveDecide, WaveIncoming, WaveMessage, WavePorts, WavePunish, WaveSend,
     WAVE_VERSION,
 };
 use cwlt::wave::{
@@ -20,10 +20,31 @@ pub(super) fn fake_signature(nonce: &[u8; 32]) -> Vec<u8> {
     [nonce.as_slice(), nonce.as_slice()].concat()
 }
 
+/// The scripted handle announcement of this fixture: only the one bound to the wave's
+/// conversation is accepted, as the real port accepts only an announcement bound to it.
+pub(super) fn scripted_handle(conversation: &[u8; 32]) -> Vec<u8> {
+    [b"scripted handle:".as_slice(), conversation.as_slice()].concat()
+}
+
+/// The fixture's lineage as the one authority for the peer.
+struct Peer(ckmg::Lineage);
+impl cnbx::DeviceAuthority for Peer {
+    async fn current(
+        &mut self,
+        _: &ckmg::Binding,
+    ) -> std::result::Result<ckmg::Lineage, cnbx::ContactError> {
+        Ok(self.0.clone())
+    }
+}
+
 pub(super) struct Ports {
     pub(super) lineage: ckmg::Lineage,
     /// Seconds an offer stays open; 0 makes every Terms late.
     pub(super) lifetime: u64,
+    /// The peer is a current member of the verified roster.
+    pub(super) member: bool,
+    /// A handle for the peer was verified and retained, so its lineage can be read.
+    pub(super) readable: bool,
 }
 impl WavePorts for Ports {
     fn policy(&self, _: u64) -> Result<Policy> {
@@ -50,6 +71,7 @@ impl WavePorts for Ports {
                 recipient_authority: [5; 32],
                 recipient_challenge: [6; 32],
                 contact_signature: fake_signature(&nonce),
+                recipient_handle: vec![],
             })
         })
     }
@@ -95,11 +117,41 @@ impl WavePorts for Ports {
     fn own_record<'a>(&'a self, _: &'a ckmg::Binding) -> facades::OwnedFuture<'a, ()> {
         Box::pin(async { Ok(()) })
     }
+    fn member<'a>(&'a self, _: &'a ckmg::Binding, _: u64) -> facades::OwnedFuture<'a, ()> {
+        let member = self.member;
+        Box::pin(async move { member.then_some(()).ok_or(ErrorCode::Refused) })
+    }
+    fn accept_handle<'a>(&'a self, request: HandleRequest<'a>) -> facades::OwnedFuture<'a, ()> {
+        Box::pin(async move {
+            // The scripted peers of the single-owner tests announce the scripted handle.
+            if request.announcement == scripted_handle(request.conversation).as_slice() {
+                return Ok(());
+            }
+            // A real peer's announcement is verified as the production port does, against
+            // this fixture's lineage for the peer.
+            let announcement: cnbx::HandleAnnouncement =
+                serde_json::from_slice(request.announcement).map_err(|_| ErrorCode::Refused)?;
+            if announcement.binding() != request.peer
+                || announcement.conversation() != request.conversation
+            {
+                return Err(ErrorCode::Refused);
+            }
+            let mut lineage = self.lineage.clone();
+            lineage.binding = request.peer.clone();
+            announcement
+                .verify(request.own, &mut Peer(lineage))
+                .await
+                .map_err(|_| ErrorCode::Refused)
+        })
+    }
     fn peer_lineage<'a>(
         &'a self,
         binding: &'a ckmg::Binding,
     ) -> facades::OwnedFuture<'a, ckmg::Lineage> {
         Box::pin(async move {
+            if !self.readable {
+                return Err(ErrorCode::Unavailable);
+            }
             let mut lineage = self.lineage.clone();
             lineage.binding = binding.clone();
             Ok(lineage)
@@ -124,7 +176,15 @@ async fn open() -> (ProfileOwner, Ports) {
         .lineage()
         .await
         .unwrap();
-    (owner, Ports { lineage, lifetime: 3600 })
+    (
+        owner,
+        Ports {
+            lineage,
+            lifetime: 3600,
+            member: true,
+            readable: true,
+        },
+    )
 }
 
 async fn status(
@@ -197,6 +257,7 @@ async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof()
         recipient_authority: [5; 32],
         recipient_challenge: [6; 32],
         contact_signature: fake_signature(&nonce),
+        recipient_handle: scripted_handle(&conversation),
     };
     let wrong = WaveIncoming {
         peer: member("ef"),
@@ -220,6 +281,26 @@ async fn a_sent_wave_is_recorded_first_and_its_job_survives_every_failed_proof()
         };
         assert_eq!(
             status(&mut owner, &ports, Command::Receive(bad)).await,
+            Err(ErrorCode::Refused)
+        );
+    }
+    // Terms without the recipient's handle, or with one bound to another conversation (a
+    // substituted handle), are refused before anything is offered or reserved.
+    for handle in [vec![], scripted_handle(&[0xee; 32])] {
+        let bad = Terms {
+            recipient_handle: handle,
+            ..terms.clone()
+        };
+        assert_eq!(
+            status(
+                &mut owner,
+                &ports,
+                Command::Receive(WaveIncoming {
+                    peer: member(PEER),
+                    envelope: terms_envelope(nonce, bad, PEER, 0, conversation),
+                }),
+            )
+            .await,
             Err(ErrorCode::Refused)
         );
     }
@@ -331,6 +412,7 @@ async fn a_blocked_peer_is_refused_on_this_device_in_both_directions() {
         expires_at: u64::MAX,
         sender_authority: [4; 32],
         sender_challenge: [7; 32],
+        sender_handle: scripted_handle(&[9; 32]),
     };
     let incoming = |peer: &str, nonce: u8| WaveIncoming {
         peer: member(peer),
@@ -433,6 +515,7 @@ async fn an_unanswered_wave_gives_no_claim_so_the_pending_conversation_cannot_se
         expires_at: u64::MAX,
         sender_authority: [4; 32],
         sender_challenge: [7; 32],
+        sender_handle: scripted_handle(&[9; 32]),
     };
     let accepted = status(
         &mut owner,
@@ -508,6 +591,7 @@ async fn terms_that_come_too_late_replace_the_hello_silently_and_boundedly() {
                     nonce,
                     terms: Terms {
                         recipient_authority: [5; 32],
+                        recipient_handle: scripted_handle(&conversation),
                         recipient_challenge: [6; 32],
                         contact_signature: fake_signature(&nonce),
                     },
@@ -544,6 +628,7 @@ async fn terms_that_come_too_late_replace_the_hello_silently_and_boundedly() {
                 nonce,
                 terms: Terms {
                     recipient_authority: [5; 32],
+                    recipient_handle: scripted_handle(&conversation),
                     recipient_challenge: [6; 32],
                     contact_signature: fake_signature(&nonce),
                 },
@@ -554,4 +639,139 @@ async fn terms_that_come_too_late_replace_the_hello_silently_and_boundedly() {
         status(&mut owner, &ports, Command::Receive(late)).await,
         Err(ErrorCode::Refused)
     );
+}
+
+#[tokio::test]
+async fn the_first_wave_to_a_stranger_needs_no_retained_handle_and_carries_its_own() {
+    let (mut owner, mut ports) = open().await;
+    let own = ports.lineage.binding.clone();
+    // Nothing is retained for the peer, so its lineage cannot be read; it is a member.
+    ports.readable = false;
+    let sent = status(
+        &mut owner,
+        &ports,
+        Command::Send(WaveSend { peer: member(PEER) }),
+    )
+    .await
+    .unwrap();
+    assert_eq!((sent.role, sent.stage), (0, Stage::Hello));
+    // The signed Hello carries the sender's OWN handle, bound to this wave's conversation.
+    let Answer::Outbox(outbox) = owner.waves(Command::Outbox, &ports).await.unwrap() else {
+        panic!("an outbox")
+    };
+    let WaveMessage::Hello { hello, .. } = &outbox.messages[0].envelope.message else {
+        panic!("a hello")
+    };
+    let announcement: cnbx::HandleAnnouncement = serde_json::from_slice(&hello.sender_handle)
+        .expect("the hello carries a handle announcement");
+    assert_eq!(announcement.binding(), &own);
+    assert_eq!(announcement.conversation(), &hello.conversation);
+    assert!(!announcement.handle().is_empty());
+    // Only roster membership gates the send: a peer that is no member is refused.
+    ports.member = false;
+    assert_eq!(
+        status(
+            &mut owner,
+            &ports,
+            Command::Send(WaveSend { peer: member(PEER) })
+        )
+        .await,
+        Err(ErrorCode::Refused)
+    );
+    // Every later message needs the peer's lineage, read through the handle retained
+    // from the first exchange: unreadable, it is unavailable (retry), never accepted.
+    ports.member = true;
+    let later = WaveIncoming {
+        peer: member(PEER),
+        envelope: Envelope {
+            version: WAVE_VERSION,
+            conversation: hello.conversation,
+            sender: member(PEER),
+            sequence: 1,
+            message: WaveMessage::Welcome {
+                nonce: sent.nonce,
+                welcome: vec![1],
+            },
+        },
+    };
+    assert_eq!(
+        status(&mut owner, &ports, Command::Receive(later)).await,
+        Err(ErrorCode::Unavailable)
+    );
+}
+
+#[tokio::test]
+async fn a_hello_is_countersigned_only_with_a_handle_bound_to_its_conversation() {
+    let (mut owner, mut ports) = open().await;
+    let own = ports.lineage.binding.clone();
+    ports.readable = false;
+    let hello = |handle: Vec<u8>| Hello {
+        conversation: [9; 32],
+        group: [1; 32],
+        contact_policy: [2; 32],
+        history: [3; 32],
+        opened_at: 1,
+        expires_at: u64::MAX,
+        sender_authority: [4; 32],
+        sender_challenge: [7; 32],
+        sender_handle: handle,
+    };
+    let incoming = |nonce: u8, hello: Hello| WaveIncoming {
+        peer: member(PEER),
+        envelope: Envelope {
+            version: WAVE_VERSION,
+            conversation: hello.conversation,
+            sender: member(PEER),
+            sequence: 0,
+            message: WaveMessage::Hello {
+                nonce: [nonce; 32],
+                hello,
+            },
+        },
+    };
+    // No handle, or one bound to another conversation (a substituted handle), is refused
+    // before anything is countersigned, and no wave is created.
+    for bad in [vec![], scripted_handle(&[8; 32]), b"scripted handle:".to_vec()] {
+        assert_eq!(
+            status(&mut owner, &ports, Command::Receive(incoming(1, hello(bad)))).await,
+            Err(ErrorCode::Refused)
+        );
+    }
+    let Answer::List(list) = owner.waves(Command::List, &ports).await.unwrap() else {
+        panic!("a list")
+    };
+    assert!(list.waves.is_empty());
+    // A peer that is no member of the roster is refused before its handle is looked at.
+    ports.member = false;
+    assert_eq!(
+        status(
+            &mut owner,
+            &ports,
+            Command::Receive(incoming(1, hello(scripted_handle(&[9; 32]))))
+        )
+        .await,
+        Err(ErrorCode::Refused)
+    );
+    // The bound handle is accepted without any retained handle; the countersign carries
+    // the recipient's OWN handle for the same conversation.
+    ports.member = true;
+    let accepted = status(
+        &mut owner,
+        &ports,
+        Command::Receive(incoming(1, hello(scripted_handle(&[9; 32])))),
+    )
+    .await
+    .unwrap();
+    assert_eq!((accepted.role, accepted.stage), (1, Stage::Hello));
+    let Answer::Outbox(outbox) = owner.waves(Command::Outbox, &ports).await.unwrap() else {
+        panic!("an outbox")
+    };
+    let WaveMessage::Terms { terms, .. } = &outbox.messages[0].envelope.message else {
+        panic!("terms")
+    };
+    let announcement: cnbx::HandleAnnouncement = serde_json::from_slice(&terms.recipient_handle)
+        .expect("the countersign carries a handle announcement");
+    assert_eq!(announcement.binding(), &own);
+    assert_eq!(announcement.conversation(), &[9; 32]);
+    assert!(!announcement.handle().is_empty());
 }
