@@ -7,6 +7,7 @@ mod lineage_custody;
 mod pairing_custody;
 pub use pairing_custody::PairApproved;
 mod profile_custody;
+mod room_sync;
 mod shared;
 use cbrd::clnk;
 pub use group_custody::{
@@ -14,6 +15,7 @@ pub use group_custody::{
     RoomKeysStanding, RoomLeaveTask, RoomSecretsReceived, RoomSecretsTask, VaultGroupOwner,
     VerifiedPeers,
 };
+pub use room_sync::{RefusedJoins, ResyncReason, RoomSync, RoomSyncTask, RoomSynced};
 pub use shared::{AccountPort, PortVault, VaultBoardOwner};
 use std::{future::Future, pin::Pin};
 
