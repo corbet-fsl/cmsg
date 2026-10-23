@@ -30,9 +30,11 @@ fn secs() -> u64 {
 /// The member's wallet, as far as a pairing needs it.
 #[allow(async_fn_in_trait)]
 pub trait PairingWallet {
-    /// The ONE wallet confirmation: a stamp covering both steps for the pairing's key.
+    /// The member's pseudonym in community `name` (hex), which the pairing stamp names.
+    async fn pseudonym(&mut self, name: &str) -> Result<String>;
+    /// The ONE wallet confirmation: a stamp covering the pairing's slot for the key.
     async fn confirm(&mut self, actions: &PairingActions) -> Result<()>;
-    /// Send one stamped pairing step to the community.
+    /// Send one pairing step to the community (only the add step presents the stamp).
     async fn send(
         &mut self,
         community: &mut cfyr::Foyer<Transport>,
@@ -72,6 +74,14 @@ where
     A: ckmg::Authority,
     R: cvlt::Records,
 {
+    async fn pseudonym(&mut self, name: &str) -> Result<String> {
+        let id = cwlt::passport::CommunityId::new(name.as_bytes())
+            .map_err(|_| ErrorCode::Unavailable)?;
+        self.passport
+            .with_global_passport(|holder| holder.pseudonym(&id).to_hex())
+            .await
+    }
+
     async fn confirm(&mut self, actions: &PairingActions) -> Result<()> {
         device_pair::confirm(actions, self.api, self.origin, self.passport, self.keys).await
     }
@@ -215,6 +225,7 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
             return Err(ErrorCode::Unauthorized);
         }
         let name = self.door.config.community.clone();
+        let member = wallet.pseudonym(&name).await?;
         let actions = {
             let vault = self
                 .door
@@ -225,7 +236,14 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
                 vault: vault.as_mut(),
                 origin: &self.origin,
             };
-            PairingActions::derive(&mut self.community, &name, &request.device, &mut salt).await?
+            PairingActions::derive(
+                &mut self.community,
+                &name,
+                &member,
+                &request.device,
+                &mut salt,
+            )
+            .await?
         };
         // The scope's ONE wallet confirmation: nothing is prompted when a retained stamp
         // already covers both steps.

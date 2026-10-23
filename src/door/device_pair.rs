@@ -1,18 +1,20 @@
 //! Pair a further device key into a membership with ONE wallet confirmation: the member's
-//! stamp covers BOTH pairing steps for exactly this key (`device_add` registers it PENDING,
-//! `device_activate` makes it ACTIVE once its lineage revision is published), so approving a
-//! new device costs the approving device exactly one wallet ceremony, like `device_join`.
+//! stamp carries ONE slot per community (`device_pair`: community, the member's pseudonym, the
+//! new key and the community's own pairing session), which the community accepts at
+//! `device_add` and keeps with the PENDING key; `device_activate` then needs no stamp. So
+//! approving a new device costs the approving device exactly one wallet ceremony, like
+//! `device_join`, and one ceremony covers 16 communities (the stamp's slot count).
 //!
 //! The roles are split because the key and the member are on two devices:
 //!
 //! * the APPROVING device (the existing member device) holds the wallet passport and the
-//!   stamp, picks the stamp salts from its own device key, and sends both steps;
-//! * the NEW device only proves possession: its key signs the community's one-use challenge
-//!   of each step ([`sign_possession`]).
+//!   stamp, picks the stamp salt and session from its own device key, and sends both steps;
+//! * the NEW device only proves possession: its key signs the pairing message of each step
+//!   over the community's one-use challenge (`cvlt::PairingGuest::sign_possession`).
 //!
 //! Each step needs its own fresh community challenge (they live 60 seconds), so the approving
 //! device fetches a challenge ([`begin`]), the new device signs it, and [`send`] presents the
-//! passport and the already issued stamp over it.
+//! passport (and, for the add step only, the already issued stamp) over it.
 use super::{
     composer_core::DeviceKeys,
     custody::SystemClock,
@@ -35,18 +37,19 @@ fn now() -> u64 {
     SystemClock.now().unwrap_or(u64::MAX)
 }
 
-/// Label of the first slot's salt (`device_add`); the labels separate the two slots' salts so
-/// the published stamp reveals nothing about one slot's salt from the other's.
-pub const ADD_SALT_LABEL: &[u8] = b"pair-add";
-/// Label of the second slot's salt (`device_activate`).
-pub const ACTIVATE_SALT_LABEL: &[u8] = b"pair-activate";
+/// Label of the stamp slot's salt (`device_pair`).
+pub const PAIR_SALT_LABEL: &[u8] = b"pair-slot";
+/// Label of the community's opaque pairing session value: one per community (the label and the
+/// community name are in the signed message), so no value links two memberships.
+pub const PAIR_SESSION_LABEL: &[u8] = b"pair-session";
 
-/// One of the two stamped pairing steps.
+/// One of the two pairing steps (only the first carries the stamp).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
-    /// Register the key PENDING (`device_add`): it grants nothing.
+    /// Register the key PENDING with the stamp's approval (`device_add`): it grants nothing.
     Add,
-    /// Make the pending key ACTIVE (`device_activate`), after its lineage revision exists.
+    /// Make the approved pending key ACTIVE (`device_activate`, no stamp), after its lineage
+    /// revision exists.
     Activate,
 }
 
@@ -59,52 +62,68 @@ impl Step {
     }
 }
 
-/// The two stamp actions of pairing one key into one community: what ONE stamp must cover.
+/// The stamp action of pairing one key into one community: what ONE stamp slot must cover.
+///
+/// It commits to the community (the scope), the member's pseudonym, the new key and the
+/// community's own pairing session. It does not commit to the planned lineage revision: the
+/// host approves the revision with Keys only after the human confirmation, and the server
+/// activates by KEY alone (the PENDING record names the key), so the key is what this approval
+/// has to bind; the revision is authenticated by Keys' own grant and published signed by the
+/// lineage root, and a revision that carries a different key never matches the PENDING one.
 #[derive(Clone)]
 pub struct PairingActions {
     scope: StampScope,
     key: [u8; 32],
-    add: StampAction,
-    activate: StampAction,
+    session: [u8; 32],
+    pair: StampAction,
 }
 
 impl PairingActions {
-    /// The actions of pairing `key` in `scope`, with one salt per slot.
+    /// The action of pairing `key` for `member` (the wallet's pseudonym in the community) in
+    /// `scope` of community `name`, with the community's `session` value and the slot's `salt`.
     pub fn new(
         scope: StampScope,
+        name: &str,
+        member: &str,
         key: [u8; 32],
-        add_salt: [u8; 32],
-        activate_salt: [u8; 32],
+        session: [u8; 32],
+        salt: [u8; 32],
     ) -> Result<Self> {
-        let action = |step: Step, salt: [u8; 32]| -> Result<StampAction> {
-            Ok(StampAction::new(
-                ActionKind::new(step.kind()).map_err(|_| ErrorCode::Unavailable)?,
-                PayloadDigest::from_bytes(cfyr::device_session::pairing_payload(step.kind(), &key)),
-                StampSalt::from_bytes(salt),
-            ))
-        };
+        let pair = StampAction::new(
+            ActionKind::new(cfyr::device_session::PAIR_ACTION).map_err(|_| ErrorCode::Unavailable)?,
+            PayloadDigest::from_bytes(cfyr::device_session::pair_payload(
+                name,
+                member,
+                &key,
+                &session,
+                None,
+            )),
+            StampSalt::from_bytes(salt),
+        );
         Ok(Self {
-            add: action(Step::Add, add_salt)?,
-            activate: action(Step::Activate, activate_salt)?,
+            pair,
             scope,
             key,
+            session,
         })
     }
 
-    /// The actions of pairing `new_key` into community `name`. The salts come from the
-    /// APPROVING device's key signature (`approver`) over the community, the new key and the
-    /// slot's label: the wallet cannot guess them, and the approving device rebuilds them after
-    /// any restart, so a retained stamp still covers and the wallet is not asked again.
+    /// The actions of pairing `new_key` into community `name` for `member`. The salt and the
+    /// session come from the APPROVING device's key signature (`approver`) over the
+    /// community, the new key and a label: the wallet cannot guess them, and the approving
+    /// device rebuilds them after any restart, so a retained stamp still covers and the
+    /// wallet is not asked again.
     pub async fn derive(
         community: &mut Foyer<Transport>,
         name: &str,
+        member: &str,
         new_key: &ckmg::PublicKey,
         approver: &mut impl DeviceSign,
     ) -> Result<Self> {
         let scope = stamp_scope(community, name).await?;
-        let add = derived_salt(name, new_key, ADD_SALT_LABEL, approver).await?;
-        let activate = derived_salt(name, new_key, ACTIVATE_SALT_LABEL, approver).await?;
-        Self::new(scope, *new_key.value(), add, activate)
+        let salt = derived_salt(name, new_key, PAIR_SALT_LABEL, approver).await?;
+        let session = derived_salt(name, new_key, PAIR_SESSION_LABEL, approver).await?;
+        Self::new(scope, name, member, *new_key.value(), session, salt)
     }
 
     /// The key being paired.
@@ -112,32 +131,31 @@ impl PairingActions {
         &self.key
     }
 
+    /// The community's pairing session value (sent with `device_add`).
+    pub fn session(&self) -> &[u8; 32] {
+        &self.session
+    }
+
     /// The community's stamp scope.
     pub fn scope(&self) -> &StampScope {
         &self.scope
     }
 
-    /// The stamp action of `step`.
-    pub fn action(&self, step: Step) -> &StampAction {
-        match step {
-            Step::Add => &self.add,
-            Step::Activate => &self.activate,
-        }
+    /// The stamp action (the community's one slot).
+    pub fn action(&self) -> &StampAction {
+        &self.pair
     }
 
-    /// Both actions as the slots of ONE stamp request.
+    /// The slot of this community in a stamp request (one per community).
     pub fn slots(&self) -> Vec<(StampScope, StampAction)> {
-        vec![
-            (self.scope.clone(), self.add.clone()),
-            (self.scope.clone(), self.activate.clone()),
-        ]
+        vec![(self.scope.clone(), self.pair.clone())]
     }
 }
 
 /// The ONE wallet confirmation of a pairing: unless the wallet already holds (or has durably
 /// begun) a stamp covering both slots, a single user-verifying ceremony — counted by
-/// [`DeviceKeys::confirm`] — obtains the stamp that covers `device_add` AND `device_activate`
-/// for this key. Resumable: a stamp that covers asks nothing, an interrupted request is sent
+/// [`DeviceKeys::confirm`] — obtains the stamp that covers `device_pair`
+/// slot for this key. Resumable: a stamp that covers asks nothing, an interrupted request is sent
 /// again, never confirmed twice.
 pub async fn confirm<A, B, C, E, Au, R>(
     actions: &PairingActions,
@@ -227,28 +245,11 @@ pub async fn begin(community: &mut Foyer<Transport>) -> Result<StepChallenge> {
     })
 }
 
-/// The NEW device's proof of possession for one step: its key's signature (purpose
-/// `DeviceJoin`) over the community, the step's challenge id and the key.
-pub async fn sign_possession(
-    name: &str,
-    challenge: &StepChallenge,
-    device: &ckmg::PublicKey,
-    sign: &mut impl DeviceSign,
-) -> Result<Vec<u8>> {
-    sign.sign(
-        DeviceUse::Sign(ckmg::DeviceFormat::DeviceJoin),
-        payload(
-            ckmg::DeviceFormat::DeviceJoin,
-            cfyr::device_session::join_message(name, &challenge.id, device.value()),
-        )?,
-    )
-    .await
-}
-
-/// Send one pairing step: a fresh passport presentation over `challenge`, the stamp
-/// presentation for the step's action (the stamp [`confirm`] obtained), and the new key's
-/// `signature` (from [`sign_possession`] over this same `challenge`). The community applies
-/// `device_add` or `device_activate`; both are idempotent for the same key.
+/// Send one pairing step: a fresh passport presentation over `challenge` and the new key's
+/// `signature` (the pairing message of this step, signed by the new device over this same
+/// `challenge`). `device_add` also carries the stamp presentation of the community's one slot
+/// (the stamp [`confirm`] obtained) and the pairing session; `device_activate` carries no
+/// stamp, the PENDING key the add registered is its approval.
 pub async fn send<B, C, E, Au, R>(
     community: &mut Foyer<Transport>,
     wallet: &mut GlobalPassport<B, C, E, Au, R>,
@@ -264,7 +265,7 @@ where
     Au: ckmg::Authority,
     R: Records,
 {
-    let action = actions.action(step);
+    let action = actions.action();
     let mut policy = community.current_policy();
     let expected = policy
         .with_current(now(), |current| {
@@ -280,22 +281,42 @@ where
             let proof = holder
                 .present(&mut rng, &expected, &challenge.request, now())
                 .map_err(|_| ErrorCode::Unauthorized)?;
-            let stamp = holder
-                .present_stamp(&mut rng, actions.scope(), action, now())
-                .map_err(|_| ErrorCode::Unauthorized)?;
-            Ok((proof.to_bytes(), stamp.to_bytes()))
+            let stamp = match step {
+                Step::Add => Some(
+                    holder
+                        .present_stamp(&mut rng, actions.scope(), action, now())
+                        .map_err(|_| ErrorCode::Unauthorized)?
+                        .to_bytes(),
+                ),
+                Step::Activate => None,
+            };
+            Ok((proof.to_bytes(), stamp))
         })
         .await??;
-    let request = json!({
-        "passport": {"challenge": challenge.id, "proof": proof},
-        "stamp": stamp,
-        "salt": action.salt().to_bytes(),
-        "device_key": actions.key(),
-        "signature": signature,
-    });
+    let passport = json!({"challenge": challenge.id, "proof": proof});
     match step {
-        Step::Add => community.device_add(request).await,
-        Step::Activate => community.device_activate(request).await,
+        Step::Add => {
+            community
+                .device_add(json!({
+                    "passport": passport,
+                    "stamp": stamp.ok_or(ErrorCode::Unauthorized)?,
+                    "salt": action.salt().to_bytes(),
+                    "device_key": actions.key(),
+                    "session": actions.session(),
+                    "revision": Value::Null,
+                    "signature": signature,
+                }))
+                .await
+        }
+        Step::Activate => {
+            community
+                .device_activate(json!({
+                    "passport": passport,
+                    "device_key": actions.key(),
+                    "signature": signature,
+                }))
+                .await
+        }
     }
     .map_err(|_| ErrorCode::Reconcile)
 }
@@ -329,83 +350,59 @@ mod tests {
     }
 
     #[test]
-    fn one_stamp_covers_the_add_and_the_activate_step_of_exactly_one_key() {
-        let actions = PairingActions::new(scope(), [7; 32], [1; 32], [2; 32]).unwrap();
+    fn one_stamp_slot_per_community_covers_exactly_one_key_of_one_member() {
+        let actions = PairingActions::new(scope(), "alpha", "m1", [7; 32], [3; 32], [1; 32]).unwrap();
         let slots = actions.slots();
-        assert_eq!(slots.len(), 2, "two slots of ONE stamp request");
-        assert!(slots.iter().all(|(slot_scope, _)| slot_scope == &scope()));
-        let (add, activate) = (actions.action(Step::Add), actions.action(Step::Activate));
-        assert_eq!(add.kind().as_str(), "device_add");
-        assert_eq!(activate.kind().as_str(), "device_activate");
+        assert_eq!(slots.len(), 1, "ONE slot per community");
+        assert_eq!(slots[0].0, scope());
+        let pair = actions.action();
+        assert_eq!(pair.kind().as_str(), "device_pair");
         assert_eq!(
-            add.payload().to_bytes(),
-            cfyr::device_session::pairing_payload("device_add", &[7; 32])
+            pair.payload().to_bytes(),
+            cfyr::device_session::pair_payload("alpha", "m1", &[7; 32], &[3; 32], None)
         );
-        assert_eq!(
-            activate.payload().to_bytes(),
-            cfyr::device_session::pairing_payload("device_activate", &[7; 32])
-        );
-        // The two steps and two keys never share a digest: a stamp approves exactly one of each.
-        let other = PairingActions::new(scope(), [8; 32], [1; 32], [2; 32]).unwrap();
-        assert_ne!(add.payload().to_bytes(), activate.payload().to_bytes());
-        assert_ne!(
-            add.payload().to_bytes(),
-            other.action(Step::Add).payload().to_bytes()
-        );
-        assert_ne!(add.salt().to_bytes(), activate.salt().to_bytes());
+        // Another key, member, session or community never shares the digest.
+        let digest = |name: &str, member: &str, key: u8, session: u8| {
+            PairingActions::new(scope(), name, member, [key; 32], [session; 32], [1; 32])
+                .unwrap()
+                .action()
+                .payload()
+                .to_bytes()
+        };
+        let base = digest("alpha", "m1", 7, 3);
+        assert_ne!(base, digest("beta", "m1", 7, 3));
+        assert_ne!(base, digest("alpha", "m2", 7, 3));
+        assert_ne!(base, digest("alpha", "m1", 8, 3));
+        assert_ne!(base, digest("alpha", "m1", 7, 4));
         assert_eq!(actions.key(), &[7; 32]);
+        assert_eq!(actions.session(), &[3; 32]);
     }
 
     #[tokio::test]
-    async fn the_approver_rebuilds_the_salts_after_a_restart_and_the_slots_differ() {
+    async fn the_approver_rebuilds_salt_and_session_after_a_restart_per_community() {
         let new_key = ckmg::PublicKey::new(ckmg::VLD0, [7; 32]);
-        let salts = |seed: u8, key: &ckmg::PublicKey, name: &str| {
+        let values = |seed: u8, key: &ckmg::PublicKey, name: &str| {
             let key = key.clone();
             let name = name.to_owned();
             async move {
                 let mut sign = signer(seed);
                 (
-                    derived_salt(&name, &key, ADD_SALT_LABEL, &mut sign)
-                        .await
-                        .unwrap(),
-                    derived_salt(&name, &key, ACTIVATE_SALT_LABEL, &mut sign)
+                    derived_salt(&name, &key, PAIR_SALT_LABEL, &mut sign).await.unwrap(),
+                    derived_salt(&name, &key, PAIR_SESSION_LABEL, &mut sign)
                         .await
                         .unwrap(),
                 )
             }
         };
-        let first = salts(1, &new_key, "alpha").await;
-        // The same approving device after a restart: the same salts, so a retained stamp covers.
-        assert_eq!(first, salts(1, &new_key, "alpha").await);
-        assert_ne!(first.0, first.1, "the slots are separated by their labels");
-        assert_ne!(first, salts(2, &new_key, "alpha").await, "another approver");
-        assert_ne!(first, salts(1, &new_key, "beta").await, "another community");
-        let other_key = ckmg::PublicKey::new(ckmg::VLD0, [8; 32]);
-        assert_ne!(first, salts(1, &other_key, "alpha").await, "another key");
-    }
-
-    #[tokio::test]
-    async fn the_new_key_signs_the_join_message_of_exactly_the_challenge_it_was_given() {
-        use ed25519_dalek::Verifier as _;
-        let challenge = StepChallenge {
-            id: "one-use".into(),
-            request: vec![1, 2, 3],
-        };
-        let device = ckmg::PublicKey::new(
-            ckmg::VLD0,
-            ed25519_dalek::SigningKey::from_bytes(&[5; 32])
-                .verifying_key()
-                .to_bytes(),
-        );
-        let signature = sign_possession("alpha", &challenge, &device, &mut signer(5))
-            .await
-            .unwrap();
-        let verifying = ed25519_dalek::VerifyingKey::from_bytes(device.value()).unwrap();
-        let signature = ed25519_dalek::Signature::from_slice(&signature).unwrap();
-        // The signature is over the exact message the server rebuilds (`cvld` `join_message`).
-        let message = cfyr::device_session::join_message("alpha", "one-use", device.value());
-        verifying.verify(&message, &signature).unwrap();
-        let other = cfyr::device_session::join_message("alpha", "another", device.value());
-        assert!(verifying.verify(&other, &signature).is_err());
+        let first = values(1, &new_key, "alpha").await;
+        // The same approving device after a restart: the same values, so a retained stamp covers.
+        assert_eq!(first, values(1, &new_key, "alpha").await);
+        // Salt and session differ, and the session never repeats across communities (it would
+        // link the memberships), keys or approving devices.
+        assert_ne!(first.0, first.1);
+        assert_ne!(first.1, values(1, &new_key, "beta").await.1);
+        assert_ne!(first.1, values(2, &new_key, "alpha").await.1);
+        let other = ckmg::PublicKey::new(ckmg::VLD0, [8; 32]);
+        assert_ne!(first.1, values(1, &other, "alpha").await.1);
     }
 }
