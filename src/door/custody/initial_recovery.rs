@@ -27,6 +27,33 @@ pub struct InitialRecoveryAuthority<'a, 'p, C, N: cdht::Network> {
     /// when the lease is a device lease (`lease.device_key()`); the passkey path keeps None.
     pub(super) stamps: Option<cvlt::StampTrust>,
 }
+/// Which single-use account channel one account Keys call consumes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AccountChannel {
+    Root,
+    Delegation,
+    Request,
+}
+
+/// A root authorization (`AuthorizeAccountDevice`) consumes the root channel
+/// and starts a new delegation round, as the member owner does: the first
+/// device signature after it is the delegation (spent by that attempt whatever
+/// its outcome), every later one the account request. Without the reset, a
+/// later round (a record-recipient registration after the account request) would
+/// consult the request channel, find nothing admitted, and the refusal locks
+/// the Keys.
+fn account_channel(authorize: bool, delegation_spent: &mut bool) -> AccountChannel {
+    if authorize {
+        *delegation_spent = false;
+        AccountChannel::Root
+    } else if *delegation_spent {
+        AccountChannel::Request
+    } else {
+        *delegation_spent = true;
+        AccountChannel::Delegation
+    }
+}
+
 impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
     fn current(&mut self, request: &Authorization<'_>) -> Result<u64, Error> {
         let signing = match request.action {
@@ -269,14 +296,13 @@ impl<C: Clock, N: cdht::Network> ckmg::Authority for InitialRecoveryAuthority<'_
                 .origin()
                 .map_err(|_| Error::Unauthorized)?
                 .to_owned();
-            let verifier = if current_request.action == Action::AuthorizeAccountDevice {
-                self.account_intent.as_mut()
-            } else if self.delegation_spent {
-                self.request_intent.as_mut()
-            } else {
-                // Spent by this attempt whatever its outcome.
-                self.delegation_spent = true;
-                self.delegation_intent.as_mut()
+            let verifier = match account_channel(
+                current_request.action == Action::AuthorizeAccountDevice,
+                &mut self.delegation_spent,
+            ) {
+                AccountChannel::Root => self.account_intent.as_mut(),
+                AccountChannel::Delegation => self.delegation_intent.as_mut(),
+                AccountChannel::Request => self.request_intent.as_mut(),
             };
             verifier
                 .ok_or(Error::Unauthorized)?
@@ -427,4 +453,27 @@ async fn complete_recovery<B: cwst::backend::Backend, N: cdht::Network + Clone>(
     creation
         .retire_recovery(network, &mut clock, &mut authority)
         .await
+}
+
+#[cfg(test)]
+mod account_channel_tests {
+    use super::{AccountChannel::*, account_channel};
+
+    /// Row 17: enrollment (authorize, delegation), the account request, then a
+    /// record-recipient round (authorize, device signature) after activation.
+    /// The second round's device signature is its delegation again, never the
+    /// request channel.
+    #[test]
+    fn every_root_authorization_starts_a_new_delegation_round() {
+        let mut spent = false;
+        let calls = [true, false, false, true, false, false, true, false];
+        let seen: Vec<_> = calls
+            .iter()
+            .map(|authorize| account_channel(*authorize, &mut spent))
+            .collect();
+        assert_eq!(
+            seen,
+            [Root, Delegation, Request, Root, Delegation, Request, Root, Delegation]
+        );
+    }
 }
