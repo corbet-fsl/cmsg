@@ -419,10 +419,26 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         let source = self.group_policy(expires).await?;
         let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
         let intent = cbrd::GroupIntent::Leave { group: room.group };
-        let (candidate, current, now, _) =
+        let (candidate, current, now, request) =
             cbrd::prepare_group_intent(owner, &source, intent.clone(), MAX_GROUPS)
                 .await
                 .map_err(group_error)?;
+        // A room member announces its leave and stays until a remaining member
+        // removed it (no ghost leaf); the device keeps only a pending record.
+        if self
+            .owner
+            .begin_room_leave(&self.inner.board, room.room, &request)
+            .await?
+        {
+            let snapshot = self
+                .owner
+                .groups()
+                .ok_or(ErrorCode::Unavailable)?
+                .snapshot()
+                .await
+                .map_err(group_error)?;
+            return snapshot.views(&current, now).map_err(group_error);
+        }
         let left = self
             .owner
             .leave_room(crate::door::facades::RoomLeaveTask {
@@ -467,6 +483,38 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             return Err(ErrorCode::Unavailable);
         }
         let source = self.group_policy(expires).await?;
+        if self
+            .owner
+            .advance_room_leave(
+                &self.inner.board,
+                crate::door::facades::RoomLeaveSyncTask {
+                    room: room.room,
+                    group: room.group,
+                    max_groups: MAX_GROUPS,
+                    policy: &source,
+                    refused: &mut self.joins.refused,
+                },
+            )
+            .await?
+            .is_some()
+        {
+            // Leaving: follow the room, adopt no key, send nothing.
+            let groups = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
+            let snapshot = groups.snapshot().await.map_err(group_error)?;
+            let now = groups.now().map_err(group_error)?;
+            let current = source
+                .current(snapshot.community(), now)
+                .map_err(group_error)?;
+            return Ok(RoomAdmitted {
+                admitted: 0,
+                caught_up: 0,
+                sync: crate::door::facades::RoomSync::Current,
+                refused: 0,
+                keys_adopted: 0,
+                keys_refused: 0,
+                groups: snapshot.views(&current, now).map_err(group_error)?,
+            });
+        }
         let synced = self
             .owner
             .sync_room(

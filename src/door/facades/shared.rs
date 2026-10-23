@@ -165,6 +165,50 @@ where
             groups.sync_room(board, task).await.map_err(room_error)
         })
     }
+    fn begin_room_leave<'a, T, L>(
+        &'a mut self,
+        board: &'a cbrd::Board<T, L>,
+        room: [u8; 16],
+        request: &'a cbrd::cgrp::Request,
+    ) -> board::OwnerFuture<'a, bool>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            groups
+                .begin_room_leave(board, room, request)
+                .await
+                .map_err(room_error)
+        })
+    }
+    fn advance_room_leave<'a, T, L>(
+        &'a mut self,
+        board: &'a cbrd::Board<T, L>,
+        task: super::RoomLeaveSyncTask<'a>,
+    ) -> board::OwnerFuture<'a, Option<super::LeaveProgress>>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            if groups
+                .room_leaving(task.group)
+                .await
+                .map_err(room_error)?
+                .is_none()
+            {
+                return Ok(None);
+            }
+            groups
+                .advance_room_leave(board, task)
+                .await
+                .map(Some)
+                .map_err(room_error)
+        })
+    }
     fn room_evidence<'a>(
         &'a mut self,
         group: cbrd::cgrp::Id,
