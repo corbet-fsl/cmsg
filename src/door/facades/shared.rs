@@ -104,7 +104,7 @@ where
         &'a mut self,
         board: &'a cbrd::Board<T, L>,
         task: super::RoomJoinTask<'a>,
-    ) -> board::OwnerFuture<'a, cbrd::cgrp::Snapshot>
+    ) -> board::OwnerFuture<'a, super::RoomJoined>
     where
         T: cbrd::clnk::Transport,
         L: crate::door::RoomLink,
@@ -171,6 +171,33 @@ where
         Box::pin(async move {
             let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
             groups.room_transport_key(group).await.map_err(room_error)
+        })
+    }
+    fn room_keys_standing<'a>(
+        &'a mut self,
+        group: cbrd::cgrp::Id,
+    ) -> board::OwnerFuture<'a, super::RoomKeysStanding> {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            groups.room_keys_standing(group).await.map_err(room_error)
+        })
+    }
+    fn seal_room_key<'a>(
+        &'a mut self,
+        task: super::RoomKeyTask<'a>,
+    ) -> board::OwnerFuture<'a, super::RoomKeySealed> {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            groups.seal_room_key(task).await.map_err(room_error)
+        })
+    }
+    fn receive_room_secrets<'a>(
+        &'a mut self,
+        task: super::RoomSecretsTask<'a>,
+    ) -> board::OwnerFuture<'a, super::RoomSecretsReceived> {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            groups.receive_room_secrets(task).await.map_err(room_error)
         })
     }
     fn with_current<'a, T: 'a, F>(&'a mut self, read: F) -> board::OwnerFuture<'a, T>

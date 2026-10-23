@@ -10,7 +10,9 @@ mod profile_custody;
 mod shared;
 use cbrd::clnk;
 pub use group_custody::{
-    GroupPeers, RoomAdmitTask, RoomJoinTask, RoomLeaveTask, VaultGroupOwner, VerifiedPeers,
+    GroupPeers, RoomAdmitTask, RoomJoinTask, RoomJoined, RoomKeySealed, RoomKeyTask,
+    RoomKeysStanding, RoomLeaveTask, RoomSecretsReceived, RoomSecretsTask, VaultGroupOwner,
+    VerifiedPeers,
 };
 pub use shared::{AccountPort, PortVault, VaultBoardOwner};
 use std::{future::Future, pin::Pin};

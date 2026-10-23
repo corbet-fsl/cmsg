@@ -14,6 +14,7 @@ mod group_act;
 mod groups;
 mod handlers;
 mod profile;
+pub(in crate::door) mod room_keys;
 mod rooms;
 pub(super) use group_act::{group_act, group_answer, group_message, group_propose, group_welcome};
 pub use group_act::{

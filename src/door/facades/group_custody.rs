@@ -17,6 +17,7 @@
 //! Charter-verified lineage. Vouches by other members' contacts are refused
 //! until their evidence exists.
 use super::*;
+use crate::door::board::room_keys::{self, Keyring};
 use crate::door::inbox_lineage::{
     CharterView, HandleOpener, PeerLineage, PeerUnavailable, StoredHandleRecords,
 };
@@ -495,6 +496,16 @@ pub struct RoomJoinTask<'a> {
     /// The room's transport key from the sealed room state.
     pub transport: &'a cbrd::TransportKey,
     pub policy: &'a dyn cgrp::PolicySource,
+    /// This member's own profile key as a hand-over (row 14.5), sealed to the
+    /// room in the epoch of admission: empty when profile visibility is off.
+    pub handover: Vec<zeroize::Zeroizing<Vec<u8>>>,
+}
+
+/// A completed room join: the Groups snapshot and the sealed hand-over messages
+/// the member now owes the room (MLS ciphertexts for the room transport).
+pub struct RoomJoined {
+    pub snapshot: Snapshot,
+    pub handover: Vec<Vec<u8>>,
 }
 
 impl<B, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
@@ -600,7 +611,7 @@ where
         &mut self,
         board: &cbrd::Board<T, L>,
         task: RoomJoinTask<'_>,
-    ) -> std::result::Result<Snapshot, ctnd::Error>
+    ) -> std::result::Result<RoomJoined, ctnd::Error>
     where
         T: cbrd::clnk::Transport,
         L: crate::door::RoomLink,
@@ -678,7 +689,11 @@ where
                 evidence: task.evidence,
                 source: &source,
                 authority: &cbrd::JoinParent::new(&self.authority, task.parent),
-                handover: vec![],
+                handover: task
+                    .handover
+                    .iter()
+                    .map(|item| item.to_vec())
+                    .collect(),
                 companion,
                 operation,
                 attempts: ROOM_CONTEXT_ATTEMPTS,
@@ -692,7 +707,11 @@ where
             self.roster.borrow_mut().forget();
         }
         self.open().map_err(|_| Fail::Authority)?;
-        Ok(joined?.snapshot)
+        let joined = joined?;
+        Ok(RoomJoined {
+            snapshot: joined.snapshot,
+            handover: joined.handover,
+        })
     }
 }
 
@@ -822,6 +841,375 @@ where
         let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
         let key = threads.transport_keys().map_err(|_| Fail::Authority)?;
         Ok(cbrd::TransportKey::from_keys(&key))
+    }
+}
+
+/// What sealing this member's own profile key to a room takes (row 14.5).
+pub struct RoomKeyTask<'a> {
+    pub group: cgrp::Id,
+    /// This member's own key as a hand-over; never empty.
+    pub payload: &'a [u8],
+    pub policy: &'a dyn cgrp::PolicySource,
+}
+
+/// The sealed key message and the epoch it was sealed in.
+pub struct RoomKeySealed {
+    pub epoch: u64,
+    /// An MLS application message for the room transport of `epoch`.
+    pub message: Vec<u8>,
+}
+
+/// What opening the room secrets a read of the room delivered takes.
+pub struct RoomSecretsTask<'a> {
+    pub group: cgrp::Id,
+    /// MLS application messages read from the room, oldest first.
+    pub messages: &'a [Vec<u8>],
+    /// The first epoch a sender could have sent in, for members whose admission
+    /// this device saw; any other member counts from epoch 0.
+    pub joined: &'a BTreeMap<String, u64>,
+    pub policy: &'a dyn cgrp::PolicySource,
+}
+
+/// What the room secrets did. Refused hand-overs were consumed (their MLS
+/// message is spent) and stored nothing; unread ones could not be opened by this
+/// device's MLS state at all (another epoch, a replay) and changed nothing.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct RoomSecretsReceived {
+    pub adopted: BTreeSet<String>,
+    pub refused: u32,
+    pub unread: u32,
+}
+
+/// Where this device stands in a room's keys.
+#[derive(Debug, PartialEq, Eq)]
+pub struct RoomKeysStanding {
+    pub epoch: u64,
+    /// The members whose profile keys this device holds for the room.
+    pub held: BTreeSet<String>,
+}
+
+fn thread_fail(error: cthr::Error) -> ctnd::Error {
+    match error {
+        cthr::Error::Authority | cthr::Error::Scope | cthr::Error::Clock => ctnd::Error::Authority,
+        cthr::Error::Conflict => ctnd::Error::Reconcile,
+        cthr::Error::Storage => ctnd::Error::Storage,
+        _ => ctnd::Error::Unavailable,
+    }
+}
+
+impl<B, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
+where
+    B: cwst::backend::Backend,
+    C: ckmg::Clock,
+    E: ckmg::Entropy,
+    A: ckmg::Authority,
+    R: cvlt::Records,
+{
+    /// The room's roster from Groups, with every member's lineage read once and
+    /// kept (row 14.8): Threads certifies each leaf of the room against them.
+    async fn ensure_room_roster(
+        &mut self,
+        group: cgrp::Id,
+    ) -> std::result::Result<BTreeSet<String>, ctnd::Error> {
+        use ctnd::Error as Fail;
+        let roster = {
+            let mut retained = self.retained.lock().await;
+            let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+            let storage = custody.vault.storage().clone();
+            let store = storage.lock().await;
+            Snapshot::load(custody.binding.community(), &store)
+                .map_err(|_| Fail::Storage)?
+                .members(&group)
+                .map_err(|_| Fail::Authority)?
+                .clone()
+        };
+        if self.ensure_roster(&roster).await.is_err() {
+            *self.cache.borrow_mut() = Cache::default();
+            return Err(Fail::Unavailable);
+        }
+        Ok(roster)
+    }
+
+    /// The epoch this device is in for `group` and the members whose profile
+    /// keys it holds for the room.
+    pub async fn room_keys_standing(
+        &mut self,
+        group: cgrp::Id,
+    ) -> std::result::Result<RoomKeysStanding, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let storage = custody.vault.storage().clone();
+        let store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let epoch = cthr::Threads::load(binding, group, &store)
+            .map_err(|_| Fail::Storage)?
+            .epoch()
+            .map_err(|_| Fail::Unavailable)?;
+        let record = store
+            .read(room_keys::OWNER, &group)
+            .map_err(|_| Fail::Storage)?;
+        let held = Keyring::decode(record)
+            .map_err(|_| Fail::Storage)?
+            .owners();
+        Ok(RoomKeysStanding { epoch, held })
+    }
+
+    /// Seal this member's own profile key to the room in the current epoch: one
+    /// MLS application message, committed with the Threads state it advances.
+    /// The message never enters the room's accepted history.
+    pub async fn seal_room_key(
+        &mut self,
+        task: RoomKeyTask<'_>,
+    ) -> std::result::Result<RoomKeySealed, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        self.ensure_room_roster(task.group).await?;
+        let operation = {
+            let mut bytes = [0; 32];
+            getrandom::fill(&mut bytes).map_err(|_| Fail::Unavailable)?;
+            bytes
+        };
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let handle = custody
+            .vault
+            .keys()
+            .key(cnbx::threads_purpose())
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let own = custody
+            .vault
+            .keys()
+            .lineage()
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let storage = custody.vault.storage().clone();
+        let mut store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let mut devices = GroupDevices {
+            own,
+            cache: self.cache.clone(),
+            roster: Some(self.roster.clone()),
+        };
+        let mut port = cnbx::KeyPort {
+            keys: custody.vault.keys(),
+            handle: &handle,
+            devices: &mut devices,
+        };
+        let mut clock = crate::door::custody::SystemClock;
+        let source = PolicyRef(task.policy);
+        let threads =
+            cthr::Threads::load(binding, task.group, &store).map_err(|_| Fail::Storage)?;
+        let epoch = threads.epoch().map_err(|_| Fail::Unavailable)?;
+        let sealed = async {
+            threads
+                .seal_room_secret(&mut port, &source, &mut clock, task.payload)
+                .await?
+                .commit_room_secret(&mut port, &mut store, operation, &source, &mut clock, &[])
+                .await
+        }
+        .await
+        .map_err(thread_fail);
+        *self.cache.borrow_mut() = Cache::default();
+        self.open().map_err(|_| Fail::Authority)?;
+        let committed = sealed?;
+        let message = committed
+            .outgoing()
+            .first()
+            .map(|sent| sent.bytes().to_vec())
+            .ok_or(Fail::Unavailable)?;
+        Ok(RoomKeySealed { epoch, message })
+    }
+
+    /// Open the room secrets a read of the room delivered and adopt the profile
+    /// keys they hand over (row 14.5). Each message is one step: opened by the
+    /// room's MLS state, judged by Envelope (the key's owner must be the MLS
+    /// sender) and committed with the keyring it changes in ONE Store
+    /// transaction, so a spent MLS message never loses its key. The keys of
+    /// members who left the room are dropped first.
+    pub async fn receive_room_secrets(
+        &mut self,
+        task: RoomSecretsTask<'_>,
+    ) -> std::result::Result<RoomSecretsReceived, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let roster = self.ensure_room_roster(task.group).await?;
+        let mut received = RoomSecretsReceived::default();
+        let done = self.open_secrets(&task, &roster, &mut received).await;
+        *self.cache.borrow_mut() = Cache::default();
+        self.open().map_err(|_| Fail::Authority)?;
+        done.map(|()| received)
+    }
+
+    async fn open_secrets(
+        &mut self,
+        task: &RoomSecretsTask<'_>,
+        roster: &BTreeSet<String>,
+        received: &mut RoomSecretsReceived,
+    ) -> std::result::Result<(), ctnd::Error> {
+        use ctnd::Error as Fail;
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let handle = custody
+            .vault
+            .keys()
+            .key(cnbx::threads_purpose())
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let storage = custody.vault.storage().clone();
+        let mut store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let source = PolicyRef(task.policy);
+        let mut clock = crate::door::custody::SystemClock;
+        let mut ring = Keyring::decode(
+            store
+                .read(room_keys::OWNER, &task.group)
+                .map_err(|_| Fail::Storage)?,
+        )
+        .map_err(|_| Fail::Storage)?;
+        let version = store.version().map_err(|_| Fail::Storage)?;
+        // Members who left or were removed take their keys with them.
+        if ring.prune(roster) {
+            let mut operation = [0; 32];
+            getrandom::fill(&mut operation).map_err(|_| Fail::Unavailable)?;
+            let bytes = ring.encode().map_err(|_| Fail::Storage)?;
+            let change = if ring.is_empty() {
+                cwst::Change::Delete {
+                    owner: room_keys::OWNER,
+                    key: &task.group,
+                }
+            } else {
+                cwst::Change::Put {
+                    owner: room_keys::OWNER,
+                    key: &task.group,
+                    value: &bytes,
+                }
+            };
+            store
+                .commit(version, operation, &[change], &[])
+                .await
+                .map_err(|_| Fail::Reconcile)?;
+        }
+        if task.messages.is_empty() {
+            return Ok(());
+        }
+        let blocked = custody
+            .inbox
+            .contacts(&store)
+            .and_then(|contacts| contacts.blocking_rules())
+            .map_err(|_| Fail::Storage)?;
+        for wire in task.messages {
+            let own = custody
+                .vault
+                .keys()
+                .lineage()
+                .await
+                .map_err(|_| Fail::Authority)?;
+            let mut devices = GroupDevices {
+                own,
+                cache: self.cache.clone(),
+                roster: Some(self.roster.clone()),
+            };
+            let opened = {
+                let mut port = cnbx::KeyPort {
+                    keys: custody.vault.keys(),
+                    handle: &handle,
+                    devices: &mut devices,
+                };
+                let threads = cthr::Threads::load(binding.clone(), task.group, &store)
+                    .map_err(|_| Fail::Storage)?;
+                threads
+                    .open_room_secret(&mut port, &source, &mut clock, wire)
+                    .await
+            };
+            let Ok((candidate, secret)) = opened else {
+                received.unread += 1;
+                continue;
+            };
+            let sender = secret.sender().to_owned();
+            let joined = task.joined.get(&sender).copied().unwrap_or(0);
+            let verdict = if blocked.iter().any(|peer| *peer == sender) {
+                Err(room_keys::Refusal::Sender)
+            } else {
+                let current = ring.clone();
+                custody
+                    .with_custodian_owned(&self.origin, |custodian| {
+                        let mut next = current;
+                        Ok(next
+                            .adopt(
+                                custodian,
+                                &task.group,
+                                &sender,
+                                secret.epoch(),
+                                joined,
+                                secret.bytes(),
+                            )
+                            .map(|()| next))
+                    })
+                    .await
+                    .map_err(|_| Fail::Authority)?
+            };
+            drop(secret);
+            let bytes = match &verdict {
+                Ok(next) => Some(next.encode().map_err(|_| Fail::Storage)?),
+                Err(_) => None,
+            };
+            let changes: Vec<cwst::Change<'_>> = bytes
+                .iter()
+                .map(|bytes| cwst::Change::Put {
+                    owner: room_keys::OWNER,
+                    key: &task.group,
+                    value: bytes,
+                })
+                .collect();
+            let mut operation = [0; 32];
+            getrandom::fill(&mut operation).map_err(|_| Fail::Unavailable)?;
+            let own = custody
+                .vault
+                .keys()
+                .lineage()
+                .await
+                .map_err(|_| Fail::Authority)?;
+            let mut devices = GroupDevices {
+                own,
+                cache: self.cache.clone(),
+                roster: Some(self.roster.clone()),
+            };
+            let mut port = cnbx::KeyPort {
+                keys: custody.vault.keys(),
+                handle: &handle,
+                devices: &mut devices,
+            };
+            candidate
+                .commit_room_secret(&mut port, &mut store, operation, &source, &mut clock, &changes)
+                .await
+                .map_err(thread_fail)?;
+            match verdict {
+                Ok(next) => {
+                    ring = next;
+                    received.adopted.insert(sender);
+                }
+                Err(_) => received.refused += 1,
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1082,6 +1470,8 @@ where
                 authority: &self.authority,
                 clock: &mut clock,
                 operation,
+                // The room's profile keys leave with the room, in the same commit.
+                dependents: &[room_keys::OWNER],
             },
         )
         .await;

@@ -3,7 +3,9 @@
 //! group only. The ephemeral key, the sealing, the consent and the ordered
 //! commit all come from the retained owner and the original libraries; nothing
 //! is ever published in the clear, and a join with nobody online simply waits.
-use super::handlers::{group_error, OwnedBoard, MAX_GROUPS};
+use super::handlers::{group_error, with_context, OwnedBoard, MAX_GROUPS};
+use super::room_keys;
+use super::ProfileParts;
 use super::*;
 use crate::door::RoomLink;
 use cbrd::cgrp::PolicySource as _;
@@ -45,6 +47,10 @@ pub struct RoomAdmitted {
     pub admitted: u32,
     /// Ordered joins this device refused (unverifiable newcomer or consent).
     pub refused: u32,
+    /// Profile keys of fellow members this call adopted (row 14.5).
+    pub keys_adopted: u32,
+    /// Hand-overs this call refused: nothing was stored for them.
+    pub keys_refused: u32,
     /// The room's group as this device now holds it.
     pub groups: Vec<cbrd::GroupView>,
 }
@@ -93,6 +99,63 @@ pub(super) struct RoomJoins {
     served: std::collections::BTreeSet<([u8; 16], u64)>,
     /// How far this device has read each room's ordered joins (relay sequence).
     admitted_through: BTreeMap<[u8; 16], u64>,
+    /// How far this device has read each room's secrets (relay sequence).
+    secrets_through: BTreeMap<[u8; 16], u64>,
+    /// The epoch this device last sent its own profile key to each room in.
+    key_sent: BTreeMap<[u8; 16], u64>,
+    /// The epoch each newcomer this device admitted joined in: the first epoch
+    /// its hand-over can be from.
+    joined_in: BTreeMap<[u8; 16], BTreeMap<String, u64>>,
+}
+
+/// The member's own committed profile key as a room hand-over; `None` when no
+/// profile is committed. The current Charter judges the publication exactly as
+/// it does for every other read.
+fn own_handover<B: cwst::backend::Backend>(
+    context: &cbrd::ReadContext<'_, B>,
+    custody: &cbrd::cnvl::Custodian<'_>,
+    now: u64,
+) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
+    let policy = context
+        .charter
+        .admission_policy(
+            context.policy.admission_action,
+            now,
+            context.policy.maximum_snapshot_age,
+        )
+        .map_err(|_| ErrorCode::Refused)?;
+    let signed_schema = context
+        .charter
+        .publication(cchr::Kind::Schema)
+        .signed_bytes();
+    let Some(committed) = cpfl::load_current_committed(
+        context.store,
+        context.binding,
+        cpfl::Validation {
+            policy,
+            signed_schema,
+            contact: context.contact,
+        },
+    )
+    .map_err(|_| ErrorCode::Refused)?
+    else {
+        return Ok(None);
+    };
+    let verified = committed.verified();
+    let wrapped = context
+        .store
+        .read("profile.keys", &verified.transcript().revision.to_be_bytes())
+        .map_err(|_| ErrorCode::Reconcile)?
+        .ok_or(ErrorCode::Unavailable)?;
+    let key = custody
+        .restore(
+            verified.context(),
+            &cbrd::cnvl::WrappedReadKey::from_bytes(wrapped).map_err(|_| ErrorCode::Refused)?,
+        )
+        .map_err(|_| ErrorCode::Refused)?;
+    room_keys::handover(&key)
+        .map(Some)
+        .map_err(|_| ErrorCode::Refused)
 }
 
 fn link(error: cbrd::clnk::ErrorCode) -> ErrorCode {
@@ -108,6 +171,9 @@ impl RoomJoins {
     pub(super) fn forget(&mut self, room: [u8; 16]) {
         self.open.remove(&room);
         self.admitted_through.remove(&room);
+        self.secrets_through.remove(&room);
+        self.key_sent.remove(&room);
+        self.joined_in.remove(&room);
     }
 }
 
@@ -190,7 +256,11 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         // The signed Join request rides with the ordered commit (the owner adds
         // the handle of this member's own lineage); members admit the newcomer
         // only with it.
-        let snapshot = self
+        // The member's own profile key goes to the room in the epoch of its
+        // admission, if it published a profile (joining a public room is the
+        // consent to visible profiles).
+        let handover = self.own_room_handover(expires).await?;
+        let joined = self
             .owner
             .join_room(
                 &self.inner.board,
@@ -204,10 +274,130 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
                     handles: &state.handles,
                     transport: &cbrd::TransportKey::from_keys(&state.transport),
                     policy: &source,
+                    handover,
                 },
             )
             .await?;
-        snapshot.views(&current, now).map_err(group_error)
+        // The joined member is in; delivering the hand-over is best effort and
+        // is repeated by every admit call until it reaches the room.
+        self.deliver_handover(join.room, join.group, &joined.handover).await;
+        joined.snapshot.views(&current, now).map_err(group_error)
+    }
+
+    /// The member's own profile key as a room hand-over: empty when it has not
+    /// published a profile or its owner has no profile custody.
+    async fn own_room_handover(
+        &mut self,
+        expires: u64,
+    ) -> Result<Vec<zeroize::Zeroizing<Vec<u8>>>> {
+        let community = self.inner.board.community().to_owned();
+        let current = &mut self.current;
+        let policy = &self.policy;
+        let made = self
+            .owner
+            .with_profile(|parts| {
+                let ProfileParts { read, custody, .. } = parts;
+                with_context(current, policy, &community, expires, read, |context, now| {
+                    own_handover(context, &custody, now)
+                })
+            })
+            .await;
+        match made {
+            Ok(held) => Ok(held.into_iter().collect()),
+            Err(ErrorCode::Unavailable) => Ok(vec![]),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Relay the sealed hand-over messages of a join to the room, under the
+    /// transport key of the epoch they were sealed in.
+    async fn deliver_handover(&mut self, room: [u8; 16], group: [u8; 32], sealed: &[Vec<u8>]) {
+        if sealed.is_empty() {
+            return;
+        }
+        let Ok(standing) = self.owner.room_keys_standing(group).await else {
+            return;
+        };
+        let Ok(key) = self.owner.room_transport_key(group).await else {
+            return;
+        };
+        for message in sealed {
+            if R::relay_room_secret(&self.inner.board, room, &key, message)
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+        self.joins.key_sent.insert(room, standing.epoch);
+    }
+
+    /// The profile-key hand-over of one room (row 14.5), once per call and safe
+    /// to repeat: send this member's own key if it has not sent it in the
+    /// current epoch, then open the room secrets that arrived and adopt the
+    /// keys they hand over. Returns `(adopted, refused)`.
+    async fn room_keys_step(
+        &mut self,
+        room: &RoomRef,
+        source: &impl cbrd::cgrp::PolicySource,
+        expires: u64,
+    ) -> Result<(u32, u32)> {
+        let standing = self.owner.room_keys_standing(room.group).await?;
+        let transport = self.owner.room_transport_key(room.group).await?;
+        // A failed send is repeated by the next call (the epoch is not marked
+        // as sent) and never holds back what has already arrived.
+        let _ = self
+            .send_own_room_key(room, source, expires, standing.epoch, &transport)
+            .await;
+        let after = self.joins.secrets_through.get(&room.room).copied().unwrap_or(0);
+        let read = R::room_secrets(&self.inner.board, room.room, after, &transport)
+            .await
+            .map_err(link)?;
+        let messages: Vec<Vec<u8>> = read.secrets.into_iter().map(|frame| frame.message).collect();
+        let joined = self.joins.joined_in.get(&room.room).cloned().unwrap_or_default();
+        let received = self
+            .owner
+            .receive_room_secrets(crate::door::facades::RoomSecretsTask {
+                group: room.group,
+                messages: &messages,
+                joined: &joined,
+                policy: source,
+            })
+            .await?;
+        self.joins.secrets_through.insert(room.room, read.through);
+        Ok((received.adopted.len() as u32, received.refused))
+    }
+
+    /// Send this member's own profile key to the room, sealed in `epoch`, unless
+    /// it already did in that epoch. A member without a published profile has
+    /// nothing to send.
+    async fn send_own_room_key(
+        &mut self,
+        room: &RoomRef,
+        source: &impl cbrd::cgrp::PolicySource,
+        expires: u64,
+        epoch: u64,
+        transport: &cbrd::TransportKey,
+    ) -> Result<()> {
+        if self.joins.key_sent.get(&room.room) == Some(&epoch) {
+            return Ok(());
+        }
+        let handover = self.own_room_handover(expires).await?;
+        if let Some(payload) = handover.first() {
+            let sealed = self
+                .owner
+                .seal_room_key(crate::door::facades::RoomKeyTask {
+                    group: room.group,
+                    payload,
+                    policy: source,
+                })
+                .await?;
+            R::relay_room_secret(&self.inner.board, room.room, transport, &sealed.message)
+                .await
+                .map_err(link)?;
+        }
+        self.joins.key_sent.insert(room.room, epoch);
+        Ok(())
     }
 
     /// Leave a member room: Groups `Leave`, the Threads state and the Attend
@@ -285,7 +475,20 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
                 policy: &source,
             };
             match self.owner.admit_room(&self.inner.board, task).await {
-                Ok(_) => admitted += 1,
+                Ok(_) => {
+                    admitted += 1;
+                    // The newcomer's hand-over can only be from this epoch on.
+                    if let (Some(companion), Ok(standing)) = (
+                        cbrd::RoomCompanion::decode(&frame.companion),
+                        self.owner.room_keys_standing(room.group).await,
+                    ) {
+                        self.joins
+                            .joined_in
+                            .entry(room.room)
+                            .or_default()
+                            .insert(companion.request.actor, standing.epoch);
+                    }
+                }
                 Err(ErrorCode::Unavailable | ErrorCode::Reconcile) => {
                     retry = true;
                     break;
@@ -296,6 +499,12 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         if !retry {
             self.joins.admitted_through.insert(room.room, read.through);
         }
+        // Profile keys follow the admissions in the same call. A failure here
+        // never undoes an admission (it is committed); the next call repeats it.
+        let (keys_adopted, keys_refused) = self
+            .room_keys_step(&room, &source, expires)
+            .await
+            .unwrap_or((0, 0));
         let groups = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
         let snapshot = groups.snapshot().await.map_err(group_error)?;
         let now = groups.now().map_err(group_error)?;
@@ -305,6 +514,8 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         Ok(RoomAdmitted {
             admitted,
             refused,
+            keys_adopted,
+            keys_refused,
             groups: snapshot.views(&current, now).map_err(group_error)?,
         })
     }

@@ -103,7 +103,7 @@ pub trait CommittedOwner {
         &'a mut self,
         _board: &'a cbrd::Board<T, L>,
         _task: crate::door::facades::RoomJoinTask<'a>,
-    ) -> OwnerFuture<'a, cbrd::cgrp::Snapshot>
+    ) -> OwnerFuture<'a, crate::door::facades::RoomJoined>
     where
         T: clnk::Transport,
         L: crate::door::RoomLink,
@@ -160,6 +160,32 @@ pub trait CommittedOwner {
         &'a mut self,
         _group: cbrd::cgrp::Id,
     ) -> OwnerFuture<'a, cbrd::TransportKey> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
+    /// The epoch this device is in for a room and the members whose profile
+    /// keys it holds for it (row 14.5).
+    fn room_keys_standing<'a>(
+        &'a mut self,
+        _group: cbrd::cgrp::Id,
+    ) -> OwnerFuture<'a, crate::door::facades::RoomKeysStanding> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
+    /// Seal this member's own profile key to a room in its current epoch.
+    fn seal_room_key<'a>(
+        &'a mut self,
+        _task: crate::door::facades::RoomKeyTask<'a>,
+    ) -> OwnerFuture<'a, crate::door::facades::RoomKeySealed> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
+    /// Open the room secrets a read of the room delivered and adopt the profile
+    /// keys they hand over.
+    fn receive_room_secrets<'a>(
+        &'a mut self,
+        _task: crate::door::facades::RoomSecretsTask<'a>,
+    ) -> OwnerFuture<'a, crate::door::facades::RoomSecretsReceived> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
 

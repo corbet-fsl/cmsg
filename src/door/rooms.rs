@@ -108,6 +108,24 @@ pub trait RoomLink: Sized + 'static {
     ) -> RoomFuture<'a, cbrd::JoinsRead> {
         Box::pin(async { Err(LinkError::Rejected) })
     }
+    /// Relay one room secret (an MLS application message) to the room.
+    fn relay_room_secret<'a, T: clnk::Transport>(
+        _board: &'a cbrd::Board<T, Self>,
+        _room: cmbl::Id,
+        _key: &'a cbrd::TransportKey,
+        _message: &'a [u8],
+    ) -> RoomFuture<'a, ()> {
+        Box::pin(async { Err(LinkError::Rejected) })
+    }
+    /// The room secrets after relay sequence `after` that open under `key`.
+    fn room_secrets<'a, T: clnk::Transport>(
+        _board: &'a cbrd::Board<T, Self>,
+        _room: cmbl::Id,
+        _after: u64,
+        _key: &'a cbrd::TransportKey,
+    ) -> RoomFuture<'a, cbrd::SecretsRead> {
+        Box::pin(async { Err(LinkError::Rejected) })
+    }
     /// Post a join request (fresh ephemeral key); returns its relay sequence.
     fn request_room_join<'a, T: clnk::Transport>(
         _board: &'a cbrd::Board<T, Self>,
@@ -226,6 +244,22 @@ impl<R: clnk::Transport + 'static> RoomLink for clnk::AnonymousRooms<R> {
         key: &'a cbrd::TransportKey,
     ) -> RoomFuture<'a, cbrd::JoinsRead> {
         Box::pin(board.room_joins(room, after, key))
+    }
+    fn relay_room_secret<'a, T: clnk::Transport>(
+        board: &'a cbrd::Board<T, Self>,
+        room: cmbl::Id,
+        key: &'a cbrd::TransportKey,
+        message: &'a [u8],
+    ) -> RoomFuture<'a, ()> {
+        Box::pin(board.relay_room_secret(room, key, message))
+    }
+    fn room_secrets<'a, T: clnk::Transport>(
+        board: &'a cbrd::Board<T, Self>,
+        room: cmbl::Id,
+        after: u64,
+        key: &'a cbrd::TransportKey,
+    ) -> RoomFuture<'a, cbrd::SecretsRead> {
+        Box::pin(board.room_secrets(room, after, key))
     }
     fn request_room_join<'a, T: clnk::Transport>(
         board: &'a cbrd::Board<T, Self>,
