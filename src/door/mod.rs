@@ -19,6 +19,7 @@ mod communities;
 mod creating;
 mod device_session;
 pub mod device_join;
+pub mod device_pair;
 pub mod stamp;
 mod current;
 pub use composition::VaultComposer;

@@ -54,7 +54,7 @@ where
 }
 
 /// `message` without `purpose`'s tag: the payload the device signer signs under that tag.
-fn payload(purpose: ckmg::DevicePurpose, message: Vec<u8>) -> Result<Vec<u8>> {
+pub(crate) fn payload(purpose: ckmg::DevicePurpose, message: Vec<u8>) -> Result<Vec<u8>> {
     message
         .strip_prefix(purpose.tag())
         .map(<[u8]>::to_vec)
