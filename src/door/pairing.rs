@@ -2,10 +2,12 @@
 //!
 //! The existing device shows a `cvpr1.` link (QR or text) holding a one-time
 //! 256-bit secret, an offer id, a one-time HPKE public key and its mesh address.
-//! The new device runs THREE rounds, each one sealed message to that address and one
-//! sealed reply: (1) hello, answered with the registration options of its own passkey;
-//! (2) the registration credential, answered with the current lineage anchor; (3) the
-//! pairing request, answered with the grant. Every message is HPKE PSK mode (RFC 9180)
+//! The new device runs FOUR rounds, each one sealed message to that address and one
+//! sealed reply: (1) hello, answered with the current lineage anchor; (2) the pairing
+//! request, answered with the community's challenge of the first stamped step (after the
+//! member's one wallet confirmation); (3) the new key's signature over that challenge,
+//! answered with the grant and the challenge of the second step; (4) the new key's
+//! signature over the second challenge, answered with the activation. Every message is HPKE PSK mode (RFC 9180)
 //! with the link secret as the pre-shared key and the offer id as its identifier, so only
 //! the holder of the link can produce or read any of them. The round number is part of
 //! the HPKE `info`, so a message cannot be replayed into another round. A repeated
@@ -38,7 +40,7 @@ const ENC: usize = 32;
 const INFO_REQUEST: &[u8] = b"cvpr.pairing.request.v2";
 const INFO_REPLY: &[u8] = b"cvpr.pairing.reply.v2";
 /// Number of request/reply rounds of one pairing.
-pub const ROUNDS: u8 = 3;
+pub const ROUNDS: u8 = 4;
 
 fn info(base: &[u8], round: u8) -> Vec<u8> {
     let mut info = base.to_vec();
@@ -237,7 +239,7 @@ impl Awaiting {
 }
 
 /// The existing device's open offer: the one-time secret and key behind a link, and
-/// how far the three rounds have come.
+/// how far the rounds have come.
 pub struct Offer {
     secret: Zeroizing<[u8; 32]>,
     id: [u8; 16],
@@ -314,7 +316,7 @@ impl Offer {
         self.done
     }
 
-    /// All three rounds are answered: this offer serves nothing more.
+    /// All rounds are answered: this offer serves nothing more.
     pub fn finished(&self) -> bool {
         self.done == ROUNDS
     }
@@ -395,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn a_link_carries_three_rounds_in_order_and_nothing_else() {
+    fn a_link_carries_its_rounds_in_order_and_nothing_else() {
         let (mut offer, text) = Offer::new(&address(), 1_000).unwrap();
         assert!(text.starts_with(PREFIX) && text.len() <= MAX_LINK_CHARS);
         let link = Link::parse(&text).unwrap();

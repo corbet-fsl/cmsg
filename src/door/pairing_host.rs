@@ -1,26 +1,31 @@
 //! The existing device's concrete steps of a pairing ([`HostSteps`]) over the Door: the
 //! member's ONE wallet confirmation (a stamp covering `device_add` and `device_activate` for
-//! exactly the new device's key), the community's two stamped pairing steps, Keys (`Pair`)
-//! and the lineage revision (certified evidence, record value, publication through cvlt's
-//! narrow capability).
+//! exactly the new device's key, which the pairing request names), the community's two
+//! stamped pairing steps, Keys (`Pair`) and the lineage revision (certified evidence, record
+//! value, publication through cvlt's narrow capability).
 //!
 //! Every step that took the person's time (the wallet confirmation, the evidence ceremony)
 //! or that must not run twice (the Keys approval, the signed record value, the community
 //! add) keeps its outcome in this value, so a failed round that the new device repeats
-//! resumes after the last completed step. The order of the second round is the safety order:
+//! resumes after the last completed step. The order of the third round is the safety order:
 //! the key is registered PENDING (it grants nothing), Keys approval, evidence over the
 //! receipt, durable retention, record value, publication and forced read, Keys
-//! acknowledgment, and only then, in the third round, the community activates the key. A
+//! acknowledgment, and only then, in the fourth round, the community activates the key. A
 //! host that restarts loses the offer; the person starts a new link, nothing half-applied is
 //! trusted.
 use super::device_join::DeviceSign;
 use super::device_pair::{self, PairingActions, Step, StepChallenge};
 use super::pairing_publish::prepare_pairing_evidence;
-use super::pairing_roles::{Granted, HostSteps, Welcome};
+use super::pairing_roles::{HostSteps, Scope, Selection};
+use std::collections::BTreeMap;
 use super::passport::GlobalPassport;
 use super::*;
 use composer_core::DeviceKeys;
 use foyer::Transport;
+
+fn secs() -> u64 {
+    ckmg::Clock::now(&mut custody::SystemClock).unwrap_or(u64::MAX)
+}
 
 /// Seconds the vault's signing admission stays valid for a salt signature.
 const SIGN_SECONDS: u64 = 60;
@@ -44,6 +49,11 @@ pub trait PairingWallet {
 /// [`PairingWallet`] over the wallet's authenticated Foyer, its passport and its passkeys.
 pub struct WalletParts<'a, B, C, E, A, R, K>
 where
+    B: cwst::backend::Backend,
+    C: ckmg::Clock,
+    E: ckmg::Entropy,
+    A: ckmg::Authority,
+    R: cvlt::Records,
     K: cfyr::passkeys::Authenticator,
 {
     /// The wallet's authenticated Foyer, for the stamp.
@@ -108,17 +118,15 @@ impl DeviceSign for VaultSalt<'_> {
     }
 }
 
-/// What round 1 settled: the key being paired, its two stamp actions and the answer.
-struct Welcomed {
-    device: ckmg::PublicKey,
+/// What round 2 settled: the request, its key's two stamp actions.
+struct Confirmed {
+    request: ckmg::PairingRequest,
     actions: PairingActions,
-    welcome: Welcome,
 }
 
-/// The progress of the second round that must survive a retried round.
+/// The progress of the third round that must survive a retried round.
 #[derive(Default)]
 struct Approval {
-    request: Option<ckmg::PairingRequest>,
     added: bool,
     grant: Option<ckmg::PairingGrant>,
     receipt: Option<ckmg::Receipt>,
@@ -127,24 +135,26 @@ struct Approval {
     value: Option<cdht::SignedValue>,
     published: bool,
     acknowledged: bool,
-    granted: Option<Granted>,
 }
 
-/// [`HostSteps`] over one Door, one network for the record publication and the member's wallet.
-pub struct DoorHost<'a, N: cdht::Network + Clone, W: PairingWallet> {
+/// The pairing steps of ONE community scope over its Door and one network for the record
+/// publication. The member's wallet is lent per call ([`SessionHost`] owns it), because one
+/// wallet serves every scope of a session.
+pub struct DoorHost<'a, N: cdht::Network + Clone> {
     door: &'a mut Door,
     origin: String,
     network: N,
     /// A session-less Foyer of the community: the pairing challenges are public and a
     /// challenge issued to a session is refused for pairing.
     community: cfyr::Foyer<Transport>,
-    wallet: W,
-    welcomed: Option<Welcomed>,
+    anchor: Option<ckmg::Lineage>,
+    confirmed: Option<Confirmed>,
     approval: Approval,
-    activation: Option<StepChallenge>,
+    /// The challenge fetched last (the add step's, then the activation's).
+    challenge: Option<StepChallenge>,
 }
 
-impl<'a, N: cdht::Network + Clone, W: PairingWallet> DoorHost<'a, N, W> {
+impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
     /// Steps for the member portal `origin` of `door`; `network` is the record network the
     /// lineage revision is published to, `community` a session-less Foyer of the community.
     pub fn new(
@@ -152,31 +162,57 @@ impl<'a, N: cdht::Network + Clone, W: PairingWallet> DoorHost<'a, N, W> {
         origin: &str,
         network: N,
         community: cfyr::Foyer<Transport>,
-        wallet: W,
     ) -> Self {
         Self {
             door,
             origin: origin.to_owned(),
             network,
             community,
-            wallet,
-            welcomed: None,
+            anchor: None,
+            confirmed: None,
             approval: Approval::default(),
-            activation: None,
+            challenge: None,
         }
     }
-}
 
-impl<N: cdht::Network + Clone, W: PairingWallet> HostSteps for DoorHost<'_, N, W> {
-    async fn welcome(&mut self, device: ckmg::PublicKey) -> Result<Welcome> {
-        if let Some(kept) = &self.welcomed {
-            // A repeat of round 1 for the same key keeps the confirmed answer; another key
-            // never reuses this pairing.
-            return if kept.device == device {
-                Ok(kept.welcome.clone())
+    async fn anchor(&mut self) -> Result<ckmg::Lineage> {
+        if let Some(kept) = &self.anchor {
+            return Ok(kept.clone());
+        }
+        let anchor = self
+            .door
+            .vaults
+            .get_mut(&self.origin)
+            .ok_or(ErrorCode::Unavailable)?
+            .pairing_anchor()
+            .await?;
+        self.anchor = Some(anchor.clone());
+        Ok(anchor)
+    }
+
+    async fn confirm(
+        &mut self,
+        wallet: &mut impl PairingWallet,
+        request: ckmg::PairingRequest,
+    ) -> Result<()> {
+        if let Some(kept) = &self.confirmed {
+            // A repeat of round 2 for the same request keeps the confirmation; another
+            // request never reuses this pairing.
+            return if kept.request == request {
+                Ok(())
             } else {
                 Err(ErrorCode::Refused)
             };
+        }
+        // Nothing is asked of the person for a request that cannot be approved anyway: it
+        // must be proven and extend exactly the lineage this device showed.
+        let anchor = self.anchor.as_ref().ok_or(ErrorCode::InvalidRequest)?;
+        request.verify(secs()).map_err(|_| ErrorCode::Unauthorized)?;
+        if request.binding != anchor.binding
+            || request.root != anchor.root
+            || request.epoch != anchor.epoch
+        {
+            return Err(ErrorCode::Unauthorized);
         }
         let name = self.door.config.community.clone();
         let actions = {
@@ -189,57 +225,40 @@ impl<N: cdht::Network + Clone, W: PairingWallet> HostSteps for DoorHost<'_, N, W
                 vault: vault.as_mut(),
                 origin: &self.origin,
             };
-            PairingActions::derive(&mut self.community, &name, &device, &mut salt).await?
+            PairingActions::derive(&mut self.community, &name, &request.device, &mut salt).await?
         };
-        // The pairing's ONE wallet confirmation: nothing is prompted when a retained stamp
+        // The scope's ONE wallet confirmation: nothing is prompted when a retained stamp
         // already covers both steps.
-        self.wallet.confirm(&actions).await?;
-        let anchor = self
-            .door
-            .vaults
-            .get_mut(&self.origin)
-            .ok_or(ErrorCode::Unavailable)?
-            .pairing_anchor()
-            .await?;
-        let welcome = Welcome {
-            anchor,
-            challenge: device_pair::begin(&mut self.community).await?,
-        };
-        self.welcomed = Some(Welcomed {
-            device,
-            actions,
-            welcome: welcome.clone(),
-        });
-        Ok(welcome)
+        wallet.confirm(&actions).await?;
+        self.confirmed = Some(Confirmed { request, actions });
+        Ok(())
+    }
+
+    /// A fresh one-use challenge (it lives 60 seconds, so it is fetched after the round's
+    /// human steps).
+    async fn challenge(&mut self) -> Result<StepChallenge> {
+        let challenge = device_pair::begin(&mut self.community).await?;
+        self.challenge = Some(challenge.clone());
+        Ok(challenge)
     }
 
     async fn approve(
         &mut self,
-        request: ckmg::PairingRequest,
+        wallet: &mut impl PairingWallet,
         signature: Vec<u8>,
-    ) -> Result<Granted> {
-        let welcomed = self.welcomed.as_ref().ok_or(ErrorCode::InvalidRequest)?;
-        if request.device != welcomed.device {
-            return Err(ErrorCode::Refused);
-        }
-        let anchor = welcomed.welcome.anchor.clone();
-        match &self.approval.request {
-            Some(kept) if kept != &request => return Err(ErrorCode::Refused),
-            Some(_) => {}
-            None => self.approval.request = Some(request.clone()),
-        }
-        if let Some(granted) = &self.approval.granted {
-            return Ok(granted.clone());
-        }
+    ) -> Result<ckmg::PairingGrant> {
+        let confirmed = self.confirmed.as_ref().ok_or(ErrorCode::InvalidRequest)?;
+        let request = confirmed.request.clone();
+        let anchor = self.anchor.clone().ok_or(ErrorCode::InvalidRequest)?;
         // 0. The key is registered PENDING at the community: it grants nothing yet.
         if !self.approval.added {
-            let welcomed = self.welcomed.as_ref().ok_or(ErrorCode::InvalidRequest)?;
-            self.wallet
+            let challenge = self.challenge.as_ref().ok_or(ErrorCode::InvalidRequest)?;
+            wallet
                 .send(
                     &mut self.community,
-                    &welcomed.actions,
+                    &confirmed.actions,
                     Step::Add,
-                    &welcomed.welcome.challenge,
+                    challenge,
                     signature,
                 )
                 .await?;
@@ -308,29 +327,80 @@ impl<N: cdht::Network + Clone, W: PairingWallet> HostSteps for DoorHost<'_, N, W
         if !self.approval.acknowledged {
             vault.acknowledge_pairing(&receipt).await?;
             self.approval.acknowledged = true;
-        }        // 6. The revision is published: the next challenge is for the activation, fetched only
-        // now so it is fresh when the new device signs it.
-        let challenge = device_pair::begin(&mut self.community).await?;
-        self.activation = Some(challenge.clone());
-        let granted = Granted {
-            grant: self.approval.grant.clone().ok_or(ErrorCode::Reconcile)?,
-            challenge,
-        };
-        self.approval.granted = Some(granted.clone());
-        Ok(granted)
+        }
+        self.approval.grant.clone().ok_or(ErrorCode::Reconcile)
     }
 
-    async fn activate(&mut self, signature: Vec<u8>) -> Result<()> {
-        let welcomed = self.welcomed.as_ref().ok_or(ErrorCode::InvalidRequest)?;
-        let challenge = self.activation.clone().ok_or(ErrorCode::InvalidRequest)?;
-        self.wallet
+    async fn activate(&mut self, wallet: &mut impl PairingWallet, signature: Vec<u8>) -> Result<()> {
+        let confirmed = self.confirmed.as_ref().ok_or(ErrorCode::InvalidRequest)?;
+        // Only after the revision is published and acknowledged.
+        if !self.approval.acknowledged {
+            return Err(ErrorCode::InvalidRequest);
+        }
+        let challenge = self.challenge.as_ref().ok_or(ErrorCode::InvalidRequest)?;
+        wallet
             .send(
                 &mut self.community,
-                &welcomed.actions,
+                &confirmed.actions,
                 Step::Activate,
-                &challenge,
+                challenge,
                 signature,
             )
             .await
+    }
+}
+
+/// [`HostSteps`] for one pairing session over the member's communities: one wallet, one
+/// [`DoorHost`] per community scope. The wallet scope has no server pairing action yet, so a
+/// session with [`Scope::Wallet`] is refused at its first step.
+pub struct SessionHost<'a, N: cdht::Network + Clone, W: PairingWallet> {
+    wallet: W,
+    hosts: BTreeMap<Scope, DoorHost<'a, N>>,
+}
+
+impl<'a, N: cdht::Network + Clone, W: PairingWallet> SessionHost<'a, N, W> {
+    /// The member's `wallet` and the community scopes (by community name) it can bring along.
+    pub fn new(wallet: W, communities: impl IntoIterator<Item = (String, DoorHost<'a, N>)>) -> Self {
+        Self {
+            wallet,
+            hosts: communities
+                .into_iter()
+                .map(|(name, host)| (Scope::Community(name), host))
+                .collect(),
+        }
+    }
+
+    /// Every scope the session can bring along, all selected: deselect before showing the link.
+    pub fn selection(&self) -> Option<Selection> {
+        Selection::all(self.hosts.keys().cloned())
+    }
+
+    fn host(&mut self, scope: &Scope) -> Result<&mut DoorHost<'a, N>> {
+        self.hosts.get_mut(scope).ok_or(ErrorCode::Unavailable)
+    }
+}
+
+impl<N: cdht::Network + Clone, W: PairingWallet> HostSteps for SessionHost<'_, N, W> {
+    async fn anchor(&mut self, scope: &Scope) -> Result<ckmg::Lineage> {
+        self.host(scope)?.anchor().await
+    }
+
+    async fn confirm(&mut self, scope: &Scope, request: ckmg::PairingRequest) -> Result<()> {
+        let host = self.hosts.get_mut(scope).ok_or(ErrorCode::Unavailable)?;
+        host.confirm(&mut self.wallet, request).await
+    }
+
+    async fn challenge(&mut self, scope: &Scope) -> Result<StepChallenge> {
+        self.host(scope)?.challenge().await
+    }
+
+    async fn approve(&mut self, scope: &Scope, signature: Vec<u8>) -> Result<ckmg::PairingGrant> {
+        let host = self.hosts.get_mut(scope).ok_or(ErrorCode::Unavailable)?;
+        host.approve(&mut self.wallet, signature).await
+    }
+
+    async fn activate(&mut self, scope: &Scope, signature: Vec<u8>) -> Result<()> {
+        let host = self.hosts.get_mut(scope).ok_or(ErrorCode::Unavailable)?;
+        host.activate(&mut self.wallet, signature).await
     }
 }
