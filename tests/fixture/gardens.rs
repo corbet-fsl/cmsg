@@ -251,7 +251,7 @@ async fn proof(
     )
     .unwrap();
     let anchor = anchor(service, &host, scope).await;
-    let bytes = if scope == "root" {
+    let bytes = if scope == super::BOARD {
         holder
             .present_root_board(
                 &mut cpsd::rand::rngs::OsRng,
@@ -342,7 +342,7 @@ pub async fn roots(
     )
     .unwrap();
     let source_anchor = anchor(source, "api.alpha.example.test", "alpha").await;
-    let root_anchor = anchor(board, "api.root.example.test", "root").await;
+    let root_anchor = anchor(board, &format!("api.{}.example.test", super::BOARD), super::BOARD).await;
     let request = holder
         .begin_root_board_issuance(
             &mut cpsd::rand::rngs::OsRng,
@@ -370,6 +370,6 @@ pub async fn roots(
             &cpsd::BlindRootBoardCredential::from_bytes(&answer.bytes).unwrap(),
         )
         .unwrap();
-    let board_member = root_member(wallet, operator, board, "root", &holder, "fixture_board_root").await;
+    let board_member = root_member(wallet, operator, board, super::BOARD, &holder, "fixture_board_root").await;
     (source_member, board_member)
 }
