@@ -261,7 +261,7 @@ async fn commits_at(
         .iter()
         .filter_map(|frame| match frame.open(&ROOM, key)? {
             cbrd::FrameContent::Commit(commit) => Some((frame.sequence, frame.counter, commit)),
-            cbrd::FrameContent::Secret => None,
+            cbrd::FrameContent::Secret | cbrd::FrameContent::Notice(_) => None,
         })
         .collect()
 }
@@ -546,3 +546,6 @@ async fn a_commit_is_applied_only_to_the_epoch_it_was_made_for() {
         .unwrap();
     assert_eq!(standing(&b.owner).await, standing(&room.a).await);
 }
+
+#[path = "room_leave.rs"]
+mod leave;

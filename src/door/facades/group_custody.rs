@@ -1546,6 +1546,248 @@ where
     }
 }
 
+/// How a removal reaches this device: it commits the removal itself, or applies
+/// the member commit another member already ordered.
+pub enum RemoveStep<'a> {
+    /// Order the removal commit at `expected` in the ordering generation `ordering`.
+    Commit { ordering: [u8; 16], expected: u64 },
+    /// The room already holds the member commit that removes the leaver.
+    Apply { commit: &'a [u8] },
+}
+
+/// What removing a member who announced its own leave takes. Nobody else can be
+/// removed: the Groups decision exists only from the leaver's own signed request.
+pub struct RoomRemoveTask<'a> {
+    pub room: [u8; 16],
+    pub group: cgrp::Id,
+    /// The leaver's signed request, exactly as its notice or the removal
+    /// commit's companion carries it.
+    pub companion: &'a [u8],
+    pub max_groups: usize,
+    /// The room's transport key at the epoch the removal is made for.
+    pub transport: &'a cbrd::TransportKey,
+    pub policy: &'a dyn cgrp::PolicySource,
+    pub step: RemoveStep<'a>,
+}
+
+impl<B, C, E, A, R, W> VaultGroupOwner<B, C, E, A, R, W>
+where
+    B: cwst::backend::Backend,
+    C: ckmg::Clock,
+    E: ckmg::Entropy,
+    A: ckmg::Authority,
+    R: cvlt::Records,
+{
+    /// This device's community pseudonym.
+    pub fn own_member(&self) -> &str {
+        &self.member
+    }
+
+    /// Announce this device's own leave to the room: relay the signed Groups
+    /// `Leave` request, sealed under the transport key of the epoch this device
+    /// holds, as one ordinary member frame (no new frame kind, no new key).
+    pub async fn announce_leave<T, L>(
+        &mut self,
+        board: &cbrd::Board<T, L>,
+        room: [u8; 16],
+        request: &cgrp::Request,
+    ) -> std::result::Result<(), ctnd::Error>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        use ctnd::Error as Fail;
+        let cgrp::Command::Leave { group } = request.command else {
+            return Err(Fail::Invalid);
+        };
+        if request.actor != self.member {
+            return Err(Fail::Authority);
+        }
+        let key = self.room_transport_key(group).await?;
+        L::relay_room_notice(
+            board,
+            room,
+            &key,
+            &cbrd::RoomCompanion {
+                request: request.clone(),
+            },
+        )
+        .await
+        .map_err(|_| Fail::Unavailable)
+    }
+
+    /// Remove (or apply the removal of) a member who announced its own leave.
+    /// The leaver is believed only through evidence this device verifies
+    /// itself: its leaf in the MLS tree must verify against the roster lineage
+    /// this device holds, and its signed request counts only from that leaf's
+    /// device key. A request that is not a Groups `Leave` of this room by a
+    /// listed member other than this device is refused before anything is
+    /// processed.
+    pub async fn remove_room<T, L>(
+        &mut self,
+        board: &cbrd::Board<T, L>,
+        task: RoomRemoveTask<'_>,
+    ) -> std::result::Result<Snapshot, ctnd::Error>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let companion = cbrd::RoomCompanion::decode(task.companion).ok_or(Fail::Authority)?;
+        let leaver = companion.request.actor.clone();
+        if leaver == self.member
+            || !matches!(companion.request.command, cgrp::Command::Leave { group } if group == task.group)
+        {
+            return Err(Fail::Authority);
+        }
+        let roster = {
+            let mut retained = self.retained.lock().await;
+            let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+            let storage = custody.vault.storage().clone();
+            let store = storage.lock().await;
+            cgrp::Snapshot::load(custody.binding.community(), &store)
+                .map_err(|_| Fail::Storage)?
+                .members(&task.group)
+                .map_err(|_| Fail::Authority)?
+                .clone()
+        };
+        if !roster.contains(&leaver) {
+            return Err(Fail::Authority);
+        }
+        if self.ensure_roster(&roster).await.is_err() {
+            *self.cache.borrow_mut() = Cache::default();
+            return Err(Fail::Unavailable);
+        }
+        let operation = {
+            let mut bytes = [0; 32];
+            getrandom::fill(&mut bytes).map_err(|_| Fail::Unavailable)?;
+            bytes
+        };
+        let removed = self
+            .remove_verified(board, &task, &companion.request, operation)
+            .await;
+        *self.cache.borrow_mut() = Cache::default();
+        self.open().map_err(|_| Fail::Authority)?;
+        removed
+    }
+
+    async fn remove_verified<T, L>(
+        &mut self,
+        board: &cbrd::Board<T, L>,
+        task: &RoomRemoveTask<'_>,
+        request: &cgrp::Request,
+        operation: [u8; 32],
+    ) -> std::result::Result<Snapshot, ctnd::Error>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        use ctnd::Error as Fail;
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let handle = custody
+            .vault
+            .keys()
+            .key(cnbx::threads_purpose())
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let own = custody
+            .vault
+            .keys()
+            .lineage()
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let storage = custody.vault.storage().clone();
+        let mut store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let mut devices = GroupDevices {
+            own,
+            cache: self.cache.clone(),
+            roster: Some(self.roster.clone()),
+        };
+        let mut port = cnbx::KeyPort {
+            keys: custody.vault.keys(),
+            handle: &handle,
+            devices: &mut devices,
+        };
+        let mut clock = crate::door::custody::SystemClock;
+        let threads =
+            cthr::Threads::load(binding.clone(), task.group, &store).map_err(|_| Fail::Storage)?;
+        // The leaver's leaf first, then its request: Groups decides only on a
+        // leaver whose certificate this device verified, and only the leaf's own
+        // device key counts as the leaver's consent.
+        let credential = threads
+            .room_member_credential(&request.actor)
+            .map_err(|_| Fail::Authority)?;
+        if credential.binding.community() != binding.community()
+            || credential.binding.member() != request.actor
+        {
+            return Err(Fail::Authority);
+        }
+        cthr::keys::Custody::verify(&mut port, &credential)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        let authority = RoomAuthority {
+            member: request.actor.clone(),
+            device: *credential.device.value(),
+        };
+        let source = PolicyRef(task.policy);
+        let now = ckmg::Clock::now(&mut clock).map_err(|_| Fail::Unavailable)?;
+        #[cfg(test)]
+        let now = now + TEST_CONSENT_AGE.with(std::cell::Cell::get);
+        let snapshot = Snapshot::load(binding.community(), &store).map_err(|_| Fail::Storage)?;
+        let groups = cgrp::prepare(&snapshot, request, &source, &authority, now, task.max_groups)
+            .map_err(|_| Fail::Authority)?;
+        let removed = match &task.step {
+            RemoveStep::Apply { commit } => {
+                cbrd::apply_room_removal(cbrd::RoomApplyRemovalInput {
+                    keys: &mut port,
+                    clock: &mut clock,
+                    store: &mut store,
+                    threads: &threads,
+                    groups,
+                    commit,
+                    source: &source,
+                    authority: &authority,
+                    operation,
+                })
+                .await
+            }
+            RemoveStep::Commit { ordering, expected } => {
+                L::remove_room(
+                    board,
+                    cbrd::RoomRemoveInput {
+                        keys: &mut port,
+                        clock: &mut clock,
+                        store: &mut store,
+                        threads: &threads,
+                        groups,
+                        companion: task.companion,
+                        room: task.room,
+                        ordering: *ordering,
+                        expected: *expected,
+                        source: &source,
+                        authority: &authority,
+                        operation,
+                        transport: task.transport,
+                    },
+                )
+                .await
+            }
+        };
+        if removed.is_err() {
+            self.roster.borrow_mut().forget();
+        }
+        Ok(removed?.snapshot)
+    }
+}
+
 /// Reads of the room's traffic per join attempt, for the member's context commit.
 const ROOM_CONTEXT_ATTEMPTS: u8 = 3;
 
