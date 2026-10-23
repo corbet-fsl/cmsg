@@ -6,7 +6,9 @@
 //! What is not exercised here: the Door's Rulebook-backed policy read and the
 //! sealed request/answer exchange (they sit above the owners under test).
 use super::profile_owner_tests::{open_with, ProfileOwner};
-use crate::door::facades::{GroupPeers, RoomAdmitTask, RoomJoinTask};
+use crate::door::facades::{
+    GroupPeers, RoomAdmitTask, RoomJoinTask, RoomKeyTask, RoomSecretsTask,
+};
 use blind_rsa_signatures::{DefaultRng, KeyPair, PSS, Randomized, Sha384};
 use cbrd::cgrp::{self, Band, Notification, Policy, SeatFormats, DAY};
 use cbrd::clnk::{self, cfrm, cmbl};
@@ -360,6 +362,33 @@ async fn own_lineage(owner: &ProfileOwner) -> (ckmg::Lineage, Vec<u8>) {
     (lineage, handle)
 }
 
+/// A real profile key of `owner` (member `letter`), as the hand-over it would
+/// send to a room: Envelope custody is lent exactly as the product lends it.
+async fn own_key(owner: &ProfileOwner, letter: &str) -> Vec<u8> {
+    let mut retained = owner.retained.lock().await;
+    let custody = retained.as_mut().unwrap();
+    custody
+        .with_custodian_owned("https://member.example.test", |custodian| {
+            let (_, key) = custodian
+                .seal(
+                    cbrd::cnvl::Context {
+                        community: COMMUNITY.into(),
+                        owner: member_id(letter),
+                        profile_revision: 1,
+                        schema_revision: 1,
+                        key_generation: 1,
+                    },
+                    b"private profile",
+                )
+                .unwrap();
+            Ok(crate::door::board::room_keys::handover(&key)
+                .unwrap()
+                .to_vec())
+        })
+        .await
+        .unwrap()
+}
+
 fn policy_at() -> cbrd::PolicyAt {
     cbrd::PolicyAt::new(COMMUNITY, policy())
 }
@@ -481,8 +510,9 @@ async fn attempt(
     member: &mut ProfileOwner,
     member_board: &RoomBoard,
     cursor: &mut u64,
+    handover: Vec<zeroize::Zeroizing<Vec<u8>>>,
 ) -> (
-    Result<cgrp::Snapshot, ctnd::Error>,
+    Result<crate::door::facades::RoomJoined, ctnd::Error>,
     Vec<Result<cgrp::Snapshot, ctnd::Error>>,
 ) {
     let policy = policy_at();
@@ -516,7 +546,9 @@ async fn attempt(
     )
     .await
     .unwrap();
-    let join = groups.join_room(
+    let join = async {
+        groups
+            .join_room(
         newcomer_board,
         RoomJoinTask {
             room: ROOM,
@@ -528,8 +560,11 @@ async fn attempt(
             handles: &evidence.handles,
             transport: &join_key,
             policy: &policy,
+            handover,
         },
-    );
+    )
+    .await
+    };
     let admit = async {
         let groups = member.groups.as_mut().unwrap();
         let transport = groups.room_transport_key(GROUP).await.unwrap();
@@ -640,6 +675,7 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
         &mut member,
         &member_board,
         &mut cursor,
+        vec![],
     )
     .await;
     assert!(joined.is_err());
@@ -654,6 +690,8 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
     let (joiner_lineage, joiner_handle) = own_lineage(&joiner).await;
     directory.publish(joiner_handle.clone(), joiner_lineage);
     let joiner_board = board(&router, 60, false).await;
+    let joiner_key = own_key(&joiner, "b").await;
+    let member_key = own_key(&member, "a").await;
     let (joined, admitted) = attempt(
         &mut joiner,
         &joiner_board,
@@ -661,9 +699,10 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
         &mut member,
         &member_board,
         &mut cursor,
+        vec![zeroize::Zeroizing::new(joiner_key.clone())],
     )
     .await;
-    joined.unwrap();
+    let joined = joined.unwrap();
     assert_eq!(admitted.len(), 1);
     admitted[0].as_ref().unwrap();
     let both = BTreeSet::from([member_id("a"), member_id("x"), member_id("y"), member_id("b")]);
@@ -693,6 +732,130 @@ async fn a_stranger_is_admitted_through_its_own_lineage_and_a_substituted_handle
             .unwrap()
             .roster_members()
             .contains(&member_id("b"))
+    );
+
+    // Profile keys (row 14.5). The joiner sent its key in the epoch of its
+    // admission; the member holds nothing before it opens that message.
+    let policy = policy_at();
+    let nobody = BTreeMap::new();
+    assert_eq!(joined.handover.len(), 1);
+    let held = |standing: crate::door::facades::RoomKeysStanding| standing.held;
+    assert!(
+        held(member.groups.as_mut().unwrap().room_keys_standing(GROUP).await.unwrap()).is_empty()
+    );
+    let adopted = member
+        .groups
+        .as_mut()
+        .unwrap()
+        .receive_room_secrets(RoomSecretsTask {
+            group: GROUP,
+            messages: &joined.handover,
+            joined: &BTreeMap::from([(member_id("b"), member_epoch)]),
+            policy: &policy,
+        })
+        .await
+        .unwrap();
+    assert_eq!(adopted.adopted, BTreeSet::from([member_id("b")]));
+    assert_eq!(
+        held(member.groups.as_mut().unwrap().room_keys_standing(GROUP).await.unwrap()),
+        BTreeSet::from([member_id("b")])
+    );
+    // The message is spent: opened once, never again.
+    let again = member
+        .groups
+        .as_mut()
+        .unwrap()
+        .receive_room_secrets(RoomSecretsTask {
+            group: GROUP,
+            messages: &joined.handover,
+            joined: &nobody,
+            policy: &policy,
+        })
+        .await
+        .unwrap();
+    assert_eq!((again.adopted.len(), again.unread), (0, 1));
+    // A hand-over from before the sender's membership is refused (and spent).
+    let sealed = joiner
+        .groups
+        .as_mut()
+        .unwrap()
+        .seal_room_key(RoomKeyTask {
+            group: GROUP,
+            payload: &joiner_key,
+            policy: &policy,
+        })
+        .await
+        .unwrap();
+    assert_eq!(sealed.epoch, member_epoch);
+    let early = member
+        .groups
+        .as_mut()
+        .unwrap()
+        .receive_room_secrets(RoomSecretsTask {
+            group: GROUP,
+            messages: std::slice::from_ref(&sealed.message),
+            joined: &BTreeMap::from([(member_id("b"), member_epoch + 1)]),
+            policy: &policy,
+        })
+        .await
+        .unwrap();
+    assert_eq!((early.adopted.len(), early.refused), (0, 1));
+
+    // The member answers with its own key; the joiner adopts it.
+    let sealed = member
+        .groups
+        .as_mut()
+        .unwrap()
+        .seal_room_key(RoomKeyTask {
+            group: GROUP,
+            payload: &member_key,
+            policy: &policy,
+        })
+        .await
+        .unwrap();
+    let adopted = joiner
+        .groups
+        .as_mut()
+        .unwrap()
+        .receive_room_secrets(RoomSecretsTask {
+            group: GROUP,
+            messages: std::slice::from_ref(&sealed.message),
+            joined: &nobody,
+            policy: &policy,
+        })
+        .await
+        .unwrap();
+    assert_eq!(adopted.adopted, BTreeSet::from([member_id("a")]));
+
+    // A member cannot hand over a key that is not its own: the MLS sender is
+    // the member, the key belongs to the joiner, which refuses it.
+    let forged = member
+        .groups
+        .as_mut()
+        .unwrap()
+        .seal_room_key(RoomKeyTask {
+            group: GROUP,
+            payload: &joiner_key,
+            policy: &policy,
+        })
+        .await
+        .unwrap();
+    let refused = joiner
+        .groups
+        .as_mut()
+        .unwrap()
+        .receive_room_secrets(RoomSecretsTask {
+            group: GROUP,
+            messages: std::slice::from_ref(&forged.message),
+            joined: &nobody,
+            policy: &policy,
+        })
+        .await
+        .unwrap();
+    assert_eq!((refused.adopted.len(), refused.refused), (0, 1));
+    assert_eq!(
+        held(joiner.groups.as_mut().unwrap().room_keys_standing(GROUP).await.unwrap()),
+        BTreeSet::from([member_id("a")])
     );
 }
 
@@ -731,6 +894,7 @@ async fn a_refused_admission_makes_the_member_read_the_roster_again() {
         &mut member,
         &member_board,
         &mut cursor,
+        vec![],
     )
     .await;
     assert!(joined.is_err());
@@ -764,6 +928,7 @@ async fn a_refused_admission_makes_the_member_read_the_roster_again() {
         &mut member,
         &member_board,
         &mut cursor,
+        vec![],
     )
     .await;
     joined.unwrap();

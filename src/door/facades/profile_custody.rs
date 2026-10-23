@@ -108,6 +108,53 @@ where
         lent?
     }
 
+    /// Lend Envelope custody, without the signer, to one synchronous callback
+    /// under its own single-use admission. The caller already holds the Store
+    /// guard of the same checkpoint, so this takes no lock and reads no Store.
+    pub(super) async fn with_custodian_owned<T>(
+        &mut self,
+        origin: &str,
+        use_custody: impl for<'p> FnOnce(&cbrd::cnvl::Custodian<'p>) -> Result<T>,
+    ) -> Result<T> {
+        let lineage = self.vault.keys().lineage().await.map_err(keys_error)?;
+        if lineage.binding != self.binding {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let device = self
+            .vault
+            .keys()
+            .device_public_key()
+            .await
+            .map_err(keys_error)?;
+        let now = ckmg::Clock::now(&mut super::super::custody::SystemClock).map_err(keys_error)?;
+        let intent = self.intent.as_mut().ok_or(ErrorCode::Unavailable)?;
+        let admitted = intent
+            .admit(
+                ckmg::AdmittedCommand {
+                    binding: lineage.binding.clone(),
+                    origin: origin.into(),
+                    action: ckmg::Action::LendProfileCustody,
+                    device,
+                    root: Some(lineage.root),
+                    epoch: lineage.epoch,
+                    target: None,
+                    statement: None,
+                    transcript: None,
+                    expires: now.saturating_add(PROFILE_CUSTODY_SECONDS),
+                },
+                now,
+            )
+            .map_err(keys_error)?;
+        let lent = self
+            .vault
+            .keys()
+            .with_profile_custody(|_, custody| use_custody(&custody))
+            .await
+            .map_err(keys_error);
+        drop(admitted);
+        lent?
+    }
+
     /// Commit an authorized publication under the Store version fence. A lost
     /// race or uncertain write is Reconcile; nothing is overwritten or retried.
     pub(super) async fn commit_profile_owned(
