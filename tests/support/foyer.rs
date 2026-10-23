@@ -10,6 +10,15 @@ fn forwarding_catalog_preserves_owner_metadata_and_withholds_session_secrets() {
         "the released owner must provide forwarding metadata"
     );
     assert!(action("foyer.login_finish").is_none());
+    // The wallet's birth-session finish is a trusted owner action: neither the owner's
+    // forwarding contract nor any forwarded catalog (the foyer's or the Door's registry)
+    // ever offers it to a shell.
+    assert!(cfyr::action("wallet_register_finish").is_none());
+    assert!(action("foyer.wallet_register_finish").is_none());
+    assert!(!catalog
+        .iter()
+        .chain(crate::door::registry::catalog().iter())
+        .any(|description| description.action.ends_with("wallet_register_finish")));
     for description in catalog {
         let name = description.action.strip_prefix("foyer.").unwrap();
         let owner = cfyr::action(name).unwrap();
