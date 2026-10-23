@@ -206,3 +206,114 @@ async fn a_member_who_leaves_is_removed_by_another_and_reads_and_sends_nothing_a
         .unwrap();
     assert!(left.is_some());
 }
+
+/// Relay `request` as a leave notice sealed under the epoch key `owner` holds,
+/// as any member of the room can.
+async fn relay_notice(owner: &mut ProfileOwner, board: &RoomBoard, request: cgrp::Request) {
+    let key = transport(owner).await;
+    board
+        .relay_room_notice(ROOM, &key, &cbrd::RoomCompanion { request })
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_forged_notice_or_a_removal_asked_by_another_member_is_refused_untouched() {
+    let (mut room, mut b, mut c) = room_of_five().await;
+    let caught_b = sync_with(&mut b.owner, &b.board, &mut RefusedJoins::new()).await;
+    assert_eq!(caught_b.sync, RoomSync::Current);
+    let before = standing(&room.a).await;
+    let (_, genuine_c) = leave_request(&mut c.owner).await;
+
+    // (1) c's own request with a damaged consent signature.
+    let mut damaged = genuine_c.clone();
+    *damaged.consents[0].signature.last_mut().unwrap() ^= 1;
+    // (2) c asks for the removal of b: the request names b as the actor but
+    // carries c's consent, which b's certified device key did not make.
+    let mut other = genuine_c.clone();
+    other.actor = member_id("b");
+    // (3) the same with the consent relabelled as b's own.
+    let mut relabelled = other.clone();
+    relabelled.consents[0].member = member_id("b");
+    // (4) a leave of a member that is not listed in the room at all.
+    let mut stranger = genuine_c.clone();
+    stranger.actor = member_id("q");
+    stranger.consents[0].member = member_id("q");
+    for forged in [damaged, other, relabelled, stranger] {
+        relay_notice(&mut c.owner, &c.board, forged).await;
+    }
+
+    let mut refused = RefusedJoins::new();
+    let synced = sync_with(&mut room.a, &room.a_board, &mut refused).await;
+    assert_eq!((synced.admitted, synced.caught_up, synced.refused), (0, 0, 4));
+    assert!(synced.left.is_empty());
+    assert!(!synced.advanced);
+    assert_eq!(standing(&room.a).await, before);
+    // A refused frame is not verified again.
+    let again = sync_with(&mut room.a, &room.a_board, &mut refused).await;
+    assert_eq!((again.admitted, again.refused), (0, 0));
+    assert_eq!(standing(&room.a).await, before);
+
+    // The genuine requests are not poisoned by the refusals: b leaves for real.
+    let (_, genuine_b) = leave_request(&mut b.owner).await;
+    relay_notice(&mut b.owner, &b.board, genuine_b).await;
+    let real = sync_with(&mut room.a, &room.a_board, &mut refused).await;
+    assert_eq!(real.left, vec![member_id("b")]);
+    assert_eq!(
+        standing(&room.a).await,
+        (members(&["a", "x", "y", "c"]), before.1 + 1)
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_forged_removal_commit_is_refused_untouched_and_the_real_one_still_applies() {
+    let (mut room, mut b, mut c) = room_of_five().await;
+    sync_with(&mut b.owner, &b.board, &mut RefusedJoins::new()).await;
+    let (_, genuine_b) = leave_request(&mut b.owner).await;
+    relay_notice(&mut b.owner, &b.board, genuine_b).await;
+    let key = transport(&mut c.owner).await;
+    // `c` stays offline at this epoch while `a` removes `b`.
+    let held = standing(&c.owner).await;
+    sync_with(&mut room.a, &room.a_board, &mut RefusedJoins::new()).await;
+    let real = commits_at(&c.board, &key).await;
+    let (sequence, counter, removal) = real
+        .iter()
+        .find(|(_, _, commit)| cbrd::RoomCompanion::is_leave(&commit.companion))
+        .cloned()
+        .expect("the removal commit is in the room");
+    let forge = |commit: &[u8], companion: &[u8], at: u64| cmbl::RelayFrame {
+        kind: cmbl::FrameKind::Message,
+        sequence: at,
+        counter,
+        ciphertext: key
+            .wrap(&ROOM, &ctnd::pack_ordered(commit, companion))
+            .unwrap(),
+    };
+    let mut bad_commit = removal.commit.clone();
+    *bad_commit.last_mut().unwrap() ^= 1;
+    let mut bad_companion = removal.companion.clone();
+    *bad_companion.last_mut().unwrap() ^= 1;
+    let forged = vec![
+        forge(&bad_commit, &removal.companion, u64::MAX - 1),
+        forge(&removal.commit, &bad_companion, u64::MAX - 2),
+    ];
+    let (hostile, mode) = room.through().await;
+    // The hostile relay shows neither the real removal nor the notice that asked
+    // for it, so that only the forgeries are in front of `c`.
+    let mut hidden = vec![sequence];
+    for frame in &c.board.room_frames(ROOM).await.unwrap().frames {
+        if matches!(frame.open(&ROOM, &key), Some(cbrd::FrameContent::Notice(_))) {
+            hidden.push(frame.sequence);
+        }
+    }
+    *mode.borrow_mut() = Box::new(rewrite(hidden, forged, false));
+    let mut refused = RefusedJoins::new();
+    let first = sync_with(&mut c.owner, &hostile, &mut refused).await;
+    assert_eq!((first.caught_up, first.refused), (0, 2));
+    assert!(first.left.is_empty());
+    assert_eq!(standing(&c.owner).await, held);
+    // The room's real frames are not poisoned by the refusals.
+    let real = sync_with(&mut c.owner, &c.board, &mut refused).await;
+    assert_eq!(real.left, vec![member_id("b")]);
+    assert_eq!(standing(&c.owner).await, standing(&room.a).await);
+}
