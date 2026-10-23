@@ -124,6 +124,12 @@ if (command === 'select') {
     '--format=esm', '--target=es2022', `--outfile=${join(target, 'vendor/ctrn/browser/tor-streams.js')}`],
     { stdio: 'inherit' });
   await cp(join(out, 'generated/wasm'), join(target, 'wasm'), { recursive: true, errorOnExist: true, force: false });
+  // The browser prover's worker files sit beside the bundled glue (it starts ./prover.worker.js
+  // relative to wasm/cmsg.js): the worker, bb.js's two inner workers, the shared chunks and the
+  // wasm as plain files, so the wallet origin's worker policy needs no data: or blob: source.
+  const proverDist = join(out, 'prover-dist');
+  execFileSync('node', [join(process.cwd(), 'prover/build.mjs'), '--out', proverDist], { stdio: 'inherit' });
+  await cp(proverDist, join(target, 'wasm'), { recursive: true, errorOnExist: true, force: false });
   for (const name of ['registry', 'openapi', 'mcp', 'cli']) {
     await cp(join(out, `generated/${name}.json`), join(target, `${name}.json`),
       { errorOnExist: true, force: false });

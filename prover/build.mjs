@@ -2,14 +2,18 @@
 // (dist/main.worker.js, dist/thread.worker.js), shared chunks and the two noir wasm files. Copy dist/
 // next to the cmsg package's bundle (the host glue starts ./prover.worker.js relative to it).
 // `node build.mjs --page` also bundles the test page (host glue included) for the browser tests.
+// `node build.mjs --out <dir>` writes into that directory instead of ./dist (the package build
+// uses a fresh one). The build only writes files; it never deletes.
 import { build } from 'esbuild';
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('./', import.meta.url));
 const bbBrowser = `${root}node_modules/@aztec/bb.js/dest/browser/barretenberg_wasm`;
-const out = `${root}dist`;
-rmSync(out, { recursive: true, force: true }); // the one build output directory of this package
+const outFlag = process.argv.indexOf('--out');
+const out = outFlag > 0 ? resolve(process.argv[outFlag + 1] ?? '') : `${root}dist`;
+if (outFlag > 0 && !process.argv[outFlag + 1]) throw new Error('--out needs a directory');
 mkdirSync(out, { recursive: true });
 // bb.js ships its wasm as a base64 data URL inside a JS module and fetches that URL. A data: URL would
 // need `data:` in connect-src, so the build writes the same gzip bytes as plain files next to the worker

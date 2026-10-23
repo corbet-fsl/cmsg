@@ -32,6 +32,10 @@ for tool in cargo rustc node wasm-bindgen esbuild; do command -v "$tool" >/dev/n
 test -f tools/node_modules/typescript/bin/tsc
 test -d tools/node_modules/json-schema-to-typescript
 test -d tools/node_modules/ajv
+# The browser prover's worker (bb.js and noir_js, exact versions in prover/package-lock.json) is built
+# from provisioned dependencies as well.
+test -d prover/node_modules/@aztec/bb.js
+test -d prover/node_modules/@noir-lang/noir_js
 mkdir "$CMSG_BROWSER_OUT"
 out="$CMSG_BROWSER_OUT"
 trap 'printf "Packaging stopped; partial evidence retained at %s\n" "$CMSG_BROWSER_OUT" >&2' ERR
@@ -47,13 +51,13 @@ cp tools/package-lock.json "$out/tools-package-lock.json"
 
 # The parent resolves/retains v01's snapshot. Never reselect first-party sources
 # from an archived candidate list or a child crate's standalone lockfile.
-cargo metadata $locked --format-version 1 --features browser-tor \
+cargo metadata $locked --format-version 1 --features browser-tor,browser-prover \
   --filter-platform wasm32-unknown-unknown > "$out/metadata.json"
 node "$helper" select "$out" "$PWD"
 node "$helper" bindgen "$out" "$(wasm-bindgen --version)"
 
 cargo build --release $locked --target wasm32-unknown-unknown --lib \
-  --features cmsg/browser-tor -p cmsg -p ctrn -p cfry \
+  --features cmsg/browser-tor,cmsg/browser-prover -p cmsg -p ctrn -p cfry \
   --message-format=json > "$out/wasm-build.jsonl"
 for port in cmsg ctrn cfry; do
   wasm=$(node "$helper" artifact "$out" "$port")
