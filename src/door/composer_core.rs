@@ -1321,6 +1321,113 @@ pub(crate) struct Composed<B: cwst::backend::Backend + 'static, N: cdht::Network
     pub(crate) device: ckmg::PublicKey,
 }
 
+/// The community account a composition bound to its Door (step 5).
+pub(crate) struct CommunityBound<B: cwst::backend::Backend + 'static, N: cdht::Network + 'static> {
+    pub(crate) owner: MemberOwner<B, N>,
+    pub(crate) account: custody::AccountWiring,
+    /// The account actor's admission (a second session of the same device key).
+    pub(crate) actor_membership: cfyr::membership::LiveMembership<Transport>,
+    pub(crate) actor_policy: Policy,
+    pub(crate) device: ckmg::PublicKey,
+}
+
+/// Step 5 of every device composition, shared by a registration (`compose_device`) and every
+/// start of a registered device (`restore_device_login`, C8 A): recover the community vault
+/// from the wallet unlock, hold its initial-creation lease on a third session of the device
+/// key, open the member vault with the accounting intents and bind it to `door`. `companion`
+/// is the community session (by the device key) the account actor admits through. No
+/// ceremony: every session opens by the device key's session signature.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn bind_community<S, B, N>(
+    services: &mut S,
+    door: &mut Door,
+    names: Names<'_>,
+    unlock: &super::unlock_once::DeviceUnlock,
+    fingerprint: &[u8; 32],
+    user: &str,
+    companion: Foyer<Transport>,
+    stamps: &cvlt::StampTrust,
+    community_network: N,
+    community_storage: B,
+) -> Result<CommunityBound<B, N>, ComposeError>
+where
+    S: Services,
+    B: cwst::backend::Backend + Clone + 'static,
+    N: cdht::Network + Clone + 'static,
+{
+    let Names {
+        community_origin,
+        community_name,
+        ..
+    } = names;
+    // The vault opens from the wallet unlock; its stamp genesis is reauthorized at every check.
+    let (device, recovered) = recover(
+        unlock
+            .community_opening(fingerprint, community_name)
+            .map_err(step("community opening"))?,
+        &community_network,
+    )
+    .await?;
+    // The recovery lease holds its session for the device's life: it gets a third session of
+    // the same device key, so the Door's own session stays free for owner actions (creation
+    // claim, vouching), as the wallet Door lends its companion for creation.
+    let mut vault_session = services.foyer(Service::Community).await?;
+    {
+        let opening = unlock
+            .community_opening(fingerprint, community_name)
+            .map_err(step("community opening"))?;
+        super::device_join::open_session(
+            &mut vault_session,
+            community_name,
+            user,
+            &device,
+            &mut session_signer(&opening),
+        )
+        .await
+        .map_err(step("device session"))?;
+    }
+    // The companion session outlives this call: the account actor admits through it.
+    let companion: &'static Foyer<Transport> = Box::leak(Box::new(companion));
+    let actor_membership = companion.live_membership();
+    let actor_policy = companion.current_policy();
+    let vault_session: &'static Foyer<Transport> = Box::leak(Box::new(vault_session));
+    let vault_policy: &'static mut Policy = Box::leak(Box::new(vault_session.current_policy()));
+    let held = vault_session
+        .live_membership()
+        .observe_lease(now)
+        .await
+        .map_err(step("lease_observe"))?
+        .device_initial_creation(vault_policy, now)
+        .await
+        .map_err(step("lease_creation"))?;
+    let owners =
+        custody::prepare_device_initial_recovery(recovered, held, community_network.clone(), stamps)
+            .await
+            .map_err(step("community recovery"))?;
+    // One owner per Store: the Door holds the community Vault (voucher custody,
+    // community creation, ...) and the account actor works through its port.
+    let custody::ComposedMemberVault {
+        vault,
+        intent,
+        account,
+        lifetime,
+    } = owners
+        .open_member_vault(community_network, community_storage)
+        .await
+        .map_err(step("community vault"))?;
+    let owner = door
+        .bind_vault_with_board_owner(community_origin, vault, intent, lifetime)
+        .await
+        .map_err(step("bind vault"))?;
+    Ok(CommunityBound {
+        owner,
+        account,
+        actor_membership,
+        actor_policy,
+        device,
+    })
+}
+
 /// The names a composition needs: the two service origins and the community name.
 #[derive(Clone, Copy)]
 pub(crate) struct Names<'a> {
@@ -1594,66 +1701,28 @@ where
     .await?;
     let mut door = door;
 
-    // 5. Recover the community account with the accounting intents. The vault opens from the
-    //    wallet unlock; its stamp genesis is reauthorized at every check.
-    let (device, recovered) = recover(
-        unlock
-            .community_opening(&fingerprint, community_name)
-            .map_err(step("community opening"))?,
-        &community_network,
+    // 5. Recover the community account with the accounting intents (shared with the open
+    //    path's restore_device_login, C8 A).
+    let CommunityBound {
+        owner,
+        account,
+        actor_membership,
+        actor_policy,
+        device,
+    } = bind_community(
+        services,
+        &mut door,
+        names,
+        &unlock,
+        &fingerprint,
+        &user,
+        companion,
+        &stamps,
+        community_network,
+        community_storage,
     )
     .await?;
-    // The recovery lease holds its session for the device's life: it gets a third session of
-    // the same device key, so the Door's own session stays free for owner actions (creation
-    // claim, vouching), as the wallet Door lends its companion for creation.
-    let mut vault_session = services.foyer(Service::Community).await?;
-    {
-        let opening = unlock
-            .community_opening(&fingerprint, community_name)
-            .map_err(step("community opening"))?;
-        super::device_join::open_session(
-            &mut vault_session,
-            community_name,
-            &user,
-            &device,
-            &mut session_signer(&opening),
-        )
-        .await
-        .map_err(step("device session"))?;
-    }
     drop(unlock);
-    // The companion session outlives this call: the account actor admits through it.
-    let companion: &'static Foyer<Transport> = Box::leak(Box::new(companion));
-    let actor_membership = companion.live_membership();
-    let actor_policy = companion.current_policy();
-    let vault_session: &'static Foyer<Transport> = Box::leak(Box::new(vault_session));
-    let vault_policy: &'static mut Policy = Box::leak(Box::new(vault_session.current_policy()));
-    let held = vault_session
-        .live_membership()
-        .observe_lease(now)
-        .await
-        .map_err(step("lease_observe"))?
-        .device_initial_creation(vault_policy, now)
-        .await
-        .map_err(step("lease_creation"))?;
-    let owners = custody::prepare_device_initial_recovery(recovered, held, community_network.clone(), &stamps)
-        .await
-        .map_err(step("community recovery"))?;
-    // One owner per Store: the Door holds the community Vault (voucher custody,
-    // community creation, ...) and the account actor works through its port.
-    let custody::ComposedMemberVault {
-        vault,
-        intent,
-        account,
-        lifetime,
-    } = owners
-        .open_member_vault(community_network, community_storage)
-        .await
-        .map_err(step("community vault"))?;
-    let owner = door
-        .bind_vault_with_board_owner(community_origin, vault, intent, lifetime)
-        .await
-        .map_err(step("bind vault"))?;
     Ok(Composed {
         door,
         wallet_door,

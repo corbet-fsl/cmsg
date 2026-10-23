@@ -78,6 +78,24 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
         self.network_drain = Some(drain);
         self.network = Some(startup.await?);
         let retained = self.network.as_ref().ok_or(ErrorCode::Unavailable)?;
+        // C8 A: a registered device-key member's custody was bound when the app started
+        // (`composer::restore_device_login`); its Vault is not recovered a second time.
+        if let Some(eager) = door.take_eager_binding(origin) {
+            let peers = retained.records()?.network();
+            #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+            let waves = peers.clone();
+            let mut owner = eager.owner;
+            owner.enable_groups(Some(crate::door::facades::verified_peers(
+                peers,
+                door.current_policy(origin)?,
+            )))?;
+            #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+            bind_waves(door, origin, waves)?;
+            if let Some(board) = self.board.take() {
+                owner.bind_board(door, origin, board)?;
+            }
+            return self.bind_mesh(door, origin).await;
+        }
         let member = retained.take_member_authority()?;
         let network = retained.records()?.network();
         let peers = network.clone();
@@ -101,22 +119,15 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
             .await?;
         // Every native device has groups: peers are verified, never claimed.
         owner.enable_verified_groups(peers, door.current_policy(origin)?)?;
-        // A device the platform equipped with the wave and outcome circuits also runs
-        // waves: the ports and the proof worker read the same verified community trust.
         #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
-        if let Some(device) = door.wave_device(origin) {
-            let charter = door.current_policy(origin)?;
-            crate::door::inbox_waves::native::bind_device(
-                door,
-                origin,
-                &device,
-                crate::door::inbox_lineage::TorHandleOpener::new(waves),
-                charter,
-            )?;
-        }
+        bind_waves(door, origin, waves)?;
         if let Some(board) = self.board.take() {
             board.bind(door, origin, owner)?;
         }
+        self.bind_mesh(door, origin).await
+    }
+
+    async fn bind_mesh(&mut self, door: &mut Door, origin: &str) -> Result<()> {
         let retained = self.network.take().ok_or(ErrorCode::Unavailable)?;
         let (drain, binding) = mesh::Owner::prepare_bind(door, origin, retained);
         self.mesh_drain = Some(drain);
@@ -235,4 +246,26 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Drop for Composer<W, B> {
     fn drop(&mut self) {
         self.close();
     }
+}
+
+/// A device the platform equipped with the wave and outcome circuits also runs waves: the
+/// ports and the proof worker read the same verified community trust. Both restore paths
+/// (the eager C8 A binding and the device-login recovery) bind them the same way.
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+fn bind_waves<N: cdht::Network + Clone + 'static>(
+    door: &mut Door,
+    origin: &str,
+    network: N,
+) -> Result<()> {
+    if let Some(device) = door.wave_device(origin) {
+        let charter = door.current_policy(origin)?;
+        crate::door::inbox_waves::native::bind_device(
+            door,
+            origin,
+            &device,
+            crate::door::inbox_lineage::TorHandleOpener::new(network),
+            charter,
+        )?;
+    }
+    Ok(())
 }

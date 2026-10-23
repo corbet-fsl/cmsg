@@ -62,11 +62,7 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> VaultBoardOwner<B, C, E, A, R, W>
     where
         N: cdht::Network + Clone + 'static,
     {
-        self.enable_groups(Some(Box::new(group_custody::VerifiedPeers::new(
-            crate::door::inbox_lineage::TorHandleOpener::new(network),
-            policy,
-            || ckmg::Clock::now(&mut crate::door::custody::SystemClock).ok(),
-        ))))
+        self.enable_groups(Some(verified_peers(network, policy)))
     }
 
     fn require_open(&self) -> Result<()> {
@@ -879,5 +875,136 @@ impl<B: cwst::backend::Backend, C, E, A, R> VaultBoardOwner<B, C, E, A, R, cvlt:
             lifetime: self.lifetime.clone(),
             arm,
         }
+    }
+}
+
+/// The production group peers: other members' lineage read over `network` through the handle
+/// this member's Contacts journal retained, reverified against the community Charter.
+pub fn verified_peers<N>(
+    network: N,
+    policy: cfyr::policy::CurrentPolicy<crate::door::foyer::Transport>,
+) -> Box<dyn GroupPeers>
+where
+    N: cdht::Network + Clone + 'static,
+{
+    Box::new(group_custody::VerifiedPeers::new(
+        crate::door::inbox_lineage::TorHandleOpener::new(network),
+        policy,
+        || ckmg::Clock::now(&mut crate::door::custody::SystemClock).ok(),
+    ))
+}
+
+/// The start steps a community owner bound at app start (C8 A) still needs once the start's
+/// records network runs: its verified groups and the Board. The owner's own type names the
+/// embedder's backend and records network, so the Door holds it through this trait.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) trait StartOwner {
+    /// Give the Board's handle its group owner (see [`VaultBoardOwner::enable_groups`]).
+    fn enable_groups(&mut self, peers: Option<Box<dyn GroupPeers>>) -> Result<()>;
+    /// Bind the start's pending Board to this owner.
+    #[cfg(any(feature = "native-tor", feature = "browser-tor", test))]
+    fn bind_board(
+        self: Box<Self>,
+        door: &mut Door,
+        origin: &str,
+        board: board::PendingBoard,
+    ) -> Result<()>;
+}
+
+impl<B, C, E, A, R, W> StartOwner for VaultBoardOwner<B, C, E, A, R, W>
+where
+    B: cwst::backend::Backend + 'static,
+    C: ckmg::Clock + 'static,
+    E: ckmg::Entropy + 'static,
+    A: ckmg::Authority + 'static,
+    R: cvlt::Records + 'static,
+    W: cvlt::RecordSlot + 'static,
+{
+    fn enable_groups(&mut self, peers: Option<Box<dyn GroupPeers>>) -> Result<()> {
+        VaultBoardOwner::enable_groups(self, peers)
+    }
+    #[cfg(any(feature = "native-tor", feature = "browser-tor", test))]
+    fn bind_board(
+        self: Box<Self>,
+        door: &mut Door,
+        origin: &str,
+        board: board::PendingBoard,
+    ) -> Result<()> {
+        board.bind(door, origin, *self)
+    }
+}
+
+/// A community custody the trusted composer bound when the app started (C8 A,
+/// `composer::restore_device_login`): the Board's handle of the Door's bound Vault. The start
+/// restore takes it once (`Door::take_eager_binding`) instead of recovering the Vault again.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub struct EagerBinding {
+    pub(crate) owner: Box<dyn StartOwner>,
+}
+
+impl Door {
+    /// Trusted composition only: retain the Board's handle of the Vault just bound at
+    /// `origin` for the start restore. Refused unless `origin` holds a bound Vault; replaces
+    /// an earlier, untaken retention.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn retain_eager_binding<O: StartOwner + 'static>(
+        &mut self,
+        origin: &str,
+        owner: O,
+    ) -> Result<()> {
+        if !self.vaults.contains_key(origin) {
+            return Err(ErrorCode::Unavailable);
+        }
+        self.eager_bindings.insert(
+            origin.to_owned(),
+            EagerBinding {
+                owner: Box::new(owner),
+            },
+        );
+        Ok(())
+    }
+
+    /// Trusted composition only: the eager binding of `origin`, once (a second take returns
+    /// `None`). Without one the start restore recovers the Vault at the login action.
+    pub fn take_eager_binding(&mut self, origin: &str) -> Option<EagerBinding> {
+        self.eager_bindings.remove(origin)
+    }
+}
+
+#[cfg(test)]
+mod eager_tests {
+    use super::*;
+    use crate::door::{Configuration, Role};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    struct Unbound;
+    impl StartOwner for Unbound {
+        fn enable_groups(&mut self, _: Option<Box<dyn GroupPeers>>) -> Result<()> {
+            Ok(())
+        }
+        fn bind_board(self: Box<Self>, _: &mut Door, _: &str, _: board::PendingBoard) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Without an eager binding the start restore keeps the login-action recovery
+    /// (`recover_login_vault`): the take is `None`, and nothing can be retained for an origin
+    /// whose Vault is not bound.
+    #[test]
+    fn a_door_without_a_bound_vault_has_no_eager_binding() {
+        const ORIGIN: &str = "https://community.example.test";
+        let mut door = Door::new(
+            Configuration::new(
+                "omega".into(),
+                BTreeMap::from([(Role::Member, BTreeSet::from([ORIGIN.to_owned()]))]),
+            )
+            .unwrap(),
+        );
+        assert!(door.take_eager_binding(ORIGIN).is_none());
+        assert_eq!(
+            door.retain_eager_binding(ORIGIN, Unbound).err(),
+            Some(ErrorCode::Unavailable)
+        );
+        assert!(door.take_eager_binding(ORIGIN).is_none());
     }
 }
