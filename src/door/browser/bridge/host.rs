@@ -462,7 +462,10 @@ impl VaultHost {
         let context = cfyr::passkeys::Context::new(&registration.passkey_origin, &registration.rp_id)
             .map_err(|_| refused("passkey context"))?;
         let mut keys =
-            DeviceKeys::new(cfyr::passkeys::Client::new(context, cfyr::passkeys::browser::Browser));
+            DeviceKeys::new(
+                cfyr::passkeys::Client::new(context, cfyr::passkeys::browser::Browser),
+                &registration.passkey_origin,
+            );
         let networks = registration.networks(config.browser_tor.as_ref()).await?;
         let (door, retained) = super::super::registration::compose_browser_device(
             &registration,

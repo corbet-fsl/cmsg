@@ -34,6 +34,9 @@ pub enum Service {
 /// their own on `global` while a composition holds it.
 pub struct DeviceKeys<A: cfyr::passkeys::Authenticator> {
     pub global: Client<A>,
+    /// The wallet passkey origin as the device signs it in its birth signatures (the ASCII
+    /// serialization of `global`'s configured origin: scheme, host, port; no path).
+    signed_origin: String,
     used: u32,
     budget: u32,
 }
@@ -43,17 +46,26 @@ pub struct DeviceKeys<A: cfyr::passkeys::Authenticator> {
 /// holds the wallet passport, and the community sessions open by the device key.
 pub const REGISTERED_CONFIRMATIONS: u32 = 1;
 
-/// The most wallet ceremonies a registration (fresh or resumed at any marker) starts on the
-/// current wallet protocol: registration (create with PRF), wallet login, the device
-/// authorization step-up, the wallet lineage's passkey evidence and the join stamp. The
-/// companion beside the passport's recovery lease is a fork of the login (`session_fork`), no
-/// ceremony.
-pub const REGISTRATION_CONFIRMATIONS: u32 = 5;
+/// The most wallet ceremonies a registration (fresh or resumed at any marker) starts: ONE.
+/// A fresh registration is the create ceremony alone: `register_finish` returns the birth
+/// session (C1), the wallet device binds by the device key's own signature (C3), the wallet
+/// lineage's genesis evidence is the wallet-signed birth statement (C4), the passport and the
+/// join stamp are issued under the birth grant (Q5, C5), and the companion is a fork of the
+/// birth session (C6). A restart at any marker is ONE assertion that both reopens the retained
+/// enrollment and logs the session in (C7). An authenticator that gives no PRF at create
+/// answers one follow-up assertion inside the same confirmation (cpky `register_member`; J1:
+/// two platform prompts, one confirmation of this budget).
+pub const REGISTRATION_CONFIRMATIONS: u32 = 1;
 
 impl<A: cfyr::passkeys::Authenticator> DeviceKeys<A> {
-    pub fn new(global: Client<A>) -> Self {
+    /// `passkey_origin` is the origin `global`'s passkey context was built with.
+    pub fn new(global: Client<A>, passkey_origin: &str) -> Self {
+        let signed_origin = url::Url::parse(passkey_origin)
+            .map(|url| url.origin().ascii_serialization())
+            .unwrap_or_else(|_| passkey_origin.to_owned());
         Self {
             global,
+            signed_origin,
             used: 0,
             budget: u32::MAX,
         }
@@ -419,43 +431,40 @@ pub(crate) async fn wallet_sibling<S: Services>(
     Ok(sibling)
 }
 
-/// A fresh user-verifying assertion for exactly one action (`step_up`).
-pub(crate) async fn authorize_device<A: cfyr::passkeys::Authenticator, S: Services>(
-    services: &mut S,
+/// C3: bind the account's first wallet device `device` (K) by K's own signature over
+/// (WalletBirthDevice, origin, account, credential, seed commitment, K), under the birth grant
+/// of `api`'s session (the registration's birth session or the restart's login). The server
+/// rebuilds the payload from its own records; `signed_origin` is the wallet passkey origin.
+pub(crate) async fn birth_device(
     api: &mut Foyer<Transport>,
-    keys: &mut Client<A>,
-    wallet: bool,
-    device: &ckmg::PublicKey,
+    origin: &str,
+    signed_origin: &str,
+    seed: [u8; 32],
+    device: ckmg::PublicKey,
+    unlock: &super::unlock_once::DeviceUnlock,
 ) -> Result<(), ComposeError> {
-    let begin = api
-        .call(
-            "step_up_begin",
-            json!({"action": {"kind":"device_authorize","key":device.value()}}),
-        )
+    let mut wallet = api
+        .live_global_wallet(origin.into())
+        .observe_lease(now)
         .await
         .map_err(step("device authorize"))?;
-    let (credential, _) = keys
-        .sign_in(begin["options"].clone())
-        .await
+    let payload = ckmg::wallet_birth_device_payload(
+        signed_origin,
+        wallet.user().map_err(step("device authorize"))?,
+        wallet.credential_id().map_err(step("device authorize"))?,
+        &seed,
+        device.value(),
+    )
+    .map_err(step("device authorize"))?;
+    let signature = unlock
+        .wallet_opening()
         .map_err(step("device authorize"))?
-        .into_parts();
-    guard(api, credential.as_json())?;
-    let body = json!({
-        "key": device.value(),
-        "step_up": {"ceremony": begin["ceremony"], "credential": credential.into_json()},
-    });
-    let action = if wallet {
-        "wallet_device_authorize"
-    } else {
-        "device_authorize"
-    };
-    api.call(action, body)
-        .await
+        .sign_device(ckmg::DevicePurpose::WalletBirthDevice, &payload)
         .map_err(step("device authorize"))?;
-    if wallet {
-        services.wallet_authorized(api).await?;
-    }
-    Ok(())
+    wallet
+        .authorize_birth_device(*device.value(), signature, now)
+        .await
+        .map_err(step("device authorize"))
 }
 
 /// What a fresh registration needs beyond the vault.
@@ -469,8 +478,10 @@ pub(crate) enum Entry {
 pub(crate) struct Driven {
     door: Door,
     policy: &'static mut Policy,
-    /// The PRF unlock of the wallet login (the composition's unlock for every vault).
-    unlock: Option<cfyr::passkeys::UnlockSecret>,
+    /// The PRF unlock of this start's one confirmation (the registration's create, the
+    /// restart's assertion or the registered login): the composition's unlock for every vault
+    /// and the signer of the birth signatures.
+    unlock: Option<super::unlock_once::DeviceUnlock>,
     /// The wallet's stamp trust, read over this session before any lease holds it (a
     /// registered wallet only; a registration reads it over the companion).
     stamps: Option<cvlt::StampTrust>,
@@ -507,38 +518,64 @@ where
         .is_some();
     let mut stage = resume_stage(progress.stage(wallet), vault_held || progress.value.restored)?;
 
-    // Registration (fresh) or reopening of the retained enrollment.
+    // Registration (fresh) or reopening of the retained enrollment. Every path below has ONE
+    // wallet confirmation: the create, the restart's assertion, or the registered login.
     let mut enrollment: Option<custody::InitialEnrollment<B>> = None;
+    let mut unlock: Option<super::unlock_once::DeviceUnlock> = None;
+    // The restart's credential id, for reopening an activated creation.
+    let mut credential: Option<Vec<u8>> = None;
     if stage == Stage::Fresh {
         let entry = entry.ok_or(ComposeError::Inconsistent("registration entry"))?;
-        enrollment = Some(
-            register(
-                &mut api,
-                entry,
-                keys.confirm("register")?,
-                backend.clone(),
-                &mut clock,
-                &mut entropy,
-            )
-            .await?,
-        );
+        let (retained, opened) = register(
+            &mut api,
+            entry,
+            keys.confirm("register")?,
+            backend.clone(),
+            &mut clock,
+            &mut entropy,
+        )
+        .await?;
+        enrollment = Some(retained);
+        unlock = Some(opened);
         progress.advance(wallet, Stage::Retained).await?;
         stage = Stage::Retained;
-    } else if stage < Stage::Activated {
+    } else if stage < Stage::Done {
+        // C7: one assertion reopens the retained enrollment (its PRF) and, from Finished on,
+        // logs the session in (a wallet login: the birth grant's user verification).
         let challenge = api.begin_browser_login().await.map_err(step("reopen"))?;
-        let authentication = keys
+        let (public, vault) = keys
             .confirm("reopen")?
             .sign_in(challenge.options)
             .await
-            .map_err(step("reopen"))?;
-        match custody::reopen_initial_enrollment(authentication, scope, backend.clone()).await {
-            Ok(opened) => enrollment = Some(opened),
-            // Activation may have landed before its marker: the creation is then the owner.
-            Err(_) if stage == Stage::Authorized => stage = Stage::Activated,
-            Err(e) => return Err(step("reopen enrollment")(e)),
+            .map_err(step("reopen"))?
+            .into_parts();
+        let id = public.credential_id().map_err(step("reopen"))?;
+        let cfyr::passkeys::VaultOutcome::Ready(secret) = vault else {
+            return Err(ComposeError::Inconsistent("the authenticator gave no PRF"));
+        };
+        let opened = super::unlock_once::DeviceUnlock::from_unlock(secret);
+        if stage >= Stage::Finished {
+            guard(&mut api, public.as_json())?;
+            api.finish_browser_login(challenge.ceremony, public)
+                .await
+                .map_err(step("login"))?;
         }
+        if stage < Stage::Activated {
+            let opening = opened.wallet_opening().map_err(step("reopen"))?;
+            match custody::reopen_initial_enrollment_opened(&id, opening, scope, backend.clone())
+                .await
+            {
+                Ok(reopened) => enrollment = Some(reopened),
+                // Activation may have landed before its marker: the creation is then the owner.
+                Err(_) if stage == Stage::Authorized => stage = Stage::Activated,
+                Err(e) => return Err(step("reopen enrollment")(e)),
+            }
+        }
+        credential = Some(id);
+        unlock = Some(opened);
     }
     if let (Some(retained), Stage::Retained) = (&enrollment, stage) {
+        // C1: the finish answers with the birth session; the Foyer adopts it (no login).
         retained
             .resume_finish(&mut api, now)
             .await
@@ -546,40 +583,35 @@ where
         progress.advance(wallet, Stage::Finished).await?;
         stage = Stage::Finished;
     }
-    let mut unlock = None;
-    if stage >= Stage::Finished {
+    if stage == Stage::Done {
         if let cfyr::passkeys::VaultOutcome::Ready(secret) =
             login(&mut api, keys.confirm("login")?).await?
         {
-            unlock = Some(secret);
+            unlock = Some(super::unlock_once::DeviceUnlock::from_unlock(secret));
         }
     }
     if let (Some(retained), Stage::Finished) = (&enrollment, stage) {
-        authorize_device(
-            services,
+        // C3: the account's first wallet device binds by that device key's own signature
+        // under the birth grant; no step-up.
+        let opened = unlock
+            .as_ref()
+            .ok_or(ComposeError::Inconsistent("the authenticator gave no PRF"))?;
+        birth_device(
             &mut api,
-            keys.confirm("device authorize")?,
-            wallet,
-            &retained.device(),
+            origin,
+            &keys.signed_origin,
+            retained.seed().map_err(step("device authorize"))?,
+            retained.device(),
+            opened,
         )
         .await?;
+        if wallet {
+            services.wallet_authorized(&mut api).await?;
+        }
         progress.advance(wallet, Stage::Authorized).await?;
         stage = Stage::Authorized;
     }
 
-    // The sign-in that reopens an activated creation must be made before the Foyer moves
-    // into the Door.
-    let reopening = if stage == Stage::Activated {
-        let challenge = api.begin_browser_login().await.map_err(step("reopen"))?;
-        Some(
-            keys.confirm("reopen")?
-                .sign_in(challenge.options)
-                .await
-                .map_err(step("reopen"))?,
-        )
-    } else {
-        None
-    };
     let stamps = if wallet && stage == Stage::Done {
         Some(stamp_trust(&api, origin).await?)
     } else {
@@ -628,12 +660,18 @@ where
             .map_err(step("activate"))?;
         progress.advance(wallet, Stage::Activated).await?;
         created
-    } else if let Some(authentication) = reopening {
+    } else if let (Some(id), Some(opened)) = (&credential, &unlock) {
         let held = lease(&door, origin, wallet, &mut *policy).await?;
-        custody::reopen_initial_publication(authentication, held, backend.clone(), &mut clock)
-            .await
-            .map_err(step("reopen publication"))?
-            .0
+        custody::reopen_initial_publication_opened(
+            id,
+            custody::Opening::Opened(opened.wallet_opening().map_err(step("reopen"))?),
+            held,
+            backend.clone(),
+            &mut clock,
+        )
+        .await
+        .map_err(step("reopen publication"))?
+        .0
     } else {
         return Err(ComposeError::Inconsistent("no owner for the lineage"));
     };
@@ -641,17 +679,20 @@ where
     let verifier = || cdht::NetworkBackend::new(network.clone(), LineageVerifier);
     let mut phase = creation.phase().map_err(step("phase"))?;
     if phase == cvlt::InitialPhase::Pending {
+        // C4: the wallet's birth statement is the genesis evidence; no passkey prompt.
         let held = lease(&door, origin, wallet, &mut *policy).await?;
-        let (prepared, held) =
-            custody::prepare_initial_publication(
-                creation,
-                held,
-                keys.confirm("lineage evidence")?,
-                &mut clock,
-                &mut entropy,
-            )
+        let birth = companion
+            .as_ref()
+            .ok_or(ComposeError::Inconsistent("a wallet lineage without its companion"))?
+            .live_global_wallet(origin.into())
+            .observe_lease(now)
+            .await
+            .map_err(step("prepare publication"))?;
+        let prepared =
+            custody::prepare_birth_publication(creation, held, birth, &mut clock, &mut entropy)
                 .await
                 .map_err(step("prepare publication"))?;
+        let held = lease(&door, origin, wallet, &mut *policy).await?;
         creation = custody::retain_initial_publication(prepared, held, &mut clock)
             .await
             .map_err(step("retain publication"))?;
@@ -722,7 +763,7 @@ pub(crate) async fn register<A, B>(
     backend: B,
     clock: &mut SystemClock,
     entropy: &mut ckmg::SystemEntropy,
-) -> Result<custody::InitialEnrollment<B>, ComposeError>
+) -> Result<(custody::InitialEnrollment<B>, super::unlock_once::DeviceUnlock), ComposeError>
 where
     A: cfyr::passkeys::Authenticator,
     B: cwst::backend::Backend,
@@ -744,14 +785,19 @@ where
                 .continue_initial(api, commitment, now)
                 .await
                 .map_err(step("register"))?;
-            let registration = keys
+            let (credential, secret) = keys
                 .register_member(pending.options().clone())
                 .await
-                .map_err(step("register"))?;
-            custody::retain_global_initial_enrollment(
+                .map_err(step("register"))?
+                .into_parts();
+            // The create ceremony's PRF is this start's unlock: it opens the wallet vault, derives
+            // every community vault and signs the birth signatures. Never asked for again.
+            let unlock = super::unlock_once::DeviceUnlock::from_unlock(secret);
+            let retained = custody::retain_global_initial_enrollment_opened(
                 api,
                 pending,
-                registration,
+                credential,
+                unlock.wallet_opening().map_err(step("retain"))?,
                 seed,
                 backend,
                 "original-wallet",
@@ -759,7 +805,8 @@ where
                 entropy,
             )
             .await
-            .map_err(step("retain"))
+            .map_err(step("retain"))?;
+            Ok((retained, unlock))
         }
     }
 }
@@ -834,6 +881,7 @@ pub(crate) async fn drive_device<A, B, N, S, P, WB, WC, WE, WA, WR>(
     wallet_origin: &str,
     wallet: &mut super::passport::GlobalPassport<WB, WC, WE, WA, WR>,
     wallet_keys: &mut DeviceKeys<A>,
+    birth: bool,
     backend: B,
     network: &N,
     progress: &mut ProgressFile<P>,
@@ -913,8 +961,12 @@ where
                     .lineage_genesis_action(gsalt)
                     .map_err(step("genesis action"))?;
                 let seed = enrollment.seed().map_err(step("join"))?;
-                // The join's wallet confirmation: a wallet passkey assertion for the stamp.
+                // The join's wallet confirmation: none under a registration's birth grant (C5),
+                // else a wallet passkey assertion for the stamp.
                 let assertion = |options: Value| async move {
+                    if birth {
+                        return Ok(None);
+                    }
                     let (credential, _) = wallet_keys
                         .confirm("join stamp")
                         .map_err(|_| super::ErrorCode::Refused)?
@@ -922,7 +974,7 @@ where
                         .await
                         .map_err(|_| super::ErrorCode::Refused)?
                         .into_parts();
-                    Ok(credential.as_json().clone())
+                    Ok(Some(credential.as_json().clone()))
                 };
                 let user = super::device_join::join(
                     &mut api,
@@ -1313,6 +1365,9 @@ where
     // A registered device's start has ONE wallet confirmation; a registration at most
     // REGISTRATION_CONFIRMATIONS. Nothing over the budget is ever prompted.
     keys.limit(confirmation_budget(progress));
+    // A registration (any marker short of a registered start) issues its passport and join
+    // stamp under the birth grant of its one confirmation (Q5, C5), without an assertion.
+    let birth = confirmation_budget(progress) == REGISTRATION_CONFIRMATIONS;
 
     // 1-2. The wallet lineage.
     let api = services.foyer(Service::Global).await?;
@@ -1341,9 +1396,7 @@ where
     // 3. Restore the global holder and make sure it holds one real passport.
     // The wallet login's PRF unlock opens the wallet vault and derives every community vault
     // (unlock once): no community passkey and no second unlock ceremony exist.
-    let unlock = super::unlock_once::DeviceUnlock::from_unlock(
-        unlock.ok_or(ComposeError::Inconsistent("the authenticator gave no PRF"))?,
-    );
+    let unlock = unlock.ok_or(ComposeError::Inconsistent("the authenticator gave no PRF"))?;
     let (_, recovered) = recover(
         unlock.wallet_opening().map_err(step("restore"))?,
         &network,
@@ -1381,9 +1434,15 @@ where
             .passport_challenge(now)
             .await
             .map_err(step("passport"))?;
-        super::passport::issue_global_passport(
+        let signer = if birth {
+            Some(unlock.wallet_opening().map_err(step("passport issue"))?)
+        } else {
+            None
+        };
+        super::passport::issue_global_passport_with(
             issuance,
             &mut global,
+            signer.as_ref(),
             &mut cwlt::passport::rand::rngs::OsRng,
         )
         .await
@@ -1527,6 +1586,7 @@ where
         global_origin,
         &mut global,
         keys,
+        birth,
         community_storage.clone(),
         &community_network,
         progress,

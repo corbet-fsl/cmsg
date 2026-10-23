@@ -79,7 +79,10 @@ fn device(
         forum: None,
         record_period_key: None,
     };
-    let keys = composer::DeviceKeys::new(passkeys(&f["wallet"]));
+    let keys = composer::DeviceKeys::new(
+        passkeys(&f["wallet"]),
+        f["wallet"]["passkey_origin"].as_str().unwrap(),
+    );
     (settings, keys)
 }
 
