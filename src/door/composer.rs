@@ -479,48 +479,60 @@ impl Services for OwnedNativeServices {
     feature = "embedded-authenticator",
     not(target_arch = "wasm32")
 ))]
-pub struct OpenParts<S, F> {
+pub struct OpenParts<S, F, B, R> {
     pub services: S,
     /// The wallet authenticator; called for every ceremony.
     pub authenticator: F,
+    /// The registration's checkpoints (the same `DeviceStorage` it composed into).
+    pub storage: DeviceStorage<B>,
+    /// The registration's records network, made on the Door's thread.
+    pub records: R,
     /// Runs on the Door's thread after everything else is lent (for example
     /// `bind_waves`). It cannot replace what the composer lent.
     pub finish: Option<super::native::DeviceSetup>,
 }
 
-/// Open an already registered device and lend its Door everything a restart must restore
-/// that custody does not (see [`restore_device_login`]): the member's global session and the
-/// session-less global channel (community creation), the activation prover, and the retained
-/// device-key login, so the login action completes without any ceremony. Custody itself still
-/// opens at the login action, exactly as in [`open_native_device`]. Only the global
-/// authenticator is used: a device-key member has no community passkey.
+/// Open an already registered device and bind its Door before the app starts (see
+/// [`restore_device_login`], C8 A): the member's global session and the session-less global
+/// channel (community creation), the activation prover, the community Vault and the account
+/// actor, and the retained device-key login for the start's transport, so the login action
+/// completes without any ceremony. Only the global authenticator is used: a device-key member
+/// has no community passkey.
 #[cfg(all(
     feature = "native-tor",
     feature = "native-prover",
     feature = "embedded-authenticator",
     not(target_arch = "wasm32")
 ))]
-pub async fn open_native_device_with<A, S, F>(
+pub async fn open_native_device_with<A, S, F, B, R, N>(
     settings: &DeviceSettings,
-    progress: &Path,
     mut deployment: super::native::NativeDeployment,
     lifetime_seconds: u64,
     clock: std::sync::Arc<dyn super::native::Clock>,
-    parts: OpenParts<S, F>,
+    parts: OpenParts<S, F, B, R>,
 ) -> Result<super::native::Embedded, ComposeError>
 where
     A: cfyr::passkeys::Authenticator + cpky::Authenticator + 'static,
     S: Services + Send + 'static,
     F: Fn() -> A + Send + 'static,
+    B: cwst::backend::Backend + Clone + Send + 'static,
+    R: FnOnce() -> N + Send + 'static,
+    N: cdht::Network + Clone + 'static,
 {
-    check_open(settings, &mut deployment, registered(progress)?)?;
+    let progress = parts
+        .storage
+        .progress
+        .clone()
+        .ok_or(ComposeError::Config("a registered device keeps its progress file".into()))?;
+    check_open(settings, &mut deployment, registered(&progress)?)?;
     let settings = settings.clone();
     let OpenParts {
         mut services,
         authenticator,
+        storage,
+        records,
         finish,
     } = parts;
-    let progress = progress.to_owned();
     let setup: super::native::DeviceSetup = Box::new(move |door: &mut Door| {
         Box::pin(async move {
             let context = cpky::Context::new(
@@ -528,8 +540,11 @@ where
                 &settings.global.rp_id,
             )
             .map_err(|_| super::ErrorCode::InvalidRequest)?;
-            let mut keys = Client::new(context, authenticator());
-            restore_device_login(door, &settings, &mut services, &mut keys, &progress)
+            let mut keys = DeviceKeys::new(
+                Client::new(context, authenticator()),
+                &settings.global.passkey_origin,
+            );
+            restore_device_login(door, &settings, &mut services, &mut keys, storage, records())
                 .await
                 .map_err(|e| {
                     eprintln!("device setup: {e}");
@@ -546,45 +561,79 @@ where
         .map_err(step("open"))
 }
 
-/// Every start of a registered device-key member, on its freshly constructed Door: ONE wallet
-/// sign-in with PRF (the start's only confirmation) gives the member's global session and the
-/// device unlock; the wallet's stamp trust is read over that session; the community opening
-/// derives from the unlock with the community identity the Door's verified policy reports
-/// (it must equal the configured founding fingerprint); and the Door retains it as the device
-/// login (`Door::retain_device_login`) with the member id the join kept in `progress`. The
-/// next `login.start` then opens the community session by the device key and answers
-/// `authenticated_pending_custody` without a ceremony; its recovery verifies the stamp
-/// lineage with the retained trust. Interrupted anywhere, the next start simply repeats this.
-pub async fn restore_device_login<A, S>(
+/// Every start of a registered device-key member, on its freshly constructed Door (C8 A): ONE
+/// wallet sign-in with PRF (the start's only confirmation) gives the member's global session
+/// S1 and the device unlock; the wallet's stamp trust is read over S1 and S1 is forked into
+/// S2 (`session_fork`, same family, no ceremony). S1 holds the global passport's recovery
+/// lease; S2 is lent to the Door for community creation. The community opening derives from
+/// the unlock with the community identity the Door's verified policy reports (it must equal
+/// the configured founding fingerprint), and the composer's community step 5
+/// (`bind_community`, shared with a registration) binds the Vault and the account actor to
+/// this Door before the app starts. The Door retains the device login only for the start's
+/// transport: the next `login.start` opens the Door's community session by the device key
+/// without a ceremony, and the start restore takes the eager binding
+/// (`Door::take_eager_binding`) instead of recovering the Vault again. Interrupted anywhere,
+/// the next start simply repeats this.
+#[allow(clippy::too_many_arguments)]
+pub async fn restore_device_login<A, S, B, N>(
     door: &mut Door,
     settings: &DeviceSettings,
     services: &mut S,
-    wallet: &mut Client<A>,
-    progress: &Path,
+    wallet: &mut DeviceKeys<A>,
+    storage: DeviceStorage<B>,
+    network: N,
 ) -> Result<(), ComposeError>
 where
     A: cfyr::passkeys::Authenticator,
     S: Services,
+    B: cwst::backend::Backend + Clone + 'static,
+    N: cdht::Network + Clone + 'static,
 {
     settings.validate()?;
+    let prover = settings.prover.prover()?;
     let global_origin = settings.global.origin.as_str();
     let community_origin = settings.community.origin.as_str();
-    let user = ProgressFile::open(Some(progress.to_owned()))?
+    let user = ProgressFile::open(storage.progress.clone())?
         .value
         .community_user
         .ok_or(ComposeError::Inconsistent(
             "a device-key member without its member id",
         ))?;
+    // The wallet: S1 by the one sign-in, its stamp trust, the sibling S2, the passport.
+    // The start's budget is its one login (REGISTERED_CONFIRMATIONS); nothing further prompts.
+    wallet.limit(REGISTERED_CONFIRMATIONS);
     let mut api = services.foyer(Service::Global).await?;
-    let unlock =
-        super::unlock_once::DeviceUnlock::from_unlock(sign_in_unlock(&mut api, wallet).await?);
+    let unlock = super::unlock_once::DeviceUnlock::from_unlock(
+        sign_in_unlock(&mut api, wallet.confirm("login")?).await?,
+    );
     let stamps = stamp_trust(&api, global_origin).await?;
+    let sibling = wallet_sibling(services, &mut api).await?;
     let mut wallet_door = bound("wallet", global_origin, Scope::Global, api)?;
-    let session = wallet_door
-        .take_global(global_origin)
-        .map_err(step("global session"))?;
+    let policy: &'static mut Policy = Box::leak(Box::new(
+        wallet_door
+            .wallet_current_policy(global_origin)
+            .map_err(step("policy"))?,
+    ));
+    let (_, recovered) = recover(
+        unlock.wallet_opening().map_err(step("restore"))?,
+        &network,
+    )
+    .await?;
+    let held = lease(&wallet_door, global_origin, true, policy).await?;
+    let global = super::custody::prepare_initial_recovery(recovered, held, network.clone())
+        .await
+        .map_err(step("global recovery"))?
+        .open_global_passport(network.clone(), storage.global.clone())
+        .await
+        .map_err(step("global passport"))?;
+    // The recovery lease holds S1 for the device's life.
+    Box::leak(Box::new(
+        wallet_door
+            .take_global(global_origin)
+            .map_err(step("global session"))?,
+    ));
     let public = services.public(Service::Global).await?;
-    door.lend_global(community_origin, session, public)
+    door.lend_global(community_origin, sibling, public)
         .map_err(step("global session"))?;
     door.set_activation_prover(std::sync::Arc::new(
         super::accounting::NativeActivationProver::new(settings.prover.clone()),
@@ -615,6 +664,8 @@ where
             record: record_current.clone(),
         },
     );
+
+    // The community: its verified identity, then step 5 and the account actor.
     let fingerprint = door
         .current_policy(community_origin)
         .map_err(step("community identity"))?
@@ -638,7 +689,56 @@ where
     let opening = unlock
         .community_opening(&fingerprint, &settings.community_name)
         .map_err(step("community opening"))?;
+    let device = opening.device().map_err(step("restore"))?;
+    let mut companion = services.foyer(Service::Community).await?;
+    super::device_join::open_session(
+        &mut companion,
+        &settings.community_name,
+        &user,
+        &device,
+        &mut session_signer(&opening),
+    )
+    .await
+    .map_err(step("device session"))?;
+    let CommunityBound {
+        owner,
+        account,
+        actor_membership,
+        actor_policy,
+        device,
+    } = bind_community(
+        services,
+        door,
+        Names {
+            global_origin,
+            community_origin,
+            community_name: &settings.community_name,
+        },
+        &unlock,
+        &fingerprint,
+        &user,
+        companion,
+        &stamps,
+        network,
+        storage.community,
+    )
+    .await?;
     drop(unlock);
+    super::account_open::bind_member_account_with(
+        door,
+        community_origin,
+        &owner,
+        account,
+        actor_membership,
+        actor_policy,
+        global,
+        *device.value(),
+        std::sync::Arc::new(prover),
+    )
+    .await
+    .map_err(step("bind account"))?;
+    door.retain_eager_binding(community_origin, owner)
+        .map_err(step("eager binding"))?;
     door.retain_device_login(community_origin, user, opening, stamps)
         .map_err(step("device login"))?;
     // `login.poll` reports Idle for a configured origin before the first start.
@@ -920,69 +1020,128 @@ mod tests {
         assert_eq!(reopened.stage(true), Stage::Finished);
     }
 
-    /// Decision B (one confirmation per device): a registered device's start may run exactly
-    /// ONE wallet ceremony, and its PRF is the unlock; a second prompt is refused before the
-    /// authenticator runs. A registration is bounded by REGISTRATION_CONFIRMATIONS.
+    /// One-ceremony registration (C1-C8): a registration, fresh or resumed at any marker, and
+    /// every start of a registered device run exactly ONE wallet confirmation through
+    /// `DeviceKeys::confirm`; every former further prompt (login after finish, device
+    /// authorization, lineage evidence, wallet session, join stamp, a second reopen) is refused
+    /// before the authenticator runs. An authenticator without PRF at create answers its
+    /// follow-up assertion inside the same confirmation (J1: a second platform prompt).
     #[test]
-    fn a_registered_start_counts_one_wallet_ceremony_and_refuses_a_second() {
+    fn every_registration_marker_and_registered_start_counts_one_wallet_confirmation() {
         use cfyr::passkeys::software::{SoftwareAuthenticator, TestConfiguration};
         use futures_executor::block_on;
         use serde_json::json;
         const ORIGIN: &str = "https://wallet.example.test";
         const RP: &str = "wallet.example.test";
+        const REFUSED: [&str; 7] = [
+            "register",
+            "login",
+            "device authorize",
+            "lineage evidence",
+            "wallet session",
+            "join stamp",
+            "reopen",
+        ];
         let b64 = |bytes: &[u8]| data_encoding::BASE64URL_NOPAD.encode(bytes);
-        block_on(async {
+        let keys = |evaluate_at_create: bool| {
             let platform = SoftwareAuthenticator::new(
                 ORIGIN,
                 TestConfiguration {
                     user_verified: true,
                     prf: true,
-                    evaluate_at_create: true,
+                    evaluate_at_create,
                 },
             )
             .unwrap();
-            let mut keys =
-                DeviceKeys::new(Client::new(cfyr::passkeys::Context::new(ORIGIN, RP).unwrap(), platform), ORIGIN);
-            let mut progress =
-                ProgressFile::load(BackendProgress::new(cwst::backend::Memory::new())).await.unwrap();
-
-            // Registration: the create ceremony with PRF counts once.
-            keys.limit(confirmation_budget(&progress));
-            assert_eq!(confirmation_budget(&progress), REGISTRATION_CONFIRMATIONS);
-            keys.confirm("register").unwrap().register_member(json!({"publicKey": {
-                "rp":{"id":RP,"name":"Wallet"},
-                "user":{"id":b64(&[17;16]),"name":"member","displayName":"Member"},
-                "challenge":b64(&[41;32]),
-                "pubKeyCredParams":[{"type":"public-key","alg":-7}],
-                "authenticatorSelection":{"residentKey":"required","requireResidentKey":true,
-                    "userVerification":"required","authenticatorAttachment":"platform"},
-                "timeout":42000,"excludeCredentials":[],"attestation":"none",
-                "extensions":{"credProps":true},"hints":["client-device"]
-            }})).await.unwrap();
-            assert_eq!(keys.ceremonies(), 1);
-            progress.advance(true, Stage::Done).await.unwrap();
-            assert_eq!(confirmation_budget(&progress), REGISTRATION_CONFIRMATIONS);
-            progress.advance(false, Stage::Done).await.unwrap();
-
-            // Registered: the start's budget is one; its login carries the PRF unlock.
-            keys.limit(confirmation_budget(&progress));
-            assert_eq!(confirmation_budget(&progress), REGISTERED_CONFIRMATIONS);
-            let login = json!({"publicKey": {"challenge":b64(&[55;32]),"rpId":RP,
-                "userVerification":"required","allowCredentials":[],"timeout":21000}});
-            let (_, outcome) = keys
-                .confirm("login")
-                .unwrap()
-                .sign_in(login.clone())
-                .await
-                .unwrap()
-                .into_parts();
-            assert!(matches!(outcome, cfyr::passkeys::VaultOutcome::Ready(_)));
-            assert_eq!(keys.ceremonies(), 2);
-            // The former second unlock, a second session or any other prompt: refused unprompted.
-            for purpose in ["wallet session", "join stamp", "reopen"] {
-                assert!(matches!(keys.confirm(purpose), Err(ComposeError::Step(p, _)) if p == purpose));
+            DeviceKeys::new(
+                Client::new(cfyr::passkeys::Context::new(ORIGIN, RP).unwrap(), platform),
+                ORIGIN,
+            )
+        };
+        let refuses_every_further_prompt =
+            |keys: &mut DeviceKeys<SoftwareAuthenticator>, used: u32| {
+                for purpose in REFUSED {
+                    assert!(
+                        matches!(keys.confirm(purpose), Err(ComposeError::Step(p, _)) if p == purpose)
+                    );
+                }
+                assert_eq!(keys.ceremonies(), used);
+            };
+        block_on(async {
+            // A fresh registration: the create ceremony, with or without PRF at create.
+            for evaluate_at_create in [true, false] {
+                let mut keys = keys(evaluate_at_create);
+                let progress =
+                    ProgressFile::load(BackendProgress::new(cwst::backend::Memory::new()))
+                        .await
+                        .unwrap();
+                assert_eq!(confirmation_budget(&progress), REGISTRATION_CONFIRMATIONS);
+                assert_eq!(REGISTRATION_CONFIRMATIONS, 1);
+                keys.limit(confirmation_budget(&progress));
+                let (_, _unlock) = keys
+                    .confirm("register")
+                    .unwrap()
+                    .register_member(json!({"publicKey": {
+                        "rp":{"id":RP,"name":"Wallet"},
+                        "user":{"id":b64(&[17;16]),"name":"member","displayName":"Member"},
+                        "challenge":b64(&[41;32]),
+                        "pubKeyCredParams":[{"type":"public-key","alg":-7}],
+                        "authenticatorSelection":{"residentKey":"required","requireResidentKey":true,
+                            "userVerification":"required","authenticatorAttachment":"platform"},
+                        "timeout":42000,"excludeCredentials":[],"attestation":"none",
+                        "extensions":{"credProps":true},"hints":["client-device"]
+                    }}))
+                    .await
+                    .unwrap()
+                    .into_parts();
+                assert_eq!(keys.ceremonies(), 1);
+                refuses_every_further_prompt(&mut keys, 1);
             }
-            assert_eq!(keys.ceremonies(), 2);
+
+            // A restart at every registration marker: ONE merged assertion (C7).
+            for (global, community) in [
+                (Stage::Retained, Stage::Fresh),
+                (Stage::Finished, Stage::Fresh),
+                (Stage::Authorized, Stage::Fresh),
+                (Stage::Activated, Stage::Fresh),
+                (Stage::Done, Stage::Fresh),
+                (Stage::Done, Stage::Retained),
+                (Stage::Done, Stage::Activated),
+            ] {
+                let mut progress =
+                    ProgressFile::load(BackendProgress::new(cwst::backend::Memory::new()))
+                        .await
+                        .unwrap();
+                for stage in &ALL[1..] {
+                    if *stage <= global {
+                        progress.advance(true, *stage).await.unwrap();
+                    }
+                    if *stage <= community {
+                        progress.advance(false, *stage).await.unwrap();
+                    }
+                }
+                assert_eq!(confirmation_budget(&progress), REGISTRATION_CONFIRMATIONS);
+                let mut keys = keys(true);
+                keys.limit(confirmation_budget(&progress));
+                keys.confirm("reopen").unwrap();
+                refuses_every_further_prompt(&mut keys, 1);
+            }
+
+            // A registered start: one login, its PRF is the unlock; nothing further.
+            let mut progress =
+                ProgressFile::load(BackendProgress::new(cwst::backend::Memory::new()))
+                    .await
+                    .unwrap();
+            for stage in &ALL[1..] {
+                progress.advance(true, *stage).await.unwrap();
+                progress.advance(false, *stage).await.unwrap();
+            }
+            assert_eq!(confirmation_budget(&progress), REGISTERED_CONFIRMATIONS);
+            assert_eq!(REGISTERED_CONFIRMATIONS, 1);
+            let mut keys = keys(true);
+            keys.limit(confirmation_budget(&progress));
+            keys.confirm("login").unwrap();
+            refuses_every_further_prompt(&mut keys, 1);
         });
     }
 

@@ -299,6 +299,8 @@ pub struct Door {
     /// Device-key members' retained logins of this start, per origin (no community passkey).
     #[cfg(not(target_arch = "wasm32"))]
     device_logins: BTreeMap<String, login::session::DeviceLogin>,
+    /// Community custody bound at app start (C8 A), taken once by the start restore.
+    eager_bindings: BTreeMap<String, facades::EagerBinding>,
     #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
     embedded_authenticators: BTreeMap<String, login::native::Embedded>,
     #[cfg(target_arch = "wasm32")]
@@ -329,6 +331,7 @@ impl Door {
             logins: BTreeMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
             device_logins: BTreeMap::new(),
+            eager_bindings: BTreeMap::new(),
             #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
             embedded_authenticators: BTreeMap::new(),
             #[cfg(target_arch = "wasm32")]
