@@ -1249,6 +1249,38 @@ where
         T: cbrd::clnk::Transport,
         L: crate::door::RoomLink,
     {
+        self.admit_inner(board, task, None).await
+    }
+
+    /// Catch up through an admission another member already ordered: the room
+    /// holds both the newcomer's external commit (`task.frame`) and the member
+    /// commit that installed the context (`context`). The newcomer is believed
+    /// through exactly the evidence `admit_room` demands; nothing is ordered or
+    /// sent, and both commits must be made for this device's epoch and its
+    /// successor (`cbrd::apply_room_admission`).
+    pub async fn catch_up_room<T, L>(
+        &mut self,
+        board: &cbrd::Board<T, L>,
+        task: RoomAdmitTask<'_>,
+        context: &[u8],
+    ) -> std::result::Result<Snapshot, ctnd::Error>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        self.admit_inner(board, task, Some(context)).await
+    }
+
+    async fn admit_inner<T, L>(
+        &mut self,
+        board: &cbrd::Board<T, L>,
+        task: RoomAdmitTask<'_>,
+        context: Option<&[u8]>,
+    ) -> std::result::Result<Snapshot, ctnd::Error>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
         use ctnd::Error as Fail;
         self.open().map_err(|_| Fail::Authority)?;
         let companion =
@@ -1309,7 +1341,7 @@ where
             bytes
         };
         let admitted = self
-            .admit_verified(board, &task, &companion.request, operation)
+            .admit_verified(board, &task, &companion.request, operation, context)
             .await;
         *self.cache.borrow_mut() = Cache::default();
         self.open().map_err(|_| Fail::Authority)?;
@@ -1322,6 +1354,7 @@ where
         task: &RoomAdmitTask<'_>,
         request: &cgrp::Request,
         operation: [u8; 32],
+        context: Option<&[u8]>,
     ) -> std::result::Result<Snapshot, ctnd::Error>
     where
         T: cbrd::clnk::Transport,
@@ -1385,23 +1418,46 @@ where
         let snapshot = Snapshot::load(binding.community(), &store).map_err(|_| Fail::Storage)?;
         let groups = cgrp::prepare(&snapshot, request, &source, &authority, now, task.max_groups)
             .map_err(|_| Fail::Authority)?;
-        let admitted = L::admit_room(
-            board,
-            cbrd::RoomAdmitInput {
-                keys: &mut port,
-                clock: &mut clock,
-                store: &mut store,
-                threads: &threads,
-                groups,
-                frame: task.frame,
-                room: task.room,
-                source: &source,
-                authority: &authority,
-                operation,
-                transport: task.transport,
-            },
-        )
-        .await;
+        let admitted = match context {
+            // The room already holds the member commit: apply it, order nothing.
+            Some(context) => {
+                cbrd::apply_room_admission(cbrd::RoomApplyInput {
+                    keys: &mut port,
+                    clock: &mut clock,
+                    store: &mut store,
+                    threads: &threads,
+                    groups,
+                    join: &cbrd::OrderedCommit {
+                        commit: task.frame.commit.clone(),
+                        companion: task.frame.companion.clone(),
+                    },
+                    context,
+                    source: &source,
+                    authority: &authority,
+                    operation,
+                })
+                .await
+            }
+            None => {
+                L::admit_room(
+                    board,
+                    cbrd::RoomAdmitInput {
+                        keys: &mut port,
+                        clock: &mut clock,
+                        store: &mut store,
+                        threads: &threads,
+                        groups,
+                        frame: task.frame,
+                        room: task.room,
+                        source: &source,
+                        authority: &authority,
+                        operation,
+                        transport: task.transport,
+                    },
+                )
+                .await
+            }
+        };
         // The leaves of the tree were certified against the roster lineages this
         // device holds; a refusal here may mean one moved on, so they are read
         // again next time (the newcomer was verified fresh above).

@@ -151,6 +151,24 @@ where
             groups.admit_room(board, task).await.map_err(room_error)
         })
     }
+    fn catch_up_room<'a, T, L>(
+        &'a mut self,
+        board: &'a cbrd::Board<T, L>,
+        task: super::RoomAdmitTask<'a>,
+        context: &'a [u8],
+    ) -> board::OwnerFuture<'a, cbrd::cgrp::Snapshot>
+    where
+        T: cbrd::clnk::Transport,
+        L: crate::door::RoomLink,
+    {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            groups
+                .catch_up_room(board, task, context)
+                .await
+                .map_err(room_error)
+        })
+    }
     fn room_evidence<'a>(
         &'a mut self,
         group: cbrd::cgrp::Id,

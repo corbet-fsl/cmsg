@@ -41,10 +41,43 @@ pub enum RoomJoinStatus {
     },
 }
 
+/// Where a room stands for this device after an admission call. Never a silent
+/// stall: a device that cannot reach the room's epoch says so here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RoomSync {
+    /// This device holds the epoch the room's relayed commits lead to.
+    Current,
+    /// An admission at this device's epoch is not finished yet (its context
+    /// commit is not in the room, or the attempt must be repeated): call again.
+    Pending,
+    /// This device cannot reach the room's epoch from the commits the room
+    /// holds: the room needs a resync (an external rejoin).
+    NeedsResync { reason: ResyncReason },
+}
+
+/// Why a room needs a resync.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ResyncReason {
+    /// The relay no longer holds the room's oldest frames.
+    HistoryGap,
+    /// Later frames exist but the commit made for this device's epoch is not
+    /// in the room.
+    CommitMissing,
+    /// The commit made for this device's epoch failed verification here
+    /// (forged, tampered or its consent expired) while the room moved on.
+    CommitRefused,
+}
+
 /// What one admission call did: newcomers admitted into the room's group.
 #[derive(Clone, Serialize, JsonSchema)]
 pub struct RoomAdmitted {
     pub admitted: u32,
+    /// Admissions other members ordered that this device applied to catch up.
+    pub caught_up: u32,
+    /// Where the room stands for this device after the call.
+    pub sync: RoomSync,
     /// Ordered joins this device refused (unverifiable newcomer or consent).
     pub refused: u32,
     /// Profile keys of fellow members this call adopted (row 14.5).
@@ -97,8 +130,9 @@ pub(super) struct RoomJoins {
     open: BTreeMap<[u8; 16], PendingJoin>,
     /// Requests this device already answered (room, relay sequence).
     served: std::collections::BTreeSet<([u8; 16], u64)>,
-    /// How far this device has read each room's ordered joins (relay sequence).
-    admitted_through: BTreeMap<[u8; 16], u64>,
+    /// Ordered joins this device refused, by (room, ordering, relay sequence):
+    /// a refused frame is not verified again.
+    refused: std::collections::BTreeSet<([u8; 16], [u8; 16], u64)>,
     /// How far this device has read each room's secrets (relay sequence).
     secrets_through: BTreeMap<[u8; 16], u64>,
     /// The epoch this device last sent its own profile key to each room in.
@@ -170,7 +204,7 @@ fn link(error: cbrd::clnk::ErrorCode) -> ErrorCode {
 impl RoomJoins {
     pub(super) fn forget(&mut self, room: [u8; 16]) {
         self.open.remove(&room);
-        self.admitted_through.remove(&room);
+        self.refused.retain(|(held, _, _)| *held != room);
         self.secrets_through.remove(&room);
         self.key_sent.remove(&room);
         self.joined_in.remove(&room);
@@ -438,11 +472,19 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         }
     }
 
-    /// Admit the newcomers whose ordered external commits `room` holds beyond
-    /// this device's cursor. Each is verified from its own evidence (see
-    /// `VaultGroupOwner::admit_room`); a newcomer that fails verification is
-    /// skipped for good, while an unavailable or conflicting attempt keeps the
-    /// cursor so the next call retries it.
+    /// Bring this device to the room's epoch and admit the newcomers waiting
+    /// at it. The room holds every join as two ordered commits (the newcomer's
+    /// external commit, then the member commit that installs the context), both
+    /// sealed under the key of the epoch they were made for. This device opens
+    /// the next frame with ITS epoch's key and applies a commit only to exactly
+    /// that epoch: a join whose context commit is already in the room was
+    /// admitted by another member (a device that was offline, or that lost the
+    /// race to commit, catches up by applying it); a join without one is
+    /// admitted here (today's path). Each join is verified from its own
+    /// evidence (see `VaultGroupOwner::admit_room`); a newcomer that fails
+    /// verification is skipped for good, while an unavailable or conflicting
+    /// attempt is repeated by the next call. Whatever this device cannot apply
+    /// is reported in `sync`, never dropped silently.
     pub(super) async fn room_admit_step(
         &mut self,
         room: RoomRef,
@@ -452,31 +494,56 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         if !R::ROOMS || self.owner.groups().is_none() {
             return Err(ErrorCode::Unavailable);
         }
-        let after = self
-            .joins
-            .admitted_through
-            .get(&room.room)
-            .copied()
-            .unwrap_or(0);
-        let transport = self.owner.room_transport_key(room.group).await?;
-        let read = R::room_joins(&self.inner.board, room.room, after, &transport)
+        let source = self.group_policy(expires).await?;
+        let mut frames = R::room_frames(&self.inner.board, room.room)
             .await
             .map_err(link)?;
-        let source = self.group_policy(expires).await?;
-        let (mut admitted, mut refused) = (0, 0);
-        let mut retry = false;
-        for frame in &read.joins {
+        let start_epoch = self.owner.room_keys_standing(room.group).await?.epoch;
+        let (mut admitted, mut caught_up, mut refused) = (0, 0, 0);
+        let (mut pending, mut raced) = (false, false);
+        for _ in 0..MAX_ROOM_APPLY {
+            let transport = self.owner.room_transport_key(room.group).await?;
+            let epoch = self.owner.room_keys_standing(room.group).await?.epoch;
+            let Some((position, join)) =
+                next_join(&frames, &room.room, &transport, epoch, |sequence| {
+                    self.joins
+                        .refused
+                        .contains(&(room.room, frames.ordering, sequence))
+                })
+            else {
+                break;
+            };
+            let context = context_after(&frames, position, &room.room, &transport, epoch);
+            let frame = cbrd::JoinFrame {
+                ordering: frames.ordering,
+                counter: frames.frames[position].counter,
+                commit: join.commit,
+                companion: join.companion,
+            };
+            let sequence = frames.frames[position].sequence;
             let task = crate::door::facades::RoomAdmitTask {
                 room: room.room,
                 group: room.group,
-                frame,
+                frame: &frame,
                 max_groups: MAX_GROUPS,
                 transport: &transport,
                 policy: &source,
             };
-            match self.owner.admit_room(&self.inner.board, task).await {
+            let done = match &context {
+                Some(context) => {
+                    self.owner
+                        .catch_up_room(&self.inner.board, task, context)
+                        .await
+                }
+                None => self.owner.admit_room(&self.inner.board, task).await,
+            };
+            match done {
                 Ok(_) => {
-                    admitted += 1;
+                    if context.is_some() {
+                        caught_up += 1;
+                    } else {
+                        admitted += 1;
+                    }
                     // The newcomer's hand-over can only be from this epoch on.
                     if let (Some(companion), Ok(standing)) = (
                         cbrd::RoomCompanion::decode(&frame.companion),
@@ -489,16 +556,42 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
                             .insert(companion.request.actor, standing.epoch);
                     }
                 }
+                // Another member's context commit may have been ordered first:
+                // read the room once more, then apply it instead.
+                Err(ErrorCode::Reconcile) if context.is_none() && !raced => {
+                    raced = true;
+                    frames = R::room_frames(&self.inner.board, room.room)
+                        .await
+                        .map_err(link)?;
+                }
                 Err(ErrorCode::Unavailable | ErrorCode::Reconcile) => {
-                    retry = true;
+                    pending = true;
                     break;
                 }
-                Err(_) => refused += 1,
+                Err(_) => {
+                    self.joins.refused.insert((room.room, frames.ordering, sequence));
+                    refused += 1;
+                }
             }
         }
-        if !retry {
-            self.joins.admitted_through.insert(room.room, read.through);
+        let end_epoch = self.owner.room_keys_standing(room.group).await?.epoch;
+        if end_epoch != start_epoch {
+            // Secrets sealed in the epochs this device just reached were
+            // unreadable before: read the room's secrets again from the start.
+            self.joins.secrets_through.remove(&room.room);
         }
+        let transport = self.owner.room_transport_key(room.group).await?;
+        let sync = if pending {
+            RoomSync::Pending
+        } else {
+            sync_status(
+                &frames,
+                &room.room,
+                &transport,
+                end_epoch != start_epoch,
+                self.joins.refused.iter().any(|(held, _, _)| *held == room.room),
+            )
+        };
         // Profile keys follow the admissions in the same call. A failure here
         // never undoes an admission (it is committed); the next call repeats it.
         let (keys_adopted, keys_refused) = self
@@ -513,6 +606,8 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             .map_err(group_error)?;
         Ok(RoomAdmitted {
             admitted,
+            caught_up,
+            sync,
             refused,
             keys_adopted,
             keys_refused,
@@ -661,6 +756,96 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             answered += 1;
         }
         Ok(RoomServed { answered })
+    }
+}
+
+/// The most joins one call applies (each moves the epoch on by two).
+const MAX_ROOM_APPLY: usize = 64;
+
+/// The first frame, oldest first, that opens under the key of the epoch this
+/// device holds as a newcomer's external commit made for exactly that epoch.
+fn next_join(
+    frames: &cbrd::RoomFrames,
+    room: &[u8; 16],
+    key: &cbrd::TransportKey,
+    epoch: u64,
+    refused: impl Fn(u64) -> bool,
+) -> Option<(usize, cbrd::OrderedCommit)> {
+    frames.frames.iter().enumerate().find_map(|(position, frame)| {
+        if refused(frame.sequence) {
+            return None;
+        }
+        match frame.open(room, key)? {
+            cbrd::FrameContent::Commit(join)
+                if !join.companion.is_empty()
+                    && cthr::wire_epoch(&join.commit).ok() == Some(epoch) =>
+            {
+                Some((position, join))
+            }
+            _ => None,
+        }
+    })
+}
+
+/// The member commit that followed the join at `position`: the next frame that
+/// opens as a bare commit made for the epoch the join leads to.
+fn context_after(
+    frames: &cbrd::RoomFrames,
+    position: usize,
+    room: &[u8; 16],
+    key: &cbrd::TransportKey,
+    epoch: u64,
+) -> Option<Vec<u8>> {
+    frames.frames[position + 1..].iter().find_map(|frame| {
+        match frame.open(room, key)? {
+            cbrd::FrameContent::Commit(context)
+                if context.companion.is_empty()
+                    && cthr::wire_epoch(&context.commit).ok() == Some(epoch.checked_add(1)?) =>
+            {
+                Some(context.commit)
+            }
+            _ => None,
+        }
+    })
+}
+
+/// Where the room stands for a device that applied everything it could. A
+/// frame sealed under a key this device does not hold is of a LATER epoch when
+/// its counter is above every frame of this device's epoch (a frame of the
+/// current epoch carries the counter in force, which only a later commit
+/// raises): then the commit that leads on from here is missing or was refused.
+/// With nothing readable at all the room's history is judged by the relay's own
+/// `gap` flag. `progressed` is a call that moved this device on.
+fn sync_status(
+    frames: &cbrd::RoomFrames,
+    room: &[u8; 16],
+    key: &cbrd::TransportKey,
+    progressed: bool,
+    refused: bool,
+) -> RoomSync {
+    let readable = frames
+        .frames
+        .iter()
+        .filter(|frame| frame.open(room, key).is_some())
+        .map(|frame| frame.counter)
+        .max();
+    let ahead = frames.frames.iter().any(|frame| {
+        frame.open(room, key).is_none() && readable.is_some_and(|top| frame.counter > top)
+    });
+    let unreadable = frames.frames.iter().any(|frame| frame.open(room, key).is_none());
+    let reason = if refused {
+        ResyncReason::CommitRefused
+    } else if frames.gap {
+        ResyncReason::HistoryGap
+    } else {
+        ResyncReason::CommitMissing
+    };
+    match readable {
+        Some(_) if ahead => RoomSync::NeedsResync { reason },
+        None if frames.gap && unreadable && !progressed => RoomSync::NeedsResync {
+            reason: ResyncReason::HistoryGap,
+        },
+        _ => RoomSync::Current,
     }
 }
 
