@@ -8,7 +8,8 @@
     "noEmit": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": { "cmsg-prover-snippet": ["../src/door/browser/prover.ts"] }
   },
-  "include": ["src", "tests", "build.mjs", "../src/door/browser/prover.ts"]
+  "include": ["src", "tests", "build.mjs", "build-probe.mjs", "../src/door/browser/prover.ts"]
 }

@@ -132,6 +132,8 @@ conformance = []
 native-prover = ["cwlt/native-prover", "cwlt/native-verifier", "dep:cvfy", "czkp/native", "cvlt/wallet-native-prover", "ckmg/wallet-native-prover"]
 # The browser prover (Web Worker behind the engine's ProofWorker port); wasm32 only in production.
 browser-prover = ["cwlt/browser-prover", "cvlt/wallet-browser-prover", "ckmg/wallet-browser-prover"]
+# Test only: probe exports for the wasm32 browser tests of the prover path; never part of a product build.
+browser-prover-probe = ["browser-prover", "ckmg/wallet-browser-prover-probe"]
 native-tor = ["ckmg/native-tor", "cmsh/tor", "cmsh/tor-records", "dep:ctrn", "dep:arti-client", "dep:tor-rtcompat", "dep:tor-hscrypto", "dep:tor-llcrypto", "dep:rustls"]
 # Test/fixture only: a private Tor network supplied by embedding code. Production builds never enable it.
 private-tor-fixture = ["native-tor"]

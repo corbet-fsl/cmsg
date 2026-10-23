@@ -168,6 +168,28 @@ async fn fetch_checked(
     Ok(bytes)
 }
 
+/// The prover configuration for these two files and this setup size: the scope is the digests of
+/// the files themselves (the engine checks them again against the circuit group it opens).
+fn config_of(circuit: Vec<u8>, verification_key: Vec<u8>, points: u32) -> BrowserProverConfig {
+    let sha = |bytes: &[u8]| -> [u8; 32] { Sha256::digest(bytes).into() };
+    BrowserProverConfig {
+        scope: czkp::ProofScope {
+            circuit_digest: sha(&circuit),
+            verifying_key_digest: sha(&verification_key),
+        },
+        program: Program::Update,
+        circuit,
+        verification_key,
+        srs: SrsLocation {
+            g1_path: format!("/prover/srs/g1-{points}.dat"),
+            g2_path: "/prover/srs/g2.dat".into(),
+            points,
+        },
+        timeout: PROOF_TIMEOUT,
+        max_threads: MAX_THREADS,
+    }
+}
+
 /// The prover configuration of a deployment: the circuit and key groups the wallet origin
 /// serves, each checked against the digest the deployment pins (the engine checks them again
 /// against the scope it derives), and the setup paths of the pinned size.
@@ -177,23 +199,7 @@ pub async fn configure(
     let circuit = fetch_checked(PROVER_CIRCUIT_PATH, &deployment.circuit_sha256, 64 << 20).await?;
     let verification_key =
         fetch_checked(PROVER_KEYS_PATH, &deployment.keys_sha256, 1 << 20).await?;
-    let sha = |bytes: &[u8]| -> [u8; 32] { Sha256::digest(bytes).into() };
-    Ok(BrowserProverConfig {
-        scope: czkp::ProofScope {
-            circuit_digest: sha(&circuit),
-            verifying_key_digest: sha(&verification_key),
-        },
-        program: Program::Update,
-        circuit,
-        verification_key,
-        srs: SrsLocation {
-            g1_path: format!("/prover/srs/g1-{}.dat", deployment.points),
-            g2_path: "/prover/srs/g2.dat".into(),
-            points: deployment.points,
-        },
-        timeout: PROOF_TIMEOUT,
-        max_threads: MAX_THREADS,
-    })
+    Ok(config_of(circuit, verification_key, deployment.points))
 }
 
 /// The prover a browser build lends the account actor once the wallet origin has authenticated
@@ -251,3 +257,7 @@ pub async fn calibrate(
 pub fn refusing() -> Arc<dyn AccountProver> {
     Arc::new(RefusingProver)
 }
+
+/// Test-only exports for the browser tests of this prover path (never part of a product build).
+#[cfg(feature = "browser-prover-probe")]
+mod probe;

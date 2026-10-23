@@ -17,10 +17,20 @@ export const WORKER_POLICY =
 
 const TYPES: Record<string, string> = { '.js': 'text/javascript', '.wasm': 'application/wasm', '.html': 'text/html', '.json': 'application/json' };
 
+/** One request as the server saw it: nothing but method, path, query and whether a body came with it. */
+export interface Seen {
+  method: string;
+  path: string;
+  search: string;
+  body: boolean;
+}
+
 export interface Harness {
   origin: string;
   hits: Map<string, number>;
-  control: { tamperG1: boolean; tamperG2: boolean };
+  /** Every request in arrival order (the server-side half of the request recorder). */
+  seen: Seen[];
+  control: { tamperG1: boolean; tamperG2: boolean; tamperCircuit: boolean };
   close(): Promise<void>;
 }
 
@@ -35,13 +45,23 @@ function readRange(path: string, length: number): Buffer {
   return out;
 }
 
-export async function startHarness(options: { dist: string; setupDir: string; port?: number; isolated?: boolean }): Promise<Harness> {
+// `setupDir` serves the setup from the extension artifact's g1.dat/g2.dat; `artifacts` serves a
+// deployment's prover directory (circuit.json, keys.json, calibration.json, srs/g1-<points>.dat,
+// srs/g2.dat) at /prover/, the layout cmeet's web build ships.
+export async function startHarness(options: { dist: string; setupDir?: string; artifacts?: string; page?: string; port?: number; isolated?: boolean }): Promise<Harness> {
   const hits = new Map<string, number>();
-  const control = { tamperG1: false, tamperG2: false };
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>wallet</title></head><body><script type="module" src="/page.js"></script></body></html>`;
+  const seen: Seen[] = [];
+  const control = { tamperG1: false, tamperG2: false, tamperCircuit: false };
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>wallet</title></head><body><script type="module" src="/${options.page ?? 'page.js'}"></script></body></html>`;
   const server: Server = createServer((req, res) => {
     const path = new URL(req.url ?? '/', 'http://x').pathname;
     hits.set(path, (hits.get(path) ?? 0) + 1);
+    seen.push({
+      method: req.method ?? '',
+      path,
+      search: new URL(req.url ?? '/', 'http://x').search,
+      body: req.headers['content-length'] !== undefined || req.headers['transfer-encoding'] !== undefined,
+    });
     const common: Record<string, string> = { 'cache-control': 'no-store' };
     if (options.isolated) {
       common['cross-origin-opener-policy'] = 'same-origin';
@@ -54,14 +74,22 @@ export async function startHarness(options: { dist: string; setupDir: string; po
     };
     if (path === '/favicon.ico') return send(204, 'image/x-icon', '');
     if (path === '/') return send(200, 'text/html', html, { 'content-security-policy': PAGE_POLICY });
+    const material = /^\/prover\/(circuit|keys|calibration)\.json$/.exec(path);
+    if (material && options.artifacts) {
+      const bytes = Buffer.from(readFileSync(join(options.artifacts, `${material[1]}.json`)));
+      if (control.tamperCircuit && material[1] === 'circuit') bytes[bytes.length >> 1] ^= 1;
+      return send(200, 'application/json', bytes);
+    }
     const srs = /^\/prover\/srs\/g1-(\d+)\.dat$/.exec(path);
     if (srs) {
-      const bytes = readRange(join(options.setupDir, 'g1.dat'), Number(srs[1]) * 32);
+      const bytes = options.artifacts
+        ? readRange(join(options.artifacts, 'srs', `g1-${srs[1]}.dat`), Number(srs[1]) * 32)
+        : readRange(join(options.setupDir!, 'g1.dat'), Number(srs[1]) * 32);
       if (control.tamperG1) bytes[bytes.length >> 1] ^= 1;
       return send(200, 'application/octet-stream', bytes);
     }
     if (path === '/prover/srs/g2.dat') {
-      const bytes = readRange(join(options.setupDir, 'g2.dat'), 128);
+      const bytes = readRange(join(options.artifacts ? join(options.artifacts, 'srs') : options.setupDir!, 'g2.dat'), 128);
       if (control.tamperG2) bytes[7] ^= 1;
       return send(200, 'application/octet-stream', bytes);
     }
@@ -94,6 +122,7 @@ export async function startHarness(options: { dist: string; setupDir: string; po
   return {
     origin: `http://127.0.0.1:${port}`,
     hits,
+    seen,
     control,
     close: () => new Promise((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }),
   };

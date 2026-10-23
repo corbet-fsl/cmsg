@@ -12,7 +12,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
+import type { Browser, BrowserContext, Page } from 'playwright-core';
+import { launch, record, type Contact } from './harness/browser.ts';
 import { startHarness, type Harness } from './harness/server.ts';
 
 const need = (name: string): string => {
@@ -31,38 +32,14 @@ const G1 = `/prover/srs/g1-${POINTS}.dat`;
 const MINUTES = 60_000;
 
 type Reply = { ok: true; reply: string } | { ok: false; error: string };
-type Contact = { origin: string; url: string; kind: string };
 
 let browser: Browser;
 before(async () => {
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM ?? '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
+  browser = await launch();
 });
 after(async () => {
   await browser.close();
 });
-
-// Records every request of every page of the context, workers and web sockets included (the
-// pattern of the member page's network spec), as origin + url.
-function record(context: BrowserContext): Contact[] {
-  const contacts: Contact[] = [];
-  const origin = (url: string) => {
-    const parsed = new URL(url);
-    if (['data:', 'blob:', 'about:'].includes(parsed.protocol)) return null;
-    return `${parsed.protocol.replace('ws', 'http')}//${parsed.host}`;
-  };
-  context.on('request', (request) => {
-    const o = origin(request.url());
-    if (o !== null) contacts.push({ origin: o, url: request.url(), kind: request.resourceType() });
-  });
-  const sockets = (page: Page) =>
-    page.on('websocket', (socket) => {
-      const o = origin(socket.url());
-      if (o !== null) contacts.push({ origin: o, url: socket.url(), kind: 'websocket' });
-    });
-  context.pages().forEach(sockets);
-  context.on('page', sockets);
-  return contacts;
-}
 
 async function open(harness: Harness): Promise<{ context: BrowserContext; page: Page; contacts: Contact[]; pageErrors: string[] }> {
   const context = await browser.newContext();
