@@ -86,13 +86,33 @@ export function prepareConfiguredWalletHost() {
   if (window.parent === window || window.parent !== window.top || location.protocol !== 'https:') {
     return Promise.reject(new CmsgError('unauthorized'));
   }
-  return configured<VaultHostConfiguration, {registers: boolean; register(): ReturnType<typeof startWalletHost>; dispose(): Promise<void>}>(
+  return configured<VaultHostConfiguration, {registers: boolean; register(): ReturnType<typeof startWalletHost>; calibrate(): Promise<DeviceForecast | null>; dispose(): Promise<void>}>(
     '/cmsg/vault.json', async configuration => ({
       registers: configuration.registration != null && configuration.wallet_origin === location.origin,
       register: () => startWalletHost(configuration),
+      calibrate: () => calibrateWalletDevice(configuration),
       async dispose() {},
     }),
   );
+}
+
+/** What this device's calibration says about the genesis proof window (kept on this device only). */
+export interface DeviceForecast {
+  class: 'fast' | 'ok' | 'slow' | 'too_slow';
+  predicted_millis: number;
+  window_seconds: number;
+  fits: boolean;
+}
+
+/** Calibrate the browser prover of this deployment when the page is idle (once per circuit version).
+ * Resolves to the forecast, or null when the deployment ships no prover or a real proof took the device first.
+ */
+async function calibrateWalletDevice(configuration: VaultHostConfiguration): Promise<DeviceForecast | null> {
+  if (configuration.registration?.prover == null) return null;
+  const {default: init, VaultHost} = await import('./wasm/cmsg.js');
+  await init();
+  const forecast = await VaultHost.calibrate(JSON.stringify(configuration)) as string | null;
+  return forecast === null ? null : JSON.parse(forecast) as DeviceForecast;
 }
 
 /** Register (or resume) this device in the wallet frame, then serve the member page. */
