@@ -14,6 +14,40 @@ use super::*;
 mod update;
 pub use update::{Applied, Shared};
 
+/// The account actor's prover, lent by the embedder (decision 2026-10-22): a native device
+/// lends its bounded `NativeProver`; a browser lends [`RefusingProver`] until the wasm32
+/// prover lands. The port only answers which prover a proof runs on; the proof itself stays
+/// inside the account vault.
+pub trait AccountProver: Send + Sync {
+    /// The prover of an account open's genesis proof, or the build's honest refusal.
+    fn genesis(&self) -> Result<GenesisProver<'_>>;
+}
+
+/// What a genesis proof runs on. A build without the native prover has no inhabited variant.
+pub enum GenesisProver<'a> {
+    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    Native(&'a ckmg::wallet_engine::native_prover::NativeProver),
+    #[doc(hidden)]
+    None(std::convert::Infallible, std::marker::PhantomData<&'a ()>),
+}
+
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+impl AccountProver for ckmg::wallet_engine::native_prover::NativeProver {
+    fn genesis(&self) -> Result<GenesisProver<'_>> {
+        Ok(GenesisProver::Native(self))
+    }
+}
+
+/// The browser's port until the wasm32 prover (W3) lands: every proof is refused with
+/// `Unavailable` before any vault or network step; nothing is faked.
+pub struct RefusingProver;
+
+impl AccountProver for RefusingProver {
+    fn genesis(&self) -> Result<GenesisProver<'_>> {
+        Err(ErrorCode::Unavailable)
+    }
+}
+
 /// Where the current common checkpoint stands for this member.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "checkpoint", rename_all = "snake_case", deny_unknown_fields)]
@@ -311,6 +345,24 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
     }
 }
 
+/// The answer to `command` from the existing state alone, asked BEFORE any
+/// fresh admission. `Some` means the actor replies without admitting; `None`
+/// means the command needs an admission (it may still be rewritten later, as
+/// `open` resumes as `reopen`).
+#[cfg_attr(
+    not(all(feature = "native-prover", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+pub(super) async fn before_admission<S: Standing>(
+    command: &Command,
+    state: &mut S,
+) -> Option<Answer> {
+    match repeat(command.clone(), state).await {
+        Repeat::Answer(answer) => Some(answer),
+        Repeat::As(_) => None,
+    }
+}
+
 /// The lobby of the community, as far as a join needs it.
 #[cfg_attr(
     not(all(feature = "native-prover", not(target_arch = "wasm32"))),
@@ -472,7 +524,7 @@ mod run {
         pub intents: AccountingIntents,
         pub request_intent: ckmg::IntentAdmission,
         pub rng: G,
-        pub prover: ckmg::wallet_engine::native_prover::NativeProver,
+        pub prover: std::sync::Arc<dyn AccountProver>,
     }
 
     fn clock() -> u64 {
@@ -887,7 +939,7 @@ mod run {
             cvlt::PasskeyRecords<cvlt::TorPasskeyRecord<'static, N>>,
         >,
         device: [u8; 32],
-        prover: ckmg::wallet_engine::native_prover::NativeProver,
+        prover: std::sync::Arc<dyn AccountProver>,
     ) -> super::super::Result<()>
     where
         B: cwst::backend::Backend + 'static,
@@ -1159,6 +1211,14 @@ mod run {
                 }
                 _ => {}
             }
+            // An action the existing state already answers (an ACTIVE account,
+            // or enrolling with a durable pending request) is answered before
+            // any fresh admission: a second admission would bring a credential
+            // that differs from the stored one and is refused.
+            if let Some(answer) = before_admission(&first, &mut account).await {
+                mailbox.reply(Ok(answer));
+                continue;
+            }
             let admission = match admit(
                 &mut membership,
                 &mut policy,
@@ -1204,7 +1264,7 @@ mod run {
                     &mut account,
                     &mut intents,
                     &mut request_intent,
-                    &prover,
+                    &*prover,
                 )
                 .await;
                 match next {
@@ -1256,7 +1316,7 @@ mod run {
         account: &mut CommunityAccount<B, C, E, A, R>,
         intents: &mut AccountingIntents,
         request_intent: &mut ckmg::IntentAdmission,
-        prover: &ckmg::wallet_engine::native_prover::NativeProver,
+        prover: &dyn AccountProver,
     ) -> (Reply, Next)
     where
         B: cwst::backend::Backend,
@@ -1386,7 +1446,7 @@ mod run {
         current: CurrentEnrollment<'p>,
         account: &mut CommunityAccount<B, C, E, A, R>,
         intent: &mut ckmg::IntentAdmission,
-        prover: &ckmg::wallet_engine::native_prover::NativeProver,
+        prover: &dyn AccountProver,
     ) -> Result<u64>
     where
         B: cwst::backend::Backend,
@@ -1516,6 +1576,12 @@ mod tests {
             Err(ErrorCode::Reconcile)
         );
         assert_eq!(steps.commands, [Command::Enroll, Command::Open]);
+    }
+
+    #[test]
+    fn the_browser_port_refuses_every_proof_honestly() {
+        let port: std::sync::Arc<dyn AccountProver> = std::sync::Arc::new(RefusingProver);
+        assert!(matches!(port.genesis(), Err(ErrorCode::Unavailable)));
     }
 
     #[test]
@@ -1650,6 +1716,42 @@ mod tests {
                 checkpoint: Checkpoint::Ready
             }))
         );
+    }
+
+    /// Row 17: a join repeated after activation is answered before the actor
+    /// would admit again, every time with the same result; only an account
+    /// that is not active yet reaches an admission.
+    #[test]
+    fn a_repeat_after_activation_is_answered_before_any_fresh_admission() {
+        let mut active = Fake {
+            active: Some(done()),
+            pending: false,
+            probes: 0,
+        };
+        for command in all().into_iter().filter(|c| !matches!(c, Command::Join(_))) {
+            let first = block(before_admission(&command, &mut active));
+            let again = block(before_admission(&command, &mut active));
+            assert!(first.is_some(), "{command:?} would be admitted again");
+            assert_eq!(first, again);
+            assert_eq!(
+                first,
+                match block(repeat(command, &mut active)) {
+                    Repeat::Answer(answer) => Some(answer),
+                    Repeat::As(_) => None,
+                }
+            );
+        }
+        let mut fresh = Fake {
+            active: None,
+            pending: false,
+            probes: 0,
+        };
+        for command in [Command::Enroll, Command::Open, Command::Reopen, Command::Activate] {
+            assert_eq!(block(before_admission(&command, &mut fresh)), None);
+        }
+        // A join's gates are always asked; they never answer from the state here.
+        let join = all().into_iter().find(|c| matches!(c, Command::Join(_)));
+        assert_eq!(block(before_admission(&join.unwrap(), &mut active)), None);
     }
 
     #[test]

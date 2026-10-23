@@ -12,8 +12,8 @@ use cdht::{
 use cmsh::{
     tor_applications::TorApplications,
     tor_discovery::{
-        TorDiscovery, TorDiscoveryConfig, TorDiscoveryLimits, TorEnvelopeTime, TorNodeIdentity,
-        TorWatcher,
+        TorDialConfig, TorDiscovery, TorDiscoveryConfig, TorDiscoveryLimits, TorEnvelopeTime,
+        TorNodeIdentity, TorWatcher,
     },
     tor_records::{TorRecordLimits, TorRecords},
 };
@@ -318,5 +318,81 @@ impl<I: Identity, W: TorWatcher> Drop for Network<I, W> {
         self.applications.close();
         self.records.transport_lost();
         self.control.close();
+    }
+}
+
+/// Transport capability of a dial-only records client: no CustodyLifetime from a Door
+/// and no advertisement signing, because the client never listens or advertises.
+pub trait ClientIdentity: TorNodeIdentity + 'static {
+    type Clock: ckmg::Clock + 'static;
+    type Authority: ckmg::Authority + 'static;
+    fn transport(&self) -> &Rc<BrowserTor<Self::Clock, Self::Authority>>;
+    fn envelope_time(&self) -> Arc<dyn TorEnvelopeTime>;
+    fn envelope_window(&self) -> TimeWindow;
+}
+
+/// Trusted resource policy of a dial-only client. It stores nothing, serves nothing and
+/// runs no application port, so only lookup and record limits apply.
+pub struct ClientConfiguration {
+    pub discovery: TorDiscoveryLimits,
+    pub records: TorRecordLimits,
+    pub bootstrap: Vec<UnverifiedPeerInfoBytes>,
+    pub maximum_bootstrap_bytes: NonZeroUsize,
+}
+
+/// A dial-only Records client over its own transport: it looks up, reads and writes
+/// records but never claims a listener, never advertises and holds no watch. Dropping it
+/// closes its transport.
+#[must_use = "drop closes the client's Tor transport"]
+pub struct Client<I: ClientIdentity, W: TorWatcher> {
+    transport: Rc<BrowserTor<I::Clock, I::Authority>>,
+    records: Arc<Records<I, W>>,
+}
+impl<I: ClientIdentity, W: TorWatcher + 'static> Client<I, W> {
+    #[allow(clippy::arc_with_non_send_sync)]
+    pub fn new(identity: I, watcher: W, config: ClientConfiguration) -> Result<Self> {
+        let transport = identity.transport().clone();
+        if identity.node_id() != *transport.public_key().value()
+            || config.bootstrap.len() > config.discovery.peers.get()
+        {
+            return Err(ErrorCode::InvalidRequest);
+        }
+        let mut remaining = config.maximum_bootstrap_bytes.get();
+        for entry in &config.bootstrap {
+            remaining = remaining
+                .checked_sub(entry.as_bytes().len())
+                .ok_or(ErrorCode::Capacity)?;
+        }
+        let discovery = Arc::new(
+            TorDiscovery::dial_only(TorDialConfig {
+                messages: transport.messages(),
+                envelope_time: identity.envelope_time(),
+                envelope_window: identity.envelope_window(),
+                identity,
+                verifier: Verifier,
+                bootstrap: config.bootstrap,
+                clock: transport.clock(),
+                limits: config.discovery,
+            })
+            .map_err(|_| ErrorCode::InvalidRequest)?,
+        );
+        let records = Arc::new(
+            TorRecords::new(discovery, watcher, None, config.records)
+                .map_err(|_| ErrorCode::InvalidRequest)?,
+        );
+        Ok(Self { transport, records })
+    }
+    pub fn records(&self) -> &Arc<Records<I, W>> {
+        &self.records
+    }
+    pub fn close(&self) {
+        self.records.transport_lost();
+        self.transport.close();
+    }
+}
+impl<I: ClientIdentity, W: TorWatcher> Drop for Client<I, W> {
+    fn drop(&mut self) {
+        self.records.transport_lost();
+        self.transport.close();
     }
 }

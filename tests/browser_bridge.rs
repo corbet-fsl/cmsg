@@ -13,6 +13,7 @@ fn vault_frame_is_exactly_the_member_subdomain() {
         vault_origin: "https://vault.alpha.example.test".into(),
         vault_url: "https://vault.alpha.example.test/runtime".into(),
         timeout_millis: 10_000,
+        wallet_origin: None,
     };
     assert_eq!(configuration.validate(), Ok(()));
     for origin in [

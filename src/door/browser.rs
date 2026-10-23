@@ -2,6 +2,7 @@
 //! Service addresses are deployment inputs, never action-body overrides.
 use super::*;
 pub mod deployment;
+pub mod registration;
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -51,6 +52,11 @@ pub struct VaultBridgeConfiguration {
     pub vault_origin: String,
     pub vault_url: String,
     pub timeout_millis: u32,
+    /// The deployment's wallet origin (`https://wallet.<base>`): when set, the vault frame
+    /// may be this exact origin for a member page on `<base>` or a subdomain of it (one
+    /// wallet custody frame for every community of the deployment).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallet_origin: Option<String>,
 }
 impl VaultBridgeConfiguration {
     /// Check only deployment shape, never membership or a remote grant.
@@ -58,7 +64,11 @@ impl VaultBridgeConfiguration {
         if self.timeout_millis == 0 {
             return Err(ErrorCode::InvalidRequest);
         }
-        vault_pair(&self.member_origin, &self.vault_origin)?;
+        vault_pair(
+            &self.member_origin,
+            &self.vault_origin,
+            self.wallet_origin.as_deref(),
+        )?;
         let page = url::Url::parse(&self.vault_url).map_err(|_| ErrorCode::InvalidRequest)?;
         if page.origin().ascii_serialization() != self.vault_origin
             || !page.username().is_empty()
@@ -83,6 +93,12 @@ pub struct VaultHostConfiguration {
     /// presence installs restoration, never custody or a readiness assertion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser_tor: Option<deployment::Configuration>,
+    /// The deployment's wallet origin, as in `VaultBridgeConfiguration::wallet_origin`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallet_origin: Option<String>,
+    /// The wallet frame's registration of this device (only with `wallet_origin`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registration: Option<registration::Configuration>,
 }
 
 pub(crate) const BRIDGE_READY: &str = "cmsg.ui.ready.v1";
@@ -119,23 +135,43 @@ pub(crate) fn bridge_contract() -> Value {
         "maximum_unacknowledged_bytes":BRIDGE_MAX_REPLY,"acknowledgement_millis":BRIDGE_ACK_MILLIS})
 }
 
-fn vault_pair(member: &str, vault: &str) -> Result<()> {
+/// The member page and its vault frame. Two shapes are accepted, both https, same port, no
+/// credentials, every comparison exact against the pinned deployment values:
+/// - the community's own vault, `vault.<member host>`;
+/// - the deployment's wallet frame: `vault` equals `wallet` (`https://wallet.<base>`) and the
+///   member host is `<base>` or a subdomain of it, never the wallet host itself.
+fn vault_pair(member: &str, vault: &str, wallet: Option<&str>) -> Result<()> {
     validate_origin(member)?;
     validate_origin(vault)?;
     let member = url::Url::parse(member).map_err(|_| ErrorCode::InvalidRequest)?;
-    let vault = url::Url::parse(vault).map_err(|_| ErrorCode::InvalidRequest)?;
+    let parsed = url::Url::parse(vault).map_err(|_| ErrorCode::InvalidRequest)?;
     if member.scheme() != "https"
-        || vault.scheme() != "https"
-        || member.port_or_known_default() != vault.port_or_known_default()
-        || vault.host_str()
-            != member
-                .host_str()
-                .map(|host| format!("vault.{host}"))
-                .as_deref()
+        || parsed.scheme() != "https"
+        || member.port_or_known_default() != parsed.port_or_known_default()
     {
         return Err(ErrorCode::Unauthorized);
     }
-    Ok(())
+    let member_host = member.host_str().ok_or(ErrorCode::InvalidRequest)?;
+    if parsed.host_str() == Some(format!("vault.{member_host}").as_str()) {
+        return Ok(());
+    }
+    let Some(wallet) = wallet else {
+        return Err(ErrorCode::Unauthorized);
+    };
+    if wallet != vault {
+        return Err(ErrorCode::Unauthorized);
+    }
+    let base = parsed
+        .host_str()
+        .and_then(|host| host.strip_prefix("wallet."))
+        .filter(|base| !base.is_empty())
+        .ok_or(ErrorCode::Unauthorized)?;
+    if member_host != format!("wallet.{base}")
+        && (member_host == base || member_host.ends_with(&format!(".{base}")))
+    {
+        return Ok(());
+    }
+    Err(ErrorCode::Unauthorized)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -331,5 +367,58 @@ impl Configuration {
             door.configure_board(&self.origin, forum, board::SystemClock)?;
         }
         Ok(door)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::vault_pair;
+
+    const WALLET: &str = "https://wallet.toy.test";
+
+    #[test]
+    fn the_community_vault_shape_is_unchanged() {
+        assert!(vault_pair("https://omega.toy.test", "https://vault.omega.toy.test", None).is_ok());
+        assert!(vault_pair(
+            "https://omega.toy.test",
+            "https://vault.omega.toy.test",
+            Some(WALLET)
+        )
+        .is_ok());
+        assert!(vault_pair("https://omega.toy.test", "https://vault.other.toy.test", None).is_err());
+    }
+
+    #[test]
+    fn the_wallet_frame_is_accepted_only_at_the_deployments_exact_wallet_origin() {
+        for member in ["https://toy.test", "https://omega.toy.test", "https://a.b.toy.test"] {
+            assert!(vault_pair(member, WALLET, Some(WALLET)).is_ok(), "{member}");
+            // Without the deployment's wallet origin the frame is refused.
+            assert!(vault_pair(member, WALLET, None).is_err(), "{member}");
+        }
+    }
+
+    #[test]
+    fn every_near_miss_of_the_wallet_shape_is_refused() {
+        let member = "https://omega.toy.test";
+        let refused = |member: &str, vault: &str, wallet: &str| {
+            assert!(vault_pair(member, vault, Some(wallet)).is_err(), "{member} {vault} {wallet}");
+        };
+        // Another port, plain http, or credentials in the frame origin.
+        refused(member, "https://wallet.toy.test:8443", "https://wallet.toy.test:8443");
+        refused("https://omega.toy.test:8443", WALLET, WALLET);
+        refused(member, "http://wallet.toy.test", "http://wallet.toy.test");
+        refused(member, "https://user@wallet.toy.test", "https://user@wallet.toy.test");
+        // A frame origin that is not exactly the deployment's wallet origin.
+        refused(member, "https://wallet.other.test", WALLET);
+        refused(member, "https://wallet.toy.test", "https://wallet.toy.test/");
+        // A member page outside the wallet's base, or a sibling that only shares a suffix.
+        refused("https://other.test", WALLET, WALLET);
+        refused("https://eviltoy.test", WALLET, WALLET);
+        refused("https://toy.test.evil.test", WALLET, WALLET);
+        // The wallet origin as the member page itself.
+        refused(WALLET, WALLET, WALLET);
+        // A wallet origin without the wallet label or with an empty base.
+        refused(member, "https://toy.test", "https://toy.test");
+        refused("https://wallet.", "https://wallet.", "https://wallet.");
     }
 }

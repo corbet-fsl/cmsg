@@ -27,7 +27,7 @@ pub async fn bind_member_account<B, A, R, GB, GC, GE, GA, GR>(
     wiring: AccountWiring,
     global: GlobalPassport<GB, GC, GE, GA, GR>,
     device: [u8; 32],
-    prover: ckmg::wallet_engine::native_prover::NativeProver,
+    prover: std::sync::Arc<dyn super::account::AccountProver>,
 ) -> Result<()>
 where
     B: cwst::backend::Backend + 'static,
@@ -60,7 +60,7 @@ pub async fn bind_member_account_with<B, A, R, GB, GC, GE, GA, GR>(
     policy: cfyr::policy::CurrentPolicy<super::foyer::Transport>,
     global: GlobalPassport<GB, GC, GE, GA, GR>,
     device: [u8; 32],
-    prover: ckmg::wallet_engine::native_prover::NativeProver,
+    prover: std::sync::Arc<dyn super::account::AccountProver>,
 ) -> Result<()>
 where
     B: cwst::backend::Backend + 'static,

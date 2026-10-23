@@ -289,7 +289,7 @@ pub use proven::{ProvenAccount, StagedRequest};
 mod proven {
     //! The proven candidate, the signed request and the durable pending state A/B.
     use super::*;
-    use ckmg::wallet_engine::{account as engine, native_prover::NativeProver};
+    use ckmg::wallet_engine::account as engine;
     use cwlt::account_owner::AccountGenesisProof;
 
     /// The original private candidate after the bounded native proof, still bound
@@ -315,7 +315,7 @@ mod proven {
         pub async fn prove<B, C, E, A, R>(
             mut self,
             account: &mut CommunityAccount<B, C, E, A, R>,
-            prover: &NativeProver,
+            prover: &dyn crate::door::account::AccountProver,
         ) -> Result<ProvenAccount<'p>>
         where
             B: cwst::backend::Backend,
@@ -334,10 +334,16 @@ mod proven {
                 origin,
                 ..
             } = self;
-            let proof = account.vault().await?
-                .prove_community_genesis(candidate, &context, prover, || Ok(now()))
-                .await
-                .map_err(|_| ErrorCode::Unauthorized)?;
+            let proof = match prover.genesis()? {
+                #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+                crate::door::account::GenesisProver::Native(native) => account
+                    .vault()
+                    .await?
+                    .prove_community_genesis(candidate, &context, native, || Ok(now()))
+                    .await
+                    .map_err(|_| ErrorCode::Unauthorized)?,
+                crate::door::account::GenesisProver::None(never, _) => match never {},
+            };
             let mut proven = ProvenAccount {
                 enrollment,
                 proof,

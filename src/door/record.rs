@@ -86,16 +86,7 @@ fn current(
     epoch
         .check_time(checked)
         .map_err(|_| ErrorCode::Unauthorized)?;
-    let pseudonym: [u8; 48] = HEX
-        .decode(member.member.as_bytes())
-        .map_err(|_| ErrorCode::Unauthorized)?
-        .try_into()
-        .map_err(|_| ErrorCode::Unauthorized)?;
-    let owner = B64
-        .decode(cblc::admission::member_id(&pseudonym).as_bytes())
-        .map_err(|_| ErrorCode::Unauthorized)?
-        .try_into()
-        .map_err(|_| ErrorCode::Unauthorized)?;
+    let owner = account_owner(&member.member).ok_or(ErrorCode::Unauthorized)?;
     Ok(CurrentRecord {
         material,
         period,
@@ -334,4 +325,30 @@ where
         .finish_record_epoch(record, proof, operation()?)
         .await
         .map_err(|_| ErrorCode::Unauthorized)
+}
+
+/// The account owner of a member: cblc's member id, SHA-256 of the canonical 48-byte
+/// community pseudonym (lowercase hex, as the lobby and the identity binding name it).
+/// This is the id the accounting ledger and the enrollment roster know the member by.
+pub(super) fn account_owner(pseudonym: &str) -> Option<[u8; 32]> {
+    let pseudonym: [u8; 48] = HEX.decode(pseudonym.as_bytes()).ok()?.try_into().ok()?;
+    B64.decode(cblc::admission::member_id(&pseudonym).as_bytes())
+        .ok()?
+        .try_into()
+        .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_account_owner_is_the_sha256_of_the_48_byte_pseudonym() {
+        let pseudonym = [7u8; 48];
+        let expected: [u8; 32] = Sha256::digest(pseudonym).into();
+        assert_eq!(account_owner(&HEX.encode(&pseudonym)), Some(expected));
+        // A 32-byte id or no hex at all is not a pseudonym.
+        assert_eq!(account_owner(&HEX.encode(&[7u8; 32])), None);
+        assert_eq!(account_owner("not hex"), None);
+    }
 }

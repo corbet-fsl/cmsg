@@ -155,12 +155,15 @@ pub struct VaultHost {
     hello: Closure<dyn FnMut(MessageEvent)>,
     leaving: Closure<dyn FnMut(web_sys::Event)>,
     done: Completion,
+    /// A registration's wallet parts (passport, wallet Door, companion), kept for the frame's
+    /// life and dropped with it, after everything above.
+    retained: Option<super::super::registration::Retained>,
 }
 impl VaultHost {
     /// Trusted Rust composition inside the pinned vault frame. Ceremony results
     /// must enter through original cpky custody, never this public API channel.
     pub fn attach(door: Door, member_origin: String, vault_origin: String) -> Result<Self> {
-        Self::attach_owned(door, member_origin, vault_origin, None)
+        Self::attach_owned(door, member_origin, vault_origin, None, None)
     }
 
     /// Retain the parent's real custody composer inside the same origin-pinned
@@ -171,16 +174,29 @@ impl VaultHost {
         vault_origin: String,
         composer: Box<dyn VaultComposer>,
     ) -> Result<Self> {
-        Self::attach_owned(door, member_origin, vault_origin, Some(composer))
+        Self::attach_owned(door, member_origin, vault_origin, None, Some(composer))
+    }
+
+    /// The deployment's one wallet custody frame (`https://wallet.<base>`) for a member page on
+    /// that base: the frame's actual origin must be exactly the pinned wallet origin.
+    pub fn attach_wallet(
+        door: Door,
+        member_origin: String,
+        wallet_origin: String,
+        composer: Option<Box<dyn VaultComposer>>,
+    ) -> Result<Self> {
+        let wallet = wallet_origin.clone();
+        Self::attach_owned(door, member_origin, wallet_origin, Some(wallet), composer)
     }
 
     fn attach_owned(
         mut door: Door,
         member_origin: String,
         vault_origin: String,
+        wallet_origin: Option<String>,
         composer: Option<Box<dyn VaultComposer>>,
     ) -> Result<Self> {
-        vault_pair(&member_origin, &vault_origin)?;
+        vault_pair(&member_origin, &vault_origin, wallet_origin.as_deref())?;
         let window = window()?;
         if actual_origin()? != vault_origin {
             return Err(ErrorCode::Unauthorized);
@@ -328,6 +344,7 @@ impl VaultHost {
             done: async move { completion.await.map_err(|_| ErrorCode::Reconcile)? }
                 .boxed_local()
                 .shared(),
+            retained: None,
         };
         // Construct the Drop guard before registering either listener: every
         // later setup failure removes both callbacks and drains the real owner.
@@ -401,6 +418,66 @@ impl VaultHost {
         };
         make().map_err(error)
     }
+    /// The deployment's one wallet custody frame: register this device (or resume a half
+    /// registration) with the wallet passkey in this frame's own window, then attach the
+    /// composed community Door for the member page. Call from the frame's own control (the
+    /// first WebAuthn creation needs this frame's activation). Resolves to the attached host.
+    pub fn wallet(configuration: String) -> js_sys::Promise {
+        future_to_promise(async move {
+            let host = Self::wallet_inner(configuration).await.map_err(|e| {
+                // Composer errors never carry secrets; the stage name helps the operator.
+                web_sys::console::warn_1(&JsValue::from_str(&e.to_string()));
+                error(ErrorCode::Unavailable)
+            })?;
+            Ok(JsValue::from(host))
+        })
+    }
+
+    async fn wallet_inner(
+        configuration: String,
+    ) -> std::result::Result<VaultHost, crate::door::composer_core::ComposeError> {
+        use crate::door::composer_core::{ComposeError, DeviceKeys};
+        let refused = |reason: &str| ComposeError::Config(reason.into());
+        if configuration.len() > MAX_BODY_BYTES {
+            return Err(refused("configuration size"));
+        }
+        let config: VaultHostConfiguration =
+            serde_json::from_str(&configuration).map_err(|_| refused("configuration"))?;
+        let (Some(wallet_origin), Some(registration)) = (config.wallet_origin, config.registration)
+        else {
+            return Err(refused("wallet frame configuration"));
+        };
+        if config.runtime.role != Role::Member
+            || config.runtime.origin != wallet_origin
+            || registration.passkey_origin != wallet_origin
+        {
+            return Err(refused("wallet frame origin"));
+        }
+        // The member page and this frame are a pinned wallet pair before any ceremony runs.
+        vault_pair(&config.member_origin, &wallet_origin, Some(&wallet_origin))
+            .map_err(|_| refused("wallet pair"))?;
+        if actual_origin().map_err(|_| refused("frame origin"))? != wallet_origin {
+            return Err(refused("frame origin"));
+        }
+        let context = cfyr::passkeys::Context::new(&registration.passkey_origin, &registration.rp_id)
+            .map_err(|_| refused("passkey context"))?;
+        let mut keys =
+            DeviceKeys::new(cfyr::passkeys::Client::new(context, cfyr::passkeys::browser::Browser));
+        let networks = registration.networks(config.browser_tor.as_ref()).await?;
+        let (door, retained) = super::super::registration::compose_browser_device(
+            &registration,
+            &wallet_origin,
+            &config.runtime.community,
+            &mut keys,
+            networks,
+        )
+        .await?;
+        let mut host = Self::attach_wallet(door, config.member_origin, wallet_origin, None)
+            .map_err(|e| ComposeError::Step("attach", format!("{e:?}")))?;
+        host.retained = Some(retained);
+        Ok(host)
+    }
+
     pub fn dispose(&self) -> js_sys::Promise {
         self.state.close();
         let done = self.done.clone();
