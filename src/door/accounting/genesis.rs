@@ -296,7 +296,7 @@ impl Drop for Attempt<'_> {
 }
 
 /// Operation identifiers for Store commits; random, non-zero, never reused.
-#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+#[cfg(any(all(feature = "native-prover", not(target_arch = "wasm32")), feature = "browser-prover"))]
 pub(super) fn operation() -> Result<[u8; 32]> {
     let mut id = [0u8; 32];
     getrandom::fill(&mut id).map_err(|_| ErrorCode::Unavailable)?;
@@ -306,10 +306,10 @@ pub(super) fn operation() -> Result<[u8; 32]> {
     Ok(id)
 }
 
-#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+#[cfg(any(all(feature = "native-prover", not(target_arch = "wasm32")), feature = "browser-prover"))]
 pub use proven::{ProvenAccount, StagedRequest};
 
-#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+#[cfg(any(all(feature = "native-prover", not(target_arch = "wasm32")), feature = "browser-prover"))]
 mod proven {
     //! The proven candidate, the signed request and the durable pending state A/B.
     use super::*;
@@ -365,6 +365,13 @@ mod proven {
                     .vault()
                     .await?
                     .prove_community_genesis(candidate, &context, native, || Ok(now()))
+                    .await
+                    .map_err(|_| ErrorCode::Unauthorized)?,
+                #[cfg(feature = "browser-prover")]
+                crate::door::account::GenesisProver::Browser(browser) => account
+                    .vault()
+                    .await?
+                    .prove_community_genesis_browser(candidate, &context, browser, || Ok(now()))
                     .await
                     .map_err(|_| ErrorCode::Unauthorized)?,
                 crate::door::account::GenesisProver::None(never, _) => match never {},

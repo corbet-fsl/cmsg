@@ -15,8 +15,9 @@ mod update;
 pub use update::{Applied, Shared};
 
 /// The account actor's prover, lent by the embedder (decision 2026-10-22): a native device
-/// lends its bounded `NativeProver`; a browser lends [`RefusingProver`] until the wasm32
-/// prover lands. The port only answers which prover a proof runs on; the proof itself stays
+/// lends its bounded `NativeProver`; a browser lends its `BrowserProver` (a Web Worker on the
+/// wallet origin, `browser::prover::lend`) and [`RefusingProver`] only while none is
+/// configured. The port only answers which prover a proof runs on; the proof itself stays
 /// inside the account vault.
 pub trait AccountProver: Send + Sync {
     /// The prover of an account open's genesis proof, or the build's honest refusal.
@@ -27,6 +28,9 @@ pub trait AccountProver: Send + Sync {
 pub enum GenesisProver<'a> {
     #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
     Native(&'a ckmg::wallet_engine::native_prover::NativeProver),
+    /// The browser prover: the private input goes to a Web Worker behind the engine's port.
+    #[cfg(feature = "browser-prover")]
+    Browser(&'a ckmg::wallet_engine::browser_prover::BrowserProver),
     #[doc(hidden)]
     None(std::convert::Infallible, std::marker::PhantomData<&'a ()>),
 }
@@ -38,8 +42,16 @@ impl AccountProver for ckmg::wallet_engine::native_prover::NativeProver {
     }
 }
 
-/// The browser's port until the wasm32 prover (W3) lands: every proof is refused with
-/// `Unavailable` before any vault or network step; nothing is faked.
+#[cfg(feature = "browser-prover")]
+impl AccountProver for ckmg::wallet_engine::browser_prover::BrowserProver {
+    fn genesis(&self) -> Result<GenesisProver<'_>> {
+        Ok(GenesisProver::Browser(self))
+    }
+}
+
+/// The port of a build that lends no prover (a browser build whose wallet origin has not
+/// configured the browser prover, see `door::browser::prover::lend`): every proof is refused
+/// with `Unavailable` before any vault or network step; nothing is faked.
 pub struct RefusingProver;
 
 impl AccountProver for RefusingProver {

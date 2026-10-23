@@ -17,3 +17,5 @@ __pycache__/
 
 runtime-metadata.json
 evidence/
+/prover/node_modules/
+/prover/dist/
