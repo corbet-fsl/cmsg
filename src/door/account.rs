@@ -345,6 +345,24 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
     }
 }
 
+/// The answer to `command` from the existing state alone, asked BEFORE any
+/// fresh admission. `Some` means the actor replies without admitting; `None`
+/// means the command needs an admission (it may still be rewritten later, as
+/// `open` resumes as `reopen`).
+#[cfg_attr(
+    not(all(feature = "native-prover", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+pub(super) async fn before_admission<S: Standing>(
+    command: &Command,
+    state: &mut S,
+) -> Option<Answer> {
+    match repeat(command.clone(), state).await {
+        Repeat::Answer(answer) => Some(answer),
+        Repeat::As(_) => None,
+    }
+}
+
 /// The lobby of the community, as far as a join needs it.
 #[cfg_attr(
     not(all(feature = "native-prover", not(target_arch = "wasm32"))),
@@ -1193,6 +1211,14 @@ mod run {
                 }
                 _ => {}
             }
+            // An action the existing state already answers (an ACTIVE account,
+            // or enrolling with a durable pending request) is answered before
+            // any fresh admission: a second admission would bring a credential
+            // that differs from the stored one and is refused.
+            if let Some(answer) = before_admission(&first, &mut account).await {
+                mailbox.reply(Ok(answer));
+                continue;
+            }
             let admission = match admit(
                 &mut membership,
                 &mut policy,
@@ -1690,6 +1716,42 @@ mod tests {
                 checkpoint: Checkpoint::Ready
             }))
         );
+    }
+
+    /// Row 17: a join repeated after activation is answered before the actor
+    /// would admit again, every time with the same result; only an account
+    /// that is not active yet reaches an admission.
+    #[test]
+    fn a_repeat_after_activation_is_answered_before_any_fresh_admission() {
+        let mut active = Fake {
+            active: Some(done()),
+            pending: false,
+            probes: 0,
+        };
+        for command in all().into_iter().filter(|c| !matches!(c, Command::Join(_))) {
+            let first = block(before_admission(&command, &mut active));
+            let again = block(before_admission(&command, &mut active));
+            assert!(first.is_some(), "{command:?} would be admitted again");
+            assert_eq!(first, again);
+            assert_eq!(
+                first,
+                match block(repeat(command, &mut active)) {
+                    Repeat::Answer(answer) => Some(answer),
+                    Repeat::As(_) => None,
+                }
+            );
+        }
+        let mut fresh = Fake {
+            active: None,
+            pending: false,
+            probes: 0,
+        };
+        for command in [Command::Enroll, Command::Open, Command::Reopen, Command::Activate] {
+            assert_eq!(block(before_admission(&command, &mut fresh)), None);
+        }
+        // A join's gates are always asked; they never answer from the state here.
+        let join = all().into_iter().find(|c| matches!(c, Command::Join(_)));
+        assert_eq!(block(before_admission(&join.unwrap(), &mut active)), None);
     }
 
     #[test]
