@@ -108,6 +108,14 @@ pub trait RoomLink: Sized + 'static {
     ) -> RoomFuture<'a, cbrd::JoinsRead> {
         Box::pin(async { Err(LinkError::Rejected) })
     }
+    /// Every member frame the room still holds (sealed), for a member that
+    /// catches up epoch by epoch.
+    fn room_frames<'a, T: clnk::Transport>(
+        _board: &'a cbrd::Board<T, Self>,
+        _room: cmbl::Id,
+    ) -> RoomFuture<'a, cbrd::RoomFrames> {
+        Box::pin(async { Err(LinkError::Rejected) })
+    }
     /// Relay one room secret (an MLS application message) to the room.
     fn relay_room_secret<'a, T: clnk::Transport>(
         _board: &'a cbrd::Board<T, Self>,
@@ -244,6 +252,12 @@ impl<R: clnk::Transport + 'static> RoomLink for clnk::AnonymousRooms<R> {
         key: &'a cbrd::TransportKey,
     ) -> RoomFuture<'a, cbrd::JoinsRead> {
         Box::pin(board.room_joins(room, after, key))
+    }
+    fn room_frames<'a, T: clnk::Transport>(
+        board: &'a cbrd::Board<T, Self>,
+        room: cmbl::Id,
+    ) -> RoomFuture<'a, cbrd::RoomFrames> {
+        Box::pin(board.room_frames(room))
     }
     fn relay_room_secret<'a, T: clnk::Transport>(
         board: &'a cbrd::Board<T, Self>,
