@@ -191,7 +191,8 @@ where
                 .await
                 .map_err(|_| ErrorCode::Refused)?
                 .into_parts();
-            Ok(credential.as_json().clone())
+            // A pairing stamp always carries its own passkey assertion (never the birth grant).
+            Ok(Some(credential.as_json().clone()))
         };
         request_stamp(issuance().await?, wallet, &slots, assertion, &mut rng).await?;
     }
