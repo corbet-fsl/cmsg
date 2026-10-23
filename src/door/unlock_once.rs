@@ -82,6 +82,15 @@ impl DeviceUnlock {
         .map_err(|_| ErrorCode::InvalidRequest)
     }
 
+    /// The wallet passkey's unlock. A resumed start does not hold it: the wallet vault
+    /// and its records (membership index) need the passkey (`Unauthorized`).
+    fn wallet_unlock(&self) -> Result<&cvlt::WalletUnlock> {
+        match &self.held {
+            Held::Ceremony(wallet) => Ok(wallet),
+            Held::Resumed(_) => Err(ErrorCode::Unauthorized),
+        }
+    }
+
     /// Add this community to the wallet's membership index (a record only the wallet
     /// secret locates) and wait for its replication: a restore on a new device finds the
     /// community through it. Idempotent; `Queued` means "ask again", never "proceed".
@@ -92,7 +101,7 @@ impl DeviceUnlock {
         fingerprint: &[u8; 32],
     ) -> Result<cvlt::Outcome> {
         let (mut record, cipher) = self
-            .wallet
+            .wallet_unlock()?
             .index_record(network)
             .map_err(|_| ErrorCode::Unavailable)?;
         let entry = cvlt::MembershipEntry::new(address, *fingerprint)
@@ -109,7 +118,7 @@ impl DeviceUnlock {
         network: N,
     ) -> Result<Option<cvlt::MembershipIndex>> {
         let (mut record, cipher) = self
-            .wallet
+            .wallet_unlock()?
             .index_record(network)
             .map_err(|_| ErrorCode::Unavailable)?;
         cvlt::read_index(&mut record, &cipher)
@@ -413,6 +422,7 @@ mod tests {
             assert!(resumed.community_device(&[2; 32], "orchard").is_ok());
             // Narrower bundle: no wallet vault, no new community without the passkey.
             assert_eq!(resumed.wallet_opening().err(), Some(ErrorCode::Unauthorized));
+            assert_eq!(resumed.wallet_unlock().err(), Some(ErrorCode::Unauthorized));
             assert_eq!(
                 resumed.community_device(&[3; 32], "meadow").err(),
                 Some(ErrorCode::InvalidRequest)
