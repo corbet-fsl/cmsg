@@ -137,7 +137,10 @@ impl Keyring {
         Ok(())
     }
 
-    /// The key held for `owner`, opened for this room only.
+    /// The key held for `owner`, opened for this room only. The read side that
+    /// a room member's private profile will be opened with; tested here, its
+    /// product caller is the room profile read.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(in crate::door) fn open<'k>(
         &self,
         custody: &Custodian<'k>,
