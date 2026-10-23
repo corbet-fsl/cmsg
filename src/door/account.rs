@@ -1874,6 +1874,63 @@ mod tests {
         assert_eq!(steps.commands, [Command::Enroll, Command::Open]);
     }
 
+    // A browser prover over the retained original artifacts (CWLT_NATIVE_PROVER_FIXTURE) and a
+    // worker that answers nothing: only the port's variant is under test here.
+    #[cfg(feature = "browser-prover")]
+    struct NoWorker;
+    #[cfg(feature = "browser-prover")]
+    impl ckmg::wallet_engine::browser_prover::ProofWorker for NoWorker {
+        fn prove<'a>(
+            &'a self,
+            _: &'a str,
+            _: &'a str,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = std::result::Result<String, ckmg::wallet_engine::Error>> + 'a>,
+        > {
+            Box::pin(async { Err(ckmg::wallet_engine::Error::Crypto) })
+        }
+        fn cancel(&self) {}
+    }
+
+    #[cfg(feature = "browser-prover")]
+    #[test]
+    fn a_browser_prover_lends_the_browser_variant_while_the_refusing_port_stays_a_refusal() {
+        use ckmg::wallet_engine::browser_prover::{BrowserProver, BrowserProverConfig, SrsLocation};
+        use sha2::{Digest, Sha256};
+        let directory = std::path::PathBuf::from(
+            std::env::var_os("CWLT_NATIVE_PROVER_FIXTURE")
+                .expect("genuine original retained extension artifact prerequisite"),
+        );
+        let circuit = std::fs::read(directory.join("circuits.json")).unwrap();
+        let verification_key = std::fs::read(directory.join("keys.json")).unwrap();
+        let digest = |bytes: &[u8]| -> [u8; 32] { Sha256::digest(bytes).into() };
+        let prover = BrowserProver::new(
+            BrowserProverConfig {
+                scope: ckmg::wallet_engine::account::GenesisProofScope {
+                    circuit_digest: digest(&circuit),
+                    verifying_key_digest: digest(&verification_key),
+                },
+                program: ckmg::wallet_engine::browser_prover::Program::Update,
+                circuit,
+                verification_key,
+                srs: SrsLocation {
+                    g1_path: "/prover/srs/g1-1048576.dat".into(),
+                    g2_path: "/prover/srs/g2.dat".into(),
+                    points: 1 << 20,
+                },
+                timeout: std::time::Duration::from_secs(240),
+                max_threads: 8,
+            },
+            std::sync::Arc::new(NoWorker),
+        )
+        .unwrap();
+        let port: std::sync::Arc<dyn AccountProver> = std::sync::Arc::new(prover);
+        assert!(matches!(port.genesis(), Ok(GenesisProver::Browser(_))));
+        // The port of a build that lends no prover is unchanged.
+        let refusing: std::sync::Arc<dyn AccountProver> = std::sync::Arc::new(RefusingProver);
+        assert!(matches!(refusing.genesis(), Err(ErrorCode::Unavailable)));
+    }
+
     #[test]
     fn the_browser_port_refuses_every_proof_honestly() {
         let port: std::sync::Arc<dyn AccountProver> = std::sync::Arc::new(RefusingProver);

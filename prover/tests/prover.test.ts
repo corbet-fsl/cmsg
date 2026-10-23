@@ -103,7 +103,7 @@ describe('the browser prover on the wallet origin', () => {
       // Verified by the native backend (barretenberg through the same crate the native prover uses).
       const directory = mkdtempSync(join(tmpdir(), 'cmsg-prover-'));
       writeFileSync(join(directory, 'reply.json'), result.reply);
-      const verdict = execFileSync(need('CMSG_PROVER_VERIFY'), [join(FIXTURE, 'setup.json'), join(directory, 'reply.json'), join(FIXTURE, 'expected.json')], { encoding: 'utf8' });
+      const verdict = execFileSync(need('CMSG_PROVER_VERIFY'), [join(FIXTURE, 'setup.json'), join(directory, 'reply.json'), join(FIXTURE, 'expected.json'), join(ARTIFACT, 'setup')], { encoding: 'utf8' });
       assert.match(verdict, /native verification: verified/);
       // Progress reached the frame host as events, in order, without any value.
       const seen = await events(page);
@@ -211,6 +211,25 @@ describe('the browser prover on the wallet origin', () => {
     } finally {
       harness.control.tamperG2 = false;
       await context.close();
+    }
+  });
+
+  test('on a cross-origin isolated page (test server only) the worker uses threads and proves the same statement', { timeout: 15 * MINUTES, skip: process.env.CMSG_PROVER_THREADS === undefined }, async () => {
+    const isolated = await startHarness({ dist: DIST, setupDir: join(ARTIFACT, 'setup'), isolated: true });
+    const { context, page, contacts, pageErrors } = await open(isolated);
+    try {
+      assert.equal(await page.evaluate(() => (window as unknown as { prover: { isolated: boolean } }).prover.isolated), true);
+      const result = await prove(page);
+      assert.deepEqual(pageErrors, []);
+      assert.ok(result.ok, JSON.stringify(result));
+      const reply = JSON.parse(result.reply) as { verified: boolean; public_inputs: string[] };
+      assert.equal(reply.verified, true);
+      assert.deepEqual(reply.public_inputs, expected);
+      assert.ok(((await events(page)).find((e) => e.stage === 'prove')?.threads ?? 0) > 1, 'more than one thread');
+      assert.deepEqual([...new Set(contacts.map((c) => c.origin))], [isolated.origin]);
+    } finally {
+      await context.close();
+      await isolated.close();
     }
   });
 
