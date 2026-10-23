@@ -9,7 +9,7 @@
 //! verification is refused for good and leaves the state untouched, and a
 //! room this device cannot follow is reported as a typed [`RoomSync`] status.
 //! No new frame kind and no new key exist for this.
-use super::group_custody::RoomAdmitTask;
+use super::group_custody::{RemoveStep, RoomAdmitTask, RoomRemoveTask};
 use super::*;
 use cbrd::cgrp;
 use std::collections::BTreeSet;
@@ -69,6 +69,9 @@ pub struct RoomSynced {
     pub sync: RoomSync,
     /// The newcomers this call admitted or applied and the epoch each led to.
     pub joined: Vec<(String, u64)>,
+    /// The members this call removed (committed or applied) after they announced
+    /// their own leave.
+    pub left: Vec<String>,
     /// This device's epoch changed during the call.
     pub advanced: bool,
 }
@@ -120,52 +123,117 @@ where
         let (mut admitted, mut caught_up, mut refused) = (0, 0, 0);
         let (mut pending, mut raced) = (false, false);
         let mut joined = vec![];
+        let me = self.own_member().to_owned();
+        let mut left = vec![];
         for _ in 0..MAX_ROOM_APPLY {
             let transport = self.room_transport_key(group).await?;
             let epoch = self.room_keys_standing(group).await?.epoch;
-            let Some((position, join)) = next_join(&frames, &room, &transport, epoch, |sequence| {
+            let Some(next) = next_step(&frames, &room, &transport, epoch, &me, true, |sequence| {
                 refused_set.contains(&(room, frames.ordering, sequence))
             }) else {
                 break;
             };
-            let context = context_after(&frames, position, &room, &transport, epoch);
-            let frame = cbrd::JoinFrame {
-                ordering: frames.ordering,
-                counter: frames.frames[position].counter,
-                commit: join.commit,
-                companion: join.companion,
-            };
+            let position = next.position();
             let sequence = frames.frames[position].sequence;
-            let step = RoomAdmitTask {
-                room,
-                group,
-                frame: &frame,
-                max_groups,
-                transport: &transport,
-                policy,
-            };
-            let done = match &context {
-                Some(context) => self.catch_up_room(board, step, context).await,
-                None => self.admit_room(board, step).await,
+            // Whether this device orders a new commit in this step (and may lose
+            // the race to another member that did first).
+            let (done, committing) = match next {
+                Next::Join { join, .. } => {
+                    let context = context_after(&frames, position, &room, &transport, epoch);
+                    let frame = cbrd::JoinFrame {
+                        ordering: frames.ordering,
+                        counter: frames.frames[position].counter,
+                        commit: join.commit,
+                        companion: join.companion,
+                    };
+                    let step = RoomAdmitTask {
+                        room,
+                        group,
+                        frame: &frame,
+                        max_groups,
+                        transport: &transport,
+                        policy,
+                    };
+                    let done = match &context {
+                        Some(context) => self.catch_up_room(board, step, context).await,
+                        None => self.admit_room(board, step).await,
+                    };
+                    if done.is_ok() {
+                        if context.is_some() {
+                            caught_up += 1;
+                        } else {
+                            admitted += 1;
+                        }
+                        // The newcomer's hand-over can only be from this epoch on.
+                        if let (Some(companion), Ok(standing)) = (
+                            cbrd::RoomCompanion::decode(&frame.companion),
+                            self.room_keys_standing(group).await,
+                        ) {
+                            joined.push((companion.request.actor, standing.epoch));
+                        }
+                    }
+                    (done.map(|_| ()), context.is_none())
+                }
+                Next::Removal {
+                    commit, companion, ..
+                } => {
+                    let done = self
+                        .remove_room(
+                            board,
+                            RoomRemoveTask {
+                                room,
+                                group,
+                                companion: &companion,
+                                max_groups,
+                                transport: &transport,
+                                policy,
+                                step: RemoveStep::Apply { commit: &commit },
+                            },
+                        )
+                        .await;
+                    if done.is_ok() {
+                        caught_up += 1;
+                        left.extend(leaver_of(&companion));
+                    }
+                    (done.map(|_| ()), false)
+                }
+                Next::Notice { companion, .. } => {
+                    // The counter in force: the room's latest ordered commit.
+                    let expected = frames
+                        .frames
+                        .iter()
+                        .map(|frame| frame.counter)
+                        .max()
+                        .unwrap_or_default();
+                    let done = self
+                        .remove_room(
+                            board,
+                            RoomRemoveTask {
+                                room,
+                                group,
+                                companion: &companion,
+                                max_groups,
+                                transport: &transport,
+                                policy,
+                                step: RemoveStep::Commit {
+                                    ordering: frames.ordering,
+                                    expected,
+                                },
+                            },
+                        )
+                        .await;
+                    if done.is_ok() {
+                        admitted += 1;
+                        left.extend(leaver_of(&companion));
+                    }
+                    (done.map(|_| ()), true)
+                }
             };
             match done {
-                Ok(_) => {
-                    if context.is_some() {
-                        caught_up += 1;
-                    } else {
-                        admitted += 1;
-                    }
-                    // The newcomer's hand-over can only be from this epoch on.
-                    if let (Some(companion), Ok(standing)) = (
-                        cbrd::RoomCompanion::decode(&frame.companion),
-                        self.room_keys_standing(group).await,
-                    ) {
-                        joined.push((companion.request.actor, standing.epoch));
-                    }
-                }
-                // Another member's context commit may have been ordered first:
-                // read the room once more, then apply it instead.
-                Err(Fail::Reconcile | Fail::Storage) if context.is_none() && !raced => {
+                Ok(()) => {}
+                // Another member's commit may have been ordered first: read the
+                // room once more, then apply it instead.
+                Err(Fail::Reconcile | Fail::Storage) if committing && !raced => {
                     raced = true;
                     frames = L::room_frames(board, room).await.map_err(|__cause| {
                         crate::door::cause::emit(
@@ -203,7 +271,7 @@ where
             let transport = self.room_transport_key(group).await?;
             // A join made for the epoch this device holds exists but failed
             // verification here: this device cannot move on from the room.
-            let blocked = next_join(&frames, &room, &transport, end, |sequence| {
+            let blocked = next_step(&frames, &room, &transport, end, &me, false, |sequence| {
                 !refused_set.contains(&(room, frames.ordering, sequence))
             })
             .is_some();
@@ -222,6 +290,7 @@ where
             refused,
             sync,
             joined,
+            left,
             advanced,
         })
     }
@@ -230,15 +299,60 @@ where
 /// The most joins one call applies (each moves the epoch on by two).
 const MAX_ROOM_APPLY: usize = 64;
 
+/// What the room asks of this device at the epoch it holds.
+enum Next {
+    /// A newcomer's external commit made for exactly this epoch.
+    Join { position: usize, join: cbrd::OrderedCommit },
+    /// A member commit made for exactly this epoch that removes a leaver (its
+    /// companion is the leaver's signed Groups `Leave`).
+    Removal {
+        position: usize,
+        commit: Vec<u8>,
+        companion: Vec<u8>,
+    },
+    /// A member's leave notice with no removal commit after it yet: this device
+    /// may commit the removal.
+    Notice { position: usize, companion: Vec<u8> },
+}
+
+impl Next {
+    fn position(&self) -> usize {
+        match self {
+            Next::Join { position, .. }
+            | Next::Removal { position, .. }
+            | Next::Notice { position, .. } => *position,
+        }
+    }
+}
+
+/// The member who announced the leave a companion carries.
+fn leaver_of(companion: &[u8]) -> Option<String> {
+    cbrd::RoomCompanion::decode(companion).map(|decoded| decoded.request.actor)
+}
+
 /// The first frame, oldest first, that opens under the key of the epoch this
-/// device holds as a newcomer's external commit made for exactly that epoch.
-fn next_join(
+/// device holds as a join or removal made for exactly that epoch, or as a leave
+/// notice nobody has removed yet. A device never acts on its own notice.
+fn next_step(
     frames: &cbrd::RoomFrames,
     room: &[u8; 16],
     key: &cbrd::TransportKey,
     epoch: u64,
+    me: &str,
+    notices: bool,
     refused: impl Fn(u64) -> bool,
-) -> Option<(usize, cbrd::OrderedCommit)> {
+) -> Option<Next> {
+    let removed_later = |from: usize, leaver: &str| {
+        frames.frames[from + 1..].iter().any(|frame| {
+            matches!(
+                frame.open(room, key),
+                Some(cbrd::FrameContent::Commit(ref commit))
+                    if cthr::wire_epoch(&commit.commit).ok() == Some(epoch)
+                        && leaver_of(&commit.companion).as_deref() == Some(leaver)
+                        && cbrd::RoomCompanion::is_leave(&commit.companion)
+            )
+        })
+    };
     frames
         .frames
         .iter()
@@ -248,11 +362,27 @@ fn next_join(
                 return None;
             }
             match frame.open(room, key)? {
-                cbrd::FrameContent::Commit(join)
-                    if !join.companion.is_empty()
-                        && cthr::wire_epoch(&join.commit).ok() == Some(epoch) =>
+                cbrd::FrameContent::Commit(commit)
+                    if !commit.companion.is_empty()
+                        && cthr::wire_epoch(&commit.commit).ok() == Some(epoch) =>
                 {
-                    Some((position, join))
+                    Some(if cbrd::RoomCompanion::is_leave(&commit.companion) {
+                        Next::Removal {
+                            position,
+                            commit: commit.commit,
+                            companion: commit.companion,
+                        }
+                    } else {
+                        Next::Join {
+                            position,
+                            join: commit,
+                        }
+                    })
+                }
+                cbrd::FrameContent::Notice(companion) => {
+                    let leaver = leaver_of(&companion)?;
+                    (notices && leaver != me && !removed_later(position, &leaver))
+                        .then_some(Next::Notice { position, companion })
                 }
                 _ => None,
             }

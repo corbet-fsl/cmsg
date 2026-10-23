@@ -99,6 +99,30 @@ pub trait RoomLink: Sized + 'static {
     {
         Box::pin(async { Err(ctnd::Error::Unavailable) })
     }
+    /// Remove a member who announced its own leave; see `cbrd::Board::remove_room`.
+    fn remove_room<'a, T, K, B, S, A, C>(
+        _board: &'a cbrd::Board<T, Self>,
+        _input: cbrd::RoomRemoveInput<'a, K, B, S, A, C>,
+    ) -> JoinFuture<'a, cbrd::RoomAdmitted>
+    where
+        T: clnk::Transport,
+        K: cthr::keys::Custody,
+        B: cwst::backend::Backend,
+        S: cbrd::cgrp::PolicySource,
+        A: cbrd::cgrp::Authority,
+        C: ckmg::Clock,
+    {
+        Box::pin(async { Err(ctnd::Error::Unavailable) })
+    }
+    /// Relay a member's leave notice (its signed Groups `Leave`) to the room.
+    fn relay_room_notice<'a, T: clnk::Transport>(
+        _board: &'a cbrd::Board<T, Self>,
+        _room: cmbl::Id,
+        _key: &'a cbrd::TransportKey,
+        _companion: &'a cbrd::RoomCompanion,
+    ) -> RoomFuture<'a, ()> {
+        Box::pin(async { Err(LinkError::Rejected) })
+    }
     /// The newcomers' ordered external commits after relay sequence `after`.
     fn room_joins<'a, T: clnk::Transport>(
         _board: &'a cbrd::Board<T, Self>,
@@ -266,6 +290,28 @@ impl<R: clnk::Transport + 'static> RoomLink for clnk::AnonymousRooms<R> {
         message: &'a [u8],
     ) -> RoomFuture<'a, ()> {
         Box::pin(board.relay_room_secret(room, key, message))
+    }
+    fn remove_room<'a, T, K, B, S, A, C>(
+        board: &'a cbrd::Board<T, Self>,
+        input: cbrd::RoomRemoveInput<'a, K, B, S, A, C>,
+    ) -> JoinFuture<'a, cbrd::RoomAdmitted>
+    where
+        T: clnk::Transport,
+        K: cthr::keys::Custody,
+        B: cwst::backend::Backend,
+        S: cbrd::cgrp::PolicySource,
+        A: cbrd::cgrp::Authority,
+        C: ckmg::Clock,
+    {
+        Box::pin(board.remove_room(input))
+    }
+    fn relay_room_notice<'a, T: clnk::Transport>(
+        board: &'a cbrd::Board<T, Self>,
+        room: cmbl::Id,
+        key: &'a cbrd::TransportKey,
+        companion: &'a cbrd::RoomCompanion,
+    ) -> RoomFuture<'a, ()> {
+        Box::pin(board.relay_room_notice(room, key, companion))
     }
     fn room_secrets<'a, T: clnk::Transport>(
         board: &'a cbrd::Board<T, Self>,
