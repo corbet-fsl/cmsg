@@ -48,8 +48,6 @@ mod pairing_flow;
 pub mod pairing_host;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pairing_onion;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod pairing_onion;
 pub mod pairing_publish;
 pub mod pairing_roles;
 pub mod passport;
