@@ -28,6 +28,9 @@ pub enum CheckpointAcquisition<'p> {
 pub struct CurrentEnrollment<'p> {
     enrolled: SubmittedEnrollment<'p>,
     publication: enrollment::EnrollmentPublication,
+    /// End of the genesis proof window that began in this publication's slot, or 0
+    /// before a genesis was prepared. Only a genesis may outlive its slot.
+    grace: u64,
     failed: bool,
 }
 
@@ -36,8 +39,9 @@ fn verify(
     current: &CurrentAdmission,
     cohort: &Cohort,
     own: &enrollment::EnrollmentEntry,
+    grace: u64,
 ) -> Result<(enrollment::EnrollmentTree, Option<usize>)> {
-    let tree = verify_tree(publication, current, cohort)?;
+    let tree = verify_tree(publication, current, cohort, grace)?;
     let index = tree
         .entries()
         .iter()
@@ -55,10 +59,14 @@ fn verify(
 
 /// The complete current publication verified at `current`: slot, community, policy,
 /// signature, every delegation and the canonical tree. No member position.
+/// `grace` is the end of a genesis proof window that began in this slot (0 for
+/// every other use): the publication stays usable until the later of the slot end
+/// and that window end, because a genesis gets its full window from its start.
 fn verify_tree(
     publication: &enrollment::EnrollmentPublication,
     current: &CurrentAdmission,
     cohort: &Cohort,
+    grace: u64,
 ) -> Result<enrollment::EnrollmentTree> {
     let period = current.material.policy.checkpoint_period_seconds;
     let start = publication
@@ -76,7 +84,7 @@ fn verify_tree(
         || publication.not_before != start
         || publication.expires_at != end
         || current.now < start
-        || current.now >= end
+        || current.now >= end.max(grace)
     {
         return Err(ErrorCode::Unauthorized);
     }
@@ -125,10 +133,11 @@ fn final_cut(
     admission: &mut AccountAdmission<'_>,
     checked: &CurrentAdmission,
     publication: &enrollment::EnrollmentPublication,
+    grace: u64,
 ) -> Result<u64> {
     let completed = admission.current()?;
     if completed.now < checked.now
-        || completed.now >= publication.expires_at
+        || completed.now >= publication.expires_at.max(grace)
         || completed.material != checked.material
         || completed.material_digest != checked.material_digest
         || completed.grant != checked.grant
@@ -136,15 +145,6 @@ fn final_cut(
         return Err(ErrorCode::Unauthorized);
     }
     Ok(completed.now)
-}
-
-/// Whether less than half of the publication's checkpoint slot remains at `now`.
-/// Open proves, signs and sends over this slot and is refused once it ends; started
-/// late it rarely finishes in time, so the member waits for the next slot instead
-/// (the registered delegation stays and is read again from the next publication).
-fn late_in_slot(publication: &enrollment::EnrollmentPublication, now: u64) -> bool {
-    let half = publication.expires_at.saturating_sub(publication.not_before) / 2;
-    now.saturating_add(half) > publication.expires_at
 }
 
 impl<'p> SubmittedEnrollment<'p> {
@@ -178,9 +178,12 @@ impl<'p> SubmittedEnrollment<'p> {
             &current,
             &self.prepared.admission.cohort,
             &self.entry,
+            0,
         )?;
-        final_cut(&mut self.prepared.admission, &current, &publication)?;
-        if selected.is_none() || late_in_slot(&publication, current.now) {
+        final_cut(&mut self.prepared.admission, &current, &publication, 0)?;
+        // A genesis gets its full proof window from its start, also across the end of
+        // this slot, so a late start is no reason to wait for the next slot.
+        if selected.is_none() {
             return Ok(CheckpointAcquisition::Pending {
                 eligible_at: publication.expires_at,
                 enrollment: self,
@@ -189,6 +192,7 @@ impl<'p> SubmittedEnrollment<'p> {
         let mut result = CurrentEnrollment {
             enrolled: self,
             publication,
+            grace: 0,
             failed: false,
         };
         result.with_current(|_, _, _, _| ())?;
@@ -197,9 +201,10 @@ impl<'p> SubmittedEnrollment<'p> {
 }
 
 impl<'p> CurrentEnrollment<'p> {
-    /// End of the checkpoint slot this enrollment (and a proof over it) is bound to.
-    pub fn slot_end(&self) -> u64 {
-        self.publication.expires_at
+    /// Let this enrollment outlive its checkpoint slot until `until`, the end of the genesis
+    /// proof window that began in it. Never shortens a window already granted.
+    pub(super) fn extend_to(&mut self, until: u64) {
+        self.grace = self.grace.max(until);
     }
 
     /// The device authorization signed with the delegation, unchanged.
@@ -234,30 +239,48 @@ impl CurrentEnrollment<'_> {
         let publication: Option<enrollment::EnrollmentPublication> =
             serde_json::from_value(response).map_err(|_| ErrorCode::Reconcile)?;
         let publication = publication.ok_or(ErrorCode::Unauthorized)?;
-        if publication.signature != self.publication.signature
-            || publication
+        let current = self.enrolled.prepared.admission.current()?;
+        let same = publication.signature == self.publication.signature
+            && publication
                 .signing_bytes()
                 .map_err(|_| ErrorCode::Unauthorized)?
-                != self
+                == self
                     .publication
                     .signing_bytes()
-                    .map_err(|_| ErrorCode::Unauthorized)?
-        {
-            return Err(ErrorCode::Unauthorized);
+                    .map_err(|_| ErrorCode::Unauthorized)?;
+        if same {
+            let (_, index) = verify(
+                &publication,
+                &current,
+                &self.enrolled.prepared.admission.cohort,
+                &self.enrolled.entry,
+                self.grace,
+            )?;
+            index.ok_or(ErrorCode::Unauthorized)?;
+            final_cut(
+                &mut self.enrolled.prepared.admission,
+                &current,
+                &publication,
+                self.grace,
+            )?;
+        } else {
+            // The operator moved on to a later slot while a genesis proved inside its
+            // window. The proof stays bound to the retained original publication (the
+            // operator keeps every slot's checkpoint), so the newer one is only checked
+            // as an authentic later publication of the same community; it replaces
+            // nothing. Outside such a window a different publication still refuses.
+            if self.grace == 0
+                || publication.slot <= self.publication.slot
+                || publication.community_id != current.trust.community_id
+                || publication.policy_digest != current.trust.policy_digest
+                || current.now >= self.grace
+            {
+                return Err(ErrorCode::Unauthorized);
+            }
+            publication
+                .verify_signature(&current.material.account_response_key)
+                .map_err(|_| ErrorCode::Unauthorized)?;
         }
-        let current = self.enrolled.prepared.admission.current()?;
-        let (_, index) = verify(
-            &publication,
-            &current,
-            &self.enrolled.prepared.admission.cohort,
-            &self.enrolled.entry,
-        )?;
-        index.ok_or(ErrorCode::Unauthorized)?;
-        final_cut(
-            &mut self.enrolled.prepared.admission,
-            &current,
-            &publication,
-        )?;
         self.failed = false;
         Ok(())
     }
@@ -311,12 +334,14 @@ impl CurrentEnrollment<'_> {
             &current,
             &self.enrolled.prepared.admission.cohort,
             &self.enrolled.entry,
+            self.grace,
         )?;
         let index = index.ok_or(ErrorCode::Unauthorized)?;
         final_cut(
             &mut self.enrolled.prepared.admission,
             &current,
             &self.publication,
+            self.grace,
         )?;
         let output = inspect(&self.publication, &tree, index, &current);
         let completed = self.enrolled.prepared.admission.current()?;
@@ -328,11 +353,13 @@ impl CurrentEnrollment<'_> {
             &completed,
             &self.enrolled.prepared.admission.cohort,
             &self.enrolled.entry,
+            self.grace,
         )?;
         let completed_at = final_cut(
             &mut self.enrolled.prepared.admission,
             &completed,
             &self.publication,
+            self.grace,
         )?;
         self.failed = false;
         Ok((output, completed_at))
@@ -375,7 +402,7 @@ impl AccountAdmission<'_> {
             serde_json::from_value(response).map_err(|_| ErrorCode::Reconcile)?;
         let publication = publication.ok_or(ErrorCode::Unavailable)?;
         let current = self.current()?;
-        let tree = verify_tree(&publication, &current, &self.cohort)?;
+        let tree = verify_tree(&publication, &current, &self.cohort, 0)?;
         if !tree
             .entries()
             .iter()
@@ -384,41 +411,13 @@ impl AccountAdmission<'_> {
             return Err(ErrorCode::Unavailable);
         }
         let rows = roster_rows(&tree)?;
-        final_cut(self, &current, &publication)?;
-        let checkpoint = ckmg::wallet_engine::account::Checkpoint::from_rows(publication.root, rows)
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        final_cut(self, &current, &publication, 0)?;
+        let checkpoint =
+            ckmg::wallet_engine::account::Checkpoint::from_rows(publication.root, rows)
+                .map_err(|_| ErrorCode::Unauthorized)?;
         Ok(VerifiedRoster {
             checkpoint: std::sync::Arc::new(checkpoint),
             expires_at: publication.expires_at,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn slot(not_before: u64, expires_at: u64) -> enrollment::EnrollmentPublication {
-        enrollment::EnrollmentPublication {
-            version: 1,
-            domain: String::new(),
-            community_id: String::new(),
-            policy_digest: String::new(),
-            slot: 0,
-            not_before,
-            expires_at,
-            root: [0; 32],
-            delegations: Vec::new(),
-            signature: String::new(),
-        }
-    }
-
-    #[test]
-    fn open_waits_for_the_next_slot_in_the_second_half_of_a_slot() {
-        let publication = slot(1_000, 1_300);
-        assert!(!late_in_slot(&publication, 1_000));
-        assert!(!late_in_slot(&publication, 1_150));
-        assert!(late_in_slot(&publication, 1_151));
-        assert!(late_in_slot(&publication, 1_299));
     }
 }

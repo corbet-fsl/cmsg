@@ -13,7 +13,22 @@ pub struct PreparedAccount<'p> {
     material: cblc::publication::PublicVerifierMaterial,
     material_digest: [u8; 32],
     origin: String,
+    /// Seconds of the proof window left when this candidate was prepared, by the
+    /// authenticated time of the preparation: the code window, cut by the rate window.
+    window: u64,
     failed: bool,
+}
+
+/// Seconds a genesis prepared at `now` may take: the code window from its own start, cut by
+/// the end of the rate window containing `now` (the statement horizon, pinned by the
+/// proof circuit). A proof that outlives the rate window is an overrun; the fresh
+/// preparation then starts in the new window and so has the full code window.
+pub(super) fn proof_window(policy: &cblc::accounting::AccountPolicy, now: u64) -> Result<u64> {
+    Ok(policy
+        .proof_valid_until(now)
+        .map_err(|_| ErrorCode::Unauthorized)?
+        .saturating_sub(now)
+        .min(cblc::accounting::GENESIS_PROOF_WINDOW_SECONDS))
 }
 
 fn hex<const N: usize>(value: &str) -> Result<[u8; N]> {
@@ -146,16 +161,21 @@ impl<'p> CurrentEnrollment<'p> {
                     .vouchee_bond()
             })
             .map(|(sponsor, secret)| VoucherBond { sponsor, secret });
-        let (context, material, material_digest, origin, checked) =
+        let (context, material, material_digest, origin, checked, window) =
             self.with_verified(|publication, tree, index, current| {
+                // The proof window of this genesis: the code window from its own start
+                // (also across the end of the checkpoint slot), cut by the rate window.
+                let window = proof_window(&current.material.policy.account, current.now)?;
                 Ok::<_, ErrorCode>((
                     context(publication, tree, index, current, None, bond.clone())?,
                     current.material.clone(),
                     current.material_digest,
                     current.origin.clone(),
                     current.now,
+                    window,
                 ))
             })??;
+        self.extend_to(checked.saturating_add(window));
         account.check(&origin).await?;
         let candidate = account
             .vault()
@@ -170,6 +190,7 @@ impl<'p> CurrentEnrollment<'p> {
             material,
             material_digest,
             origin,
+            window,
             failed: false,
         };
         prepared.refresh(account).await?;
@@ -178,6 +199,12 @@ impl<'p> CurrentEnrollment<'p> {
 }
 
 impl PreparedAccount<'_> {
+    /// Seconds of proof window this genesis had when it was prepared. The caller
+    /// measures them with its own monotonic elapsed time, never against its clock.
+    pub fn window(&self) -> u64 {
+        self.window
+    }
+
     /// Reobserve the original HTTPS enrollment and local durable key without
     /// replacing the private candidate, common root, artifact group or policy.
     /// Cancellation or any refusal permanently consumes this preparation.
@@ -525,6 +552,50 @@ mod proven {
                 .await
                 .map_err(|_| ErrorCode::Reconcile)?;
             Ok(response.acceptance().accepted_at)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn policy(rate_window: u64) -> cblc::accounting::AccountPolicy {
+        cblc::accounting::AccountPolicy {
+            initial_credit: 3,
+            maximum_available: 4,
+            outgoing_reservation: 1,
+            incoming_reservation: 1,
+            policy_revision: 1,
+            policy_valid_from: 1,
+            policy_valid_until: 100_000,
+            newcomer_period: 100,
+            rate_window,
+            newcomer_admissions: 2,
+            maximum_admissions: 4,
+            refill_period: 100,
+            refill_units: 1,
+            abandon_after: rate_window,
+        }
+    }
+
+    #[test]
+    fn a_genesis_gets_its_full_window_from_its_start_unless_the_rate_window_ends_first() {
+        let w = cblc::accounting::GENESIS_PROOF_WINDOW_SECONDS;
+        let policy = policy(600);
+        // 10 s before a 300 s slot end, mid rate window: the full window, across the slot.
+        assert_eq!(proof_window(&policy, 290).unwrap(), w);
+        // Just after a rate window starts: the full window.
+        assert_eq!(proof_window(&policy, 600).unwrap(), w);
+        // Close to the end of the rate window the horizon cuts it: an overrun that
+        // re-prepares in the next window, where the window is whole again.
+        assert_eq!(proof_window(&policy, 590).unwrap(), 10);
+        assert_eq!(proof_window(&policy, 600).unwrap(), w);
+        // A rate window of at least twice the code window always leaves a whole window
+        // at some start within one code window of any boundary.
+        for now in 600..1200 {
+            let window = proof_window(&policy, now).unwrap();
+            assert!(window > 0 && window <= w);
         }
     }
 }

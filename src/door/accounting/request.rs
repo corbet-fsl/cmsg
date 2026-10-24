@@ -430,10 +430,6 @@ impl<'p> CurrentEnrollment<'p> {
             return Err(ErrorCode::Unauthorized);
         }
         let authorization = self.authorization().clone();
-        // The operator accepts a genesis only within the checkpoint slot of its
-        // proof; a request never outlives that slot, so an elapsed state A becomes
-        // discardable at the slot end instead of a full window later.
-        let slot_end = self.slot_end();
         let current = self.with_verified(|publication, tree, index, current| {
             let row = tree.entries().get(index).ok_or(ErrorCode::Unauthorized)?;
             let owner: [u8; 32] = B64
@@ -457,7 +453,7 @@ impl<'p> CurrentEnrollment<'p> {
             Ok(Snapshot {
                 grant: current.grant.clone(),
                 origin: current.origin.clone(),
-                expires: current.expires.min(slot_end),
+                expires: current.expires,
                 now: current.now,
                 max_authorization: cblc::accounting::GENESIS_PROOF_WINDOW_SECONDS,
                 extension_policy: current.material.extension_policy.clone(),
