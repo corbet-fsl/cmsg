@@ -3,11 +3,11 @@
 //! key proves possession. No community passkey is created; the key then opens sessions
 //! silently (`open_device_session`).
 use super::{
+    ErrorCode, Result,
     custody::SystemClock,
     foyer::Transport,
     passport::GlobalPassport,
     stamp::{pending_request, request_stamp, resend_stamp},
-    ErrorCode, Result,
 };
 use cfyr::Foyer;
 use ckmg::{Authority, Clock, Entropy};
@@ -16,50 +16,48 @@ use cwlt::passport::{
     self, ActionKind, AuthenticatedCommunity, CommunityId, PayloadDigest, StampAction, StampSalt,
     StampScope,
 };
-use serde_json::{json, Value};
-use sha2::{Digest as _, Sha256};
+use serde_json::{Value, json};
 use std::future::Future;
 
 fn now() -> u64 {
     SystemClock.now().unwrap_or(u64::MAX)
 }
 
-/// Domain tag of the message whose device signature derives a stamp salt: ckmg's fixed
-/// `DevicePurpose::SaltDerivation` tag, which the device signer prepends itself.
-pub const SALT_TAG: &[u8] = ckmg::DevicePurpose::SaltDerivation.tag();
-
 /// Label that separates the lineage-genesis slot's salt from the join slot's salt (whose
 /// label is empty), so the published genesis salt reveals nothing about the join's.
 pub const GENESIS_SALT_LABEL: &[u8] = b"lineage-genesis";
 
-/// The device key's signature over `payload` for one fixed purpose; the signer prepends the
-/// purpose's domain tag (before activation `cvlt::UnenrolledInitial::sign_device`).
+/// What the device key is asked for: its signature over `payload` in one typed format (the
+/// signer prepends the format's tag), or the stamp salt over `payload` (32 bytes, derived and
+/// hashed inside ckmg, so no signature over the salt message ever leaves it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeviceUse {
+    /// A signature over `tag() || payload`.
+    Sign(ckmg::DeviceFormat),
+    /// The stamp salt `ckmg` derives from `payload`.
+    Salt,
+}
+
+/// The device key's signature or stamp salt over `payload` (before activation
+/// `cvlt::UnenrolledInitial::sign_device` / `device_salt`).
 pub trait DeviceSign {
-    /// Sign `payload` under `purpose`'s tag.
-    fn sign(
-        &mut self,
-        purpose: ckmg::DevicePurpose,
-        payload: Vec<u8>,
-    ) -> impl Future<Output = Result<Vec<u8>>>;
+    /// Sign `payload` under the format's tag, or derive its stamp salt.
+    fn sign(&mut self, what: DeviceUse, payload: Vec<u8>) -> impl Future<Output = Result<Vec<u8>>>;
 }
 impl<S, SFut> DeviceSign for S
 where
-    S: FnMut(ckmg::DevicePurpose, Vec<u8>) -> SFut,
+    S: FnMut(DeviceUse, Vec<u8>) -> SFut,
     SFut: Future<Output = Result<Vec<u8>>>,
 {
-    fn sign(
-        &mut self,
-        purpose: ckmg::DevicePurpose,
-        payload: Vec<u8>,
-    ) -> impl Future<Output = Result<Vec<u8>>> {
-        self(purpose, payload)
+    fn sign(&mut self, what: DeviceUse, payload: Vec<u8>) -> impl Future<Output = Result<Vec<u8>>> {
+        self(what, payload)
     }
 }
 
-/// `message` without `purpose`'s tag: the payload the device signer signs under that tag.
-pub(crate) fn payload(purpose: ckmg::DevicePurpose, message: Vec<u8>) -> Result<Vec<u8>> {
+/// `message` without `format`'s tag: the payload the device signer signs under that tag.
+pub(crate) fn payload(format: ckmg::DeviceFormat, message: Vec<u8>) -> Result<Vec<u8>> {
     message
-        .strip_prefix(purpose.tag())
+        .strip_prefix(format.tag())
         .map(<[u8]>::to_vec)
         .ok_or(ErrorCode::Unavailable)
 }
@@ -91,9 +89,9 @@ pub async fn stamp_scope(community: &mut Foyer<Transport>, name: &str) -> Result
 }
 
 /// A stamp salt the wallet cannot guess and this device can rebuild after any restart:
-/// SHA-256 of the device key's signature (purpose `SaltDerivation`) over the community, the
-/// key and `label` (empty for the join slot, [`GENESIS_SALT_LABEL`] for the genesis slot).
-/// The length prefix keeps the encoding injective.
+/// ckmg's device salt (SHA-256 of the device key's signature under its salt tag, which never
+/// leaves ckmg) over the community, the key and `label` (empty for the join slot,
+/// [`GENESIS_SALT_LABEL`] for the genesis slot). The length prefix keeps the encoding injective.
 pub async fn derived_salt(
     name: &str,
     device: &ckmg::PublicKey,
@@ -104,11 +102,10 @@ pub async fn derived_salt(
     salted.extend_from_slice(name.as_bytes());
     salted.extend_from_slice(device.value());
     salted.extend_from_slice(label);
-    Ok(Sha256::digest(
-        sign.sign(ckmg::DevicePurpose::SaltDerivation, salted)
-            .await?,
-    )
-    .into())
+    sign.sign(DeviceUse::Salt, salted)
+        .await?
+        .try_into()
+        .map_err(|_| ErrorCode::Unavailable)
 }
 
 /// Open the community session of a device-key member before its creation is activated: the
@@ -128,8 +125,8 @@ pub async fn open_session(
         .map_err(|_| ErrorCode::Unavailable)?;
     let signature = sign
         .sign(
-            ckmg::DevicePurpose::DeviceSession,
-            payload(ckmg::DevicePurpose::DeviceSession, challenge.message(name))?,
+            DeviceUse::Sign(ckmg::DeviceFormat::DeviceSession),
+            payload(ckmg::DeviceFormat::DeviceSession, challenge.message(name))?,
         )
         .await?;
     community
@@ -340,9 +337,9 @@ where
         .await??;
     let signature = sign
         .sign(
-            ckmg::DevicePurpose::DeviceJoin,
+            DeviceUse::Sign(ckmg::DeviceFormat::DeviceJoin),
             payload(
-                ckmg::DevicePurpose::DeviceJoin,
+                ckmg::DeviceFormat::DeviceJoin,
                 cfyr::device_session::join_message(name, &challenge, key),
             )?,
         )
@@ -363,16 +360,25 @@ where
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+    use sha2::{Digest as _, Sha256};
 
-    /// A device signer that, like ckmg's, prepends the purpose's tag.
-    fn signer(
-        seed: u8,
-    ) -> impl FnMut(ckmg::DevicePurpose, Vec<u8>) -> std::future::Ready<Result<Vec<u8>>> {
+    /// ckmg's stamp-salt tag (crate-private there), kept here as the wire vector.
+    const SALT_TAG: &[u8] = b"cmsg.device-join.salt.v1\0";
+
+    /// A device signer that, like ckmg's, prepends the format's tag and derives the salt.
+    fn signer(seed: u8) -> impl FnMut(DeviceUse, Vec<u8>) -> std::future::Ready<Result<Vec<u8>>> {
         use ed25519_dalek::Signer as _;
         let key = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
-        move |purpose: ckmg::DevicePurpose, payload: Vec<u8>| {
-            let message = [purpose.tag(), &payload[..]].concat();
-            std::future::ready(Ok(key.sign(&message).to_bytes().to_vec()))
+        move |what: DeviceUse, payload: Vec<u8>| {
+            std::future::ready(Ok(match what {
+                DeviceUse::Sign(format) => key
+                    .sign(&[format.tag(), &payload[..]].concat())
+                    .to_bytes()
+                    .to_vec(),
+                DeviceUse::Salt => {
+                    Sha256::digest(key.sign(&[SALT_TAG, &payload[..]].concat()).to_bytes()).to_vec()
+                }
+            }))
         }
     }
 
@@ -422,15 +428,38 @@ mod tests {
         }
     }
 
+    /// X3 H2: the stamp salt moved into ckmg; it stays byte-identical to the former
+    /// `derived_salt` (SHA-256 of the device signature under the salt tag), so no stored
+    /// stamp or salt migrates. The vector was recorded at ckmg d1b9016 (prf [1; 32], "a").
+    #[tokio::test]
+    async fn the_ckmg_device_salt_equals_the_former_derived_salt() {
+        let prf = ckmg::passkey::PrfOutput::from_bytes(&[1; 32]).unwrap();
+        let device = ckmg::passkey::device_public_key(&prf, "a").unwrap();
+        let mut opening = |what: DeviceUse, payload: Vec<u8>| {
+            std::future::ready(match what {
+                DeviceUse::Salt => ckmg::passkey::device_salt(&prf, "a", &payload)
+                    .map(|salt| salt.to_vec())
+                    .map_err(|_| ErrorCode::Unauthorized),
+                DeviceUse::Sign(_) => Err(ErrorCode::Unauthorized),
+            })
+        };
+        let salt = derived_salt("a", &device, b"", &mut opening).await.unwrap();
+        let hex: String = salt.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex,
+            "32ca4334474fafa03510cd8fc27cdb6bd8020a94bd74d3f84f7a5a431dfff15b"
+        );
+    }
+
     #[test]
     fn signed_payloads_are_the_messages_without_their_purpose_tag() {
         let join = cfyr::device_session::join_message("alpha", "challenge", &[7; 32]);
-        let stripped = payload(ckmg::DevicePurpose::DeviceJoin, join.clone()).unwrap();
+        let stripped = payload(ckmg::DeviceFormat::DeviceJoin, join.clone()).unwrap();
         assert_eq!(
-            [ckmg::DevicePurpose::DeviceJoin.tag(), &stripped[..]].concat(),
+            [ckmg::DeviceFormat::DeviceJoin.tag(), &stripped[..]].concat(),
             join
         );
         // A message of another purpose is never signed under this one.
-        assert!(payload(ckmg::DevicePurpose::DeviceSession, join).is_err());
+        assert!(payload(ckmg::DeviceFormat::DeviceSession, join).is_err());
     }
 }

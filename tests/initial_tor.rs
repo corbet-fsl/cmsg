@@ -475,6 +475,7 @@ async fn acknowledged_open(
                 target: None,
                 statement: None,
                 transcript: Some(original.clone()),
+                format: None,
                 expires,
             },
             now(),

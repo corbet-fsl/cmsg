@@ -13,22 +13,19 @@
 //! acknowledgment, and only then, in the fourth round, the community activates the key. A
 //! host that restarts loses the offer; the person starts a new link, nothing half-applied is
 //! trusted.
-use super::device_join::DeviceSign;
+use super::device_join::{DeviceSign, DeviceUse};
 use super::device_pair::{self, PairingActions, Step, StepChallenge};
 use super::pairing_publish::prepare_pairing_evidence;
 use super::pairing_roles::{HostSteps, Scope, Selection};
-use std::collections::BTreeMap;
 use super::passport::GlobalPassport;
 use super::*;
 use composer_core::DeviceKeys;
 use foyer::Transport;
+use std::collections::BTreeMap;
 
 fn secs() -> u64 {
     ckmg::Clock::now(&mut custody::SystemClock).unwrap_or(u64::MAX)
 }
-
-/// Seconds the vault's signing admission stays valid for a salt signature.
-const SIGN_SECONDS: u64 = 60;
 
 /// The member's wallet, as far as a pairing needs it.
 #[allow(async_fn_in_trait)]
@@ -87,34 +84,35 @@ where
         challenge: &StepChallenge,
         signature: Vec<u8>,
     ) -> Result<()> {
-        device_pair::send(community, self.passport, actions, step, challenge, signature).await
+        device_pair::send(
+            community,
+            self.passport,
+            actions,
+            step,
+            challenge,
+            signature,
+        )
+        .await
     }
 }
 
-/// The approving device's own key as the stamp salt source: its Vault's device key signs the
-/// salt message, which only this device can rebuild after a restart.
+/// The approving device's own key as the stamp salt source: its Vault's Keys derive the
+/// device salt, which only this device can rebuild after a restart. It signs nothing.
 struct VaultSalt<'a> {
     vault: &'a mut dyn facades::BoundVault,
     origin: &'a str,
 }
 
 impl DeviceSign for VaultSalt<'_> {
-    async fn sign(&mut self, purpose: ckmg::DevicePurpose, payload: Vec<u8>) -> Result<Vec<u8>> {
-        if !matches!(purpose, ckmg::DevicePurpose::SaltDerivation) {
+    async fn sign(&mut self, what: DeviceUse, payload: Vec<u8>) -> Result<Vec<u8>> {
+        if what != DeviceUse::Salt {
             return Err(ErrorCode::Unauthorized);
         }
-        let message = [purpose.tag(), &payload[..]].concat();
-        let started = ckmg::Clock::now(&mut custody::SystemClock).map_err(|_| ErrorCode::Clock)?;
-        let (signature, _, _) = self
+        Ok(self
             .vault
-            .sign_endorsement(
-                &message,
-                self.origin,
-                started,
-                started.saturating_add(SIGN_SECONDS),
-            )
-            .await?;
-        Ok(signature)
+            .device_salt(&payload, self.origin)
+            .await?
+            .to_vec())
     }
 }
 
@@ -207,7 +205,9 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
         // Nothing is asked of the person for a request that cannot be approved anyway: it
         // must be proven and extend exactly the lineage this device showed.
         let anchor = self.anchor.as_ref().ok_or(ErrorCode::InvalidRequest)?;
-        request.verify(secs()).map_err(|_| ErrorCode::Unauthorized)?;
+        request
+            .verify(secs())
+            .map_err(|_| ErrorCode::Unauthorized)?;
         if request.binding != anchor.binding
             || request.root != anchor.root
             || request.epoch != anchor.epoch
@@ -331,7 +331,11 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
         self.approval.grant.clone().ok_or(ErrorCode::Reconcile)
     }
 
-    async fn activate(&mut self, wallet: &mut impl PairingWallet, signature: Vec<u8>) -> Result<()> {
+    async fn activate(
+        &mut self,
+        wallet: &mut impl PairingWallet,
+        signature: Vec<u8>,
+    ) -> Result<()> {
         let confirmed = self.confirmed.as_ref().ok_or(ErrorCode::InvalidRequest)?;
         // Only after the revision is published and acknowledged.
         if !self.approval.acknowledged {
@@ -360,7 +364,10 @@ pub struct SessionHost<'a, N: cdht::Network + Clone, W: PairingWallet> {
 
 impl<'a, N: cdht::Network + Clone, W: PairingWallet> SessionHost<'a, N, W> {
     /// The member's `wallet` and the community scopes (by community name) it can bring along.
-    pub fn new(wallet: W, communities: impl IntoIterator<Item = (String, DoorHost<'a, N>)>) -> Self {
+    pub fn new(
+        wallet: W,
+        communities: impl IntoIterator<Item = (String, DoorHost<'a, N>)>,
+    ) -> Self {
         Self {
             wallet,
             hosts: communities

@@ -59,6 +59,7 @@ where
                     target: Some(request.device),
                     statement: Some(statement),
                     transcript: None,
+                    format: None,
                     expires: now.saturating_add(PAIR_ADMISSION_SECONDS),
                 },
                 now,

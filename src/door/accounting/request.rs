@@ -579,6 +579,7 @@ impl AccountAdmission<'_> {
                     target: None,
                     statement: None,
                     transcript: Some(transcript.clone()),
+                    format: Some(ckmg::DeviceFormat::AccountRequest),
                     expires: expires_at,
                 },
                 current.now,
@@ -588,7 +589,11 @@ impl AccountAdmission<'_> {
             .vault()
             .await?
             .keys()
-            .sign_device_ed25519_current(&transcript, expires_at)
+            .sign_device_ed25519_current(
+                ckmg::DeviceFormat::AccountRequest,
+                &transcript,
+                expires_at,
+            )
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
         request.signature = B64.encode(&signature);
@@ -1090,6 +1095,14 @@ mod tests {
                     ckmg::Action::SignDeviceEd25519,
                 ),
             ] {
+                // Device signing is typed: its transcript leads with an admitted format's tag.
+                let format = (action == ckmg::Action::SignDeviceEd25519)
+                    .then_some(ckmg::DeviceFormat::DeviceSession);
+                let transcript = [
+                    format.map_or(&[][..], ckmg::DeviceFormat::tag),
+                    &[round as u8],
+                ]
+                .concat();
                 let guard = admission
                     .admit(
                         ckmg::AdmittedCommand {
@@ -1101,7 +1114,8 @@ mod tests {
                             epoch: 3,
                             target: None,
                             statement: None,
-                            transcript: Some(vec![round as u8]),
+                            transcript: Some(transcript.clone()),
+                            format,
                             expires: 5000,
                         },
                         now,
@@ -1116,7 +1130,8 @@ mod tests {
                     target: None,
                     statement: None,
                     signing: Some(ckmg::DeviceSigning {
-                        transcript: &[round as u8],
+                        transcript: &transcript,
+                        format,
                         expires: 5000,
                     }),
                     now,

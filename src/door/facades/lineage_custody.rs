@@ -79,6 +79,7 @@ where
                     target: None,
                     statement: Some(previous.digest().map_err(keys_error)?),
                     transcript: None,
+                    format: None,
                     expires: now.saturating_add(PUBLISH_ADMISSION_SECONDS),
                 },
                 now,

@@ -12,7 +12,7 @@ use super::*;
 /// `Keys::with_profile_custody`, the Store read from the committed checkpoint.
 pub struct ProfileParts<'p, B: cwst::backend::Backend> {
     pub read: CommittedRead<'p, B>,
-    pub signer: ckmg::DeviceEd25519Signer<'p>,
+    pub signer: ckmg::ProfileSigner<'p>,
     pub custody: cbrd::cnvl::Custodian<'p>,
     /// A freshly issued community credential, when admission just produced one.
     /// `None` re-uses the credential inside the committed publication.

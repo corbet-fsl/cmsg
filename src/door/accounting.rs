@@ -355,6 +355,7 @@ impl<'p> AccountAdmission<'p> {
             target: None,
             statement: None,
             transcript: Some(plan.signing_bytes().to_vec()),
+            format: None,
             expires,
         };
         let root = intents
@@ -462,6 +463,7 @@ impl<'p> AccountAdmission<'p> {
                     target: None,
                     statement: None,
                     transcript: Some(transcript.clone()),
+                    format: Some(ckmg::DeviceFormat::AccountingDelegation),
                     expires,
                 },
                 current.now,
@@ -471,7 +473,11 @@ impl<'p> AccountAdmission<'p> {
             .vault()
             .await?
             .keys()
-            .sign_device_ed25519_current(&transcript, expires)
+            .sign_device_ed25519_current(
+                ckmg::DeviceFormat::AccountingDelegation,
+                &transcript,
+                expires,
+            )
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
         delegation.signature = B64.encode(&signature);

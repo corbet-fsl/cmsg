@@ -87,22 +87,36 @@ impl<B: cwst::backend::Backend> InitialEnrollment<B> {
     /// tag prepended by ckmg. Crate-private: the device producer is its only caller.
     pub(crate) fn sign_device(
         &self,
-        purpose: ckmg::DevicePurpose,
+        format: ckmg::DeviceFormat,
         payload: &[u8],
     ) -> Result<[u8; 64], cvlt::InitialError> {
-        self.candidate.sign_device(purpose, payload)
+        self.candidate.sign_device(format, payload)
+    }
+
+    /// The candidate device key's stamp salt over `payload` (ckmg's device salt).
+    pub(crate) fn device_salt(&self, payload: &[u8]) -> Result<[u8; 32], cvlt::InitialError> {
+        self.candidate.device_salt(payload)
     }
 
     /// [`Self::sign_device`] as `device_join`'s signer.
     pub(crate) fn device_signer(
         &self,
-    ) -> impl FnMut(ckmg::DevicePurpose, Vec<u8>) -> std::future::Ready<crate::door::Result<Vec<u8>>> + '_
-    {
-        move |purpose, payload| {
+    ) -> impl FnMut(
+        crate::door::device_join::DeviceUse,
+        Vec<u8>,
+    ) -> std::future::Ready<crate::door::Result<Vec<u8>>>
+           + '_ {
+        move |what, payload| {
             std::future::ready(
-                self.sign_device(purpose, &payload)
-                    .map(|signature| signature.to_vec())
-                    .map_err(|_| crate::door::ErrorCode::Unauthorized),
+                match what {
+                    crate::door::device_join::DeviceUse::Sign(format) => self
+                        .sign_device(format, &payload)
+                        .map(|signature| signature.to_vec()),
+                    crate::door::device_join::DeviceUse::Salt => {
+                        self.device_salt(&payload).map(|salt| salt.to_vec())
+                    }
+                }
+                .map_err(|_| crate::door::ErrorCode::Unauthorized),
             )
         }
     }

@@ -389,6 +389,14 @@ pub(super) trait BoundVault {
     ) -> OwnedFuture<'a, (Vec<u8>, Vec<u8>, Vec<u8>)> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    /// The device key's stamp salt over `payload` (ckmg's device salt; no signature leaves).
+    fn device_salt<'a>(
+        &'a mut self,
+        _payload: &'a [u8],
+        _origin: &'a str,
+    ) -> OwnedFuture<'a, [u8; 32]> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     fn contact_act(&mut self, _request: inbox::ContactAct) -> OwnedFuture<'_, cnbx::Relation> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
@@ -551,6 +559,9 @@ where
         if after >= expires {
             return Err(ErrorCode::Unauthorized);
         }
+        // The format is the one whose fixed tag leads the message; ckmg refuses every other
+        // message and every format exact admission does not allow.
+        let format = ckmg::DeviceFormat::of(message).ok_or(ErrorCode::Unauthorized)?;
         let admitted = intent
             .admit(
                 ckmg::AdmittedCommand {
@@ -563,18 +574,19 @@ where
                     target: None,
                     statement: None,
                     transcript: Some(message.to_vec()),
+                    format: Some(format),
                     expires,
                 },
                 after,
             )
             .map_err(keys_error)?;
-        // Keys authorizes and signs only these same immutable owner bytes.
-        // Metadata access cannot consume this distinct exact signing intent,
-        // and no general-purpose signer callback can change the transcript.
+        // Keys authorizes and signs only these same immutable owner bytes, in this format,
+        // after the final current-owner recheck. Metadata access cannot consume this
+        // distinct exact signing intent, and no signer callback can change the transcript.
         let signature = self
             .vault
             .keys()
-            .sign_device_ed25519(message, expires)
+            .sign_device_ed25519_current(format, message, expires)
             .await
             .map_err(keys_error)?
             .to_vec();
@@ -661,6 +673,19 @@ where
         expires: u64,
     ) -> OwnedFuture<'a, (Vec<u8>, Vec<u8>, Vec<u8>)> {
         Box::pin(self.sign_endorsement_owned(message, origin, now, expires))
+    }
+    fn device_salt<'a>(
+        &'a mut self,
+        payload: &'a [u8],
+        _origin: &'a str,
+    ) -> OwnedFuture<'a, [u8; 32]> {
+        Box::pin(async move {
+            self.vault
+                .keys()
+                .device_salt(payload)
+                .await
+                .map_err(keys_error)
+        })
     }
     fn store_pin(
         &mut self,

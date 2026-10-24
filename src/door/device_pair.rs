@@ -14,13 +14,13 @@
 //! device fetches a challenge ([`begin`]), the new device signs it, and [`send`] presents the
 //! passport and the already issued stamp over it.
 use super::{
+    ErrorCode, Result,
     composer_core::DeviceKeys,
     custody::SystemClock,
-    device_join::{derived_salt, payload, stamp_scope, DeviceSign},
+    device_join::{DeviceSign, DeviceUse, derived_salt, payload, stamp_scope},
     foyer::Transport,
     passport::GlobalPassport,
     stamp::{pending_request, request_stamp, resend_stamp},
-    ErrorCode, Result,
 };
 use cfyr::Foyer;
 use ckmg::{Clock, Entropy};
@@ -29,7 +29,7 @@ use cwlt::passport::{
     self, ActionKind, AuthenticatedCommunity, PayloadDigest, StampAction, StampSalt, StampScope,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn now() -> u64 {
     SystemClock.now().unwrap_or(u64::MAX)
@@ -236,9 +236,9 @@ pub async fn sign_possession(
     sign: &mut impl DeviceSign,
 ) -> Result<Vec<u8>> {
     sign.sign(
-        ckmg::DevicePurpose::DeviceJoin,
+        DeviceUse::Sign(ckmg::DeviceFormat::DeviceJoin),
         payload(
-            ckmg::DevicePurpose::DeviceJoin,
+            ckmg::DeviceFormat::DeviceJoin,
             cfyr::device_session::join_message(name, &challenge.id, device.value()),
         )?,
     )
@@ -304,15 +304,23 @@ where
 mod tests {
     use super::*;
 
-    /// A device signer that, like ckmg's, prepends the purpose's tag.
-    fn signer(
-        seed: u8,
-    ) -> impl FnMut(ckmg::DevicePurpose, Vec<u8>) -> std::future::Ready<Result<Vec<u8>>> {
+    /// A device signer that, like ckmg's, prepends the format's tag and derives the salt.
+    fn signer(seed: u8) -> impl FnMut(DeviceUse, Vec<u8>) -> std::future::Ready<Result<Vec<u8>>> {
         use ed25519_dalek::Signer as _;
+        use sha2::Digest as _;
         let key = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
-        move |purpose: ckmg::DevicePurpose, payload: Vec<u8>| {
-            let message = [purpose.tag(), &payload[..]].concat();
-            std::future::ready(Ok(key.sign(&message).to_bytes().to_vec()))
+        move |what: DeviceUse, payload: Vec<u8>| {
+            std::future::ready(Ok(match what {
+                DeviceUse::Sign(format) => key
+                    .sign(&[format.tag(), &payload[..]].concat())
+                    .to_bytes()
+                    .to_vec(),
+                DeviceUse::Salt => sha2::Sha256::digest(
+                    key.sign(&[&b"cmsg.device-join.salt.v1\0"[..], &payload[..]].concat())
+                        .to_bytes(),
+                )
+                .to_vec(),
+            }))
         }
     }
 

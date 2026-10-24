@@ -461,12 +461,14 @@ async fn open_device(
     };
     // Fence other forwarded actions across the session's awaited round trips.
     binding.uncertain = true;
-    let mut sign = |purpose: ckmg::DevicePurpose, payload: Vec<u8>| {
-        std::future::ready(match purpose {
-            ckmg::DevicePurpose::DeviceSession => opening
-                .sign_device_session(&payload)
-                .map(|signature| signature.to_vec())
-                .map_err(|_| ErrorCode::Unauthorized),
+    let mut sign = |what: super::super::device_join::DeviceUse, payload: Vec<u8>| {
+        std::future::ready(match what {
+            super::super::device_join::DeviceUse::Sign(ckmg::DeviceFormat::DeviceSession) => {
+                opening
+                    .sign_device_session(&payload)
+                    .map(|signature| signature.to_vec())
+                    .map_err(|_| ErrorCode::Unauthorized)
+            }
             _ => Err(ErrorCode::Unauthorized),
         })
     };

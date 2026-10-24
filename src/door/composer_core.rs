@@ -6,13 +6,13 @@
 //! the vault backends, the progress store and the records network are lent by the embedder.
 use super::identity;
 use super::{
+    Configuration, Door, Role,
     custody::{self, SystemClock},
     foyer::{Scope, Sessions, Transport},
-    Configuration, Door, Role,
 };
-use cfyr::{passkeys::Client, Foyer};
+use cfyr::{Foyer, passkeys::Client};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
@@ -468,7 +468,7 @@ pub(crate) async fn birth_device(
     let signature = unlock
         .wallet_opening()
         .map_err(step("device authorize"))?
-        .sign_device(ckmg::DevicePurpose::WalletBirthDevice, &payload)
+        .sign_device_birth(ckmg::DeviceFormat::WalletBirthDevice, &payload)
         .map_err(step("device authorize"))?;
     wallet
         .authorize_birth_device(*device.value(), signature, now)
@@ -1053,13 +1053,8 @@ where
             ))?;
         let opening = open()?;
         let device = opening.device().map_err(step("reopen"))?;
-        let mut sign = |purpose: ckmg::DevicePurpose, payload: Vec<u8>| {
-            std::future::ready(
-                opening
-                    .sign_device(purpose, &payload)
-                    .map(|signature| signature.to_vec())
-                    .map_err(|_| super::ErrorCode::Unauthorized),
-            )
+        let mut sign = |what: super::device_join::DeviceUse, payload: Vec<u8>| {
+            std::future::ready(opening_use(&opening, what, &payload))
         };
         let gsalt = super::device_join::derived_salt(
             name,
@@ -1217,19 +1212,39 @@ pub(crate) async fn reopen_device<S: Services, P: ProgressStore>(
 }
 
 /// The device key's session signer from a community opening, once its enrollment is
-/// activated (before that the enrollment signs): the session purpose only.
+/// activated (before that the enrollment signs): the session format only.
 pub(crate) fn session_signer(
     opening: &cvlt::PreparedOpen,
-) -> impl FnMut(ckmg::DevicePurpose, Vec<u8>) -> std::future::Ready<super::Result<Vec<u8>>> + '_ {
-    move |purpose, payload| {
-        std::future::ready(match purpose {
-            ckmg::DevicePurpose::DeviceSession => opening
+) -> impl FnMut(super::device_join::DeviceUse, Vec<u8>) -> std::future::Ready<super::Result<Vec<u8>>> + '_
+{
+    move |what, payload| {
+        std::future::ready(match what {
+            super::device_join::DeviceUse::Sign(ckmg::DeviceFormat::DeviceSession) => opening
                 .sign_device_session(&payload)
                 .map(|signature| signature.to_vec())
                 .map_err(|_| super::ErrorCode::Unauthorized),
             _ => Err(super::ErrorCode::Unauthorized),
         })
     }
+}
+
+/// What a community opening gives the device key after activation: its session signature
+/// and the stamp salt. Every other format is refused (ckmg refuses it too).
+fn opening_use(
+    opening: &cvlt::PreparedOpen,
+    what: super::device_join::DeviceUse,
+    payload: &[u8],
+) -> super::Result<Vec<u8>> {
+    match what {
+        super::device_join::DeviceUse::Sign(ckmg::DeviceFormat::DeviceSession) => opening
+            .sign_device_session(payload)
+            .map(|signature| signature.to_vec()),
+        super::device_join::DeviceUse::Salt => {
+            opening.device_salt(payload).map(|salt| salt.to_vec())
+        }
+        super::device_join::DeviceUse::Sign(_) => return Err(super::ErrorCode::Unauthorized),
+    }
+    .map_err(|_| super::ErrorCode::Unauthorized)
 }
 
 /// Sign in once on `companion` with the PRF extension and return the unlock secret of this
@@ -1671,16 +1686,14 @@ where
         let seed = candidate.initial_seed().map_err(step("restore"))?;
         let opening = open()?;
         let device = opening.device().map_err(step("restore"))?;
-        let mut sign = |purpose: ckmg::DevicePurpose, payload: Vec<u8>| {
-            let signature = match purpose {
-                ckmg::DevicePurpose::DeviceJoin => candidate.sign_device_join(&payload),
-                _ => opening.sign_device(purpose, &payload),
-            };
-            std::future::ready(
-                signature
+        let mut sign = |what: super::device_join::DeviceUse, payload: Vec<u8>| {
+            std::future::ready(match what {
+                super::device_join::DeviceUse::Sign(ckmg::DeviceFormat::DeviceJoin) => candidate
+                    .sign_device_join(&payload)
                     .map(|signature| signature.to_vec())
                     .map_err(|_| super::ErrorCode::Unauthorized),
-            )
+                _ => opening_use(&opening, what, &payload),
+            })
         };
         let user = super::device_join::reconfirm(
             &mut community_api,

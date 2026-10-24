@@ -563,6 +563,28 @@ where
             self.after_wait(result)
         })
     }
+    fn device_salt<'a>(
+        &'a mut self,
+        payload: &'a [u8],
+        origin: &'a str,
+    ) -> OwnedFuture<'a, [u8; 32]> {
+        Box::pin(async move {
+            if self.lifetime.is_closed() || origin != self.origin {
+                return Err(ErrorCode::Unauthorized);
+            }
+            let mut retained = self.retained.lock().await;
+            self.require_open()?;
+            let result = retained
+                .as_mut()
+                .ok_or(ErrorCode::Unavailable)?
+                .vault
+                .keys()
+                .device_salt(payload)
+                .await
+                .map_err(keys_error);
+            self.after_wait(result)
+        })
+    }
     fn waves<'a>(
         &'a mut self,
         command: inbox_waves::Command,

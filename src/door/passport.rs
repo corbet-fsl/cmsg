@@ -1,5 +1,5 @@
 //! Original global passport issuance through certified, durable Wallet custody.
-use super::{custody::SystemClock, foyer::Transport, ErrorCode, Result};
+use super::{ErrorCode, Result, custody::SystemClock, foyer::Transport};
 use cfyr::membership::GlobalPassportIssuance;
 use ckmg::{Authority, Clock, Entropy};
 use cvlt::{GlobalPassportCustody, Records, Vault};
@@ -306,8 +306,8 @@ where
     let response = match birth {
         Some(opening) => {
             let signature = opening
-                .sign_device(
-                    ckmg::DevicePurpose::WalletBirthPassport,
+                .sign_device_birth(
+                    ckmg::DeviceFormat::WalletBirthPassport,
                     &ckmg::wallet_birth_passport_payload(&request),
                 )
                 .map_err(|_| ErrorCode::Refused)?;

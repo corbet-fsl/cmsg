@@ -98,6 +98,7 @@ impl AccountAdmission<'_> {
                     target: None,
                     statement: None,
                     transcript: Some(transcript.clone()),
+                    format: Some(ckmg::DeviceFormat::RecordRecipient),
                     expires: expires_at,
                 },
                 current.now,
@@ -107,7 +108,11 @@ impl AccountAdmission<'_> {
             .vault()
             .await?
             .keys()
-            .sign_device_ed25519_current(&transcript, expires_at)
+            .sign_device_ed25519_current(
+                ckmg::DeviceFormat::RecordRecipient,
+                &transcript,
+                expires_at,
+            )
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
         request.signature = B64.encode(&signature);
