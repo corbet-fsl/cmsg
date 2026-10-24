@@ -1,5 +1,5 @@
 //! Original global passport issuance through certified, durable Wallet custody.
-use super::{ErrorCode, Result, custody::SystemClock, foyer::Transport};
+use super::{custody::SystemClock, foyer::Transport, ErrorCode, Result};
 use cfyr::membership::GlobalPassportIssuance;
 use ckmg::{Authority, Clock, Entropy};
 use cvlt::{GlobalPassportCustody, Records, Vault};

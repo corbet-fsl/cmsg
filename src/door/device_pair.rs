@@ -14,13 +14,13 @@
 //! device fetches a challenge ([`begin`]), the new device signs it, and [`send`] presents the
 //! passport and the already issued stamp over it.
 use super::{
-    ErrorCode, Result,
     composer_core::DeviceKeys,
     custody::SystemClock,
-    device_join::{DeviceSign, DeviceUse, derived_salt, payload, stamp_scope},
+    device_join::{derived_salt, payload, stamp_scope, DeviceSign, DeviceUse},
     foyer::Transport,
     passport::GlobalPassport,
     stamp::{pending_request, request_stamp, resend_stamp},
+    ErrorCode, Result,
 };
 use cfyr::Foyer;
 use ckmg::{Clock, Entropy};
@@ -29,7 +29,7 @@ use cwlt::passport::{
     self, ActionKind, AuthenticatedCommunity, PayloadDigest, StampAction, StampSalt, StampScope,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 fn now() -> u64 {
     SystemClock.now().unwrap_or(u64::MAX)

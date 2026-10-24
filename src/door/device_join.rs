@@ -3,11 +3,11 @@
 //! key proves possession. No community passkey is created; the key then opens sessions
 //! silently (`open_device_session`).
 use super::{
-    ErrorCode, Result,
     custody::SystemClock,
     foyer::Transport,
     passport::GlobalPassport,
     stamp::{pending_request, request_stamp, resend_stamp},
+    ErrorCode, Result,
 };
 use cfyr::Foyer;
 use ckmg::{Authority, Clock, Entropy};
@@ -16,7 +16,7 @@ use cwlt::passport::{
     self, ActionKind, AuthenticatedCommunity, CommunityId, PayloadDigest, StampAction, StampSalt,
     StampScope,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::future::Future;
 
 fn now() -> u64 {
