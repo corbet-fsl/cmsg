@@ -109,9 +109,10 @@ impl Session {
 pub(super) struct Desk {
     pub waves: Vec<Session>,
     pub jobs: Vec<Job>,
-    /// Every account-key signature made for a wave slot, committed with the desk before
-    /// the signature is sent anywhere.
-    #[serde(default)]
+    /// The former desk-held account-signing ledger, decoded from older desks only.
+    /// Keys now keeps the ledger in its own checkpoint; the first signature imports
+    /// this one there (add-only) and empties it, so it is never written again.
+    #[serde(default, skip_serializing_if = "ckmg::SigningLedger::is_empty")]
     pub ledger: ckmg::SigningLedger,
 }
 

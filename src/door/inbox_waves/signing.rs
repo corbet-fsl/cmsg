@@ -1,11 +1,13 @@
-//! The engine's account-key signer: the exact-digest Keys admissions behind the wave's
-//! three signatures, with the persisted [`SigningLedger`].
+//! The engine's account-key signer: the wave's three signatures, each through
+//! `Keys::sign_account_digest`.
 //!
-//! The ports compute the digest from the account witness; this signer is the only thing
-//! that touches the key. A repeated digest returns the stored signature without touching
-//! custody, a different digest for the same wave slot and phase is refused. The ledger
-//! travels in the desk, so it is committed in the same checkpoint that stores the
-//! signature in the session, before anything is sent.
+//! The ports compute the digest from the account witness; this signer only passes the
+//! committed account-key capsule. Keys keeps the one-digest-per-slot-and-phase ledger
+//! inside its own checkpoint and releases a signature only after that checkpoint
+//! committed, so no key, engine or ledger leaves custody here. A retry of the same
+//! digest re-signs identical bytes (deterministic, low-S); a different digest for the
+//! same wave slot and phase is refused. The desk's former ledger is imported into Keys
+//! once (add-only) before the first signature.
 use super::super::{facades::OwnedFuture, ErrorCode, Result};
 use super::ports::AccountSigner;
 use ckmg::{Authority, Clock, Entropy, Keys, SecureStore, SigningLedger, SigningPhase};
@@ -20,7 +22,8 @@ pub(crate) struct EngineSigner<'k, 's, S, C, R, A, B: Backend> {
     keys: Mutex<&'k mut Keys<S, C, R, A>>,
     store: &'s Store<B>,
     scope: String,
-    ledger: RefCell<SigningLedger>,
+    /// The desk's legacy ledger until Keys imported it.
+    legacy: RefCell<SigningLedger>,
 }
 
 impl<'k, 's, S, C, R, A, B> EngineSigner<'k, 's, S, C, R, A, B>
@@ -35,19 +38,20 @@ where
         keys: &'k mut Keys<S, C, R, A>,
         store: &'s Store<B>,
         scope: &str,
-        ledger: SigningLedger,
+        legacy: SigningLedger,
     ) -> Self {
         Self {
             keys: Mutex::new(keys),
             store,
             scope: scope.into(),
-            ledger: RefCell::new(ledger),
+            legacy: RefCell::new(legacy),
         }
     }
 
-    /// The ledger after the signatures made so far; the caller commits it.
-    pub(crate) fn into_ledger(self) -> SigningLedger {
-        self.ledger.into_inner()
+    /// The part of the desk's legacy ledger Keys has not imported yet (empty once it
+    /// has); the caller stores it back in the desk.
+    pub(crate) fn into_legacy(self) -> SigningLedger {
+        self.legacy.into_inner()
     }
 }
 
@@ -66,36 +70,27 @@ where
         digest: [u8; 32],
     ) -> OwnedFuture<'a, [u8; 64]> {
         Box::pin(async move {
-            let stored = self
-                .ledger
-                .borrow()
-                .lookup(&slot, phase, &digest)
-                .map_err(|_| ErrorCode::Refused)?;
-            if let Some(stored) = stored {
-                return Ok(stored.0);
-            }
             let mut keys = self.keys.lock().await;
-            let opening = keys.wallet_engine().await.map_err(unavailable)?;
-            let signing = keys.wallet_engine().await.map_err(unavailable)?;
-            let owner = cwlt::account_owner::DurableAccountOwner::open(
-                opening,
-                self.store,
-                &self.scope,
-            )
-            .map_err(|_| ErrorCode::Unavailable)?;
+            let legacy = self.legacy.borrow().clone();
+            if !legacy.is_empty() {
+                let bytes = legacy.to_bytes().map_err(|_| ErrorCode::Unavailable)?;
+                keys.import_signing_ledger(&bytes)
+                    .await
+                    .map_err(unavailable)?;
+                *self.legacy.borrow_mut() = SigningLedger::new();
+            }
+            let sealed =
+                cwlt::account_owner::DurableAccountOwner::committed_sealed(self.store, &self.scope)
+                    .map_err(|_| ErrorCode::Unavailable)?;
             let expires = Clock::now(&mut super::super::custody::SystemClock)
                 .map_err(|_| ErrorCode::Clock)?
                 .saturating_add(ADMISSION_SECONDS);
-            let mut ledger = self.ledger.borrow().clone();
-            let signature = keys
-                .sign_account_digest(&mut ledger, phase, slot, digest, owner.key(), &signing, expires)
+            keys.sign_account_digest(phase, slot, digest, &sealed, expires)
                 .await
                 .map_err(|error| match error {
                     ckmg::Error::Expired => ErrorCode::Clock,
                     _ => ErrorCode::Unauthorized,
-                })?;
-            *self.ledger.borrow_mut() = ledger;
-            Ok(signature)
+                })
         })
     }
 }

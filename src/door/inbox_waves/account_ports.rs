@@ -4,7 +4,7 @@
 //!
 //! Neither holds a key. Every signature goes through the [`AccountSigner`] the engine lends
 //! for one call (the Keys `SignContact`, `SignResolution` and `SignAcknowledgment`
-//! admissions and the persisted `SigningLedger`; see `signing.rs`). The wave nonce is the
+//! admissions and the ledger Keys keeps in its own checkpoint; see `signing.rs`). The wave nonce is the
 //! slot.
 use super::production::{WaveContact, WaveTerms};
 use super::types::{Hello, Terms};

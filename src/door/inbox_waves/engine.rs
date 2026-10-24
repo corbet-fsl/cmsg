@@ -432,7 +432,7 @@ where
     }
 
     /// The receipt and acknowledgment time. It is the lease start, so a retry after a crash
-    /// signs the identical digest and the signing ledger returns the stored signature.
+    /// signs the identical digest, which Keys admits again and re-signs to identical bytes.
     fn receipt_time(session: &Session) -> u64 {
         session.hello.opened_at
     }
@@ -478,7 +478,7 @@ where
                 &signer,
             )
             .await;
-        desk.ledger = signer.into_ledger();
+        desk.ledger = signer.into_legacy();
         let signature = made?;
         if signature.len() != CONTACT_SIGNATURE_BYTES {
             return Err(ErrorCode::Refused);
@@ -774,7 +774,7 @@ where
             desk.ledger.clone(),
         );
         let made = ports.terms(&nonce, &hello, peer, now, &signer).await;
-        desk.ledger = signer.into_ledger();
+        desk.ledger = signer.into_legacy();
         let mut terms = made?;
         // The countersign carries the recipient's own handle for the same conversation.
         terms.recipient_handle = self.own_handle(hello.conversation).await?;
@@ -911,7 +911,7 @@ where
             desk.ledger.clone(),
         );
         let made = ports.sign_contact(request, now, &signer).await;
-        desk.ledger = signer.into_ledger();
+        desk.ledger = signer.into_legacy();
         let own_signature = made?;
         if own_signature.len() != CONTACT_SIGNATURE_BYTES {
             return Err(ErrorCode::Refused);
@@ -1298,7 +1298,7 @@ where
                 &signer,
             )
             .await;
-        desk.ledger = signer.into_ledger();
+        desk.ledger = signer.into_legacy();
         let signature = made?;
         if signature.len() != CONTACT_SIGNATURE_BYTES {
             return Err(ErrorCode::Refused);
