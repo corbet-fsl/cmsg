@@ -32,8 +32,9 @@ fn secs() -> u64 {
 pub trait PairingWallet {
     /// The member's pseudonym in community `name` (hex), which the pairing stamp names.
     async fn pseudonym(&mut self, name: &str) -> Result<String>;
-    /// The ONE wallet confirmation: a stamp covering the pairing's slot for the key.
-    async fn confirm(&mut self, actions: &PairingActions) -> Result<()>;
+    /// The wallet confirmation over ALL scopes' actions: stamps of `STAMP_SLOTS` slots, one
+    /// ceremony each (1 for up to 16 communities, 2 for 17).
+    async fn confirm_all(&mut self, actions: &[PairingActions]) -> Result<()>;
     /// Send one pairing step to the community (only the add step presents the stamp).
     async fn send(
         &mut self,
@@ -82,8 +83,8 @@ where
             .await
     }
 
-    async fn confirm(&mut self, actions: &PairingActions) -> Result<()> {
-        device_pair::confirm(actions, self.api, self.origin, self.passport, self.keys).await
+    async fn confirm_all(&mut self, actions: &[PairingActions]) -> Result<()> {
+        device_pair::confirm_all(actions, self.api, self.origin, self.passport, self.keys).await
     }
 
     async fn send(
@@ -198,16 +199,18 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
         Ok(anchor)
     }
 
-    async fn confirm(
+    /// Verify `request` and derive this community's pairing action (no ceremony). `None` when
+    /// a repeat of round 2 for the same request already holds its confirmation.
+    async fn prepare(
         &mut self,
         wallet: &mut impl PairingWallet,
-        request: ckmg::PairingRequest,
-    ) -> Result<()> {
+        request: &ckmg::PairingRequest,
+    ) -> Result<Option<PairingActions>> {
         if let Some(kept) = &self.confirmed {
             // A repeat of round 2 for the same request keeps the confirmation; another
             // request never reuses this pairing.
-            return if kept.request == request {
-                Ok(())
+            return if kept.request == *request {
+                Ok(None)
             } else {
                 Err(ErrorCode::Refused)
             };
@@ -245,11 +248,12 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
             )
             .await?
         };
-        // The scope's ONE wallet confirmation: nothing is prompted when a retained stamp
-        // already covers both steps.
-        wallet.confirm(&actions).await?;
+        Ok(Some(actions))
+    }
+
+    /// Keep the outcome of the session's confirmation for `request`.
+    fn confirmed(&mut self, request: ckmg::PairingRequest, actions: PairingActions) {
         self.confirmed = Some(Confirmed { request, actions });
-        Ok(())
     }
 
     /// A fresh one-use challenge (it lives 60 seconds, so it is fetched after the round's
@@ -410,9 +414,26 @@ impl<N: cdht::Network + Clone, W: PairingWallet> HostSteps for SessionHost<'_, N
         self.host(scope)?.anchor().await
     }
 
-    async fn confirm(&mut self, scope: &Scope, request: ckmg::PairingRequest) -> Result<()> {
-        let host = self.hosts.get_mut(scope).ok_or(ErrorCode::Unavailable)?;
-        host.confirm(&mut self.wallet, request).await
+    async fn confirm_all(&mut self, requests: Vec<(Scope, ckmg::PairingRequest)>) -> Result<()> {
+        // Verify and derive every scope first (nothing is asked of the person for a request
+        // that cannot be approved), then ONE confirmation pass over all of them.
+        let mut open = Vec::new();
+        for (scope, request) in requests {
+            let host = self.hosts.get_mut(&scope).ok_or(ErrorCode::Unavailable)?;
+            if let Some(actions) = host.prepare(&mut self.wallet, &request).await? {
+                open.push((scope, request, actions));
+            }
+        }
+        let actions: Vec<_> = open.iter().map(|(_, _, a)| a.clone()).collect();
+        if !actions.is_empty() {
+            self.wallet.confirm_all(&actions).await?;
+        }
+        for (scope, request, actions) in open {
+            if let Some(host) = self.hosts.get_mut(&scope) {
+                host.confirmed(request, actions);
+            }
+        }
+        Ok(())
     }
 
     async fn challenge(&mut self, scope: &Scope) -> Result<StepChallenge> {

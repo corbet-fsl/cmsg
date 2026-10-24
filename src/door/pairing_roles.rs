@@ -155,10 +155,11 @@ fn values<T>(scopes: &[Scope], entries: Entries<T>) -> Result<Vec<T>> {
 pub trait HostSteps {
     /// Round 1: the member's current lineage in `scope`, which the pairing request is made over.
     async fn anchor(&mut self, scope: &Scope) -> Result<ckmg::Lineage>;
-    /// Round 2: the member's explicit approval of pairing exactly the key `request` names in
-    /// `scope`, which is that scope's ONE wallet confirmation (a stamp covering both
-    /// community steps for this key).
-    async fn confirm(&mut self, scope: &Scope, request: ckmg::PairingRequest) -> Result<()>;
+    /// Round 2: the member's explicit approval of pairing exactly the key each request names,
+    /// ONE `confirm_all` for ALL scopes together: one stamp slot per scope, `STAMP_SLOTS`
+    /// (16) slots per wallet confirmation, so 3 scopes are 1 confirmation, 16 communities are
+    /// 1 and 17 are 2.
+    async fn confirm_all(&mut self, requests: Vec<(Scope, ckmg::PairingRequest)>) -> Result<()>;
     /// A fresh one-use community challenge of `scope`, asked for after the round's human
     /// steps (rounds 2 and 3) so it is fresh when the new device signs it.
     async fn challenge(&mut self, scope: &Scope) -> Result<StepChallenge>;
@@ -246,9 +247,12 @@ impl<S: HostSteps> Host<S> {
                 let RequestsMessage { requests } = decode(&payload)?;
                 // Every scope's confirmation first (they take the person's time), then the
                 // challenges, so none of them expires while the person confirms.
-                for (scope, request) in scopes.iter().zip(values(&scopes, requests)?) {
-                    self.steps.confirm(scope, request).await?;
-                }
+                let requests = scopes
+                    .iter()
+                    .cloned()
+                    .zip(values(&scopes, requests)?)
+                    .collect::<Vec<_>>();
+                self.steps.confirm_all(requests).await?;
                 encode(&ChallengesMessage {
                     challenges: self.challenges().await?,
                 })?
@@ -550,7 +554,7 @@ mod tests {
     #[derive(Default)]
     struct Counts {
         anchors: usize,
-        /// The wallet confirmations: exactly one per scope.
+        /// The wallet confirmations: exactly one for all scopes together.
         confirmations: usize,
         approved: usize,
         activated: usize,
@@ -568,11 +572,16 @@ mod tests {
             self.0.borrow_mut().anchors += 1;
             Ok(lineage(1))
         }
-        async fn confirm(&mut self, scope: &Scope, request: ckmg::PairingRequest) -> Result<()> {
-            assert!(request.device == key(3));
+        async fn confirm_all(
+            &mut self,
+            requests: Vec<(Scope, ckmg::PairingRequest)>,
+        ) -> Result<()> {
             let mut counts = self.0.borrow_mut();
             counts.confirmations += 1;
-            counts.touched.push(scope.clone());
+            for (scope, request) in requests {
+                assert!(request.device == key(3));
+                counts.touched.push(scope);
+            }
             Ok(())
         }
         async fn challenge(&mut self, scope: &Scope) -> Result<StepChallenge> {
@@ -701,7 +710,7 @@ mod tests {
     }
 
     #[test]
-    fn four_rounds_on_one_link_pair_every_scope_with_one_confirmation_each() {
+    fn four_rounds_on_one_link_pair_every_scope_with_one_confirmation_for_all() {
         let (host, link, counts) = setup();
         let saved = RefCell::new(GuestRecord::new(&link));
         let mut guest = Guest::new(
@@ -715,15 +724,10 @@ mod tests {
         );
         futures_executor::block_on(guest.run()).unwrap();
         let counts = counts.borrow();
-        // Three scopes, ONE link: one wallet confirmation per scope, then add and activate.
+        // Three scopes, ONE link: ONE wallet confirmation for all scopes, then add and activate.
         assert_eq!(
-            (
-                counts.anchors,
-                counts.confirmations,
-                counts.approved,
-                counts.activated
-            ),
-            (3, 3, 3, 3)
+            (counts.anchors, counts.confirmations, counts.approved, counts.activated),
+            (3, 1, 3, 3)
         );
         assert_eq!(
             (counts.requests, counts.possessions, counts.accepts),
@@ -754,7 +758,7 @@ mod tests {
         futures_executor::block_on(guest.run()).unwrap();
         let counts = counts.borrow();
         assert_eq!(counts.touched, vec![Scope::Wallet, community("alpha")]);
-        assert_eq!((counts.confirmations, counts.activated), (2, 2));
+        assert_eq!((counts.confirmations, counts.activated), (1, 2));
     }
 
     #[test]
@@ -790,13 +794,8 @@ mod tests {
                 }
                 let counts = counts.borrow();
                 assert_eq!(
-                    (
-                        counts.anchors,
-                        counts.confirmations,
-                        counts.approved,
-                        counts.activated
-                    ),
-                    (3, 3, 3, 3),
+                    (counts.anchors, counts.confirmations, counts.approved, counts.activated),
+                    (3, 1, 3, 3),
                     "{lose_reply} {at}"
                 );
                 assert_eq!(

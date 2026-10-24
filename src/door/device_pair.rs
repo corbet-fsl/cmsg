@@ -152,11 +152,7 @@ impl PairingActions {
     }
 }
 
-/// The ONE wallet confirmation of a pairing: unless the wallet already holds (or has durably
-/// begun) a stamp covering both slots, a single user-verifying ceremony — counted by
-/// [`DeviceKeys::confirm`] — obtains the stamp that covers `device_pair`
-/// slot for this key. Resumable: a stamp that covers asks nothing, an interrupted request is sent
-/// again, never confirmed twice.
+/// The ONE wallet confirmation of a pairing of one community; see [`confirm_all`].
 pub async fn confirm<A, B, C, E, Au, R>(
     actions: &PairingActions,
     wallet_api: &Foyer<Transport>,
@@ -172,49 +168,99 @@ where
     Au: ckmg::Authority,
     R: Records,
 {
-    let slots = actions.slots();
-    let covered = wallet
-        .with_global_passport(|holder| {
-            slots
-                .iter()
-                .all(|(scope, action)| holder.stamp_covers(scope, action, now()))
-        })
-        .await?;
-    if covered {
-        return Ok(());
-    }
-    let issuance = || async {
-        wallet_api
-            .live_global_wallet(wallet_origin.into())
-            .observe_lease(now)
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)?
-            .stamp_challenge(now)
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)
-    };
-    let mut rng = passport::rand::rngs::OsRng;
-    // An earlier attempt was interrupted after its request was durably begun: send the SAME
-    // request again, never a new confirmation.
-    let resent = match pending_request(wallet, &slots).await? {
-        Some(request) => resend_stamp(issuance().await?, wallet, request, &mut rng).await?,
-        None => false,
-    };
-    if !resent {
-        let assertion = |options: Value| async move {
-            let (credential, _) = keys
-                .confirm("pairing stamp")
-                .map_err(|_| ErrorCode::Refused)?
-                .sign_in(options)
+    confirm_all(std::slice::from_ref(actions), wallet_api, wallet_origin, wallet, keys).await
+}
+
+/// Slots of one stamp: mirrors `cpsd::STAMP_SLOTS` (cwlt does not re-export it); a larger chunk
+/// would be refused by the stamp request, never silently truncated.
+pub const STAMP_SLOTS: usize = 16;
+
+/// How many wallet confirmations (user-verifying ceremonies) pairing `scopes` communities
+/// takes: one stamp carries [`STAMP_SLOTS`] slots and a pairing needs one slot per community,
+/// so 16 communities are 1 confirmation and 17 are 2. Shown to the person in the CLI/UI.
+pub fn confirmations_for(scopes: usize) -> usize {
+    scopes.div_ceil(STAMP_SLOTS)
+}
+
+/// The text the CLI/UI shows before the wallet confirmation of `scopes` communities.
+pub fn confirmation_notice(scopes: usize) -> String {
+    let n = confirmations_for(scopes);
+    format!(
+        "Pairing {scopes} communit{} takes {n} wallet confirmation{} (one confirmation covers up to {STAMP_SLOTS} communities); the new device confirms once.",
+        if scopes == 1 { "y" } else { "ies" },
+        if n == 1 { "" } else { "s" },
+    )
+}
+
+/// The wallet confirmations of a pairing over ALL `actions` (one per community): the slots
+/// that no retained stamp covers yet go into stamps of at most [`STAMP_SLOTS`] slots, ONE
+/// user-verifying ceremony — counted by [`DeviceKeys::confirm`] — per stamp, so 3 communities
+/// are 1 confirmation and 17 are 2. Resumable: a covering stamp asks nothing, an interrupted
+/// request is sent again, never confirmed twice.
+pub async fn confirm_all<A, B, C, E, Au, R>(
+    actions: &[PairingActions],
+    wallet_api: &Foyer<Transport>,
+    wallet_origin: &str,
+    wallet: &mut GlobalPassport<B, C, E, Au, R>,
+    keys: &mut DeviceKeys<A>,
+) -> Result<()>
+where
+    A: cfyr::passkeys::Authenticator,
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    Au: ckmg::Authority,
+    R: Records,
+{
+    let all: Vec<_> = actions.iter().flat_map(PairingActions::slots).collect();
+    for _ in 0..=all.len().div_ceil(STAMP_SLOTS) {
+        let open = wallet
+            .with_global_passport(|holder| {
+                all.iter()
+                    .filter(|(scope, action)| !holder.stamp_covers(scope, action, now()))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .await?;
+        if open.is_empty() {
+            return Ok(());
+        }
+        let slots = &open[..open.len().min(STAMP_SLOTS)];
+        let issuance = || async {
+            wallet_api
+                .live_global_wallet(wallet_origin.into())
+                .observe_lease(now)
                 .await
-                .map_err(|_| ErrorCode::Refused)?
-                .into_parts();
-            // A pairing stamp always carries its own passkey assertion (never the birth grant).
-            Ok(Some(credential.as_json().clone()))
+                .map_err(|_| ErrorCode::Unauthorized)?
+                .stamp_challenge(now)
+                .await
+                .map_err(|_| ErrorCode::Unauthorized)
         };
-        request_stamp(issuance().await?, wallet, &slots, assertion, &mut rng).await?;
+        let mut rng = passport::rand::rngs::OsRng;
+        // An earlier attempt was interrupted after its request was durably begun: send the
+        // SAME request again, never a new confirmation.
+        let resent = match pending_request(wallet, slots).await? {
+            Some(request) => resend_stamp(issuance().await?, wallet, request, &mut rng).await?,
+            None => false,
+        };
+        if !resent {
+            let keys = &mut *keys;
+            let assertion = |options: Value| async move {
+                let (credential, _) = keys
+                    .confirm("pairing stamp")
+                    .map_err(|_| ErrorCode::Refused)?
+                    .sign_in(options)
+                    .await
+                    .map_err(|_| ErrorCode::Refused)?
+                    .into_parts();
+                // A pairing stamp always carries its own passkey assertion (never the birth grant).
+            Ok(Some(credential.as_json().clone()))
+            };
+            request_stamp(issuance().await?, wallet, slots, assertion, &mut rng).await?;
+        }
     }
-    Ok(())
+    // A stamp that does not cover what it was requested for never loops forever.
+    Err(ErrorCode::Reconcile)
 }
 
 /// The community's one-use challenge of one pairing step: its id and the signed request the
@@ -404,5 +450,21 @@ mod tests {
         assert_ne!(first.1, values(2, &new_key, "alpha").await.1);
         let other = ckmg::PublicKey::new(ckmg::VLD0, [8; 32]);
         assert_ne!(first.1, values(1, &other, "alpha").await.1);
+    }
+}
+
+#[cfg(test)]
+mod ceremony_count_tests {
+    use super::{STAMP_SLOTS, confirmation_notice, confirmations_for};
+
+    #[test]
+    fn up_to_sixteen_communities_are_one_confirmation_seventeen_are_two() {
+        assert_eq!(STAMP_SLOTS, 16);
+        assert_eq!(
+            [1, 3, 16, 17, 32, 33].map(confirmations_for),
+            [1, 1, 1, 2, 2, 3]
+        );
+        assert!(confirmation_notice(3).contains("1 wallet confirmation "));
+        assert!(confirmation_notice(17).contains("2 wallet confirmations"));
     }
 }

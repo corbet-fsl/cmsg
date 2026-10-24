@@ -48,6 +48,7 @@ pub mod ohttp;
 pub mod pairing;
 mod pairing_flow;
 #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
+pub mod pairing_guest;
 pub mod pairing_host;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pairing_onion;
