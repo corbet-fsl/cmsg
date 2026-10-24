@@ -6,11 +6,11 @@
 //! for one call (the Keys `SignContact`, `SignResolution` and `SignAcknowledgment`
 //! admissions and the ledger Keys keeps in its own checkpoint; see `signing.rs`). The wave nonce is the
 //! slot.
+use super::super::{facades::OwnedFuture, ErrorCode, Result};
+use super::ports::AccountSigner;
 use super::production::{WaveContact, WaveTerms};
 use super::types::{Hello, Terms};
-use super::ports::AccountSigner;
 use super::{ContactRequest, ReceiptRequest};
-use super::super::{facades::OwnedFuture, ErrorCode, Result};
 use ckmg::wallet_engine::account::{Account, Acknowledgment, Enrollment, Reserve, Resolution};
 use ckmg::Binding;
 use ckmg::SigningPhase;
@@ -94,7 +94,8 @@ impl<V: AccountView> WaveContact for AccountContact<V> {
             let digest = account
                 .contact_digest(&reserve_of(&account, &request)?)
                 .map_err(|_| ErrorCode::Refused)?;
-            let signature = signer.sign(SigningPhase::Contact, *request.nonce, digest)
+            let signature = signer
+                .sign(SigningPhase::Contact, *request.nonce, digest)
                 .await?;
             Ok(signature.to_vec())
         })
@@ -124,7 +125,8 @@ impl<V: AccountView> WaveContact for AccountContact<V> {
             let digest = account
                 .resolution_digest(&reserve, &resolution_of(&request)?)
                 .map_err(|_| ErrorCode::Refused)?;
-            let signature = signer.sign(SigningPhase::Resolution, *request.contact.nonce, digest)
+            let signature = signer
+                .sign(SigningPhase::Resolution, *request.contact.nonce, digest)
                 .await?;
             Ok(signature.to_vec())
         })
@@ -157,7 +159,8 @@ impl<V: AccountView> WaveContact for AccountContact<V> {
             let digest = account
                 .acknowledgment_digest(&reserve, &resolution_of(&request)?, request.issued_at)
                 .map_err(|_| ErrorCode::Refused)?;
-            let signature = signer.sign(SigningPhase::Acknowledgment, *request.contact.nonce, digest)
+            let signature = signer
+                .sign(SigningPhase::Acknowledgment, *request.contact.nonce, digest)
                 .await?;
             Ok(signature.to_vec())
         })

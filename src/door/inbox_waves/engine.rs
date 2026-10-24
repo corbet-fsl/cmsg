@@ -872,8 +872,8 @@ where
         // system step. The human's wave is kept; the retries are bounded.
         let window = self.ports.policy(now)?.window;
         let hello = &session.hello;
-        let late = now >= hello.expires_at
-            || (window > 0 && now / window != hello.opened_at / window);
+        let late =
+            now >= hello.expires_at || (window > 0 && now / window != hello.opened_at / window);
         if late {
             return self.rehello(desk, session, now).await;
         }
