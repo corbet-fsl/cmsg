@@ -14,8 +14,8 @@
 //! host that restarts loses the offer; the person starts a new link, nothing half-applied is
 //! trusted.
 use super::device_join::{DeviceSign, DeviceUse};
-use super::device_pair::{self, PairingActions, Step, StepChallenge};
-use super::pairing_publish::prepare_pairing_evidence;
+use super::device_pair::{self, PairingActions, PresentedStamp, Step, StepChallenge};
+use super::pairing_publish::prepare_revision_evidence;
 use super::pairing_roles::{HostSteps, Scope, Selection};
 use super::passport::GlobalPassport;
 use super::*;
@@ -43,7 +43,9 @@ pub trait PairingWallet {
         step: Step,
         challenge: &StepChallenge,
         signature: Vec<u8>,
-    ) -> Result<()>;
+    ) -> Result<Option<PresentedStamp>>;
+    /// The wallet's stamp trust, to verify the revision evidence before it is kept.
+    async fn stamp_trust(&mut self) -> Result<cvlt::StampTrust>;
 }
 
 /// [`PairingWallet`] over the wallet's authenticated Foyer, its passport and its passkeys.
@@ -94,16 +96,14 @@ where
         step: Step,
         challenge: &StepChallenge,
         signature: Vec<u8>,
-    ) -> Result<()> {
-        device_pair::send(
-            community,
-            self.passport,
-            actions,
-            step,
-            challenge,
-            signature,
-        )
-        .await
+    ) -> Result<Option<PresentedStamp>> {
+        device_pair::send(community, self.passport, actions, step, challenge, signature).await
+    }
+
+    async fn stamp_trust(&mut self) -> Result<cvlt::StampTrust> {
+        composer_core::stamp_trust(self.api, self.origin)
+            .await
+            .map_err(|_| ErrorCode::Unavailable)
     }
 }
 
@@ -127,6 +127,33 @@ impl DeviceSign for VaultSalt<'_> {
     }
 }
 
+/// The approving device's own key signing the typed pairing approval: the only purpose this
+/// signer accepts is the digest of ONE pairing (`ckmg::PairingApproval`), signed through the
+/// Vault's single-use admission over the exact transcript.
+struct VaultApproval<'a> {
+    vault: &'a mut dyn facades::BoundVault,
+    origin: &'a str,
+}
+
+impl VaultApproval<'_> {
+    async fn sign(&mut self, community: &str, digest: &[u8; 32]) -> Result<[u8; 64]> {
+        let message = ckmg::PairingApproval::new(community, digest)
+            .map_err(|_| ErrorCode::InvalidRequest)?
+            .message();
+        let started = ckmg::Clock::now(&mut custody::SystemClock).map_err(|_| ErrorCode::Clock)?;
+        let (signature, _, _) = self
+            .vault
+            .sign_endorsement(
+                &message,
+                self.origin,
+                started,
+                started.saturating_add(SIGN_SECONDS),
+            )
+            .await?;
+        signature.try_into().map_err(|_| ErrorCode::Reconcile)
+    }
+}
+
 /// What round 2 settled: the request, its key's two stamp actions.
 struct Confirmed {
     request: ckmg::PairingRequest,
@@ -139,6 +166,7 @@ struct Approval {
     added: bool,
     grant: Option<ckmg::PairingGrant>,
     receipt: Option<ckmg::Receipt>,
+    stamp: Option<PresentedStamp>,
     evidence: Option<cvlt::PreparedLineageEvidence>,
     retained: bool,
     value: Option<cdht::SignedValue>,
@@ -229,6 +257,22 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
         }
         let name = self.door.config.community.clone();
         let member = wallet.pseudonym(&name).await?;
+        // Keys adds exactly the proven device FIRST: the one stamp commits to the revision
+        // (the receipt's challenge), so it approves this key in exactly this revision. The
+        // key grants nothing until the community activates it, which happens only after the
+        // revision is published.
+        if self.approval.receipt.is_none() {
+            let approved = self.door.pair_approve(&self.origin, request).await?;
+            self.approval.grant = Some(approved.grant);
+            self.approval.receipt = Some(approved.receipt);
+        }
+        let revision = self
+            .approval
+            .receipt
+            .as_ref()
+            .ok_or(ErrorCode::Reconcile)?
+            .passkey_challenge()
+            .map_err(|_| ErrorCode::Unauthorized)?;
         let actions = {
             let vault = self
                 .door
@@ -244,6 +288,7 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
                 &name,
                 &member,
                 &request.device,
+                revision,
                 &mut salt,
             )
             .await?
@@ -270,43 +315,55 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
         signature: Vec<u8>,
     ) -> Result<ckmg::PairingGrant> {
         let confirmed = self.confirmed.as_ref().ok_or(ErrorCode::InvalidRequest)?;
-        let request = confirmed.request.clone();
         let anchor = self.anchor.clone().ok_or(ErrorCode::InvalidRequest)?;
-        // 0. The key is registered PENDING at the community: it grants nothing yet.
+        let actions = confirmed.actions.clone();
+        // 0. The key is registered PENDING at the community with the ONE stamp: it grants
+        // nothing yet. The stamp presentation is kept as the revision's public evidence.
         if !self.approval.added {
             let challenge = self.challenge.as_ref().ok_or(ErrorCode::InvalidRequest)?;
-            wallet
+            let presented = wallet
                 .send(
                     &mut self.community,
-                    &confirmed.actions,
+                    &actions,
                     Step::Add,
                     challenge,
                     signature,
                 )
                 .await?;
+            self.approval.stamp = Some(presented.ok_or(ErrorCode::Reconcile)?);
             self.approval.added = true;
         }
-        // 1. Keys adds exactly the proven device.
-        if self.approval.receipt.is_none() {
-            let approved = self.door.pair_approve(&self.origin, &request).await?;
-            self.approval.grant = Some(approved.grant);
-            self.approval.receipt = Some(approved.receipt);
-        }
+        // 1. Keys already added exactly the proven device (round 2, before the stamp).
         let receipt = self.approval.receipt.clone().ok_or(ErrorCode::Reconcile)?;
-        // 2. The member's passkey signs the exact receipt (one ceremony).
+        // 2. Revision evidence: the stamp and the host device key's signature over the same
+        // digest, verified against the CURRENT devices before anything is kept.
         if self.approval.evidence.is_none() {
-            let mut membership = self.door.live_membership(&self.origin)?;
+            let stamp = self.approval.stamp.clone().ok_or(ErrorCode::Reconcile)?;
+            let stamps = wallet.stamp_trust().await?;
+            let host_signature = {
+                let vault = self
+                    .door
+                    .vaults
+                    .get_mut(&self.origin)
+                    .ok_or(ErrorCode::Unavailable)?;
+                VaultApproval {
+                    vault: vault.as_mut(),
+                    origin: &self.origin,
+                }
+                .sign(actions.community(), &actions.digest())
+                .await?
+            };
             let mut policy = self.door.current_policy(&self.origin)?;
-            let origin = self.origin.clone();
-            let door = &mut *self.door;
-            let evidence = prepare_pairing_evidence(
-                &mut membership,
+            let evidence = prepare_revision_evidence(
                 &mut policy,
-                async |options| door.passkey_assert(&origin, options).await,
+                &stamps,
+                &anchor,
                 &receipt,
+                &actions,
+                &stamp,
+                host_signature,
                 &mut custody::SystemClock,
-            )
-            .await?;
+            )?;
             self.approval.evidence = Some(evidence);
         }
         // 3. Durable before anything is published.
@@ -373,6 +430,7 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
                 signature,
             )
             .await
+            .map(|_| ())
     }
 }
 

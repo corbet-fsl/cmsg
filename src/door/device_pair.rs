@@ -65,13 +65,17 @@ impl Step {
 /// The stamp action of pairing one key into one community: what ONE stamp slot must cover.
 ///
 /// It commits to the community (the scope), the member's pseudonym, the new key and the
-/// community's own pairing session. It does not commit to the planned lineage revision: the
-/// host approves the revision with Keys only after the human confirmation, and the server
-/// activates by KEY alone (the PENDING record names the key), so the key is what this approval
-/// has to bind; the revision is authenticated by Keys' own grant and published signed by the
-/// lineage root, and a revision that carries a different key never matches the PENDING one.
+/// community's own pairing session AND the planned lineage revision (the challenge of the Keys
+/// receipt that adds the key). The host therefore runs Keys' `pair_approve` BEFORE the one
+/// stamp: the stamp, which is also the revision's public evidence, then approves exactly this
+/// key in exactly this revision, and the host device key signs the same digest.
 #[derive(Clone)]
 pub struct PairingActions {
+    name: String,
+    member: String,
+    revision: [u8; 32],
+    digest: [u8; 32],
+    salt: [u8; 32],
     scope: StampScope,
     key: [u8; 32],
     session: [u8; 32],
@@ -88,19 +92,20 @@ impl PairingActions {
         key: [u8; 32],
         session: [u8; 32],
         salt: [u8; 32],
+        revision: [u8; 32],
     ) -> Result<Self> {
+        let digest = cfyr::device_session::pair_payload(name, member, &key, &session, Some(&revision));
         let pair = StampAction::new(
             ActionKind::new(cfyr::device_session::PAIR_ACTION).map_err(|_| ErrorCode::Unavailable)?,
-            PayloadDigest::from_bytes(cfyr::device_session::pair_payload(
-                name,
-                member,
-                &key,
-                &session,
-                None,
-            )),
+            PayloadDigest::from_bytes(digest),
             StampSalt::from_bytes(salt),
         );
         Ok(Self {
+            name: name.to_owned(),
+            member: member.to_owned(),
+            revision,
+            digest,
+            salt,
             pair,
             scope,
             key,
@@ -118,17 +123,43 @@ impl PairingActions {
         name: &str,
         member: &str,
         new_key: &ckmg::PublicKey,
+        revision: [u8; 32],
         approver: &mut impl DeviceSign,
     ) -> Result<Self> {
         let scope = stamp_scope(community, name).await?;
         let salt = derived_salt(name, new_key, PAIR_SALT_LABEL, approver).await?;
         let session = derived_salt(name, new_key, PAIR_SESSION_LABEL, approver).await?;
-        Self::new(scope, name, member, *new_key.value(), session, salt)
+        Self::new(scope, name, member, *new_key.value(), session, salt, revision)
     }
 
     /// The key being paired.
     pub fn key(&self) -> &[u8; 32] {
         &self.key
+    }
+
+    /// The pairing digest the stamp slot and the host device key's approval both cover.
+    pub fn digest(&self) -> [u8; 32] {
+        self.digest
+    }
+
+    /// The community name.
+    pub fn community(&self) -> &str {
+        &self.name
+    }
+
+    /// The member's pseudonym in the community.
+    pub fn member(&self) -> &str {
+        &self.member
+    }
+
+    /// The planned lineage revision (digest of the Keys receipt challenge).
+    pub fn revision(&self) -> &[u8; 32] {
+        &self.revision
+    }
+
+    /// The slot's salt (public once the stamp is presented).
+    pub fn salt(&self) -> [u8; 32] {
+        self.salt
     }
 
     /// The community's pairing session value (sent with `device_add`).
@@ -303,7 +334,7 @@ pub async fn send<B, C, E, Au, R>(
     step: Step,
     challenge: &StepChallenge,
     signature: Vec<u8>,
-) -> Result<()>
+) -> Result<Option<PresentedStamp>>
 where
     B: cwst::backend::Backend,
     C: Clock,
@@ -312,6 +343,7 @@ where
     R: Records,
 {
     let action = actions.action();
+    let at = now();
     let mut policy = community.current_policy();
     let expected = policy
         .with_current(now(), |current| {
@@ -330,7 +362,7 @@ where
             let stamp = match step {
                 Step::Add => Some(
                     holder
-                        .present_stamp(&mut rng, actions.scope(), action, now())
+                        .present_stamp(&mut rng, actions.scope(), action, at)
                         .map_err(|_| ErrorCode::Unauthorized)?
                         .to_bytes(),
                 ),
@@ -342,17 +374,20 @@ where
     let passport = json!({"challenge": challenge.id, "proof": proof});
     match step {
         Step::Add => {
+            let stamp = stamp.ok_or(ErrorCode::Unauthorized)?;
             community
                 .device_add(json!({
                     "passport": passport,
-                    "stamp": stamp.ok_or(ErrorCode::Unauthorized)?,
+                    "stamp": &stamp,
                     "salt": action.salt().to_bytes(),
                     "device_key": actions.key(),
                     "session": actions.session(),
-                    "revision": Value::Null,
+                    "revision": actions.revision(),
                     "signature": signature,
                 }))
                 .await
+                .map_err(|_| ErrorCode::Reconcile)?;
+            Ok(Some(PresentedStamp { presentation: stamp, at }))
         }
         Step::Activate => {
             community
@@ -362,9 +397,20 @@ where
                     "signature": signature,
                 }))
                 .await
+                .map_err(|_| ErrorCode::Reconcile)?;
+            Ok(None)
         }
     }
-    .map_err(|_| ErrorCode::Reconcile)
+}
+
+/// The stamp presentation the add step sent, kept as the revision's public evidence, and the
+/// time it was presented at.
+#[derive(Clone)]
+pub struct PresentedStamp {
+    /// `StampPresentation::to_bytes`.
+    pub presentation: Vec<u8>,
+    /// Unix seconds the stamp payload binds.
+    pub at: u64,
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -397,7 +443,8 @@ mod tests {
 
     #[test]
     fn one_stamp_slot_per_community_covers_exactly_one_key_of_one_member() {
-        let actions = PairingActions::new(scope(), "alpha", "m1", [7; 32], [3; 32], [1; 32]).unwrap();
+        let actions =
+            PairingActions::new(scope(), "alpha", "m1", [7; 32], [3; 32], [1; 32], [9; 32]).unwrap();
         let slots = actions.slots();
         assert_eq!(slots.len(), 1, "ONE slot per community");
         assert_eq!(slots[0].0, scope());
@@ -405,11 +452,11 @@ mod tests {
         assert_eq!(pair.kind().as_str(), "device_pair");
         assert_eq!(
             pair.payload().to_bytes(),
-            cfyr::device_session::pair_payload("alpha", "m1", &[7; 32], &[3; 32], None)
+            cfyr::device_session::pair_payload("alpha", "m1", &[7; 32], &[3; 32], Some(&[9; 32]))
         );
         // Another key, member, session or community never shares the digest.
         let digest = |name: &str, member: &str, key: u8, session: u8| {
-            PairingActions::new(scope(), name, member, [key; 32], [session; 32], [1; 32])
+            PairingActions::new(scope(), name, member, [key; 32], [session; 32], [1; 32], [9; 32])
                 .unwrap()
                 .action()
                 .payload()
@@ -420,6 +467,9 @@ mod tests {
         assert_ne!(base, digest("alpha", "m2", 7, 3));
         assert_ne!(base, digest("alpha", "m1", 8, 3));
         assert_ne!(base, digest("alpha", "m1", 7, 4));
+        let other_revision =
+            PairingActions::new(scope(), "alpha", "m1", [7; 32], [3; 32], [1; 32], [8; 32]).unwrap();
+        assert_ne!(base, other_revision.action().payload().to_bytes());
         assert_eq!(actions.key(), &[7; 32]);
         assert_eq!(actions.session(), &[3; 32]);
     }

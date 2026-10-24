@@ -761,6 +761,35 @@ mod tests {
         assert_eq!((counts.confirmations, counts.activated), (1, 2));
     }
 
+    /// Ceremony counts: the host asks the wallet ONCE for every selected scope, and each wallet
+    /// confirmation covers `STAMP_SLOTS` communities: 16 communities are one, 17 are two. The
+    /// new device is asked for one confirmation however many scopes it adopts.
+    #[test]
+    fn sixteen_communities_are_one_host_confirmation_and_seventeen_two() {
+        use super::super::device_pair::{STAMP_SLOTS, confirmations_for};
+        for (communities, wallet_confirmations) in [(3, 1), (16, 1), (17, 2)] {
+            let names: Vec<_> = (0..communities).map(|n| community(&format!("c{n:02}"))).collect();
+            let chosen = Selection::all(names.clone()).unwrap();
+            let (host, link, counts) = setup_with(&chosen);
+            let mut guest = Guest::new(
+                FakeGuest(counts.clone()),
+                wire(&host, &Rc::default()),
+                |_: &GuestRecord| Ok(()),
+                GuestRecord::new(&link),
+            );
+            futures_executor::block_on(guest.run()).unwrap();
+            let counts = counts.borrow();
+            // One host-side pass over all scopes, one new-device confirmation.
+            assert_eq!(counts.confirmations, 1, "{communities} communities");
+            assert_eq!(counts.touched.len(), communities);
+            assert_eq!(counts.activated, communities);
+            // The wallet's ceremonies follow the stamp's slot count.
+            assert_eq!(confirmations_for(communities), wallet_confirmations);
+            assert_eq!(confirmations_for(STAMP_SLOTS), 1);
+            assert_eq!(confirmations_for(STAMP_SLOTS + 1), 2);
+        }
+    }
+
     #[test]
     fn a_lost_connection_or_restart_at_any_step_redoes_no_human_work() {
         // Break the exchange at every call, once as a lost request and once as a lost
