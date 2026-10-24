@@ -55,11 +55,7 @@ fn feed(now: u64, revision: u64) -> Vec<u8> {
     ));
     let schema = json!({"community":"alpha", "version":1, "public":[], "private":[]});
     for (name, kind, content) in [
-        (
-            "settings",
-            Kind::SettingsSnapshot,
-            json!({ "forum.room_passes_per_epoch":4 }),
-        ),
+        ("settings", Kind::SettingsSnapshot, json!({})),
         ("schema", Kind::SchemaSnapshot, schema.clone()),
         (
             "schema_versions",
