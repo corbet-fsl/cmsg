@@ -13,7 +13,7 @@ branch coverage. Do not lower gates, substitute mocks or claim compilation as
 coverage. Document justified unreachable exclusions for review.
 
 Use free public CI for suitable inputs, bounded concurrency and reusable caches.
-No workstation Cargo commands. Heavy load/churn tests run on owned CI. Never
+No local Cargo commands. Heavy load/churn tests run on owned CI. Never
 publish packages or put secrets in repositories. Commit explicit paths with
 plain English messages and no attribution trailers. Every backend change needs
 independent review before acceptance.
