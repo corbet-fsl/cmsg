@@ -61,6 +61,25 @@ impl ckmg::Authority for IntentAuthority {
             _ => Err(ckmg::Error::Unauthorized),
         }
     }
+    // The final synchronous recheck of every device-key signature (Keys has no other
+    // device signing path): the admitted command was consumed by `check` above, so this
+    // only re-verifies the exact retained identity.
+    fn check_device_signing_current(
+        &mut self,
+        request: ckmg::Authorization<'_>,
+    ) -> std::result::Result<u64, ckmg::Error> {
+        let root = *self.root.borrow();
+        if request.action != ckmg::Action::SignDeviceEd25519
+            || request.binding != &self.binding
+            || request.device != self.device
+            || request.root != root
+            || request.epoch != 1
+            || request.signing.is_none()
+        {
+            return Err(ckmg::Error::Unauthorized);
+        }
+        Ok(request.now)
+    }
 }
 pub(super) type ProfileOwner = VaultBoardOwner<
     cwst::backend::Memory,

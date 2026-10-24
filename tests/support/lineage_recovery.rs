@@ -52,6 +52,26 @@ impl ckmg::Authority for LineageRecoveryTestSetupAuthority {
             _ => Err(ckmg::Error::Unauthorized),
         }
     }
+    // The one certified genesis attempt that seals the lineage record (the typed API; the
+    // reserved lineage purpose is no longer reachable from a caller).
+    async fn check_genesis(
+        &mut self,
+        request: ckmg::GenesisAuthorization<'_>,
+    ) -> Result<(), ckmg::Error> {
+        if request.now != NOW || request.evidence != b"lineage fixture" {
+            return Err(ckmg::Error::Unauthorized);
+        }
+        Ok(())
+    }
+    fn check_genesis_current(
+        &mut self,
+        request: ckmg::GenesisAuthorization<'_>,
+    ) -> Result<(), ckmg::Error> {
+        if request.evidence != b"lineage fixture" {
+            return Err(ckmg::Error::Unauthorized);
+        }
+        Ok(())
+    }
 }
 // Recording observer: exact checkpoint binding asserted per call; deny still
 // refuses. A set regress clock is rewound during admission.
@@ -123,22 +143,20 @@ async fn setup() -> (Vec<u8>, ckmg::Lineage, [u8; 24], Vec<u8>) {
         .create_scope(&prf, binding, info, CREATE_EVIDENCE)
         .await
         .unwrap();
+    let value = vault
+        .keys()
+        .prepare_genesis_record(&receipt, b"lineage fixture", NOW + 600)
+        .await
+        .unwrap()
+        .1;
     drop(guard);
     let guard = vault.stage_keys(batch(1, [62; 32])).unwrap();
     vault.keys().acknowledge(receipt.operation).await.unwrap();
     drop(guard);
     let sealed = vault.keys().retained_checkpoint().await.unwrap();
     let lineage = vault.keys().lineage().await.unwrap();
-    let purpose = ckmg::Purpose::new(ckmg::Scope::Member, "vault.lineage", 0).unwrap();
-    let handle = vault.keys().key(purpose).await.unwrap();
-    let nonce = [9u8; 24];
-    let ciphertext = vault
-        .keys()
-        .with_vld0_record_cipher(&handle, |c| {
-            c.crypt(&nonce, b"lineage fixture").unwrap().to_vec()
-        })
-        .await
-        .unwrap();
+    let nonce = value.nonce.unwrap();
+    let ciphertext = value.data;
     (sealed, lineage, nonce, ciphertext)
 }
 fn inspector() -> ckmg::CheckpointInspector {
