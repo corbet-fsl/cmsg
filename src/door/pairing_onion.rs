@@ -16,7 +16,7 @@
 //! ([`MAX_MESSAGE_BYTES`], checked before any decoding), a bounded number of calls per offer
 //! ([`MAX_CALLS`]), and the offer deadline. Framing is that of the Tor message layer
 //! (length-prefixed frames with a size limit, set to the same maximum).
-use super::pairing::{MAX_MESSAGE_BYTES, Offer};
+use super::pairing::{Offer, MAX_MESSAGE_BYTES};
 use super::pairing_roles::{Channel, Host, HostSteps};
 use super::*;
 use std::sync::Arc;
@@ -221,7 +221,7 @@ pub mod ephemeral {
 
 #[cfg(test)]
 mod tests {
-    use super::super::pairing::{Link, OFFER_SECONDS, Received};
+    use super::super::pairing::{Link, Received, OFFER_SECONDS};
     use super::*;
     use std::cell::Cell;
     use std::sync::Mutex;

@@ -2,7 +2,7 @@
 //! network (ctrn fixture). Needs `TOR_FIXTURE_JSON`; run inside the fixture network.
 #![cfg(feature = "private-tor-fixture")]
 use cmsg::door::pairing::{Link, Offer, Received};
-use cmsg::door::pairing_onion::{OnionChannel, OnionOffer, Serve, ephemeral::ephemeral_tor};
+use cmsg::door::pairing_onion::{ephemeral::ephemeral_tor, OnionChannel, OnionOffer, Serve};
 use cmsg::door::pairing_roles::Channel;
 use cmsg::door::{ErrorCode, Result};
 use std::sync::Arc;
