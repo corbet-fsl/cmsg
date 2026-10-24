@@ -30,7 +30,11 @@ const MAX_PROOF_BYTES: usize = 1 << 20;
 /// The parts of the group manifest the device authenticates its files with.
 #[derive(Deserialize)]
 struct Manifest {
+    // The released conformance manifest spells its keys in camelCase; the snake_case spelling
+    // is the test fixture's.
+    #[serde(alias = "circuitSha256")]
     circuit_sha256: String,
+    #[serde(alias = "vkSha256")]
     vk_sha256: String,
     setup: Vec<Setup>,
 }
@@ -370,6 +374,16 @@ mod tests {
         policy: WavePolicy,
     ) -> std::result::Result<(), ErrorCode> {
         factory(policy, NOW, NOW + 500).map(|_| ())
+    }
+
+    #[test]
+    fn the_released_camel_case_manifest_parses() {
+        let released = br#"{"version":1,"circuitSha256":"aa","vkSha256":"bb","numPoints":2,
+            "setup":[{"name":"g1.dat","url":"u","bytes":1,"range":true,"sha256":"cc"}]}"#;
+        let manifest: Manifest = serde_json::from_slice(released).unwrap();
+        assert_eq!(manifest.circuit_sha256, "aa");
+        assert_eq!(manifest.vk_sha256, "bb");
+        assert_eq!(manifest.setup.len(), 1);
     }
 
     #[test]
