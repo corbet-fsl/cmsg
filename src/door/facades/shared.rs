@@ -982,7 +982,12 @@ mod eager_tests {
         fn enable_groups(&mut self, _: Option<Box<dyn GroupPeers>>) -> Result<()> {
             Ok(())
         }
-        fn bind_board(self: Box<Self>, _: &mut Door, _: &str, _: board::PendingBoard) -> Result<()> {
+        fn bind_board(
+            self: Box<Self>,
+            _: &mut Door,
+            _: &str,
+            _: board::PendingBoard,
+        ) -> Result<()> {
             Ok(())
         }
     }

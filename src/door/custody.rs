@@ -1,5 +1,5 @@
 //! Separate fresh transport and member checks over the original Foyer/Records.
-use super::{Door, ErrorCode, foyer::Transport};
+use super::{foyer::Transport, Door, ErrorCode};
 use ckmg::{Action, Authorization, Binding, Clock, Error, PublicKey};
 use futures_util::lock::Mutex;
 use std::{cell::Cell, rc::Rc};
@@ -7,21 +7,20 @@ use std::{cell::Cell, rc::Rc};
 mod genesis;
 mod initial_recovery;
 pub use initial_recovery::{
-    InitialRecoveryAuthority, complete_device_initial_recovery, complete_initial_recovery,
+    complete_device_initial_recovery, complete_initial_recovery, InitialRecoveryAuthority,
 };
 mod initial_restore;
 pub use initial_restore::{
-    ComposedMemberVault, InitialRecoveredVault, InitialRecoveryOwners, InitialRootVault,
-    prepare_device_initial_recovery, prepare_initial_recovery,
+    prepare_device_initial_recovery, prepare_initial_recovery, ComposedMemberVault,
+    InitialRecoveredVault, InitialRecoveryOwners, InitialRootVault,
 };
 mod initial;
 pub use genesis::{
-    InitialPublicationError, Opening, acknowledge_device_initial_publication,
-    acknowledge_initial_publication, prepare_device_initial_publication,
-    prepare_birth_publication, prepare_initial_publication, reopen_device_initial_publication,
-    reopen_initial_publication, reopen_initial_publication_opened,
-    retain_device_initial_publication,
-    retain_initial_publication,
+    acknowledge_device_initial_publication, acknowledge_initial_publication,
+    prepare_birth_publication, prepare_device_initial_publication, prepare_initial_publication,
+    reopen_device_initial_publication, reopen_initial_publication,
+    reopen_initial_publication_opened, retain_device_initial_publication,
+    retain_initial_publication, InitialPublicationError, Opening,
 };
 mod current_member;
 
@@ -55,10 +54,10 @@ pub(super) fn account_channel(authorize: bool, delegation_spent: &mut bool) -> A
 
 mod recovery;
 pub use initial::{
-    EnrollmentError, InitialEnrollment, activate_initial, reopen_device_enrollment,
-    reopen_initial_enrollment, reopen_initial_enrollment_opened, retain_device_enrollment,
-    retain_global_initial_enrollment, retain_global_initial_enrollment_opened,
-    retain_initial_enrollment,
+    activate_initial, reopen_device_enrollment, reopen_initial_enrollment,
+    reopen_initial_enrollment_opened, retain_device_enrollment, retain_global_initial_enrollment,
+    retain_global_initial_enrollment_opened, retain_initial_enrollment, EnrollmentError,
+    InitialEnrollment,
 };
 pub use recovery::{
     AccountWiring, RecoveredVault, RecoveryAuthority, RecoveryOwners, RestoredVault,
@@ -654,7 +653,7 @@ impl Door {
 
 #[cfg(test)]
 mod account_channel_tests {
-    use super::{AccountChannel::*, account_channel};
+    use super::{account_channel, AccountChannel::*};
 
     /// Row 17: enrollment (authorize, delegation), the account request, then a
     /// record-recipient round (authorize, device signature) after activation.

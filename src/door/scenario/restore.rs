@@ -1,8 +1,6 @@
 //! One already-enrolled restoration on the native owner's existing LocalSet.
 use super::{mesh, network};
-use crate::door::{
-    login, ClientToken, Door, ErrorCode, Event, Output, Result, VaultComposer,
-};
+use crate::door::{login, ClientToken, Door, ErrorCode, Event, Output, Result, VaultComposer};
 use cmsh::tor_discovery::TorWatcher;
 use cwst::backend::Backend;
 use futures_util::{future::LocalBoxFuture, FutureExt};

@@ -254,13 +254,21 @@ async fn restart(
     );
     let mut services = composer::NativeServices(settings);
     let community = services.foyer(composer::Service::Community).await.unwrap();
-    door.bind_foyer(origin, Role::Member, Sessions::new(Scope::Community, community))
-        .unwrap();
+    door.bind_foyer(
+        origin,
+        Role::Member,
+        Sessions::new(Scope::Community, community),
+    )
+    .unwrap();
     let before = keys.ceremonies();
     composer::restore_device_login(&mut door, settings, &mut services, keys, storage, network)
         .await
         .unwrap();
-    assert_eq!(keys.ceremonies(), before + 1, "a registered start is ONE wallet confirmation");
+    assert_eq!(
+        keys.ceremonies(),
+        before + 1,
+        "a registered start is ONE wallet confirmation"
+    );
     let actions = BTreeSet::from(["login.start", "login.poll"].map(String::from));
     let token = door
         .pair_client(origin, Role::Member, actions, now(), now() + 1200)
@@ -297,8 +305,11 @@ async fn a_restarted_device_key_member_binds_at_start_and_logs_in_without_a_cere
         .unwrap();
         let (mut settings, mut keys) = device(&f, &config);
         settings.community.fingerprint = Some(community_fingerprint(&f["community"]).await);
-        let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
-            .join(format!("device-login-{}-{}", std::process::id(), now()));
+        let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "device-login-{}-{}",
+            std::process::id(),
+            now()
+        ));
         std::fs::create_dir_all(&directory).unwrap();
         let progress = directory.join("composer.json");
         let global = cwst::backend::Memory::new();
@@ -318,7 +329,11 @@ async fn a_restarted_device_key_member_binds_at_start_and_logs_in_without_a_cere
         )
         .await
         .unwrap();
-        assert_eq!(keys.ceremonies(), 1, "a fresh registration is ONE wallet confirmation");
+        assert_eq!(
+            keys.ceremonies(),
+            1,
+            "a fresh registration is ONE wallet confirmation"
+        );
         drop(registered); // The registering process ends.
         let origin = settings.community.origin.clone();
         let origin = origin.as_str();
@@ -339,12 +354,19 @@ async fn a_restarted_device_key_member_binds_at_start_and_logs_in_without_a_cere
             .prepare_login_recovery(origin, &token, now())
             .await
             .unwrap();
-        assert!(stamps.is_some(), "a device-key login retains the stamp trust");
+        assert!(
+            stamps.is_some(),
+            "a device-key login retains the stamp trust"
+        );
         assert_eq!(
             door.complete_login_recovery(origin, &token, now()).await,
             Ok(Status::Complete)
         );
-        assert_eq!(keys.ceremonies(), 3, "one registration, one confirmation per start");
+        assert_eq!(
+            keys.ceremonies(),
+            3,
+            "one registration, one confirmation per start"
+        );
     })
     .await
     .expect("bounded device-key restarts");
@@ -364,8 +386,11 @@ async fn a_new_device_with_the_synced_wallet_passkey_restores_the_same_member() 
         .unwrap();
         let (mut settings, mut keys) = device(&f, &config);
         settings.community.fingerprint = Some(community_fingerprint(&f["community"]).await);
-        let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
-            .join(format!("device-restore-{}-{}", std::process::id(), now()));
+        let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "device-restore-{}-{}",
+            std::process::id(),
+            now()
+        ));
         std::fs::create_dir_all(&directory).unwrap();
         let original = directory.join("original.json");
         let network = initial_network::Nodes::new();

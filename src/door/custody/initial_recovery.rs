@@ -437,4 +437,3 @@ async fn complete_recovery<B: cwst::backend::Backend, N: cdht::Network + Clone>(
         .retire_recovery(network, &mut clock, &mut authority)
         .await
 }
-

@@ -38,7 +38,6 @@ use std::{
     time::Duration,
 };
 
-
 /// One service endpoint and its trust anchors.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ServiceSettings {
@@ -170,7 +169,6 @@ impl DeviceSettings {
     }
 }
 
-
 /// Where the encrypted checkpoints live. Both backends are `Clone` handles to
 /// one durable checkpoint each.
 pub struct DeviceStorage<B> {
@@ -196,7 +194,6 @@ impl DeviceStorage<cwst::native::FileBackend> {
         })
     }
 }
-
 
 impl ProverArtifacts {
     /// The real client prover over the retained extension group.
@@ -414,8 +411,7 @@ fn check_open(
             .map_err(|e| ComposeError::Config(format!("forum: {e}")))?;
         match &deployment.runtime.forum {
             None => deployment.runtime.forum = Some(forum),
-            Some(held)
-                if serde_json::to_value(held).ok() == serde_json::to_value(&forum).ok() => {}
+            Some(held) if serde_json::to_value(held).ok() == serde_json::to_value(&forum).ok() => {}
             Some(_) => {
                 return Err(ComposeError::Config(
                     "deployment forum differs from the device settings".into(),
@@ -457,10 +453,16 @@ pub async fn open_native_device(
 
 /// Clients of the two HTTPS services that own their settings, so they can move into the
 /// Door's thread.
-#[cfg(all(feature = "native-tor", not(any(feature = "ohttp", target_arch = "wasm32"))))]
+#[cfg(all(
+    feature = "native-tor",
+    not(any(feature = "ohttp", target_arch = "wasm32"))
+))]
 pub struct OwnedNativeServices(pub DeviceSettings);
 
-#[cfg(all(feature = "native-tor", not(any(feature = "ohttp", target_arch = "wasm32"))))]
+#[cfg(all(
+    feature = "native-tor",
+    not(any(feature = "ohttp", target_arch = "wasm32"))
+))]
 impl Services for OwnedNativeServices {
     async fn foyer(&mut self, service: Service) -> Result<Foyer<Transport>, ComposeError> {
         NativeServices(&self.0).foyer(service).await
@@ -519,11 +521,9 @@ where
     R: FnOnce() -> N + Send + 'static,
     N: cdht::Network + Clone + 'static,
 {
-    let progress = parts
-        .storage
-        .progress
-        .clone()
-        .ok_or(ComposeError::Config("a registered device keeps its progress file".into()))?;
+    let progress = parts.storage.progress.clone().ok_or(ComposeError::Config(
+        "a registered device keeps its progress file".into(),
+    ))?;
     check_open(settings, &mut deployment, registered(&progress)?)?;
     let settings = settings.clone();
     let OpenParts {
@@ -535,21 +535,26 @@ where
     } = parts;
     let setup: super::native::DeviceSetup = Box::new(move |door: &mut Door| {
         Box::pin(async move {
-            let context = cpky::Context::new(
-                &settings.global.passkey_origin,
-                &settings.global.rp_id,
-            )
-            .map_err(|_| super::ErrorCode::InvalidRequest)?;
+            let context =
+                cpky::Context::new(&settings.global.passkey_origin, &settings.global.rp_id)
+                    .map_err(|_| super::ErrorCode::InvalidRequest)?;
             let mut keys = DeviceKeys::new(
                 Client::new(context, authenticator()),
                 &settings.global.passkey_origin,
             );
-            restore_device_login(door, &settings, &mut services, &mut keys, storage, records())
-                .await
-                .map_err(|e| {
-                    eprintln!("device setup: {e}");
-                    super::ErrorCode::Unavailable
-                })?;
+            restore_device_login(
+                door,
+                &settings,
+                &mut services,
+                &mut keys,
+                storage,
+                records(),
+            )
+            .await
+            .map_err(|e| {
+                eprintln!("device setup: {e}");
+                super::ErrorCode::Unavailable
+            })?;
             if let Some(finish) = finish {
                 finish(door).await?;
             }
@@ -614,11 +619,8 @@ where
             .wallet_current_policy(global_origin)
             .map_err(step("policy"))?,
     ));
-    let (_, recovered) = recover(
-        unlock.wallet_opening().map_err(step("restore"))?,
-        &network,
-    )
-    .await?;
+    let (_, recovered) =
+        recover(unlock.wallet_opening().map_err(step("restore"))?, &network).await?;
     let held = lease(&wallet_door, global_origin, true, policy).await?;
     let global = super::custody::prepare_initial_recovery(recovered, held, network.clone())
         .await
@@ -958,8 +960,14 @@ mod tests {
         let mut file = ProgressFile::open(Some(path.clone())).unwrap();
         assert_eq!(file.stage(true), Stage::Fresh);
         assert_eq!(file.stage(false), Stage::Fresh);
-        file.advance(true, Stage::Done).now_or_never().unwrap().unwrap();
-        file.advance(false, Stage::Authorized).now_or_never().unwrap().unwrap();
+        file.advance(true, Stage::Done)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        file.advance(false, Stage::Authorized)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
         let reopened = ProgressFile::open(Some(path.clone())).unwrap();
         assert_eq!(reopened.stage(true), Stage::Done);
         assert_eq!(reopened.stage(false), Stage::Authorized);
@@ -1010,7 +1018,8 @@ mod tests {
     fn a_second_backend_progress_writer_is_refused() {
         use futures_executor::block_on;
         let backend = cwst::backend::Memory::new();
-        let mut first = block_on(ProgressFile::load(BackendProgress::new(backend.clone()))).unwrap();
+        let mut first =
+            block_on(ProgressFile::load(BackendProgress::new(backend.clone()))).unwrap();
         let mut second =
             block_on(ProgressFile::load(BackendProgress::new(backend.clone()))).unwrap();
         block_on(first.advance(true, Stage::Retained)).unwrap();
@@ -1058,15 +1067,15 @@ mod tests {
                 ORIGIN,
             )
         };
-        let refuses_every_further_prompt =
-            |keys: &mut DeviceKeys<SoftwareAuthenticator>, used: u32| {
-                for purpose in REFUSED {
-                    assert!(
-                        matches!(keys.confirm(purpose), Err(ComposeError::Step(p, _)) if p == purpose)
-                    );
-                }
-                assert_eq!(keys.ceremonies(), used);
-            };
+        let refuses_every_further_prompt = |keys: &mut DeviceKeys<SoftwareAuthenticator>,
+                                            used: u32| {
+            for purpose in REFUSED {
+                assert!(
+                    matches!(keys.confirm(purpose), Err(ComposeError::Step(p, _)) if p == purpose)
+                );
+            }
+            assert_eq!(keys.ceremonies(), used);
+        };
         block_on(async {
             // A fresh registration: the create ceremony, with or without PRF at create.
             for evaluate_at_create in [true, false] {
@@ -1164,7 +1173,9 @@ mod tests {
                     "rp_id":"example.test","trust_key_ring":null,"connect_host":"example.test"})
             };
             let mut community = service("omega", "https://omega.example.test");
-            community["fingerprint"] = serde_json::json!("abababababababababababababababababababababababababababababababab");
+            community["fingerprint"] = serde_json::json!(
+                "abababababababababababababababababababababababababababababababab"
+            );
             serde_json::from_value(serde_json::json!({
                 "global": service("wallet", "https://wallet.example.test"),
                 "community": community,
@@ -1190,7 +1201,10 @@ mod tests {
             let path = directory.join("composer.json");
             let mut file = ProgressFile::open(Some(path.clone())).unwrap();
             file.advance(true, global).now_or_never().unwrap().unwrap();
-            file.advance(false, community).now_or_never().unwrap().unwrap();
+            file.advance(false, community)
+                .now_or_never()
+                .unwrap()
+                .unwrap();
             path
         }
 
@@ -1275,7 +1289,8 @@ mod tests {
         assert!(settings.validate().is_err());
         settings.community.fingerprint = Some("ab".into());
         assert!(settings.validate().is_err());
-        settings.community.fingerprint = Some("abababababababababababababababababababababababababababababababab".into());
+        settings.community.fingerprint =
+            Some("abababababababababababababababababababababababababababababababab".into());
         assert!(settings.validate().is_ok());
         settings.community_name = "wallet".into();
         assert!(settings.validate().is_err());

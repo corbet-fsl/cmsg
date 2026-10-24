@@ -434,8 +434,8 @@ where
     }
     let member = initial.observation().map_err(|_| refused())?.member.clone();
     let at = creation.genesis_at()?;
-    let action = cvlt::lineage_genesis_action(creation.receipt(), salt, at)
-        .map_err(|_| refused())?;
+    let action =
+        cvlt::lineage_genesis_action(creation.receipt(), salt, at).map_err(|_| refused())?;
     let mut failed = false;
     let scope = initial
         .with_current(
@@ -491,9 +491,10 @@ where
         return Err(cvlt::InitialError::Keys(Error::Clock).into());
     }
     // The bind carries exactly the published genesis evidence bytes.
-    let bound = cvlt::GenesisStampEvidence::new(creation.receipt().clone(), &presentation, salt, at)
-        .to_bytes()
-        .map_err(|_| refused())?;
+    let bound =
+        cvlt::GenesisStampEvidence::new(creation.receipt().clone(), &presentation, salt, at)
+            .to_bytes()
+            .map_err(|_| refused())?;
     let expires = initial.expires().map_err(|_| refused())?;
     let creation = creation
         .prepare(&evidence, expires, &mut clock, entropy)
@@ -885,10 +886,7 @@ pub async fn acknowledge_initial_publication<B: cwst::backend::Backend, N: cdht:
 
 /// [`acknowledge_initial_publication`] of a device-key member: the published genesis
 /// evidence by stamp is verified with the wallet's stamp trust.
-pub async fn acknowledge_device_initial_publication<
-    B: cwst::backend::Backend,
-    N: cdht::Network,
->(
+pub async fn acknowledge_device_initial_publication<B: cwst::backend::Backend, N: cdht::Network>(
     read: cvlt::InitialLineageRead<B>,
     initial: cfyr::membership::InitialCreationLease<'_, Transport>,
     network: N,

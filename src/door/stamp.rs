@@ -2,7 +2,7 @@
 //! its Wallet, the person confirms once with the wallet passkey (user verification over the
 //! request's confirmation challenge), the wallet answers blindly, and Wallet retains the stamp
 //! only after verifying its signature. The wallet never sees the actions or the communities.
-use super::{ErrorCode, Result, custody::SystemClock, foyer::Transport, passport::GlobalPassport};
+use super::{custody::SystemClock, foyer::Transport, passport::GlobalPassport, ErrorCode, Result};
 use cfyr::membership::GlobalStampIssuance;
 use ckmg::{Authority, Clock, Entropy};
 use cvlt::Records;

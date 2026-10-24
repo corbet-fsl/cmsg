@@ -16,8 +16,8 @@ pub use group_custody::{
     VerifiedPeers,
 };
 pub use room_sync::{RefusedJoins, ResyncReason, RoomSync, RoomSyncTask, RoomSynced};
-pub use shared::{verified_peers, AccountPort, EagerBinding, PortVault, VaultBoardOwner};
 pub(crate) use shared::StartOwner;
+pub use shared::{verified_peers, AccountPort, EagerBinding, PortVault, VaultBoardOwner};
 use std::{future::Future, pin::Pin};
 
 pub(super) type OwnedFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + 'a>>;

@@ -3,8 +3,11 @@
 //! key proves possession. No community passkey is created; the key then opens sessions
 //! silently (`open_device_session`).
 use super::{
-    ErrorCode, Result, custody::SystemClock, foyer::Transport, passport::GlobalPassport,
+    custody::SystemClock,
+    foyer::Transport,
+    passport::GlobalPassport,
     stamp::{pending_request, request_stamp, resend_stamp},
+    ErrorCode, Result,
 };
 use cfyr::Foyer;
 use ckmg::{Authority, Clock, Entropy};
@@ -13,7 +16,7 @@ use cwlt::passport::{
     self, ActionKind, AuthenticatedCommunity, CommunityId, PayloadDigest, StampAction, StampSalt,
     StampScope,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use std::future::Future;
 
@@ -201,7 +204,10 @@ where
         })
         .await?;
     if !covered && resumed {
-        let reconfirmed = send(community, name, wallet, &scope, None, &key, seed, salt, sign).await;
+        let reconfirmed = send(
+            community, name, wallet, &scope, None, &key, seed, salt, sign,
+        )
+        .await;
         if let Ok(user) = reconfirmed {
             return Ok(user);
         }
@@ -268,7 +274,10 @@ where
     let key: [u8; 32] = *device.value();
     let scope = stamp_scope(community, name).await?;
     let salt = derived_salt(name, device, b"", sign).await?;
-    send(community, name, wallet, &scope, None, &key, seed, salt, sign).await
+    send(
+        community, name, wallet, &scope, None, &key, seed, salt, sign,
+    )
+    .await
 }
 
 /// Send one join: a fresh passport presentation over this community's signed challenge, the
@@ -387,7 +396,10 @@ mod tests {
             use ed25519_dalek::Signer as _;
             ed25519_dalek::SigningKey::from_bytes(&[1; 32]).sign(&legacy)
         };
-        assert_eq!(first, <[u8; 32]>::from(Sha256::digest(signature.to_bytes())));
+        assert_eq!(
+            first,
+            <[u8; 32]>::from(Sha256::digest(signature.to_bytes()))
+        );
         let genesis = derived_salt("alpha", &device, GENESIS_SALT_LABEL, &mut signer(1))
             .await
             .unwrap();
@@ -414,7 +426,10 @@ mod tests {
     fn signed_payloads_are_the_messages_without_their_purpose_tag() {
         let join = cfyr::device_session::join_message("alpha", "challenge", &[7; 32]);
         let stripped = payload(ckmg::DevicePurpose::DeviceJoin, join.clone()).unwrap();
-        assert_eq!([ckmg::DevicePurpose::DeviceJoin.tag(), &stripped[..]].concat(), join);
+        assert_eq!(
+            [ckmg::DevicePurpose::DeviceJoin.tag(), &stripped[..]].concat(),
+            join
+        );
         // A message of another purpose is never signed under this one.
         assert!(payload(ckmg::DevicePurpose::DeviceSession, join).is_err());
     }

@@ -83,7 +83,10 @@ impl<A: cfyr::passkeys::Authenticator> DeviceKeys<A> {
 
     /// Count one wallet ceremony for `purpose` and lend the client for it; over the budget
     /// nothing is prompted and the composition stops.
-    pub(crate) fn confirm(&mut self, purpose: &'static str) -> Result<&mut Client<A>, ComposeError> {
+    pub(crate) fn confirm(
+        &mut self,
+        purpose: &'static str,
+    ) -> Result<&mut Client<A>, ComposeError> {
         if self.used >= self.budget {
             return Err(ComposeError::Step(
                 purpose,
@@ -125,10 +128,7 @@ pub trait Services {
     /// authorized. The production composer does nothing here: the global uniqueness
     /// gate of a passport is the platform's decision. Only a test harness for a
     /// development build of the platform enables its development gate in this hook.
-    async fn wallet_authorized(
-        &mut self,
-        _api: &mut Foyer<Transport>,
-    ) -> Result<(), ComposeError> {
+    async fn wallet_authorized(&mut self, _api: &mut Foyer<Transport>) -> Result<(), ComposeError> {
         Ok(())
     }
 }
@@ -478,9 +478,7 @@ pub(crate) async fn birth_device(
 
 /// What a fresh registration needs beyond the vault.
 pub(crate) enum Entry {
-    Global {
-        origin: String,
-    },
+    Global { origin: String },
 }
 
 /// One lineage driven to its recovered, retired state; the Door is logged in.
@@ -525,7 +523,10 @@ where
         .await
         .map_err(step("vault"))?
         .is_some();
-    let mut stage = resume_stage(progress.stage(wallet), vault_held || progress.value.restored)?;
+    let mut stage = resume_stage(
+        progress.stage(wallet),
+        vault_held || progress.value.restored,
+    )?;
 
     // Registration (fresh) or reopening of the retained enrollment. Every path below has ONE
     // wallet confirmation: the create, the restart's assertion, or the registered login.
@@ -692,7 +693,9 @@ where
         let held = lease(&door, origin, wallet, &mut *policy).await?;
         let birth = companion
             .as_ref()
-            .ok_or(ComposeError::Inconsistent("a wallet lineage without its companion"))?
+            .ok_or(ComposeError::Inconsistent(
+                "a wallet lineage without its companion",
+            ))?
             .live_global_wallet(origin.into())
             .observe_lease(now)
             .await
@@ -772,7 +775,13 @@ pub(crate) async fn register<A, B>(
     backend: B,
     clock: &mut SystemClock,
     entropy: &mut ckmg::SystemEntropy,
-) -> Result<(custody::InitialEnrollment<B>, super::unlock_once::DeviceUnlock), ComposeError>
+) -> Result<
+    (
+        custody::InitialEnrollment<B>,
+        super::unlock_once::DeviceUnlock,
+    ),
+    ComposeError,
+>
 where
     A: cfyr::passkeys::Authenticator,
     B: cwst::backend::Backend,
@@ -915,7 +924,16 @@ where
         .is_some();
     let mut stage = resume_stage(progress.stage(false), vault_held || progress.value.restored)?;
     if stage == Stage::Done {
-        return reopen_device(services, api, name, origin, open()?, stamps.clone(), progress).await;
+        return reopen_device(
+            services,
+            api,
+            name,
+            origin,
+            open()?,
+            stamps.clone(),
+            progress,
+        )
+        .await;
     }
 
     // Before activation the retained enrollment owns the device key; a vault that no longer
@@ -1409,10 +1427,14 @@ where
         .device_initial_creation(vault_policy, now)
         .await
         .map_err(step("lease_creation"))?;
-    let owners =
-        custody::prepare_device_initial_recovery(recovered, held, community_network.clone(), stamps)
-            .await
-            .map_err(step("community recovery"))?;
+    let owners = custody::prepare_device_initial_recovery(
+        recovered,
+        held,
+        community_network.clone(),
+        stamps,
+    )
+    .await
+    .map_err(step("community recovery"))?;
     // One owner per Store: the Door holds the community Vault (voucher custody,
     // community creation, ...) and the account actor works through its port.
     let custody::ComposedMemberVault {
@@ -1513,11 +1535,8 @@ where
     // The wallet login's PRF unlock opens the wallet vault and derives every community vault
     // (unlock once): no community passkey and no second unlock ceremony exist.
     let unlock = unlock.ok_or(ComposeError::Inconsistent("the authenticator gave no PRF"))?;
-    let (_, recovered) = recover(
-        unlock.wallet_opening().map_err(step("restore"))?,
-        &network,
-    )
-    .await?;
+    let (_, recovered) =
+        recover(unlock.wallet_opening().map_err(step("restore"))?, &network).await?;
     let held = lease(&wallet_door, global_origin, true, policy).await?;
     let owners = custody::prepare_initial_recovery(recovered, held, network.clone())
         .await
@@ -1535,8 +1554,9 @@ where
     );
     // The wallet companion, forked from the login before the lease held it: the passport issue,
     // the join stamp and a stamp trust not yet read use it, without a ceremony of their own.
-    let mut global_companion =
-        companion.ok_or(ComposeError::Inconsistent("a wallet lineage without its companion"))?;
+    let mut global_companion = companion.ok_or(ComposeError::Inconsistent(
+        "a wallet lineage without its companion",
+    ))?;
     let stamps = match stamps {
         Some(stamps) => stamps,
         None => stamp_trust(&global_companion, global_origin).await?,
@@ -1572,8 +1592,10 @@ where
         .await
         .map_err(step("vault"))?
         .is_some();
-    let fresh = resume_stage(progress.stage(false), community_held || progress.value.restored)?
-        == Stage::Fresh;
+    let fresh = resume_stage(
+        progress.stage(false),
+        community_held || progress.value.restored,
+    )? == Stage::Fresh;
     // The community's identity (its founding fingerprint, as the verified Charter reports
     // it) derives its vault from the wallet unlock; never its reusable address.
     let fingerprint = community_api
