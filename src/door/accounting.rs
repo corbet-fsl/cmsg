@@ -18,9 +18,9 @@ mod request;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub use activation::{prove as prove_activation, NativeActivationProver};
 pub use activation::{Activation, ActivationPoll, ActivationProver};
-pub use checkpoint::{CheckpointAcquisition, CurrentEnrollment, SubmittedEnrollment};
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub use checkpoint::VerifiedRoster;
+pub use checkpoint::{CheckpointAcquisition, CurrentEnrollment, SubmittedEnrollment};
 pub use custody::{AccountVault, CommunityAccount};
 pub use genesis::PreparedAccount;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
@@ -28,11 +28,11 @@ pub use genesis::{ProvenAccount, StagedRequest};
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub use lifecycle::{existing_active, has_pending, voucher_remaining, Activated, Elapsed};
 pub use pending::PendingBinding;
-#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
-pub use request::response_trust;
 #[cfg(test)]
 pub(super) use request::fixtures as update_fixtures;
 pub use request::outbox_request_id;
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub use request::response_trust;
 pub use request::{AcceptedResponse, ProvenGenesis, ProvenUpdate, SignedApplyExtended};
 
 /// Distinct local intentions reserved by the trusted recovery composer. No
@@ -185,7 +185,10 @@ where
         .finish(proof, device, now)
         .await
         .map_err(|error| {
-            eprintln!("account actor: admission finish after {}s: {error:?}", now().saturating_sub(started));
+            eprintln!(
+                "account actor: admission finish after {}s: {error:?}",
+                now().saturating_sub(started)
+            );
             ErrorCode::Reconcile
         })?;
     let mut result = AccountAdmission { lease, cohort };
@@ -314,7 +317,9 @@ impl<'p> AccountAdmission<'p> {
     {
         let current = self.current()?;
         let expires = current.expires.min(intents.expires);
-        let plan = account.vault().await?
+        let plan = account
+            .vault()
+            .await?
             .keys()
             .prepare_account_device(expires)
             .await
@@ -344,7 +349,9 @@ impl<'p> AccountAdmission<'p> {
             .root
             .admit(command, current.now)
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let authorization = account.vault().await?
+        let authorization = account
+            .vault()
+            .await?
             .keys()
             .authorize_account_device(plan)
             .await
@@ -383,7 +390,9 @@ impl<'p> AccountAdmission<'p> {
     {
         let admitted_origin = self.current()?.origin;
         account.check(&admitted_origin).await?;
-        let coordinate = account.vault().await?
+        let coordinate = account
+            .vault()
+            .await?
             .account_projection()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
@@ -403,12 +412,16 @@ impl<'p> AccountAdmission<'p> {
         let transcript = delegation
             .signing_bytes()
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let lineage = account.vault().await?
+        let lineage = account
+            .vault()
+            .await?
             .keys()
             .lineage()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let device = account.vault().await?
+        let device = account
+            .vault()
+            .await?
             .keys()
             .device_public_key()
             .await
@@ -442,7 +455,9 @@ impl<'p> AccountAdmission<'p> {
                 current.now,
             )
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let signature = account.vault().await?
+        let signature = account
+            .vault()
+            .await?
             .keys()
             .sign_device_ed25519_current(&transcript, expires)
             .await

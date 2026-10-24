@@ -10,28 +10,28 @@ pub mod accounting;
 mod actor;
 pub mod board;
 pub mod browser;
+mod communities;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub mod composer;
 pub(crate) mod composer_core;
 mod composition;
 pub mod courier;
-mod communities;
 mod creating;
-mod device_session;
+mod current;
 pub mod device_join;
 pub mod device_pair;
+mod device_session;
 pub mod stamp;
-mod current;
 pub use composition::VaultComposer;
 pub mod custody;
 pub mod facades;
 pub mod foyer;
 pub mod identity;
 mod inbox;
-pub(crate) mod interrupt;
 pub mod inbox_conversation;
 pub mod inbox_lineage;
 pub mod inbox_waves;
+pub(crate) mod interrupt;
 mod json;
 pub mod login;
 #[cfg(not(target_arch = "wasm32"))]
@@ -43,11 +43,11 @@ pub mod network_native;
 #[cfg(feature = "ohttp")]
 pub mod ohttp;
 pub mod pairing;
-pub mod pairing_roles;
 mod pairing_flow;
 #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
 pub mod pairing_host;
 pub mod pairing_publish;
+pub mod pairing_roles;
 pub mod passport;
 pub mod portal;
 pub mod record;
@@ -374,7 +374,10 @@ impl Door {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn wave_worker(&self, origin: &str) -> Option<std::rc::Rc<dyn wave_job::WaveWorker>> {
+    pub(crate) fn wave_worker(
+        &self,
+        origin: &str,
+    ) -> Option<std::rc::Rc<dyn wave_job::WaveWorker>> {
         self.wave_workers.get(origin).cloned()
     }
 

@@ -536,12 +536,16 @@ impl AccountAdmission<'_> {
         let transcript =
             acct::account_request_bytes(&request).map_err(|_| ErrorCode::Unauthorized)?;
         account.check(&current.origin).await?;
-        let lineage = account.vault().await?
+        let lineage = account
+            .vault()
+            .await?
             .keys()
             .lineage()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let device = account.vault().await?
+        let device = account
+            .vault()
+            .await?
             .keys()
             .device_public_key()
             .await
@@ -572,7 +576,9 @@ impl AccountAdmission<'_> {
                 current.now,
             )
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let signature = account.vault().await?
+        let signature = account
+            .vault()
+            .await?
             .keys()
             .sign_device_ed25519_current(&transcript, expires_at)
             .await
@@ -942,7 +948,10 @@ mod tests {
         assert_eq!(steps.len(), 1);
         let step = steps[0].as_object().unwrap();
         assert_eq!(step.len(), 3);
-        assert_eq!(serde_json::from_value::<[u8; 32]>(step["state"].clone()).unwrap(), state);
+        assert_eq!(
+            serde_json::from_value::<[u8; 32]>(step["state"].clone()).unwrap(),
+            state
+        );
         assert_eq!(
             serde_json::from_value::<[u8; 32]>(step["inbox"].clone()).unwrap(),
             Inbox::default().root

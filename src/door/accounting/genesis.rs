@@ -157,7 +157,9 @@ impl<'p> CurrentEnrollment<'p> {
                 ))
             })??;
         account.check(&origin).await?;
-        let candidate = account.vault().await?
+        let candidate = account
+            .vault()
+            .await?
             .prepare_community_genesis(context.clone(), checked)
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
@@ -220,7 +222,9 @@ impl PreparedAccount<'_> {
                 Ok::<_, ErrorCode>(current.now)
             })??;
         account.check(&self.origin).await?;
-        account.vault().await?
+        account
+            .vault()
+            .await?
             .check_community_genesis(&self.candidate, &self.context, checked)
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
@@ -400,7 +404,7 @@ mod proven {
                             index,
                             current,
                             Some(self.context.checked_at),
-                        self.context.bond.clone(),
+                            self.context.bond.clone(),
                         )?;
                         if observed != self.context
                             || current.material != self.material
@@ -433,7 +437,9 @@ mod proven {
             let checked = self.refresh(account).await?;
             let policy = self.material.policy.account.clone();
             let genesis = {
-                let material = account.vault().await?
+                let material = account
+                    .vault()
+                    .await?
                     .community_genesis_material(&self.proof, &self.context, checked)
                     .await
                     .map_err(|_| ErrorCode::Unauthorized)?;
@@ -452,7 +458,9 @@ mod proven {
                 response: None,
                 upper: pending.encode()?,
             };
-            account.vault().await?
+            account
+                .vault()
+                .await?
                 .stage_pending_genesis(
                     &self.proof,
                     &binding,
@@ -482,7 +490,9 @@ mod proven {
         {
             // Never send a request whose window has elapsed: the operator could
             // only refuse it. State A stays for the guarded discard.
-            let observed = self.enrollment.with_verified(|_, _, _, current| current.now)?;
+            let observed = self
+                .enrollment
+                .with_verified(|_, _, _, current| current.now)?;
             if observed >= staged.signed.expires_at() {
                 return Err(ErrorCode::ProofWindowElapsed);
             }
@@ -492,7 +502,9 @@ mod proven {
                 .with_verified(|_, _, _, current| response_trust(&current.material))
                 .map_err(|_| ErrorCode::Reconcile)?
                 .map_err(|_| ErrorCode::Reconcile)?;
-            account.vault().await?
+            account
+                .vault()
+                .await?
                 .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
                 .await
                 .map_err(|_| ErrorCode::Reconcile)?;

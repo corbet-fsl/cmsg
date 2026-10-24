@@ -218,7 +218,9 @@ pub(super) enum Answer {
     /// Open was refused after the checkpoint slot its proof was bound to had ended
     /// (`eligible_at` = that slot's end): a crossed scheduled boundary. The join
     /// restarts enrollment and Open as a fresh operation (`enroll_and_open`).
-    SlotCrossed { eligible_at: u64 },
+    SlotCrossed {
+        eligible_at: u64,
+    },
     /// Open overran the genesis proof window: the device refused to sign or send
     /// the elapsed request, or the operator refused it with the reason expired.
     /// The join re-prepares as a fresh operation at most `GENESIS_REPREPARES` times.
@@ -228,7 +230,9 @@ pub(super) enum Answer {
     Discarded,
     /// Reopen found the elapsed state A too early for the operator's time to prove
     /// it; the join reports `checkpoint_pending` until this operator time.
-    ElapsedPending { eligible_at: u64 },
+    ElapsedPending {
+        eligible_at: u64,
+    },
 }
 
 macro_rules! accessor {
@@ -576,10 +580,9 @@ mod run {
     use super::super::vouching::Book;
     use super::super::{
         accounting::{
-            existing_active, has_pending, issue_account_admission, voucher_remaining, AccountAdmission,
-            Elapsed,
-            AccountingIntents, CheckpointAcquisition, CommunityAccount, CurrentEnrollment,
-            SubmittedEnrollment, AcceptedResponse, SignedApplyExtended,
+            existing_active, has_pending, issue_account_admission, voucher_remaining,
+            AcceptedResponse, AccountAdmission, AccountingIntents, CheckpointAcquisition,
+            CommunityAccount, CurrentEnrollment, Elapsed, SignedApplyExtended, SubmittedEnrollment,
         },
         actor::Mailbox,
         custody::SystemClock,
@@ -593,7 +596,19 @@ mod run {
 
     /// Everything the trusted embedder lends the actor. Single-use intents are
     /// reserved up front by the recovery composer and are consumed by use.
-    pub struct AccountParts<B: cwst::backend::Backend, C, E, A, R, GB: cwst::backend::Backend, GC, GE, GA, GR, G> {
+    pub struct AccountParts<
+        B: cwst::backend::Backend,
+        C,
+        E,
+        A,
+        R,
+        GB: cwst::backend::Backend,
+        GC,
+        GE,
+        GA,
+        GR,
+        G,
+    > {
         pub membership: cfyr::membership::LiveMembership<Transport>,
         pub policy: cfyr::policy::CurrentPolicy<Transport>,
         pub account: CommunityAccount<B, C, E, A, R>,
@@ -744,7 +759,20 @@ mod run {
     }
 
     /// Everything one fresh admission needs.
-    struct Fresh<'a, B: cwst::backend::Backend, C, E, A, R, GB: cwst::backend::Backend, GC, GE, GA, GR, G> {
+    struct Fresh<
+        'a,
+        B: cwst::backend::Backend,
+        C,
+        E,
+        A,
+        R,
+        GB: cwst::backend::Backend,
+        GC,
+        GE,
+        GA,
+        GR,
+        G,
+    > {
         membership: &'a mut cfyr::membership::LiveMembership<Transport>,
         policy: &'a mut cfyr::policy::CurrentPolicy<Transport>,
         account: &'a mut CommunityAccount<B, C, E, A, R>,
@@ -754,7 +782,8 @@ mod run {
         creation: Option<&'a str>,
     }
 
-    impl<B, C, E, A, R, GB, GC, GE, GA, GR, G> Credentials for Fresh<'_, B, C, E, A, R, GB, GC, GE, GA, GR, G>
+    impl<B, C, E, A, R, GB, GC, GE, GA, GR, G> Credentials
+        for Fresh<'_, B, C, E, A, R, GB, GC, GE, GA, GR, G>
     where
         B: cwst::backend::Backend,
         C: Clock,
@@ -962,19 +991,7 @@ mod run {
     pub fn bind_account_actor<B, C, E, A, R, GB, GC, GE, GA, GR>(
         door: &mut super::super::Door,
         origin: &str,
-        parts: AccountParts<
-            B,
-            C,
-            E,
-            A,
-            R,
-            GB,
-            GC,
-            GE,
-            GA,
-            GR,
-            cwlt::passport::rand::rngs::OsRng,
-        >,
+        parts: AccountParts<B, C, E, A, R, GB, GC, GE, GA, GR, cwlt::passport::rand::rngs::OsRng>,
         expires: u64,
     ) -> super::super::Result<()>
     where
@@ -1094,7 +1111,13 @@ mod run {
             let nonce = book.nonce_for(code)?;
             let mut written = save_book(account, raw, &book).await?;
             let redeemed = lease
-                .submit_voucher(code, join.handle.as_deref(), nonce, &book.package_for(code), clock)
+                .submit_voucher(
+                    code,
+                    join.handle.as_deref(),
+                    nonce,
+                    &book.package_for(code),
+                    clock,
+                )
                 .await
                 .map_err(map_error)?;
             book.add_vouchee_bond(code, &redeemed.bond)?;
@@ -1123,13 +1146,10 @@ mod run {
         GR: Records,
         G: cwlt::passport::rand::RngCore + cwlt::passport::rand::CryptoRng,
     {
-        let lease = membership
-            .observe_lease(clock)
-            .await
-            .map_err(|error| {
-                eprintln!("account actor: lease observe: {error:?}");
-                ErrorCode::Unavailable
-            })?;
+        let lease = membership.observe_lease(clock).await.map_err(|error| {
+            eprintln!("account actor: lease observe: {error:?}");
+            ErrorCode::Unavailable
+        })?;
         let challenge = lease
             .account_challenge(policy, clock)
             .await
@@ -1299,7 +1319,10 @@ mod run {
                 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
                 Command::RecordFinish(proof) => {
                     let reply = match proof.take() {
-                        Some(proof) => account.record_finish(proof).await.map(|()| Answer::RecordCached),
+                        Some(proof) => account
+                            .record_finish(proof)
+                            .await
+                            .map(|()| Answer::RecordCached),
                         None => Err(ErrorCode::InvalidRequest),
                     };
                     mailbox.reply(reply);
@@ -1561,7 +1584,10 @@ mod run {
                     Ok(at) => (Ok(Answer::Reopened(Opened { accepted_at: at })), Next::Stay),
                     // Elapsed state A: only the operator's signed status settles it.
                     Err(ErrorCode::ProofWindowElapsed) => {
-                        match admission.settle_elapsed(account, intents, request_intent).await {
+                        match admission
+                            .settle_elapsed(account, intents, request_intent)
+                            .await
+                        {
                             Ok(Elapsed::Adopted(at)) => (
                                 Ok(Answer::Reopened(Opened { accepted_at: at })),
                                 Next::Restart,
@@ -1692,7 +1718,11 @@ mod tests {
             open_outcome(Err(ErrorCode::Unauthorized), end, end - 1),
             Err(ErrorCode::Unauthorized)
         );
-        for error in [ErrorCode::Reconcile, ErrorCode::Unavailable, ErrorCode::Refused] {
+        for error in [
+            ErrorCode::Reconcile,
+            ErrorCode::Unavailable,
+            ErrorCode::Refused,
+        ] {
             assert_eq!(open_outcome(Err(error), end, end + 1), Err(error));
         }
         // Not restarted, a crossed slot reads as the refusal it replaced.
@@ -1714,7 +1744,12 @@ mod tests {
         assert_eq!(block(enroll_and_open(&mut steps)), Ok(Checkpoint::Ready));
         assert_eq!(
             steps.commands,
-            [Command::Enroll, Command::Open, Command::Enroll, Command::Open]
+            [
+                Command::Enroll,
+                Command::Open,
+                Command::Enroll,
+                Command::Open
+            ]
         );
         // A second overrun surfaces the typed error; no third preparation.
         let mut steps = Script::new(vec![ready(), elapsed(), ready(), elapsed()]);
@@ -1814,7 +1849,10 @@ mod tests {
             })),
         ]);
         assert_eq!(block(enroll_and_open(&mut steps)), Ok(pending));
-        assert_eq!(steps.commands, [Command::Enroll, Command::Open, Command::Enroll]);
+        assert_eq!(
+            steps.commands,
+            [Command::Enroll, Command::Open, Command::Enroll]
+        );
         // Any other refusal ends the join as before, without a restart.
         let mut steps = Script::new(vec![ready(), Err(ErrorCode::Reconcile)]);
         assert_eq!(
@@ -1992,7 +2030,12 @@ mod tests {
             pending: false,
             probes: 0,
         };
-        for command in [Command::Enroll, Command::Open, Command::Reopen, Command::Activate] {
+        for command in [
+            Command::Enroll,
+            Command::Open,
+            Command::Reopen,
+            Command::Activate,
+        ] {
             assert_eq!(block(before_admission(&command, &mut fresh)), None);
         }
         // A join's gates are always asked; they never answer from the state here.
@@ -2135,7 +2178,11 @@ mod tests {
             steps: Vec::new(),
         }));
         for active in [true, false] {
-            for error in [ErrorCode::Unavailable, ErrorCode::Reconcile, ErrorCode::Refused] {
+            for error in [
+                ErrorCode::Unavailable,
+                ErrorCode::Reconcile,
+                ErrorCode::Refused,
+            ] {
                 let mut hall = Hall {
                     active,
                     asked: 0,
@@ -2177,21 +2224,29 @@ mod tests {
         let global = json!({"requirement": {"gate": "development", "level": "global"}, "reason": "proof_required"});
         let voucher = json!({"requirement": {"gate": "cvch", "level": "community"}, "reason": "proof_required"});
         let disabled = json!({"requirement": {"gate": "development", "level": "global"}, "reason": "disabled"});
-        let lobby = |passport: bool, needed: u64, alternatives: Value| {
-            json!({"passport_required": passport, "missing": [{"kind": "gates", "needed": needed, "alternatives": alternatives}]})
-        };
+        let lobby = |passport: bool, needed: u64, alternatives: Value| json!({"passport_required": passport, "missing": [{"kind": "gates", "needed": needed, "alternatives": alternatives}]});
         // The passport proves the global requirement at admission.
         assert!(!lacks(&lobby(true, 1, json!([global.clone()]))));
         // Without a required passport, nothing global is assumed.
         assert!(lacks(&lobby(false, 1, json!([global.clone()]))));
         // A community requirement still lacks; a disabled global one is not proven.
-        assert!(lacks(&lobby(true, 2, json!([global.clone(), voucher.clone()]))));
+        assert!(lacks(&lobby(
+            true,
+            2,
+            json!([global.clone(), voucher.clone()])
+        )));
         assert!(lacks(&lobby(true, 1, json!([voucher]))));
         assert!(lacks(&lobby(true, 1, json!([disabled]))));
         // Unreadable groups and other kinds of missing never count as satisfied.
-        assert!(lacks(&json!({"passport_required": true, "missing": [{"kind": "gates", "alternatives": [global]}]})));
-        assert!(lacks(&json!({"passport_required": true, "missing": [{"kind": "membership"}]})));
-        assert!(lacks(&json!({"passport_required": true, "missing": [{"kind": "gates", "needed": 1}]})));
+        assert!(lacks(
+            &json!({"passport_required": true, "missing": [{"kind": "gates", "alternatives": [global]}]})
+        ));
+        assert!(lacks(
+            &json!({"passport_required": true, "missing": [{"kind": "membership"}]})
+        ));
+        assert!(lacks(
+            &json!({"passport_required": true, "missing": [{"kind": "gates", "needed": 1}]})
+        ));
         let lobby = json!({
             "steps": [
                 {"gate": "voucher", "provider": "sponsor", "steps": [{"id": "code"}, {"id": 7}]},

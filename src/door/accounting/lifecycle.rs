@@ -108,7 +108,9 @@ impl AccountAdmission<'_> {
         R: Records,
     {
         let current = self.current()?;
-        let opened = account.vault().await?
+        let opened = account
+            .vault()
+            .await?
             .reopen_pending_genesis(now())
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
@@ -156,7 +158,9 @@ impl AccountAdmission<'_> {
         let response = self.send_signed(&signed).await?;
         let trust = response_trust(&self.current().map_err(|_| ErrorCode::Reconcile)?.material)
             .map_err(|_| ErrorCode::Reconcile)?;
-        account.vault().await?
+        account
+            .vault()
+            .await?
             .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
             .await
             .map_err(|_| ErrorCode::Reconcile)?;
@@ -197,13 +201,26 @@ impl AccountAdmission<'_> {
         signed.check_binding_digest(opened.binding.acceptance.request_digest)?;
         let statement = signed.statement();
         let (request, status) = self
-            .owner_status(account, intents, intent, statement.community, statement.owner)
+            .owner_status(
+                account,
+                intents,
+                intent,
+                statement.community,
+                statement.owner,
+            )
             .await?;
-        let discarded = account.vault().await?
+        let discarded = account
+            .vault()
+            .await?
             .discarded_genesis()
             .await
             .map_err(|_| ErrorCode::Unavailable)?;
-        match verdict(&status, signed.request_id(), signed.expires_at(), &discarded)? {
+        match verdict(
+            &status,
+            signed.request_id(),
+            signed.expires_at(),
+            &discarded,
+        )? {
             Verdict::Wait(eligible_at) => return Ok(Elapsed::Wait(eligible_at)),
             Verdict::Discard => {}
             Verdict::Adopt => {
@@ -218,7 +235,9 @@ impl AccountAdmission<'_> {
                     &current.material.account_response_key,
                 )?;
                 let trust = response_trust(&current.material)?;
-                account.vault().await?
+                account
+                    .vault()
+                    .await?
                     .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
                     .await
                     .map_err(|_| ErrorCode::Reconcile)?;
@@ -226,7 +245,9 @@ impl AccountAdmission<'_> {
             }
         }
         let absence = owner_absence(&request, &status)?;
-        account.vault().await?
+        account
+            .vault()
+            .await?
             .discard_elapsed_pending_genesis(
                 signed.expires_at(),
                 &absence,
@@ -282,12 +303,16 @@ impl AccountAdmission<'_> {
         let transcript =
             acct::account_status_bytes(&request).map_err(|_| ErrorCode::Unauthorized)?;
         account.check(&current.origin).await?;
-        let lineage = account.vault().await?
+        let lineage = account
+            .vault()
+            .await?
             .keys()
             .lineage()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let device = account.vault().await?
+        let device = account
+            .vault()
+            .await?
             .keys()
             .device_public_key()
             .await
@@ -315,7 +340,9 @@ impl AccountAdmission<'_> {
                 current.now,
             )
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let signature = account.vault().await?
+        let signature = account
+            .vault()
+            .await?
             .keys()
             .sign_device_ed25519_current(&transcript, expires_at)
             .await
@@ -342,8 +369,12 @@ impl AccountAdmission<'_> {
         if after.material != current.material || after.grant != current.grant {
             return Err(ErrorCode::Unauthorized);
         }
-        acct::verify_account_status_response(&status, &request, &after.material.account_response_key)
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        acct::verify_account_status_response(
+            &status,
+            &request,
+            &after.material.account_response_key,
+        )
+        .map_err(|_| ErrorCode::Unauthorized)?;
         Ok((request, status))
     }
 
@@ -359,11 +390,15 @@ impl AccountAdmission<'_> {
         A: Authority,
         R: Records,
     {
-        let accepted = account.vault().await?
+        let accepted = account
+            .vault()
+            .await?
             .restore_accepted_account()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let outbox_settled = account.vault().await?
+        let outbox_settled = account
+            .vault()
+            .await?
             .settle_account_outbox(operation()?)
             .await
             .unwrap_or(false);
@@ -399,7 +434,9 @@ impl AccountAdmission<'_> {
             return Err(ErrorCode::Unavailable);
         }
         let trust = response_trust(&current.material)?;
-        let activation = account.vault().await?
+        let activation = account
+            .vault()
+            .await?
             .begin_account_activation(&trust, now())
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
@@ -416,7 +453,9 @@ impl AccountAdmission<'_> {
         account
             .check_pending(&pending, before.material_digest, &opened.outbox)
             .await?;
-        let activated = account.vault().await?
+        let activated = account
+            .vault()
+            .await?
             .commit_account_activation(activation, operation()?, operation()?)
             .await
             .map_err(|_| ErrorCode::Reconcile)?;
@@ -472,7 +511,10 @@ fn verdict(
 
 /// The raw signed values of a verified no-account status, for the custody
 /// owner's own verification. Nothing here grants trust.
-fn owner_absence(request: &AccountStatusRequest, status: &AccountStatusResponse) -> Result<OwnerAbsence> {
+fn owner_absence(
+    request: &AccountStatusRequest,
+    status: &AccountStatusResponse,
+) -> Result<OwnerAbsence> {
     fn decode<const N: usize>(value: &str) -> Result<[u8; N]> {
         B64.decode(value.as_bytes())
             .map_err(|_| ErrorCode::Unauthorized)?
@@ -501,7 +543,10 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
 
-    fn status(observed_at: u64, acceptance: Option<cblc::accounting::AccountAcceptance>) -> AccountStatusResponse {
+    fn status(
+        observed_at: u64,
+        acceptance: Option<cblc::accounting::AccountAcceptance>,
+    ) -> AccountStatusResponse {
         AccountStatusResponse {
             status_request_digest: [1; 32],
             observed_at,
@@ -525,7 +570,10 @@ mod tests {
             );
         }
         for observed in [expires + margin, u64::MAX] {
-            assert_eq!(verdict(&status(observed, None), id, expires, &[]), Ok(Verdict::Discard));
+            assert_eq!(
+                verdict(&status(observed, None), id, expires, &[]),
+                Ok(Verdict::Discard)
+            );
         }
         // A lost response: this request's acceptance is adopted, never discarded,
         // however late the observation.
@@ -536,10 +584,17 @@ mod tests {
         );
         // An acceptance of a request this device discarded is the typed error;
         // any other request's acceptance is not this device's to settle.
-        let earlier = fixtures::accepted(&fixtures::signed(2), 150).acceptance().clone();
+        let earlier = fixtures::accepted(&fixtures::signed(2), 150)
+            .acceptance()
+            .clone();
         let digest = earlier.request_digest;
         assert_eq!(
-            verdict(&status(expires + margin, Some(earlier.clone())), id, expires, &[digest]),
+            verdict(
+                &status(expires + margin, Some(earlier.clone())),
+                id,
+                expires,
+                &[digest]
+            ),
             Err(ErrorCode::DiscardedRequestAccepted)
         );
         assert_eq!(
@@ -564,7 +619,14 @@ mod tests {
         };
         let bytes = acct::account_status_bytes(&request).unwrap();
         request.signature = B64.encode(&device.sign(&bytes).to_bytes());
-        let signed = [bytes, device.sign(&acct::account_status_bytes(&request).unwrap()).to_bytes().to_vec()].concat();
+        let signed = [
+            bytes,
+            device
+                .sign(&acct::account_status_bytes(&request).unwrap())
+                .to_bytes()
+                .to_vec(),
+        ]
+        .concat();
         let mut response = status(1_050, None);
         response.status_request_digest = Sha256::digest(signed).into();
         response.signature = B64.encode(
@@ -577,13 +639,19 @@ mod tests {
         let absence = owner_absence(&request, &response).unwrap();
         // The engine rebuilds both Balance messages itself and agrees.
         absence.verify(&key).unwrap();
-        assert!(absence.verify(&SigningKey::from_bytes(&[6; 32]).verifying_key().to_bytes()).is_err());
+        assert!(absence
+            .verify(&SigningKey::from_bytes(&[6; 32]).verifying_key().to_bytes())
+            .is_err());
         let mut late = absence.clone();
         late.observed_at += 1;
         assert!(late.verify(&key).is_err());
         // An acceptance or a request id is never an absence.
         let mut accepted = response.clone();
-        accepted.acceptance = Some(fixtures::accepted(&fixtures::signed(1), 150).acceptance().clone());
+        accepted.acceptance = Some(
+            fixtures::accepted(&fixtures::signed(1), 150)
+                .acceptance()
+                .clone(),
+        );
         assert!(owner_absence(&request, &accepted).is_err());
     }
 }
