@@ -43,6 +43,8 @@ pub mod network_native;
 #[cfg(feature = "ohttp")]
 pub mod ohttp;
 pub mod pairing;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod pairing_onion;
 mod pairing_flow;
 #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
 pub mod pairing_host;

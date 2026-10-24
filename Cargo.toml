@@ -68,6 +68,8 @@ ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "main", op
 cvfy = { git = "https://git.corbet.ch/corbet-foss/cvfy.git", branch = "main", optional = true }
 arti-client = { version = "0.46", default-features = false, optional = true }
 tor-rtcompat = { version = "0.46", default-features = false, features = ["tokio", "rustls"], optional = true }
+tor-hscrypto = { version = "0.46", default-features = false, optional = true }
+tor-llcrypto = { version = "0.46", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 cbrd = { git = "https://git.corbet.ch/corbet-libs/cbrd.git", branch = "main", default-features = false, features = ["http"] }
 futures-util = "0.3"
@@ -128,7 +130,7 @@ ohttp = ["cfyr/ohttp", "cbrd/ohttp", "dep:cblv", "cblv/client", "reqwest/rustls"
 embedded-authenticator = ["dep:cpky"]
 conformance = []
 native-prover = ["cwlt/native-prover", "cwlt/native-verifier", "dep:cvfy", "czkp/native", "cvlt/wallet-native-prover", "ckmg/wallet-native-prover"]
-native-tor = ["ckmg/native-tor", "cmsh/tor", "cmsh/tor-records", "dep:ctrn", "dep:arti-client", "dep:tor-rtcompat", "dep:rustls"]
+native-tor = ["ckmg/native-tor", "cmsh/tor", "cmsh/tor-records", "dep:ctrn", "dep:arti-client", "dep:tor-rtcompat", "dep:tor-hscrypto", "dep:tor-llcrypto", "dep:rustls"]
 # Test/fixture only: a private Tor network supplied by embedding code. Production builds never enable it.
 private-tor-fixture = ["native-tor"]
 # Test only: named interruption points in the composer (door::interrupt) for kill-and-resume
@@ -146,6 +148,11 @@ required-features = ["conformance"]
 # Integration tests: ONE native binary (tests/cmsg.rs) instead of one link per file. The browser/wasm-capable
 # suites keep their own target (each needs its own wasm_bindgen_test_configure!), and ohttp_keys keeps its own
 # because the ohttp feature changes the types the other suites compile against.
+[[test]]
+name = "pairing_onion_tor"
+path = "tests/pairing_onion_tor.rs"
+required-features = ["private-tor-fixture"]
+
 [[test]]
 name = "cmsg"
 path = "tests/cmsg.rs"
