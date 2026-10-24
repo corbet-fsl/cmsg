@@ -10,8 +10,8 @@
 //! live in this value for the pairing session: the existing device loses its offer on a
 //! restart too, so a restarted pairing starts again with a new link, and the durable Keys
 //! output is cleared by [`DoorGuest::finish`] once every scope is active.
-use super::pairing_roles::{GuestSteps, Scope};
 use super::device_pair::StepChallenge;
+use super::pairing_roles::{GuestSteps, Scope};
 use super::unlock_once::DeviceUnlock;
 use super::*;
 use ckmg::{Clock, Entropy, PairingPossession, PairingStep};
@@ -62,7 +62,13 @@ where
     T: Targets<B>,
 {
     /// The new device with its ONE wallet `unlock`, describing itself as `info`.
-    pub fn new(unlock: DeviceUnlock, info: ckmg::DeviceInfo, targets: T, clock: C, entropy: E) -> Self {
+    pub fn new(
+        unlock: DeviceUnlock,
+        info: ckmg::DeviceInfo,
+        targets: T,
+        clock: C,
+        entropy: E,
+    ) -> Self {
         Self {
             unlock,
             info,
@@ -85,7 +91,10 @@ where
     pub async fn finish(&mut self) -> Result<()> {
         for (_, phase) in std::mem::take(&mut self.phases) {
             if let Phase::Accepted(accepted) = phase {
-                accepted.acknowledge().await.map_err(|_| ErrorCode::Unavailable)?;
+                accepted
+                    .acknowledge()
+                    .await
+                    .map_err(|_| ErrorCode::Unavailable)?;
             }
         }
         Ok(())
@@ -108,7 +117,11 @@ where
     E: Entropy + Clone,
     T: Targets<B>,
 {
-    async fn request(&mut self, scope: &Scope, anchor: ckmg::Lineage) -> Result<ckmg::PairingRequest> {
+    async fn request(
+        &mut self,
+        scope: &Scope,
+        anchor: ckmg::Lineage,
+    ) -> Result<ckmg::PairingRequest> {
         let name = Self::name(scope)?.to_owned();
         if self.phases.contains_key(scope) {
             return Err(ErrorCode::InvalidRequest);
@@ -134,7 +147,12 @@ where
         let Some(Phase::Requested(guest)) = self.phases.get(scope) else {
             return Err(ErrorCode::InvalidRequest);
         };
-        let message = possession(name, PairingStep::Add, &challenge, guest.request().device.value())?;
+        let message = possession(
+            name,
+            PairingStep::Add,
+            &challenge,
+            guest.request().device.value(),
+        )?;
         Ok(guest
             .sign_possession(&message)
             .map_err(|_| ErrorCode::Refused)?

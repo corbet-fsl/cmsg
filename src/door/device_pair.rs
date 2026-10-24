@@ -18,7 +18,7 @@
 use super::{
     composer_core::DeviceKeys,
     custody::SystemClock,
-    device_join::{DeviceSign, derived_salt, stamp_scope},
+    device_join::{derived_salt, stamp_scope, DeviceSign},
     foyer::Transport,
     passport::GlobalPassport,
     stamp::{pending_request, request_stamp, resend_stamp},
@@ -94,9 +94,11 @@ impl PairingActions {
         salt: [u8; 32],
         revision: [u8; 32],
     ) -> Result<Self> {
-        let digest = cfyr::device_session::pair_payload(name, member, &key, &session, Some(&revision));
+        let digest =
+            cfyr::device_session::pair_payload(name, member, &key, &session, Some(&revision));
         let pair = StampAction::new(
-            ActionKind::new(cfyr::device_session::PAIR_ACTION).map_err(|_| ErrorCode::Unavailable)?,
+            ActionKind::new(cfyr::device_session::PAIR_ACTION)
+                .map_err(|_| ErrorCode::Unavailable)?,
             PayloadDigest::from_bytes(digest),
             StampSalt::from_bytes(salt),
         );
@@ -129,7 +131,15 @@ impl PairingActions {
         let scope = stamp_scope(community, name).await?;
         let salt = derived_salt(name, new_key, PAIR_SALT_LABEL, approver).await?;
         let session = derived_salt(name, new_key, PAIR_SESSION_LABEL, approver).await?;
-        Self::new(scope, name, member, *new_key.value(), session, salt, revision)
+        Self::new(
+            scope,
+            name,
+            member,
+            *new_key.value(),
+            session,
+            salt,
+            revision,
+        )
     }
 
     /// The key being paired.
@@ -199,7 +209,14 @@ where
     Au: ckmg::Authority,
     R: Records,
 {
-    confirm_all(std::slice::from_ref(actions), wallet_api, wallet_origin, wallet, keys).await
+    confirm_all(
+        std::slice::from_ref(actions),
+        wallet_api,
+        wallet_origin,
+        wallet,
+        keys,
+    )
+    .await
 }
 
 /// Slots of one stamp: mirrors `cpsd::STAMP_SLOTS` (cwlt does not re-export it); a larger chunk
@@ -285,7 +302,7 @@ where
                     .map_err(|_| ErrorCode::Refused)?
                     .into_parts();
                 // A pairing stamp always carries its own passkey assertion (never the birth grant).
-            Ok(Some(credential.as_json().clone()))
+                Ok(Some(credential.as_json().clone()))
             };
             request_stamp(issuance().await?, wallet, slots, assertion, &mut rng).await?;
         }
@@ -387,7 +404,10 @@ where
                 }))
                 .await
                 .map_err(|_| ErrorCode::Reconcile)?;
-            Ok(Some(PresentedStamp { presentation: stamp, at }))
+            Ok(Some(PresentedStamp {
+                presentation: stamp,
+                at,
+            }))
         }
         Step::Activate => {
             community
@@ -444,7 +464,8 @@ mod tests {
     #[test]
     fn one_stamp_slot_per_community_covers_exactly_one_key_of_one_member() {
         let actions =
-            PairingActions::new(scope(), "alpha", "m1", [7; 32], [3; 32], [1; 32], [9; 32]).unwrap();
+            PairingActions::new(scope(), "alpha", "m1", [7; 32], [3; 32], [1; 32], [9; 32])
+                .unwrap();
         let slots = actions.slots();
         assert_eq!(slots.len(), 1, "ONE slot per community");
         assert_eq!(slots[0].0, scope());
@@ -456,11 +477,19 @@ mod tests {
         );
         // Another key, member, session or community never shares the digest.
         let digest = |name: &str, member: &str, key: u8, session: u8| {
-            PairingActions::new(scope(), name, member, [key; 32], [session; 32], [1; 32], [9; 32])
-                .unwrap()
-                .action()
-                .payload()
-                .to_bytes()
+            PairingActions::new(
+                scope(),
+                name,
+                member,
+                [key; 32],
+                [session; 32],
+                [1; 32],
+                [9; 32],
+            )
+            .unwrap()
+            .action()
+            .payload()
+            .to_bytes()
         };
         let base = digest("alpha", "m1", 7, 3);
         assert_ne!(base, digest("beta", "m1", 7, 3));
@@ -468,7 +497,8 @@ mod tests {
         assert_ne!(base, digest("alpha", "m1", 8, 3));
         assert_ne!(base, digest("alpha", "m1", 7, 4));
         let other_revision =
-            PairingActions::new(scope(), "alpha", "m1", [7; 32], [3; 32], [1; 32], [8; 32]).unwrap();
+            PairingActions::new(scope(), "alpha", "m1", [7; 32], [3; 32], [1; 32], [8; 32])
+                .unwrap();
         assert_ne!(base, other_revision.action().payload().to_bytes());
         assert_eq!(actions.key(), &[7; 32]);
         assert_eq!(actions.session(), &[3; 32]);
@@ -483,7 +513,9 @@ mod tests {
             async move {
                 let mut sign = signer(seed);
                 (
-                    derived_salt(&name, &key, PAIR_SALT_LABEL, &mut sign).await.unwrap(),
+                    derived_salt(&name, &key, PAIR_SALT_LABEL, &mut sign)
+                        .await
+                        .unwrap(),
                     derived_salt(&name, &key, PAIR_SESSION_LABEL, &mut sign)
                         .await
                         .unwrap(),
@@ -505,7 +537,7 @@ mod tests {
 
 #[cfg(test)]
 mod ceremony_count_tests {
-    use super::{STAMP_SLOTS, confirmation_notice, confirmations_for};
+    use super::{confirmation_notice, confirmations_for, STAMP_SLOTS};
 
     #[test]
     fn up_to_sixteen_communities_are_one_confirmation_seventeen_are_two() {

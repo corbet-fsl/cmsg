@@ -34,8 +34,7 @@ pub fn prepare_revision_evidence(
     if !matches!(receipt.change, ckmg::Change::DeviceAuthorized(_)) {
         return Err(refused());
     }
-    let presentation =
-        StampPresentation::from_bytes(&stamp.presentation).map_err(|_| refused())?;
+    let presentation = StampPresentation::from_bytes(&stamp.presentation).map_err(|_| refused())?;
     let now = clock.now().map_err(|_| ErrorCode::Clock)?;
     policy
         .with_current(now, |current| {

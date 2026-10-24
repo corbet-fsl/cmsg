@@ -97,7 +97,15 @@ where
         challenge: &StepChallenge,
         signature: Vec<u8>,
     ) -> Result<Option<PresentedStamp>> {
-        device_pair::send(community, self.passport, actions, step, challenge, signature).await
+        device_pair::send(
+            community,
+            self.passport,
+            actions,
+            step,
+            challenge,
+            signature,
+        )
+        .await
     }
 
     async fn stamp_trust(&mut self) -> Result<cvlt::StampTrust> {

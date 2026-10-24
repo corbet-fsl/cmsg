@@ -726,7 +726,12 @@ mod tests {
         let counts = counts.borrow();
         // Three scopes, ONE link: ONE wallet confirmation for all scopes, then add and activate.
         assert_eq!(
-            (counts.anchors, counts.confirmations, counts.approved, counts.activated),
+            (
+                counts.anchors,
+                counts.confirmations,
+                counts.approved,
+                counts.activated
+            ),
             (3, 1, 3, 3)
         );
         assert_eq!(
@@ -766,9 +771,11 @@ mod tests {
     /// new device is asked for one confirmation however many scopes it adopts.
     #[test]
     fn sixteen_communities_are_one_host_confirmation_and_seventeen_two() {
-        use super::super::device_pair::{STAMP_SLOTS, confirmations_for};
+        use super::super::device_pair::{confirmations_for, STAMP_SLOTS};
         for (communities, wallet_confirmations) in [(3, 1), (16, 1), (17, 2)] {
-            let names: Vec<_> = (0..communities).map(|n| community(&format!("c{n:02}"))).collect();
+            let names: Vec<_> = (0..communities)
+                .map(|n| community(&format!("c{n:02}")))
+                .collect();
             let chosen = Selection::all(names.clone()).unwrap();
             let (host, link, counts) = setup_with(&chosen);
             let mut guest = Guest::new(
@@ -823,7 +830,12 @@ mod tests {
                 }
                 let counts = counts.borrow();
                 assert_eq!(
-                    (counts.anchors, counts.confirmations, counts.approved, counts.activated),
+                    (
+                        counts.anchors,
+                        counts.confirmations,
+                        counts.approved,
+                        counts.activated
+                    ),
                     (3, 1, 3, 3),
                     "{lose_reply} {at}"
                 );
