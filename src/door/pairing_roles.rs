@@ -29,7 +29,7 @@
 //! person nothing either. A [`Host`] that restarts loses its offer: the existing device
 //! shows a new link.
 use super::device_pair::StepChallenge;
-use super::pairing::{Link, Offer, Received, ROUNDS};
+use super::pairing::{Link, Offer, ROUNDS, Received};
 use super::*;
 use std::collections::BTreeSet;
 
@@ -138,7 +138,10 @@ fn decode<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
 /// The entries' values, once their scopes are exactly `scopes` in order.
 fn values<T>(scopes: &[Scope], entries: Entries<T>) -> Result<Vec<T>> {
     if entries.len() != scopes.len()
-        || entries.iter().zip(scopes).any(|(entry, scope)| &entry.scope != scope)
+        || entries
+            .iter()
+            .zip(scopes)
+            .any(|(entry, scope)| &entry.scope != scope)
     {
         return Err(ErrorCode::InvalidRequest);
     }
@@ -283,8 +286,11 @@ impl<S: HostSteps> Host<S> {
 pub trait GuestSteps {
     /// Round 1 answered: make the pairing request over the confirmed anchor of `scope` (it
     /// names this device's key there).
-    async fn request(&mut self, scope: &Scope, anchor: ckmg::Lineage)
-    -> Result<ckmg::PairingRequest>;
+    async fn request(
+        &mut self,
+        scope: &Scope,
+        anchor: ckmg::Lineage,
+    ) -> Result<ckmg::PairingRequest>;
     /// Round 2 answered: sign, with this device's key of `scope`, possession of the add
     /// `challenge`.
     async fn possess(&mut self, scope: &Scope, challenge: StepChallenge) -> Result<Vec<u8>>;
@@ -439,8 +445,7 @@ impl<S: GuestSteps, C: Channel, P: FnMut(&GuestRecord) -> Result<()>> Guest<S, C
             (self.save)(&self.record)?;
             Some(requests)
         };
-        let ChallengesMessage { challenges } =
-            decode(&self.exchange(&link, 2, requests).await?)?;
+        let ChallengesMessage { challenges } = decode(&self.exchange(&link, 2, requests).await?)?;
         // Round 3: the add signatures are made once and kept before they are sent.
         let possessions = if self.record.sent.len() >= 3 {
             None
@@ -529,7 +534,6 @@ mod tests {
             proof: signature(),
         }
     }
-
 
     fn challenge(id: &str) -> StepChallenge {
         StepChallenge {
@@ -688,7 +692,10 @@ mod tests {
         assert!(selected.deselect(&community("alpha")));
         assert!(!selected.deselect(&community("alpha")), "already left out");
         assert!(selected.deselect(&Scope::Wallet));
-        assert!(!selected.deselect(&community("beta")), "the last scope stays");
+        assert!(
+            !selected.deselect(&community("beta")),
+            "the last scope stays"
+        );
         assert_eq!(selected.scopes(), vec![community("beta")]);
         assert!(Selection::all([]).is_none());
     }
@@ -710,7 +717,12 @@ mod tests {
         let counts = counts.borrow();
         // Three scopes, ONE link: one wallet confirmation per scope, then add and activate.
         assert_eq!(
-            (counts.anchors, counts.confirmations, counts.approved, counts.activated),
+            (
+                counts.anchors,
+                counts.confirmations,
+                counts.approved,
+                counts.activated
+            ),
             (3, 3, 3, 3)
         );
         assert_eq!(
@@ -778,7 +790,12 @@ mod tests {
                 }
                 let counts = counts.borrow();
                 assert_eq!(
-                    (counts.anchors, counts.confirmations, counts.approved, counts.activated),
+                    (
+                        counts.anchors,
+                        counts.confirmations,
+                        counts.approved,
+                        counts.activated
+                    ),
                     (3, 3, 3, 3),
                     "{lose_reply} {at}"
                 );
@@ -795,14 +812,31 @@ mod tests {
     fn entries_must_be_exactly_the_sessions_scopes_in_order() {
         let scopes = [Scope::Wallet, community("alpha")];
         let entry = |scope: Scope| Entry { scope, value: 1u8 };
-        assert!(values(&scopes, vec![entry(Scope::Wallet), entry(community("alpha"))]).is_ok());
-        assert!(values(&scopes, vec![entry(Scope::Wallet)]).is_err(), "a scope missing");
         assert!(
-            values(&scopes, vec![entry(community("alpha")), entry(Scope::Wallet)]).is_err(),
+            values(
+                &scopes,
+                vec![entry(Scope::Wallet), entry(community("alpha"))]
+            )
+            .is_ok()
+        );
+        assert!(
+            values(&scopes, vec![entry(Scope::Wallet)]).is_err(),
+            "a scope missing"
+        );
+        assert!(
+            values(
+                &scopes,
+                vec![entry(community("alpha")), entry(Scope::Wallet)]
+            )
+            .is_err(),
             "out of order"
         );
         assert!(
-            values(&scopes, vec![entry(Scope::Wallet), entry(community("beta"))]).is_err(),
+            values(
+                &scopes,
+                vec![entry(Scope::Wallet), entry(community("beta"))]
+            )
+            .is_err(),
             "a scope the session does not have"
         );
     }
