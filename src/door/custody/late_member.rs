@@ -38,17 +38,22 @@ impl<A: ckmg::Authority> BoardSigning for A {
 /// The trusted start restore's handle to install the member authority, once.
 #[derive(Clone, Default)]
 pub struct MemberSlot {
-    slot: Rc<RefCell<Option<Box<dyn BoardSigning>>>>,
+    slot: Rc<RefCell<Option<(Binding, Box<dyn BoardSigning>)>>>,
     used: Rc<Cell<bool>>,
 }
 
 impl MemberSlot {
-    /// Install the member authority. Refused a second time.
-    pub fn install<A: ckmg::Authority + 'static>(&self, authority: A) -> super::super::Result<()> {
+    /// Install the member authority of exactly this community member's `binding`.
+    /// Refused a second time.
+    pub fn install<A: ckmg::Authority + 'static>(
+        &self,
+        binding: Binding,
+        authority: A,
+    ) -> super::super::Result<()> {
         if self.used.replace(true) {
             return Err(ErrorCode::Unauthorized);
         }
-        *self.slot.borrow_mut() = Some(Box::new(authority));
+        *self.slot.borrow_mut() = Some((binding, Box::new(authority)));
         Ok(())
     }
 }
@@ -113,7 +118,7 @@ impl MemberBinder {
 pub struct LateMemberAuthority<A> {
     initial: A,
     slot: MemberSlot,
-    member: Option<Box<dyn BoardSigning>>,
+    member: Option<(Binding, Box<dyn BoardSigning>)>,
     account_armed: Rc<Cell<bool>>,
 }
 
@@ -135,11 +140,18 @@ impl<A> LateMemberAuthority<A> {
 
     /// The member authority, for the actions of the Board's one signing admission: its
     /// device signature (unless the account actor holds the arm) and its Profile custody.
-    /// The initial authority admits neither.
-    fn board(&mut self, action: Action) -> Option<&mut Box<dyn BoardSigning>> {
-        let board = match action {
+    /// The initial authority admits neither. Exact: only this member's own binding, and
+    /// Profile custody only in its plain shape (no target, statement or signing); the
+    /// member authority itself then admits it solely against the Board's single-use
+    /// admitted command for exactly that action.
+    fn board(&mut self, request: &Authorization<'_>) -> Option<&mut Box<dyn BoardSigning>> {
+        let board = match request.action {
             Action::SignDeviceEd25519 => !self.account_armed.get(),
-            Action::LendProfileCustody => true,
+            Action::LendProfileCustody => {
+                request.target.is_none()
+                    && request.statement.is_none()
+                    && request.signing.is_none()
+            }
             _ => false,
         };
         if !board {
@@ -148,7 +160,10 @@ impl<A> LateMemberAuthority<A> {
         if self.member.is_none() {
             self.member = self.slot.slot.borrow_mut().take();
         }
-        self.member.as_mut()
+        match self.member.as_mut() {
+            Some((own, member)) if own == request.binding => Some(member),
+            _ => None,
+        }
     }
 }
 
@@ -166,7 +181,7 @@ impl<A: ckmg::Authority> ckmg::Authority for LateMemberAuthority<A> {
         self.initial.check_initial_activation_current(request)
     }
     async fn check(&mut self, request: Authorization<'_>) -> Result<(), Error> {
-        match self.board(request.action) {
+        match self.board(&request) {
             Some(member) => member.board_check(request).await,
             None => self.initial.check(request).await,
         }
@@ -184,7 +199,7 @@ impl<A: ckmg::Authority> ckmg::Authority for LateMemberAuthority<A> {
         self.initial.check_account_signing_current(request)
     }
     async fn check_device_signing(&mut self, request: Authorization<'_>) -> Result<(), Error> {
-        match self.board(request.action) {
+        match self.board(&request) {
             Some(member) => member.board_signing(request).await,
             None => self.initial.check_device_signing(request).await,
         }
@@ -193,13 +208,13 @@ impl<A: ckmg::Authority> ckmg::Authority for LateMemberAuthority<A> {
         self.initial.check_record_recipient(request).await
     }
     fn discard_current_attempt(&mut self) {
-        if let Some(member) = self.member.as_mut() {
+        if let Some((_, member)) = self.member.as_mut() {
             member.board_discard();
         }
         self.initial.discard_current_attempt();
     }
     fn check_device_signing_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
-        match self.board(request.action) {
+        match self.board(&request) {
             Some(member) => member.board_current(request),
             None => self.initial.check_device_signing_current(request),
         }
@@ -324,7 +339,7 @@ mod tests {
     async fn board_signing_succeeds_through_the_installed_member_authority() {
         let binding = Binding::new("c", "m").unwrap();
         let (mut authority, slot, _) = late();
-        slot.install(Member).unwrap();
+        slot.install(binding.clone(), Member).unwrap();
         assert_eq!(
             authority
                 .check_device_signing(request(&binding, Action::SignDeviceEd25519))
@@ -355,7 +370,7 @@ mod tests {
     async fn account_signing_stays_with_the_initial_authority() {
         let binding = Binding::new("c", "m").unwrap();
         let (mut authority, slot, armed) = late();
-        slot.install(Member).unwrap();
+        slot.install(binding.clone(), Member).unwrap();
         armed.set(true);
         assert_eq!(
             authority
@@ -369,7 +384,93 @@ mod tests {
     #[test]
     fn the_member_authority_installs_only_once() {
         let (_authority, slot, _) = late();
-        assert_eq!(slot.install(Member), Ok(()));
-        assert_eq!(slot.install(Member), Err(ErrorCode::Unauthorized));
+        let binding = Binding::new("c", "m").unwrap();
+        assert_eq!(slot.install(binding.clone(), Member), Ok(()));
+        assert_eq!(slot.install(binding, Member), Err(ErrorCode::Unauthorized));
+    }
+
+    /// Stands for the member authority's Profile custody rule: only against the single-use
+    /// admitted command (consumed exactly as `MemberAuthority::check` does).
+    struct Admitted(ckmg::IntentVerifier);
+    impl Authority for Admitted {
+        async fn check(&mut self, request: Authorization<'_>) -> Result<(), Error> {
+            match request.action {
+                Action::LendProfileCustody => self.0.consume(&request, "o"),
+                _ => Err(Error::Unauthorized),
+            }
+        }
+    }
+
+    fn command(binding: &Binding) -> ckmg::AdmittedCommand {
+        ckmg::AdmittedCommand {
+            binding: binding.clone(),
+            origin: "o".into(),
+            action: Action::LendProfileCustody,
+            device: PublicKey::new(ckmg::VLD0, [1; 32]),
+            root: None,
+            epoch: 1,
+            target: None,
+            statement: None,
+            transcript: None,
+            format: None,
+            expires: 100,
+        }
+    }
+
+    /// Profile custody is lent for this member's own profile only: another member's
+    /// binding is refused even when an admission for that binding is pending.
+    #[tokio::test]
+    async fn profile_custody_is_refused_for_another_members_profile() {
+        let own = Binding::new("c", "m").unwrap();
+        let other = Binding::new("c", "other").unwrap();
+        let (mut authority, slot, _) = late();
+        let (mut admission, verifier) = ckmg::intent_channel();
+        slot.install(own.clone(), Admitted(verifier)).unwrap();
+        let _guard = admission.admit(command(&other), 1).unwrap();
+        assert_eq!(
+            authority
+                .check(request(&other, Action::LendProfileCustody))
+                .await,
+            Err(Error::Unauthorized)
+        );
+        // The refusal did not consume the pending admission: it is still spent on the owner.
+        let _guard = ();
+        assert!(admission.admit(command(&own), 1).is_err());
+    }
+
+    /// Profile custody is lent only inside the Board's admission, once: with no admitted
+    /// command, after it was spent, and for a request that names a target it is refused.
+    #[tokio::test]
+    async fn profile_custody_is_refused_outside_a_board_admission() {
+        let own = Binding::new("c", "m").unwrap();
+        let (mut authority, slot, _) = late();
+        let (mut admission, verifier) = ckmg::intent_channel();
+        slot.install(own.clone(), Admitted(verifier)).unwrap();
+        // No admission at all.
+        assert_eq!(
+            authority
+                .check(request(&own, Action::LendProfileCustody))
+                .await,
+            Err(Error::Unauthorized)
+        );
+        // A shaped request (target) never reaches the member authority.
+        let guard = admission.admit(command(&own), 1).unwrap();
+        let mut shaped = request(&own, Action::LendProfileCustody);
+        shaped.target = Some(PublicKey::new(ckmg::VLD0, [2; 32]));
+        assert_eq!(authority.check(shaped).await, Err(Error::Unauthorized));
+        // Inside the admission: once.
+        assert_eq!(
+            authority
+                .check(request(&own, Action::LendProfileCustody))
+                .await,
+            Ok(())
+        );
+        assert_eq!(
+            authority
+                .check(request(&own, Action::LendProfileCustody))
+                .await,
+            Err(Error::Unauthorized)
+        );
+        drop(guard);
     }
 }

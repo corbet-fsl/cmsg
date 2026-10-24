@@ -445,7 +445,7 @@ impl Door {
         let RecoveryOwners {
             authority, intent, ..
         } = member.bind_recovery(stamps, &candidate, network).await?;
-        slot.install(authority)?;
+        slot.install(binding.clone(), authority)?;
         Ok(intent)
     }
 }
