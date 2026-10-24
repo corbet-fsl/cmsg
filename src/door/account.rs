@@ -582,13 +582,13 @@ impl AccountActor {
     }
 }
 
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub use run::bind_native_account;
 #[cfg(any(
     all(feature = "native-prover", not(target_arch = "wasm32")),
     all(feature = "browser-prover", target_arch = "wasm32")
 ))]
 pub use run::{bind_account_actor, AccountParts};
-#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
-pub use run::bind_native_account;
 
 #[cfg(any(
     all(feature = "native-prover", not(target_arch = "wasm32")),

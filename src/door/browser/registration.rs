@@ -355,7 +355,10 @@ mod tests {
     #[test]
     fn a_deployment_names_its_browser_prover_by_digests_only() {
         let parsed: Configuration = serde_json::from_value(configuration()).expect("configuration");
-        assert!(parsed.prover.is_none(), "a deployment without a prover lends none");
+        assert!(
+            parsed.prover.is_none(),
+            "a deployment without a prover lends none"
+        );
         let mut value = configuration();
         value["prover"] = serde_json::json!({
             "circuit_sha256": "ab".repeat(32), "keys_sha256": "cd".repeat(32),
@@ -368,8 +371,14 @@ mod tests {
         // The deployment cannot choose a path, a window or a thread count.
         for field in ["circuit_path", "window_seconds", "max_threads"] {
             value["prover"][field] = serde_json::json!("x");
-            assert!(serde_json::from_value::<Configuration>(value.clone()).is_err(), "{field}");
-            value["prover"].as_object_mut().expect("object").remove(field);
+            assert!(
+                serde_json::from_value::<Configuration>(value.clone()).is_err(),
+                "{field}"
+            );
+            value["prover"]
+                .as_object_mut()
+                .expect("object")
+                .remove(field);
         }
         assert_eq!(super::PROVER_CIRCUIT_PATH, "/prover/circuit.json");
         assert_eq!(super::PROVER_KEYS_PATH, "/prover/keys.json");

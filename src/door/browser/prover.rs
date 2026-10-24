@@ -13,7 +13,7 @@ use super::registration::{
 use ckmg::wallet_engine::{
     browser_prover::{
         calibration::{self, Forecast},
-        BrowserProver, BrowserProverConfig, ProofWorker, Program, SrsLocation,
+        BrowserProver, BrowserProverConfig, Program, ProofWorker, SrsLocation,
     },
     Error,
 };
@@ -232,8 +232,8 @@ pub async fn calibrate(
         8 << 20,
     )
     .await?;
-    let prover = BrowserProver::new(config, Arc::new(WorkerPort))
-        .map_err(|_| refused("browser prover"))?;
+    let prover =
+        BrowserProver::new(config, Arc::new(WorkerPort)).map_err(|_| refused("browser prover"))?;
     let measured = calibrate_in_worker(
         prover.setup_json(),
         prover.circuit_id(),
