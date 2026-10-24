@@ -50,16 +50,6 @@ impl AccountAdmission<'_> {
         if expires_at <= current.now {
             return Err(ErrorCode::Unauthorized);
         }
-        let mut request = RecipientRequest {
-            community: Sha256::digest(current.trust.community_id.as_bytes()).into(),
-            owner,
-            recipient_key,
-            chat_public_key: current.grant.chat_public_key.clone(),
-            issued_at: current.now,
-            expires_at,
-            signature: String::new(),
-        };
-        let transcript = recipient_bytes(&request).map_err(|_| ErrorCode::Unauthorized)?;
         account.check(&current.origin).await?;
         let lineage = account
             .vault()
@@ -68,6 +58,17 @@ impl AccountAdmission<'_> {
             .lineage()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
+        let mut request = RecipientRequest {
+            community: Sha256::digest(current.trust.community_id.as_bytes()).into(),
+            owner,
+            recipient_key,
+            chat_public_key: current.grant.chat_public_key.clone(),
+            issued_at: current.now,
+            lineage_epoch: lineage.epoch,
+            expires_at,
+            signature: String::new(),
+        };
+        let transcript = recipient_bytes(&request).map_err(|_| ErrorCode::Unauthorized)?;
         let device = account
             .vault()
             .await?
