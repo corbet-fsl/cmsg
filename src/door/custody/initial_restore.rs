@@ -25,14 +25,30 @@ pub type InitialRootVault<'a, 'p, B, N> = cvlt::Vault<
     (),
 >;
 
+/// The Door's community Vault of a composed member device: initial recovery custody, with
+/// Board device signing handed to a member authority once the start restore installs it
+/// (`MemberSlot`, see `LateMemberAuthority`).
+pub type MemberVault<'a, 'p, B, N> = cvlt::Vault<
+    B,
+    SystemClock,
+    ckmg::SystemEntropy,
+    LateMemberAuthority<InitialRecoveryAuthority<'a, 'p, SystemClock, N>>,
+    cvlt::PasskeyRecords<cvlt::TorPasskeyRecord<'static, N>>,
+    cvlt::WalletCustody,
+>;
+
 /// The Door's one Vault of a freshly composed member device: the community Store
 /// with its account-only custody, the account actor's channels for
 /// `account_open::bind_member_account` and this custody session's lifetime.
 pub struct ComposedMemberVault<'a, 'p, B: cwst::backend::Backend, N: cdht::Network> {
-    pub vault: InitialRecoveredVault<'a, 'p, B, N>,
+    pub vault: MemberVault<'a, 'p, B, N>,
     /// Board signing intent. The initial authority admits no Board signing, so its
-    /// verifier is not kept: a Board signature on this Vault is refused.
+    /// verifier is not kept: a Board signature on this Vault is refused until the start
+    /// restore installs a member authority in `member` and a fresh admission here.
     pub intent: ckmg::IntentAdmission,
+    /// Where the start restore installs the member authority (once this device is in
+    /// the community's current lineage).
+    pub member: MemberSlot,
     pub account: AccountWiring,
     pub lifetime: CustodyLifetime,
 }
@@ -182,10 +198,31 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
     /// are installed before passkey/compound reads; the exact inner ACK carrier
     /// is checked before Keys, Wallet custody or Vault can escape.
     pub async fn open_root<B: cwst::backend::Backend>(
-        mut self,
+        self,
         network: N,
         backend: B,
     ) -> super::super::Result<InitialRootVault<'a, 'p, B, N>> {
+        self.open_root_with(network, backend, |authority| authority)
+            .await
+    }
+
+    /// [`Self::open_root`] with the Vault's authority wrapped by `wrap`; the
+    /// recovery reads themselves always run under the initial authority.
+    async fn open_root_with<B: cwst::backend::Backend, A: ckmg::Authority>(
+        mut self,
+        network: N,
+        backend: B,
+        wrap: impl FnOnce(InitialRecoveryAuthority<'a, 'p, SystemClock, N>) -> A,
+    ) -> super::super::Result<
+        cvlt::Vault<
+            B,
+            SystemClock,
+            ckmg::SystemEntropy,
+            A,
+            cvlt::PasskeyRecords<cvlt::TorPasskeyRecord<'static, N>>,
+            (),
+        >,
+    > {
         let occupied = backend
             .read()
             .await
@@ -215,7 +252,7 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
         let owners = cvlt::Owners {
             clock: SystemClock,
             entropy: ckmg::SystemEntropy,
-            authority: self.authority,
+            authority: wrap(self.authority),
             records,
             wallet: (),
         };
@@ -302,8 +339,14 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
         backend: B,
     ) -> super::super::Result<ComposedMemberVault<'a, 'p, B, N>> {
         let (owners, intents, request) = self.with_accounting_intents()?;
+        let arm = std::rc::Rc::new(std::cell::Cell::new(false));
+        let mut member = None;
         let mut vault = owners
-            .open_root(network, backend)
+            .open_root_with(network, backend, |initial| {
+                let (late, slot) = LateMemberAuthority::new(initial, arm.clone());
+                member = Some(slot);
+                late
+            })
             .await?
             .restore_account_only_custody()
             .await
@@ -323,10 +366,11 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
         Ok(ComposedMemberVault {
             vault,
             intent,
+            member: member.ok_or(ErrorCode::Unavailable)?,
             account: AccountWiring {
                 intents,
                 request,
-                arm: AccountArm(std::rc::Rc::new(std::cell::Cell::new(false))),
+                arm: AccountArm(arm),
             },
             lifetime: CustodyLifetime {
                 binding,

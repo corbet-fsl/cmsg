@@ -31,6 +31,18 @@ impl<B: cwst::backend::Backend, C, E, A, R, W> VaultBoardOwner<B, C, E, A, R, W>
     /// Give the Board its group owner. `peers` is the forced, Charter-verified
     /// lineage read of other members; without it only this member's own
     /// consents can be verified. Call once, right after binding.
+    /// Replace the Board's one signing admission (the open path installs the member
+    /// authority after the Vault was bound; its verifier lives in that authority).
+    pub fn set_board_intent(&mut self, intent: ckmg::IntentAdmission) -> Result<()> {
+        let mut retained = self.retained.try_lock().ok_or(ErrorCode::Reconcile)?;
+        let custody = retained.as_mut().ok_or(ErrorCode::Unavailable)?;
+        if let Some(old) = custody.intent.as_mut() {
+            old.cancel();
+        }
+        custody.intent = Some(intent);
+        Ok(())
+    }
+
     pub fn enable_groups(&mut self, peers: Option<Box<dyn GroupPeers>>) -> Result<()> {
         let member = {
             let retained = self.retained.try_lock().ok_or(ErrorCode::Reconcile)?;
@@ -221,11 +233,15 @@ where
             let mut retained = self.retained.lock().await;
             self.require_open()?;
             let custody = retained.as_mut().ok_or(ErrorCode::Unavailable)?;
+            eprintln!("D5 with_current keys {:?}", custody.vault.keys().state());
             let storage = custody.vault.storage().clone();
             let store = storage.lock().await;
             // Original ReadHandle checks this exact immutable checkpoint while
             // fresh member authority completes. No earlier lineage is reused.
-            let lineage = custody.vault.keys().lineage().await.map_err(keys_error)?;
+            let lineage = custody.vault.keys().lineage().await.map_err(|e| {
+                eprintln!("D5 with_current lineage {e:?}");
+                keys_error(e)
+            })?;
             if self.lifetime.is_closed()
                 || lineage.binding != custody.binding
                 || !store.is_scope(custody.binding.community())
@@ -262,9 +278,15 @@ where
             self.require_open()?;
             let result = retained
                 .as_mut()
-                .ok_or(ErrorCode::Unavailable)?
+                .ok_or_else(|| {
+                    eprintln!("D5 retained none");
+                    ErrorCode::Unavailable
+                })?
                 .with_profile_owned(&self.origin, prepare)
                 .await;
+            if let Err(e) = &result {
+                eprintln!("D5 with_profile_owned result {e:?}");
+            }
             // A sibling lock during the wait drops the authorized candidate.
             self.after_wait(result)
         })
@@ -792,6 +814,7 @@ impl Door {
         if self.vaults.contains_key(origin) {
             return Err(ErrorCode::InvalidRequest);
         }
+        eprintln!("D5 bind_vault keys {:?}", vault.keys().state());
         let binding = vault.keys().lineage().await.map_err(keys_error)?.binding;
         let device = vault.keys().device_public_key().await.map_err(keys_error)?;
         lifetime.check_owner(&binding, device).map_err(keys_error)?;
@@ -923,6 +946,8 @@ where
 pub(crate) trait StartOwner {
     /// Give the Board's handle its group owner (see [`VaultBoardOwner::enable_groups`]).
     fn enable_groups(&mut self, peers: Option<Box<dyn GroupPeers>>) -> Result<()>;
+    /// Replace the Board's signing admission (see [`VaultBoardOwner::set_board_intent`]).
+    fn set_board_intent(&mut self, intent: ckmg::IntentAdmission) -> Result<()>;
     /// Bind the start's pending Board to this owner.
     #[cfg(any(feature = "native-tor", feature = "browser-tor", test))]
     fn bind_board(
@@ -945,6 +970,9 @@ where
     fn enable_groups(&mut self, peers: Option<Box<dyn GroupPeers>>) -> Result<()> {
         VaultBoardOwner::enable_groups(self, peers)
     }
+    fn set_board_intent(&mut self, intent: ckmg::IntentAdmission) -> Result<()> {
+        VaultBoardOwner::set_board_intent(self, intent)
+    }
     #[cfg(any(feature = "native-tor", feature = "browser-tor", test))]
     fn bind_board(
         self: Box<Self>,
@@ -962,6 +990,9 @@ where
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub struct EagerBinding {
     pub(crate) owner: Box<dyn StartOwner>,
+    /// Binds the Vault's Board member authority once the start restore proves the device is
+    /// in the community's current lineage.
+    pub(crate) member: super::super::custody::MemberBinder,
 }
 
 impl Door {
@@ -973,6 +1004,7 @@ impl Door {
         &mut self,
         origin: &str,
         owner: O,
+        member: super::super::custody::MemberBinder,
     ) -> Result<()> {
         if !self.vaults.contains_key(origin) {
             return Err(ErrorCode::Unavailable);
@@ -981,6 +1013,7 @@ impl Door {
             origin.to_owned(),
             EagerBinding {
                 owner: Box::new(owner),
+                member,
             },
         );
         Ok(())
@@ -1002,6 +1035,9 @@ mod eager_tests {
     struct Unbound;
     impl StartOwner for Unbound {
         fn enable_groups(&mut self, _: Option<Box<dyn GroupPeers>>) -> Result<()> {
+            Ok(())
+        }
+        fn set_board_intent(&mut self, _: ckmg::IntentAdmission) -> Result<()> {
             Ok(())
         }
         fn bind_board(
@@ -1029,7 +1065,12 @@ mod eager_tests {
         );
         assert!(door.take_eager_binding(ORIGIN).is_none());
         assert_eq!(
-            door.retain_eager_binding(ORIGIN, Unbound).err(),
+            door.retain_eager_binding(
+                ORIGIN,
+                Unbound,
+                crate::door::custody::MemberBinder::unbound()
+            )
+            .err(),
             Some(ErrorCode::Unavailable)
         );
         assert!(door.take_eager_binding(ORIGIN).is_none());

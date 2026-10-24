@@ -730,6 +730,7 @@ where
     .map_err(step("device session"))?;
     let CommunityBound {
         owner,
+        member,
         account,
         actor_membership,
         actor_policy,
@@ -747,7 +748,7 @@ where
         &user,
         companion,
         &stamps,
-        network,
+        network.clone(),
         storage.community,
     )
     .await?;
@@ -765,8 +766,12 @@ where
     )
     .await
     .map_err(step("bind account"))?;
-    door.retain_eager_binding(community_origin, owner)
-        .map_err(step("eager binding"))?;
+    door.retain_eager_binding(
+        community_origin,
+        owner,
+        super::custody::MemberBinder::new(member, network),
+    )
+    .map_err(step("eager binding"))?;
     door.retain_device_login(community_origin, user, opening, stamps)
         .map_err(step("device login"))?;
     // `login.poll` reports Idle for a configured origin before the first start.

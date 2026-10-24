@@ -312,7 +312,7 @@ impl<W: TorWatcher + 'static> Network<W> {
                 Self::construct(client, configuration, watcher, control),
             )
             .await
-            .map_err(|e| { eprintln!("D3 net step L{}: {e:?}", line!()); ErrorCode::Unavailable })??;
+            .map_err(|_| ErrorCode::Unavailable)??;
             guard.0.take(); // Actual Network now owns closure.
             Ok(network)
         }
@@ -327,7 +327,7 @@ impl<W: TorWatcher + 'static> Network<W> {
         control: Rc<Control>,
     ) -> Result<Self> {
         control.live()?;
-        let initializer = client.native_initializer(config.scope).await.map_err(|e| { eprintln!("D3 net step L330: {e:?}"); e })?;
+        let initializer = client.native_initializer(config.scope).await?;
         control.live()?;
         // Match the native transport's maintained TLS provider selection; an
         // embedding runtime's already-installed provider remains authoritative.
@@ -335,7 +335,7 @@ impl<W: TorWatcher + 'static> Network<W> {
             let _ = rustls::crypto::ring::default_provider().install_default();
         }
         let runtime = tor_rtcompat::tokio::TokioRustlsRuntime::current()
-            .map_err(|e| { eprintln!("D3 net step L{}: {e:?}", line!()); ErrorCode::Unavailable })?;
+            .map_err(|_| ErrorCode::Unavailable)?;
         let clock = Arc::new(ctrn::arti::TokioClock::default());
         let node = initializer
             .initialize(
@@ -345,7 +345,7 @@ impl<W: TorWatcher + 'static> Network<W> {
                 clock.clone(),
                 config.transport,
             )
-            .map_err(|e| { eprintln!("D3 net step L{}: {e:?}", line!()); ErrorCode::Unavailable })?;
+            .map_err(|_| ErrorCode::Unavailable)?;
         *control.node.borrow_mut() = Some(node.clone());
         let messages = Arc::new(
             ctrn::messages::Messages::new(
@@ -356,20 +356,20 @@ impl<W: TorWatcher + 'static> Network<W> {
             )
             .map_err(|_| ErrorCode::InvalidRequest)?,
         );
-        node.start().await.map_err(|e| { eprintln!("D3 net step L{}: {e:?}", line!()); ErrorCode::Unavailable })?;
+        node.start().await.map_err(|_| ErrorCode::Unavailable)?;
         control.live()?;
         // Original authenticated Records and application operations share this
         // listener. Its actual published endpoint is the only self-ad input.
         let listener = messages
             .listen()
             .await
-            .map_err(|e| { eprintln!("D3 net step L{}: {e:?}", line!()); ErrorCode::Unavailable })?;
+            .map_err(|_| ErrorCode::Unavailable)?;
         control.live()?;
         let endpoint = ctrn::OnionEndpoint::from_address(listener.address())
-            .map_err(|e| { eprintln!("D3 net step L{}: {e:?}", line!()); ErrorCode::Unavailable })?;
+            .map_err(|_| ErrorCode::Unavailable)?;
         let advertisement = client
             .advertise(Advertisement {
-                timestamp_us: super::now_us().map_err(|e| { eprintln!("D3 net step L{}: {e:?}", line!()); ErrorCode::Unavailable })?,
+                timestamp_us: super::now_us().map_err(|_| ErrorCode::Unavailable)?,
                 capabilities: if config.storage.is_some() {
                     vec![DHTV]
                 } else {
@@ -384,12 +384,12 @@ impl<W: TorWatcher + 'static> Network<W> {
                 }],
             })
             .await
-            .map_err(|e| { eprintln!("D3 net step L{}: {e:?}", line!()); ErrorCode::Unavailable })?;
+            .map_err(|_| ErrorCode::Unavailable)?;
         control.live()?;
         // Preserve the exact original signed advertisement for the trusted peer
         // harness; no new bootstrap format or unsigned identity map is emitted.
         let own = UnverifiedPeerInfoBytes::from_bytes(advertisement.as_bytes().to_vec())
-            .map_err(|e| { eprintln!("D3 net step L{}: {e:?}", line!()); ErrorCode::Unavailable })?;
+            .map_err(|_| ErrorCode::Unavailable)?;
         let window = client.window;
         let discovery = Arc::new(
             TorDiscovery::new(

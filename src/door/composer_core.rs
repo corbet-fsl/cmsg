@@ -1320,7 +1320,9 @@ pub(crate) type MemberOwner<B, N> = super::facades::VaultBoardOwner<
     B,
     SystemClock,
     ckmg::SystemEntropy,
-    custody::InitialRecoveryAuthority<'static, 'static, SystemClock, N>,
+    custody::LateMemberAuthority<
+        custody::InitialRecoveryAuthority<'static, 'static, SystemClock, N>,
+    >,
     cvlt::PasskeyRecords<cvlt::TorPasskeyRecord<'static, N>>,
     cvlt::WalletCustody,
 >;
@@ -1366,6 +1368,8 @@ pub(crate) struct Composed<B: cwst::backend::Backend + 'static, N: cdht::Network
 /// The community account a composition bound to its Door (step 5).
 pub(crate) struct CommunityBound<B: cwst::backend::Backend + 'static, N: cdht::Network + 'static> {
     pub(crate) owner: MemberOwner<B, N>,
+    /// Where the start restore installs this Vault's Board member authority.
+    pub(crate) member: custody::MemberSlot,
     pub(crate) account: custody::AccountWiring,
     /// The account actor's admission (a second session of the same device key).
     pub(crate) actor_membership: cfyr::membership::LiveMembership<Transport>,
@@ -1455,6 +1459,7 @@ where
     let custody::ComposedMemberVault {
         vault,
         intent,
+        member,
         account,
         lifetime,
     } = owners
@@ -1467,6 +1472,7 @@ where
         .map_err(step("bind vault"))?;
     Ok(CommunityBound {
         owner,
+        member,
         account,
         actor_membership,
         actor_policy,
@@ -1749,6 +1755,7 @@ where
     //    path's restore_device_login, C8 A).
     let CommunityBound {
         owner,
+        member: _,
         account,
         actor_membership,
         actor_policy,

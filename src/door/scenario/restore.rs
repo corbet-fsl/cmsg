@@ -68,43 +68,67 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
         token: &ClientToken,
         now: u64,
     ) -> Result<()> {
-        let config = self.configuration.take().ok_or(ErrorCode::Refused).map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
-        let (prepared, binding, stamps) = door.prepare_login_recovery(origin, token, now).await.map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+        let config = self.configuration.take().ok_or(ErrorCode::Refused)?;
+        let (prepared, binding, stamps) = door.prepare_login_recovery(origin, token, now).await?;
         let (client, owner) =
-            door.prepare_native_transport(origin, &prepared, binding.clone(), config.window).map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+            door.prepare_native_transport(origin, &prepared, binding.clone(), config.window)?;
         let (drain, startup) =
             network::Network::prepare(client, owner, config.network, config.watcher);
         // Cleanup must remain reachable even if startup is cancelled or times out.
         self.network_drain = Some(drain);
-        self.network = Some(startup.await.map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?);
-        let retained = self.network.as_ref().ok_or(ErrorCode::Unavailable).map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+        self.network = Some(startup.await?);
+        let retained = self.network.as_ref().ok_or(ErrorCode::Unavailable)?;
         if let Some(file) = &config.advertisement_file {
             // Public data (a signed PeerInfo); written whole, then renamed, so a reader never sees a part.
             let temporary = file.with_extension("tmp");
-            std::fs::write(&temporary, retained.advertisement().map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?.as_bytes())
+            std::fs::write(&temporary, retained.advertisement()?.as_bytes())
                 .and_then(|()| std::fs::rename(&temporary, file))
-                .map_err(|_| ErrorCode::Unavailable).map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+                .map_err(|_| ErrorCode::Unavailable)?;
         }
         // C8 A: a registered device-key member's custody was bound when the app started
         // (`composer::restore_device_login`); its Vault is not recovered a second time.
         if let Some(eager) = door.take_eager_binding(origin) {
-            let peers = retained.records().map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?.network();
+            let peers = retained.records()?.network();
             #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
             let waves = peers.clone();
             let mut owner = eager.owner;
+            // The Vault was opened at app start under the initial recovery authority, which
+            // refuses Board signing. Once this device is in the community's current lineage it
+            // gets the member authority of the restore path below (the same bind function).
+            // A device not in that lineage keeps Board signing refused.
+            let member = retained.take_member_authority()?;
+            match eager
+                .member
+                .bind(
+                    door,
+                    crate::door::custody::BindInputs {
+                        origin: origin.to_owned(),
+                        prepared,
+                        binding: binding.clone(),
+                        stamps,
+                        member,
+                        now,
+                    },
+                )
+                .await
+            {
+                Ok(intent) => owner.set_board_intent(intent)?,
+                Err(ErrorCode::Unauthorized) => {}
+                Err(error) => return Err(error),
+            }
             owner.enable_groups(Some(crate::door::facades::verified_peers(
                 peers,
                 door.current_policy(origin)?,
-            ))).map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+            )))?;
             #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
-            bind_waves(door, origin, waves).map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+            bind_waves(door, origin, waves)?;
             if let Some(board) = self.board.take() {
-                owner.bind_board(door, origin, board).map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+                owner.bind_board(door, origin, board)?;
             }
             return self.bind_mesh(door, origin).await;
         }
-        let member = retained.take_member_authority().map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
-        let network = retained.records().map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?.network();
+        let member = retained.take_member_authority()?;
+        let network = retained.records()?.network();
         let peers = network.clone();
         #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
         let waves = network.clone();
@@ -120,22 +144,22 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
                 config.backend,
                 now,
             )
-            .await.map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+            .await?;
         let mut owner = door
             .bind_vault_with_board_owner(origin, restored.vault, restored.intent, restored.lifetime)
-            .await.map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+            .await?;
         // Every native device has groups: peers are verified, never claimed.
-        owner.enable_verified_groups(peers, door.current_policy(origin).map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?).map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+        owner.enable_verified_groups(peers, door.current_policy(origin)?)?;
         #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
-        bind_waves(door, origin, waves).map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+        bind_waves(door, origin, waves)?;
         if let Some(board) = self.board.take() {
-            board.bind(door, origin, owner).map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+            board.bind(door, origin, owner)?;
         }
         self.bind_mesh(door, origin).await
     }
 
     async fn bind_mesh(&mut self, door: &mut Door, origin: &str) -> Result<()> {
-        let retained = self.network.take().ok_or(ErrorCode::Unavailable).map_err(|e| { eprintln!("D3 restore step L{}: {e:?}", line!()); e })?;
+        let retained = self.network.take().ok_or(ErrorCode::Unavailable)?;
         let (drain, binding) = mesh::Owner::prepare_bind(door, origin, retained);
         self.mesh_drain = Some(drain);
         self.mesh = Some(binding.await?);

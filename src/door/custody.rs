@@ -12,8 +12,10 @@ pub use initial_recovery::{
 mod initial_restore;
 pub use initial_restore::{
     prepare_device_initial_recovery, prepare_initial_recovery, ComposedMemberVault,
-    InitialRecoveredVault, InitialRecoveryOwners, InitialRootVault,
+    InitialRecoveredVault, InitialRecoveryOwners, InitialRootVault, MemberVault,
 };
+mod late_member;
+pub use late_member::{BindInputs, LateMemberAuthority, MemberBinder, MemberSlot};
 mod initial;
 pub use genesis::{
     acknowledge_device_initial_publication, acknowledge_initial_publication,

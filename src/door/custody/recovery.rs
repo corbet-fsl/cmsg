@@ -364,6 +364,38 @@ impl Door {
         N: cdht::Network + Clone,
         B: cwst::backend::Backend,
     {
+        let candidate = self
+            .login_recovery_candidate(origin, prepared, binding, stamps.as_ref(), &network, now)
+            .await?;
+        // Original recovery performs forced lineage reads and fresh HTTPS checks
+        // before lending Store custody. A device-key member (the stamp trust is held)
+        // enrolled its community Store through the account path: account custody only.
+        let account_only = stamps.is_some();
+        let owners = member
+            .bind_recovery(stamps, &candidate, network.clone())
+            .await?;
+        if account_only {
+            owners.open_account_only(network, backend).await
+        } else {
+            owners.open(network, backend).await
+        }
+    }
+
+    /// The recovery candidate of this login: the retained checkpoint judged at the current
+    /// policy. It exists only for a device that is a member of the community's current
+    /// lineage; every other device is refused here (`Unauthorized`).
+    async fn login_recovery_candidate<N>(
+        &self,
+        origin: &str,
+        prepared: cvlt::PreparedOpen,
+        binding: &Binding,
+        stamps: Option<&cvlt::StampTrust>,
+        network: &N,
+        now: u64,
+    ) -> super::super::Result<cvlt::RecoveryCandidate>
+    where
+        N: cdht::Network + Clone,
+    {
         let checkpoint = {
             let mut record = prepared
                 .tor_records(network.clone())
@@ -378,38 +410,60 @@ impl Door {
         if completed < now {
             return Err(ErrorCode::Clock);
         }
-        let candidate = self
-            .current_policy(origin)?
+        self.current_policy(origin)?
             .with_current(completed, |current| {
-                prepared.prepare_recovery(
-                    &checkpoint,
-                    current,
-                    stamps.as_ref(),
-                    binding.member(),
-                    completed,
-                )
+                prepared.prepare_recovery(&checkpoint, current, stamps, binding.member(), completed)
             })
             .map_err(|_| ErrorCode::Unavailable)?
-            .map_err(|_| ErrorCode::Unauthorized)?;
-        // Original recovery performs forced lineage reads and fresh HTTPS checks
-        // before lending Store custody. A device-key member (the stamp trust is held)
-        // enrolled its community Store through the account path: account custody only.
+            .map_err(|_| ErrorCode::Unauthorized)
+    }
+
+    /// Give the Board's device signing of an already opened Vault (the open path binds
+    /// its community Vault at app start under the initial recovery authority) the same
+    /// member authority the restore path binds: the very candidate and bind of
+    /// [`Self::recover_login_vault`], without opening a Store again. Refused
+    /// (`Unauthorized`) unless this device is in the community's current lineage, in which
+    /// case Board signing stays refused. Returns the Board's fresh signing admission.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn bind_member_authority<N>(
+        &self,
+        origin: &str,
+        prepared: cvlt::PreparedOpen,
+        binding: &Binding,
+        stamps: Option<cvlt::StampTrust>,
+        member: MemberAuthorityBuilder,
+        network: N,
+        slot: &MemberSlot,
+        now: u64,
+    ) -> super::super::Result<ckmg::IntentAdmission>
+    where
+        N: cdht::Network + Clone + 'static,
+    {
+        let candidate = self
+            .login_recovery_candidate(origin, prepared, binding, stamps.as_ref(), &network, now)
+            .await?;
+        let RecoveryOwners {
+            authority, intent, ..
+        } = member.bind_recovery(stamps, &candidate, network).await?;
+        slot.install(authority)?;
+        Ok(intent)
+    }
+}
+
+impl MemberAuthorityBuilder {
+    /// The ONE bind of a login's member authority, for the restore path (which then opens
+    /// the Store) and the open path (which installs it into its already opened Vault).
+    async fn bind_recovery<'attempt, N: cdht::Network + Clone>(
+        self,
+        stamps: Option<cvlt::StampTrust>,
+        candidate: &'attempt cvlt::RecoveryCandidate,
+        network: N,
+    ) -> super::super::Result<RecoveryOwners<'attempt, N>> {
         match stamps {
-            Some(stamps) => {
-                member
-                    .with_stamps(stamps)
-                    .prepare_recovery(&candidate, network.clone())
-                    .await?
-                    .open_account_only(network, backend)
-                    .await
-            }
-            None => {
-                member
-                    .prepare_recovery(&candidate, network.clone())
-                    .await?
-                    .open(network, backend)
-                    .await
-            }
+            Some(stamps) => self.with_stamps(stamps),
+            None => self,
         }
+        .prepare_recovery(candidate, network)
+        .await
     }
 }

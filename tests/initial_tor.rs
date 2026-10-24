@@ -422,6 +422,57 @@ async fn ordinary_open(
     vault.lock().await;
 }
 
+/// The initial recovery authority admits Board (account Delegation) device signing only
+/// when the account enrollment composer enabled its delegation channel: a Vault opened
+/// without it refuses `SignDeviceEd25519` and locks its Keys.
+async fn acknowledged_signing_refused(
+    native: &Native,
+    api: &cfyr::Foyer<cfyr::HttpClient>,
+    opening: cvlt::PreparedOpen,
+    backend: cwst::backend::Memory,
+) {
+    let locator = opening.locator();
+    let network = native.records().unwrap().network();
+    let mut records = opening.tor_records(network.clone()).await.unwrap();
+    let checkpoint = records.checkpoint(&locator).await.unwrap();
+    drop(records);
+    let candidate = opening.prepare_initial_recovery(&checkpoint).unwrap();
+    let mut policy = api.current_policy();
+    let initial = api
+        .live_membership()
+        .observe_lease(now)
+        .await
+        .unwrap()
+        .passkey_certificate(&mut policy, now)
+        .await
+        .unwrap()
+        .initial_creation(now)
+        .await
+        .unwrap();
+    let network = native.initial_records(&initial).unwrap();
+    let expires = initial.expires().unwrap().min(now() + 60);
+    let owners = custody::prepare_initial_recovery(&candidate, initial, network.clone())
+        .await
+        .unwrap();
+    // The account-device intent only: no delegation channel is enabled.
+    let (owners, _admission) = owners.with_account_device_intent().unwrap();
+    let mut vault = owners.open_root(network, backend).await.unwrap();
+    vault.keys().lineage().await.unwrap();
+    let format = ckmg::DeviceFormat::ForumRequest;
+    let message = [
+        format.tag(),
+        b"signing needs a delegation intent".as_slice(),
+    ]
+    .concat();
+    assert!(vault
+        .keys()
+        .sign_device_ed25519_current(format, &message, expires)
+        .await
+        .is_err());
+    assert_eq!(vault.keys().state(), ckmg::State::Locked);
+    vault.lock().await;
+}
+
 async fn acknowledged_open(
     native: &Native,
     api: &cfyr::Foyer<cfyr::HttpClient>,
@@ -744,6 +795,8 @@ async fn journey() {
     )
     .await;
     drop(retired);
+    let refused = login(&mut api, &mut keys).await;
+    acknowledged_signing_refused(&native, &api, refused, backend.clone()).await;
     let cold = login(&mut api, &mut keys).await;
     acknowledged_open(&native, &api, cold, backend.clone()).await;
     drain("target", native).await;
