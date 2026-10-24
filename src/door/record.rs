@@ -487,7 +487,10 @@ where
     if RecordWindow::of(received.epoch()) != window {
         return Err(ErrorCode::Unavailable);
     }
-    Ok((window, begin_received_record(vault, &received, prover).await?))
+    Ok((
+        window,
+        begin_received_record(vault, &received, prover).await?,
+    ))
 }
 
 /// Prove this epoch's record from a received packet and cache it in the Vault
@@ -532,7 +535,10 @@ mod tests {
         let current = RecordCurrent::default();
         assert_eq!(current.check_at(1_500).err(), Some(ErrorCode::Unavailable));
         current.mark(WINDOW);
-        assert!(current.check_at(1_000).is_ok(), "the window start is inside");
+        assert!(
+            current.check_at(1_000).is_ok(),
+            "the window start is inside"
+        );
         assert!(current.check_at(1_999).is_ok());
     }
 

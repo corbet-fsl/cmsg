@@ -11,7 +11,10 @@ fn reachability_round_trips_and_drops_garbage() {
     assert!(decode_reachability(b"not json").is_empty());
     assert!(decode_reachability(br#"[{"scheme":"BAD!","address":"AA"}]"#).is_empty());
     let many: Vec<Address> = (0..20).map(address).collect();
-    assert_eq!(decode_reachability(&encode_reachability(&many)).len(), MAX_ADDRESSES);
+    assert_eq!(
+        decode_reachability(&encode_reachability(&many)).len(),
+        MAX_ADDRESSES
+    );
 }
 
 #[test]
@@ -29,7 +32,10 @@ fn frames_are_versioned_and_strict() {
     let frame = Frame {
         version: FRAME_VERSION,
         reach: vec![1],
-        body: Body::WaveAck { nonce: [7; 32], kind: "hello".into() },
+        body: Body::WaveAck {
+            nonce: [7; 32],
+            kind: "hello".into(),
+        },
     };
     let bytes = serde_json::to_vec(&frame).unwrap();
     assert_eq!(serde_json::from_slice::<Frame>(&bytes).unwrap(), frame);
@@ -39,7 +45,10 @@ fn frames_are_versioned_and_strict() {
     let chat = Frame {
         version: 2,
         reach: vec![],
-        body: Body::Chat { conversation: [1; 32], wire: vec![9] },
+        body: Body::Chat {
+            conversation: [1; 32],
+            wire: vec![9],
+        },
     };
     // A future version still parses; the receiver drops it by version.
     let parsed: Frame = serde_json::from_slice(&serde_json::to_vec(&chat).unwrap()).unwrap();
@@ -91,13 +100,21 @@ mod isolation {
             1024
         }
         async fn listen(&self) -> std::result::Result<Box<dyn Listener>, cmsh::Error> {
-            let n = if self.1 { self.0.fetch_add(1, Ordering::SeqCst) + 1 } else { 1 };
+            let n = if self.1 {
+                self.0.fetch_add(1, Ordering::SeqCst) + 1
+            } else {
+                1
+            };
             Ok(Box::new(Silent(address(n))))
         }
         async fn app_message(&self, _: &Address, _: &[u8]) -> std::result::Result<(), cmsh::Error> {
             Ok(())
         }
-        async fn app_call(&self, _: &Address, _: &[u8]) -> std::result::Result<Vec<u8>, cmsh::Error> {
+        async fn app_call(
+            &self,
+            _: &Address,
+            _: &[u8],
+        ) -> std::result::Result<Vec<u8>, cmsh::Error> {
             Ok(vec![])
         }
     }
@@ -121,7 +138,10 @@ mod isolation {
 
     #[tokio::test]
     async fn each_origin_exposes_only_its_own_addresses_and_no_grant_leaks() {
-        let (a, b) = ("http://127.0.0.1:1".to_owned(), "http://127.0.0.1:2".to_owned());
+        let (a, b) = (
+            "http://127.0.0.1:1".to_owned(),
+            "http://127.0.0.1:2".to_owned(),
+        );
         let config = Configuration::new(
             "community".into(),
             [(Role::Member, [a.clone(), b.clone()].into())].into(),
@@ -159,7 +179,10 @@ mod isolation {
     /// check belongs to the Tor fixture.)
     #[tokio::test]
     async fn a_backend_that_repeats_an_address_across_origins_is_refused() {
-        let (a, b) = ("http://127.0.0.1:1".to_owned(), "http://127.0.0.1:2".to_owned());
+        let (a, b) = (
+            "http://127.0.0.1:1".to_owned(),
+            "http://127.0.0.1:2".to_owned(),
+        );
         let config = Configuration::new(
             "community".into(),
             [(Role::Member, [a.clone(), b.clone()].into())].into(),
@@ -186,8 +209,20 @@ mod isolation {
         let lease = Lease::open(&mut door, &a, now(), 60).unwrap();
         // Grants are keyed by a hash of a bearer token; the lease key is random
         // and never encoded as a token, so no presented token authenticates it.
-        let out = door.dispatch(&a, &"A".repeat(43), br#"{"action":"inbox.waves","version":1,"body":{}}"#, now()).await;
-        assert!(matches!(out, crate::door::Output::Error { error: ErrorCode::Unauthorized }));
+        let out = door
+            .dispatch(
+                &a,
+                &"A".repeat(43),
+                br#"{"action":"inbox.waves","version":1,"body":{}}"#,
+                now(),
+            )
+            .await;
+        assert!(matches!(
+            out,
+            crate::door::Output::Error {
+                error: ErrorCode::Unauthorized
+            }
+        ));
         lease.close(&mut door);
     }
 }

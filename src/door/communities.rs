@@ -84,7 +84,11 @@ pub(super) async fn communities(
     let origin = origin_of(door, key)?;
     let book = vouching::load(door, &origin).await?.book;
     let mut list = book.communities.clone();
-    if let Some(created) = book.creation.as_ref().and_then(|record| record.created.as_ref()) {
+    if let Some(created) = book
+        .creation
+        .as_ref()
+        .and_then(|record| record.created.as_ref())
+    {
         remember(&mut list, created_entry(created));
     }
     let bound = door

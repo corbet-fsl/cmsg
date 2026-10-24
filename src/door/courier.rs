@@ -62,9 +62,15 @@ pub enum Body {
     /// The recipient's owner took the wave message of this kind.
     WaveAck { nonce: [u8; 32], kind: String },
     /// A Delivery wire of a conversation message; answered by `Receipt`.
-    Chat { conversation: [u8; 32], wire: Vec<u8> },
+    Chat {
+        conversation: [u8; 32],
+        wire: Vec<u8>,
+    },
     /// The signed receipt for a chat wire.
-    Receipt { conversation: [u8; 32], wire: Vec<u8> },
+    Receipt {
+        conversation: [u8; 32],
+        wire: Vec<u8>,
+    },
 }
 
 /// Routing descriptor of this Door: every listener address, JSON, bounded.
@@ -297,7 +303,8 @@ fn typed<T: serde::de::DeserializeOwned>(value: Value) -> Result<T> {
 
 /// (peer, conversation) of every wave that has opened a conversation.
 async fn conversations(lease: &Lease, door: &mut Door) -> Result<Vec<(String, [u8; 32])>> {
-    let list: super::inbox_waves::WaveList = typed(lease.call(door, "inbox.waves", json!({})).await?)?;
+    let list: super::inbox_waves::WaveList =
+        typed(lease.call(door, "inbox.waves", json!({})).await?)?;
     let mut all: Vec<(String, [u8; 32])> = list
         .waves
         .into_iter()
@@ -405,9 +412,10 @@ pub(super) async fn receive(
                     .await;
                 if let Ok(value) = received {
                     shared.book.borrow_mut().learn(&peer, &reach);
-                    if let Some(receipt) = value.get("receipt").and_then(|r| {
-                        serde_json::from_value::<Vec<u8>>(r.clone()).ok()
-                    }) {
+                    if let Some(receipt) = value
+                        .get("receipt")
+                        .and_then(|r| serde_json::from_value::<Vec<u8>>(r.clone()).ok())
+                    {
                         shared.push(
                             &peer,
                             Body::Receipt {
@@ -821,8 +829,16 @@ async fn gather(
     }
     if now >= state.next_listing {
         // A failed pass (not attended yet, no network) is tried again soon.
-        let done = lease.call(door, "board.room_listing", json!({})).await.is_ok();
-        state.next_listing = now + if done { config.listing.max(1) } else { LISTING_RETRY };
+        let done = lease
+            .call(door, "board.room_listing", json!({}))
+            .await
+            .is_ok();
+        state.next_listing = now
+            + if done {
+                config.listing.max(1)
+            } else {
+                LISTING_RETRY
+            };
     }
     if now >= state.next_serve {
         state.next_serve = now + config.serve;
@@ -860,7 +876,9 @@ async fn gather(
     // pass that cannot run yet (no session, no network) is retried soon.
     if now >= state.next_voucher {
         let sponsor = lease.call(door, "foyer.voucher_links", json!({})).await;
-        let newcomer = lease.call(door, "foyer.voucher_vouched_by", json!({})).await;
+        let newcomer = lease
+            .call(door, "foyer.voucher_vouched_by", json!({}))
+            .await;
         state.next_voucher = now
             + if sponsor.is_ok() || newcomer.is_ok() {
                 config.voucher.max(1)
@@ -879,7 +897,11 @@ async fn gather(
                     kind_of(&queued.envelope.message).as_bytes(),
                 ]
                 .concat();
-                if state.sent.get(&id).is_none_or(|at| now >= at + config.resend) {
+                if state
+                    .sent
+                    .get(&id)
+                    .is_none_or(|at| now >= at + config.resend)
+                {
                     out.push(Outgoing {
                         peer: queued.peer,
                         body: Body::Wave {

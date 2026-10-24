@@ -15,9 +15,9 @@
 //! | [`WaveProver`] | cwlt `NativeProver` over the account group (`Update`) and the wave group (`Wave`, `Outcome`) |
 //! | [`UpdateSink`] | the D2 update actor (`Door::account_update`), returns the accepted certificate |
 //! | [`ContactAuthority`] | the roster key check (`Account::verify_contact`) |
+use super::super::{ErrorCode, Result};
 use super::production::WaveWallet;
 use super::types::{Blob, ProveJob, Proved, Work};
-use super::super::{ErrorCode, Result};
 use ckmg::wallet_engine::account::{
     Account, Acknowledgment, Candidate, Certificate, Evidence, OsEntropy, Reserve, Resolution,
     Settled, SettledOutcome, UpdateInput, WaveContext as EvidenceContext,
@@ -145,7 +145,11 @@ where
         // The counterpart's consent is checked before anything is reserved.
         self.authority.verify(&account, &reserve, &signature)?;
         // The sender proves at the common lease start; the recipient at its own clock.
-        let at = if sender { own.opened_at } else { (self.clock)() };
+        let at = if sender {
+            own.opened_at
+        } else {
+            (self.clock)()
+        };
         let event = match account.event_for(&own.nonce) {
             Some(event) => event,
             None => {
@@ -157,7 +161,10 @@ where
                 event
             }
         };
-        let phase = account.slot(&event).map(|s| s.phase).ok_or(ErrorCode::Refused)?;
+        let phase = account
+            .slot(&event)
+            .map(|s| s.phase)
+            .ok_or(ErrorCode::Refused)?;
         if phase == 1 {
             let candidate = account
                 .activate(&event, at, signature, &mut OsEntropy)
@@ -230,7 +237,10 @@ where
         };
         let mut account = self.state.load().await?;
         let event = account.event_for(&own.nonce).ok_or(ErrorCode::Refused)?;
-        let phase = account.slot(&event).map(|s| s.phase).ok_or(ErrorCode::Refused)?;
+        let phase = account
+            .slot(&event)
+            .map(|s| s.phase)
+            .ok_or(ErrorCode::Refused)?;
         if phase == 2 {
             let candidate = account
                 .settle(
@@ -312,10 +322,9 @@ where
 
 /// The public statement of an evidence: the member of the tagged body the verifier reads.
 fn statement_of(evidence: &Evidence, member: &str) -> Result<Vec<u8>> {
-    let body: serde_json::Value = serde_json::from_str(
-        &evidence.statement_json().map_err(|_| ErrorCode::Refused)?,
-    )
-    .map_err(|_| ErrorCode::Refused)?;
+    let body: serde_json::Value =
+        serde_json::from_str(&evidence.statement_json().map_err(|_| ErrorCode::Refused)?)
+            .map_err(|_| ErrorCode::Refused)?;
     serde_json::to_vec(body.get(member).ok_or(ErrorCode::Refused)?).map_err(|_| ErrorCode::Refused)
 }
 

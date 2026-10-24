@@ -8,7 +8,9 @@
 //! the original acceptance; the update is never signed or proven twice.
 //!
 //! The same module holds the login renewal rule of the community credential.
-use super::super::accounting::{outbox_request_id, AcceptedResponse, ProvenUpdate, SignedApplyExtended};
+use super::super::accounting::{
+    outbox_request_id, AcceptedResponse, ProvenUpdate, SignedApplyExtended,
+};
 use super::super::{ErrorCode, Result};
 use std::sync::Arc;
 
@@ -110,7 +112,10 @@ fn same(signed: &SignedApplyExtended, proven: &ProvenUpdate) -> bool {
     not(all(feature = "native-prover", not(target_arch = "wasm32"))),
     allow(dead_code)
 )]
-pub(super) async fn apply<S: UpdateStore + UpdateWire>(seam: &mut S, proven: &ProvenUpdate) -> Result<Applied> {
+pub(super) async fn apply<S: UpdateStore + UpdateWire>(
+    seam: &mut S,
+    proven: &ProvenUpdate,
+) -> Result<Applied> {
     let signed = match seam.stored().await? {
         Some(outbox) => {
             let signed = seam.restore(outbox).await?;
@@ -234,7 +239,12 @@ fn head(input: &mut &[u8]) -> Option<(u8, u64)> {
         _ => return None,
     };
     let bytes = take(input, width)?;
-    Some((major, bytes.iter().fold(0, |sum, byte| sum << 8 | u64::from(*byte))))
+    Some((
+        major,
+        bytes
+            .iter()
+            .fold(0, |sum, byte| sum << 8 | u64::from(*byte)),
+    ))
 }
 
 fn skip(input: &mut &[u8], depth: u8) -> Option<()> {
@@ -356,7 +366,11 @@ mod tests {
             self.log.push("send");
             self.sent.push(signed.outbox().to_vec());
             self.clock += 1;
-            let at = match self.accepted.iter().find(|(id, _)| *id == signed.request_id()) {
+            let at = match self
+                .accepted
+                .iter()
+                .find(|(id, _)| *id == signed.request_id())
+            {
                 Some((_, at)) => *at,
                 None => {
                     let at = 150 + self.clock;
@@ -400,13 +414,19 @@ mod tests {
         };
         let proven = fixtures::proven(0);
         for _ in 0..2 {
-            assert_eq!(block(apply(&mut script, &proven)).err(), Some(ErrorCode::Reconcile));
+            assert_eq!(
+                block(apply(&mut script, &proven)).err(),
+                Some(ErrorCode::Reconcile)
+            );
         }
         let applied = block(apply(&mut script, &proven)).unwrap();
         assert_eq!(script.sent.len(), 3);
         assert!(script.sent.windows(2).all(|pair| pair[0] == pair[1]));
         assert_eq!(script.log.iter().filter(|step| **step == "sign").count(), 1);
-        assert_eq!(script.log.iter().filter(|step| **step == "persist").count(), 1);
+        assert_eq!(
+            script.log.iter().filter(|step| **step == "persist").count(),
+            1
+        );
         assert_eq!(applied.request_id(), fixtures::signed(0).request_id());
     }
 
@@ -444,7 +464,10 @@ mod tests {
             Some(ErrorCode::Reconcile)
         );
         // Nothing was signed or sent for the second one.
-        assert_eq!(script.log.iter().filter(|step| **step == "sign").count(), signs);
+        assert_eq!(
+            script.log.iter().filter(|step| **step == "sign").count(),
+            signs
+        );
         assert_eq!(script.sent.len(), sends);
         let done = block(resume(&mut script)).unwrap().unwrap();
         // The wrong request cannot settle it; the right one can.
@@ -487,7 +510,13 @@ mod tests {
     fn the_expiry_of_a_credential_is_read_from_its_claims() {
         assert_eq!(credential_valid_until(&credential(1000, 5000)), Some(5000));
         assert_eq!(credential_valid_until(&credential(7, 90_000)), Some(90_000));
-        for bad in [&b""[..], b"x", &[0xd2, 0x84], &[0xa0], &[0x84, 0x40, 0xa0, 0x40, 0x40]] {
+        for bad in [
+            &b""[..],
+            b"x",
+            &[0xd2, 0x84],
+            &[0xa0],
+            &[0x84, 0x40, 0xa0, 0x40, 0x40],
+        ] {
             assert_eq!(credential_valid_until(bad), None);
         }
         let mut cut = credential(1000, 5000);
@@ -544,6 +573,9 @@ mod tests {
         assert_eq!(block(renew_on_login(&mut due, now)), Ok(false));
         // A refusal is the member's to hear.
         due.outcome = Err(ErrorCode::Refused);
-        assert_eq!(block(renew_on_login(&mut due, now)), Err(ErrorCode::Refused));
+        assert_eq!(
+            block(renew_on_login(&mut due, now)),
+            Err(ErrorCode::Refused)
+        );
     }
 }

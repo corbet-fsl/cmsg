@@ -17,8 +17,7 @@ const ROOT: &str = "https://admin.root.example.test";
 const WALLET: &str = "https://wallet.example.test";
 
 fn fixture() -> Value {
-    let path =
-        foyer_fixture::fixture_path();
+    let path = foyer_fixture::fixture_path();
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
 

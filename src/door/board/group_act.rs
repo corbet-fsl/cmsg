@@ -25,9 +25,7 @@ pub(in crate::door) async fn group_act(
     }
     let board = door.boards.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     board.require_committed()?;
-    let views = board
-        .group_act(request.intent, expires)
-        .await?;
+    let views = board.group_act(request.intent, expires).await?;
     Ok((views, vec![]))
 }
 
@@ -109,7 +107,9 @@ pub enum GroupInbound {
         welcomes: Vec<GroupInvite>,
     },
     /// A fellow member's listing key of a public room was adopted.
-    Listing { group: [u8; 32] },
+    Listing {
+        group: [u8; 32],
+    },
     /// This member joined the group from the actor's Welcome.
     Joined {
         operation: [u8; 32],
@@ -153,9 +153,7 @@ pub(in crate::door) async fn group_propose(
     request: GroupPropose,
 ) -> Result<(GroupProposed, Vec<Event>)> {
     let (board, expires) = board_of(door, key)?;
-    let proposed = board
-        .group_propose(request.intent, expires)
-        .await?;
+    let proposed = board.group_propose(request.intent, expires).await?;
     Ok((proposed, vec![]))
 }
 
@@ -190,11 +188,7 @@ pub(in crate::door) async fn group_answer(
 ) -> Result<(GroupAnswered, Vec<Event>)> {
     let (board, expires) = board_of(door, key)?;
     let answered = board
-        .group_answer(
-            request.operation,
-            request.accept,
-            expires,
-        )
+        .group_answer(request.operation, request.accept, expires)
         .await?;
     Ok((answered, vec![]))
 }

@@ -153,12 +153,17 @@ pub trait UnlockStore {
     /// The persisted bundle, if one opens (anything else reads as none).
     fn load(&self) -> impl std::future::Future<Output = Option<cvlt::ResumeBundle>>;
     /// Delete the persisted unlock.
-    fn forget(&self) -> impl std::future::Future<Output = std::result::Result<(), cvlt::ResumeError>>;
+    fn forget(
+        &self,
+    ) -> impl std::future::Future<Output = std::result::Result<(), cvlt::ResumeError>>;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl UnlockStore for cvlt::NativeResume {
-    async fn save(&self, bundle: &cvlt::ResumeBundle) -> std::result::Result<(), cvlt::ResumeError> {
+    async fn save(
+        &self,
+        bundle: &cvlt::ResumeBundle,
+    ) -> std::result::Result<(), cvlt::ResumeError> {
         cvlt::NativeResume::save(self, bundle)
     }
     async fn load(&self) -> Option<cvlt::ResumeBundle> {
@@ -171,7 +176,10 @@ impl UnlockStore for cvlt::NativeResume {
 
 #[cfg(target_arch = "wasm32")]
 impl UnlockStore for cvlt::BrowserResume {
-    async fn save(&self, bundle: &cvlt::ResumeBundle) -> std::result::Result<(), cvlt::ResumeError> {
+    async fn save(
+        &self,
+        bundle: &cvlt::ResumeBundle,
+    ) -> std::result::Result<(), cvlt::ResumeError> {
         cvlt::BrowserResume::save(self, bundle).await
     }
     async fn load(&self) -> Option<cvlt::ResumeBundle> {
@@ -262,7 +270,10 @@ pub async fn persist<S: UnlockStore>(
         // A resumed start already persisted its bundle; it cannot add communities.
         Held::Resumed(_) => return Ok(()),
     };
-    store.save(&bundle).await.map_err(|_| ErrorCode::Unavailable)
+    store
+        .save(&bundle)
+        .await
+        .map_err(|_| ErrorCode::Unavailable)
 }
 
 /// "Lock this device" (placeholder wording): wipe the persisted unlock and drop the
@@ -409,26 +420,49 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let mut client = wallet_passkey().await;
             let mut ceremonies = 0;
-            let first = start(&store(dir.path()), &mut client, UnlockPolicy::default(), &mut ceremonies).await;
+            let first = start(
+                &store(dir.path()),
+                &mut client,
+                UnlockPolicy::default(),
+                &mut ceremonies,
+            )
+            .await;
             assert_eq!(ceremonies, 1);
             assert!(!first.is_resumed());
             let garden = first.community_device(&[1; 32], "garden").unwrap();
             drop(first);
             // Restart: ceremony count 0 for the resumed start.
-            let resumed = start(&store(dir.path()), &mut client, UnlockPolicy::default(), &mut ceremonies).await;
+            let resumed = start(
+                &store(dir.path()),
+                &mut client,
+                UnlockPolicy::default(),
+                &mut ceremonies,
+            )
+            .await;
             assert_eq!(ceremonies, 1);
             assert!(resumed.is_resumed());
-            assert_eq!(resumed.community_device(&[1; 32], "garden").unwrap().value(), garden.value());
+            assert_eq!(
+                resumed
+                    .community_device(&[1; 32], "garden")
+                    .unwrap()
+                    .value(),
+                garden.value()
+            );
             assert!(resumed.community_device(&[2; 32], "orchard").is_ok());
             // Narrower bundle: no wallet vault, no new community without the passkey.
-            assert_eq!(resumed.wallet_opening().err(), Some(ErrorCode::Unauthorized));
+            assert_eq!(
+                resumed.wallet_opening().err(),
+                Some(ErrorCode::Unauthorized)
+            );
             assert_eq!(resumed.wallet_unlock().err(), Some(ErrorCode::Unauthorized));
             assert_eq!(
                 resumed.community_device(&[3; 32], "meadow").err(),
                 Some(ErrorCode::InvalidRequest)
             );
             // Persisting from a resumed start keeps the bundle as it is.
-            persist(&store(dir.path()), &resumed, &[], UnlockPolicy::default()).await.unwrap();
+            persist(&store(dir.path()), &resumed, &[], UnlockPolicy::default())
+                .await
+                .unwrap();
             assert!(store(dir.path()).load().is_some());
         });
     }
@@ -439,9 +473,21 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let mut client = wallet_passkey().await;
             let mut ceremonies = 0;
-            let unlock = start(&store(dir.path()), &mut client, UnlockPolicy::default(), &mut ceremonies).await;
+            let unlock = start(
+                &store(dir.path()),
+                &mut client,
+                UnlockPolicy::default(),
+                &mut ceremonies,
+            )
+            .await;
             lock(&store(dir.path()), unlock).await.unwrap();
-            let next = start(&store(dir.path()), &mut client, UnlockPolicy::default(), &mut ceremonies).await;
+            let next = start(
+                &store(dir.path()),
+                &mut client,
+                UnlockPolicy::default(),
+                &mut ceremonies,
+            )
+            .await;
             assert_eq!(ceremonies, 2);
             assert!(!next.is_resumed());
         });
@@ -454,8 +500,16 @@ mod tests {
             let mut client = wallet_passkey().await;
             let mut ceremonies = 0;
             // Unlocked across restarts first, then the user opts out: the bundle is wiped.
-            start(&store(dir.path()), &mut client, UnlockPolicy::default(), &mut ceremonies).await;
-            let ask = UnlockPolicy { ask_every_start: true };
+            start(
+                &store(dir.path()),
+                &mut client,
+                UnlockPolicy::default(),
+                &mut ceremonies,
+            )
+            .await;
+            let ask = UnlockPolicy {
+                ask_every_start: true,
+            };
             for expected in 2..=3 {
                 let unlock = start(&store(dir.path()), &mut client, ask, &mut ceremonies).await;
                 assert_eq!(ceremonies, expected);
@@ -474,16 +528,34 @@ mod tests {
             std::fs::write(vault.join("records/checkpoint"), b"sealed").unwrap();
             let mut client = wallet_passkey().await;
             let mut ceremonies = 0;
-            let unlock = start(&store(&vault), &mut client, UnlockPolicy::default(), &mut ceremonies).await;
-            revoked(&store(&vault), Some(unlock), &LocalDirectory(vault.clone())).await.unwrap();
-            assert!(!vault.exists());
-            assert!(store(&vault).load().is_none());
-            start(&store(&vault), &mut client, UnlockPolicy::default(), &mut ceremonies).await;
-            assert_eq!(ceremonies, 2);
-            // Erasing data that is already gone is not an error.
-            revoked(&store(&root.path().join("none")), None, &LocalDirectory(root.path().join("none")))
+            let unlock = start(
+                &store(&vault),
+                &mut client,
+                UnlockPolicy::default(),
+                &mut ceremonies,
+            )
+            .await;
+            revoked(&store(&vault), Some(unlock), &LocalDirectory(vault.clone()))
                 .await
                 .unwrap();
+            assert!(!vault.exists());
+            assert!(store(&vault).load().is_none());
+            start(
+                &store(&vault),
+                &mut client,
+                UnlockPolicy::default(),
+                &mut ceremonies,
+            )
+            .await;
+            assert_eq!(ceremonies, 2);
+            // Erasing data that is already gone is not an error.
+            revoked(
+                &store(&root.path().join("none")),
+                None,
+                &LocalDirectory(root.path().join("none")),
+            )
+            .await
+            .unwrap();
         });
     }
 }

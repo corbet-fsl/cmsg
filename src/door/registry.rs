@@ -1,25 +1,25 @@
 use super::*;
+use board::{
+    attend as board_attend, depart as board_depart, discovery as board_discovery,
+    group_act as board_group_act, groups as board_groups, heartbeat as board_heartbeat,
+    profile_publish as board_profile_publish, room_admit as board_room_admit,
+    room_connect as board_room_connect, room_join as board_room_join,
+    room_leave as board_room_leave, room_list as board_room_list, room_refs as board_room_refs,
+    room_serve as board_room_serve, search as board_search, watch as board_watch,
+};
+use communities::communities;
 use courier::{
     chat_retry as courier_chat_retry, chat_send as courier_chat_send,
     group_answer as courier_group_answer, group_message as courier_group_message,
-    group_propose as courier_group_propose, room_listing as courier_room_listing, group_welcome as courier_group_welcome,
+    group_propose as courier_group_propose, group_welcome as courier_group_welcome,
+    room_listing as courier_room_listing,
 };
-use board::{
-    attend as board_attend, depart as board_depart, room_connect as board_room_connect, room_refs as board_room_refs,  room_list as board_room_list, discovery as board_discovery,
-    group_act as board_group_act, groups as board_groups, heartbeat as board_heartbeat,
-    profile_publish as board_profile_publish, room_admit as board_room_admit, room_join as board_room_join,
-    room_leave as board_room_leave, room_serve as board_room_serve, search as board_search,
-    watch as board_watch,
-};
-use communities::communities;
 use creating::{
     community_create, community_creation, community_creation_claim, community_creation_finish,
 };
 use foyer::refresh as foyer_refresh;
 use inbox::{blocking_rules as inbox_blocking_rules, contact_act as inbox_contact_act};
-use inbox_conversation::{
-    acknowledge as inbox_ack, receive as inbox_receive,
-};
+use inbox_conversation::{acknowledge as inbox_ack, receive as inbox_receive};
 use inbox_waves::{
     wave_decide as inbox_wave_decide, wave_delivered as inbox_wave_delivered,
     wave_job_done as inbox_wave_job_done, wave_job_next as inbox_wave_job_next,
@@ -29,9 +29,9 @@ use inbox_waves::{
 };
 use login::{cancel as login_cancel, poll as login_poll, start as login_start};
 use vouching::{
+    contacts as voucher_contacts, explanation as voucher_explanation,
     link_create as voucher_link_create, link_revoke as voucher_link_revoke, links as voucher_links,
     signoff_decide as voucher_signoff_decide, signoff_list as voucher_signoff_list,
-    contacts as voucher_contacts, explanation as voucher_explanation,
     vouched_by as voucher_vouched_by,
 };
 
@@ -343,7 +343,12 @@ async fn community_join(
     creating::settle(door, key).await?;
     // The contact with the sponsor exists from the first moment of membership.
     // A step that cannot run now is repeated by the next join or `vouched_by`.
-    if let Ok(origin) = door.grants.get(key).map(|grant| grant.origin.clone()).ok_or(()) {
+    if let Ok(origin) = door
+        .grants
+        .get(key)
+        .map(|grant| grant.origin.clone())
+        .ok_or(())
+    {
         let _ = vouching::settle_vouchee(door, &origin).await;
     }
     Ok((

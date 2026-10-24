@@ -157,7 +157,11 @@ impl Keyring {
             key_generation: held.key_generation,
         };
         custody
-            .restore_room(context, group, &WrappedReadKey::from_bytes(&held.wrapped).ok()?)
+            .restore_room(
+                context,
+                group,
+                &WrappedReadKey::from_bytes(&held.wrapped).ok()?,
+            )
             .ok()
     }
 
@@ -243,14 +247,12 @@ mod tests {
         assert!(ring.open(&reader, "alpha", &GROUP, "m2").is_none());
         // The room wrap is no personal wrap: it does not restore as one.
         let held = &ring.keys[0];
-        assert!(
-            reader
-                .restore(
-                    context("m3", 1, 1),
-                    &WrappedReadKey::from_bytes(&held.wrapped).unwrap()
-                )
-                .is_err()
-        );
+        assert!(reader
+            .restore(
+                context("m3", 1, 1),
+                &WrappedReadKey::from_bytes(&held.wrapped).unwrap()
+            )
+            .is_err());
     }
 
     #[test]
@@ -322,9 +324,11 @@ mod tests {
         let mut ring = Keyring::default();
         for index in 0..MAX_KEYS {
             let member = format!("o{index:03}");
-            let owner = Custodian::from_keys(&[7; 32], &[8; 32], "alpha", &member, [7; 32]).unwrap();
+            let owner =
+                Custodian::from_keys(&[7; 32], &[8; 32], "alpha", &member, [7; 32]).unwrap();
             let (_, payload) = sent(&owner, &member, 1, 1);
-            ring.adopt(&reader, &GROUP, &member, 4, 0, &payload).unwrap();
+            ring.adopt(&reader, &GROUP, &member, 4, 0, &payload)
+                .unwrap();
         }
         let extra = Custodian::from_keys(&[7; 32], &[8; 32], "alpha", "extra", [7; 32]).unwrap();
         let (_, payload) = sent(&extra, "extra", 1, 1);

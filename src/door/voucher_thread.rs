@@ -22,8 +22,15 @@ pub(crate) const QUEUE_OWNER: &str = "cmsg.voucher.queue";
 const MAXIMUM_QUEUED: usize = 64;
 
 fn step(conversation: &[u8; 32], name: &str) -> [u8; 32] {
-    *ckmg::hash(&[b"cmsg.voucher-thread.v1".as_slice(), conversation, name.as_bytes()].concat())
-        .value()
+    *ckmg::hash(
+        &[
+            b"cmsg.voucher-thread.v1".as_slice(),
+            conversation,
+            name.as_bytes(),
+        ]
+        .concat(),
+    )
+    .value()
 }
 
 impl<'a, S, C, R, A, B> Env<'a, S, C, R, A, B>

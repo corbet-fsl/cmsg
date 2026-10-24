@@ -72,22 +72,22 @@ where
         let (lineage, credential, device) = {
             let mut vault = vault.open().await?;
             let lineage = vault
-            .keys()
-            .lineage()
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
-        let credential = vault
-            .keys()
-            .device_info()
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)?
-            .authority_reference()
-            .to_vec();
-        let device = vault
-            .keys()
-            .device_public_key()
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+                .keys()
+                .lineage()
+                .await
+                .map_err(|_| ErrorCode::Unauthorized)?;
+            let credential = vault
+                .keys()
+                .device_info()
+                .await
+                .map_err(|_| ErrorCode::Unauthorized)?
+                .authority_reference()
+                .to_vec();
+            let device = vault
+                .keys()
+                .device_public_key()
+                .await
+                .map_err(|_| ErrorCode::Unauthorized)?;
             (lineage, credential, device)
         };
         if lineage.binding.community() == "wallet"
@@ -117,17 +117,23 @@ where
         if origin != self.origin {
             return Err(ErrorCode::Unauthorized);
         }
-        let lineage = self.vault().await?
+        let lineage = self
+            .vault()
+            .await?
             .keys()
             .lineage()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let reference = self.vault().await?
+        let reference = self
+            .vault()
+            .await?
             .keys()
             .device_info()
             .await
             .map_err(|_| ErrorCode::Unauthorized)?;
-        let device = self.vault().await?
+        let device = self
+            .vault()
+            .await?
             .keys()
             .device_public_key()
             .await
@@ -148,11 +154,15 @@ where
     pub async fn store_community_credential(&mut self, credential: &[u8]) -> Result<()> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        let current = self.vault().await?
+        let current = self
+            .vault()
+            .await?
             .community_credential()
             .await
             .map_err(|_| ErrorCode::Unavailable)?;
-        match self.vault().await?
+        match self
+            .vault()
+            .await?
             .replace_community_credential(current.as_ref().map(|c| c.as_slice()), credential)
             .await
         {
@@ -168,7 +178,8 @@ where
     pub async fn stored_community_credential(&mut self) -> Result<Option<Vec<u8>>> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        self.vault().await?
+        self.vault()
+            .await?
             .community_credential()
             .await
             .map(|credential| credential.map(|bytes| bytes.to_vec()))
@@ -180,7 +191,8 @@ where
     pub async fn update_outbox(&mut self) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        self.vault().await?
+        self.vault()
+            .await?
             .update_outbox()
             .await
             .map_err(|_| ErrorCode::Unavailable)
@@ -195,7 +207,12 @@ where
     ) -> Result<()> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        match self.vault().await?.replace_update_outbox(expected, outbox).await {
+        match self
+            .vault()
+            .await?
+            .replace_update_outbox(expected, outbox)
+            .await
+        {
             Ok(_) => Ok(()),
             Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
             Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),
@@ -208,7 +225,8 @@ where
     pub async fn voucher_custody(&mut self) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        self.vault().await?
+        self.vault()
+            .await?
             .voucher_custody()
             .await
             .map_err(|_| ErrorCode::Unavailable)
@@ -223,7 +241,12 @@ where
     ) -> Result<()> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        match self.vault().await?.replace_voucher_custody(expected, custody).await {
+        match self
+            .vault()
+            .await?
+            .replace_voucher_custody(expected, custody)
+            .await
+        {
             Ok(_) => Ok(()),
             Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
             Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),

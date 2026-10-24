@@ -75,7 +75,11 @@ where
     /// Run `act` against the Inbox owners with this member's purpose keys. The
     /// keys are obtained BEFORE the Store lock: creating a key checkpoints
     /// through that same Store.
-    pub(super) async fn with_env<T, F>(&mut self, ports: &dyn inbox_waves::WavePorts, act: F) -> Result<T>
+    pub(super) async fn with_env<T, F>(
+        &mut self,
+        ports: &dyn inbox_waves::WavePorts,
+        act: F,
+    ) -> Result<T>
     where
         F: for<'e> AsyncFnOnce(
             &mut inbox_waves::engine::Env<'e, cvlt::KeyStore<B>, C, E, A, B>,

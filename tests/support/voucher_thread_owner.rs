@@ -46,9 +46,8 @@ async fn deliver(
     conversation: [u8; 32],
     wire: Vec<u8>,
 ) -> Vec<u8> {
-    let received = to
-        .0
-        .conversation(
+    let received =
+        to.0.conversation(
             Command::Receive(Wired {
                 peer: from.2.into(),
                 conversation,
@@ -97,13 +96,22 @@ async fn sponsor_and_newcomer_chat_right_after_the_admission() {
 
     // Admission: each device derives the same contact from the bond alone, and
     // repeating the step writes nothing.
-    let conversation = sponsor.contact_by_voucher(&newcomer_id, bond).await.unwrap();
+    let conversation = sponsor
+        .contact_by_voucher(&newcomer_id, bond)
+        .await
+        .unwrap();
     assert_eq!(
-        newcomer.contact_by_voucher(&sponsor_id, bond).await.unwrap(),
+        newcomer
+            .contact_by_voucher(&sponsor_id, bond)
+            .await
+            .unwrap(),
         conversation
     );
     assert_eq!(
-        sponsor.contact_by_voucher(&newcomer_id, bond).await.unwrap(),
+        sponsor
+            .contact_by_voucher(&newcomer_id, bond)
+            .await
+            .unwrap(),
         conversation
     );
 
@@ -113,7 +121,14 @@ async fn sponsor_and_newcomer_chat_right_after_the_admission() {
         .voucher_key_package(conversation, &newcomer_ports)
         .await
         .unwrap();
-    let early = say(&mut newcomer, &newcomer_ports, &sponsor_id, conversation, "hello early").await;
+    let early = say(
+        &mut newcomer,
+        &newcomer_ports,
+        &sponsor_id,
+        conversation,
+        "hello early",
+    )
+    .await;
     assert!(early.queued && early.wire.is_empty());
 
     // The sponsor's device creates the thread once; a repeat returns the same Welcome.
@@ -151,7 +166,14 @@ async fn sponsor_and_newcomer_chat_right_after_the_admission() {
     assert_eq!(text, b"hello early");
 
     // Chat both ways.
-    let sent = say(&mut sponsor, &sponsor_ports, &newcomer_id, conversation, "welcome aboard").await;
+    let sent = say(
+        &mut sponsor,
+        &sponsor_ports,
+        &newcomer_id,
+        conversation,
+        "welcome aboard",
+    )
+    .await;
     assert!(!sent.queued);
     let text = deliver(
         (&mut sponsor, &sponsor_ports, &sponsor_id),
@@ -161,7 +183,14 @@ async fn sponsor_and_newcomer_chat_right_after_the_admission() {
     )
     .await;
     assert_eq!(text, b"welcome aboard");
-    let sent = say(&mut newcomer, &newcomer_ports, &sponsor_id, conversation, "thank you").await;
+    let sent = say(
+        &mut newcomer,
+        &newcomer_ports,
+        &sponsor_id,
+        conversation,
+        "thank you",
+    )
+    .await;
     let text = deliver(
         (&mut newcomer, &newcomer_ports, &newcomer_id),
         (&mut sponsor, &sponsor_ports, &sponsor_id),
@@ -193,13 +222,26 @@ async fn a_kill_between_the_flushed_send_and_the_queue_delete_sends_once() {
         readable: true,
     };
     let bond = [9; 32];
-    let conversation = sponsor.contact_by_voucher(&newcomer_id, bond).await.unwrap();
-    newcomer.contact_by_voucher(&sponsor_id, bond).await.unwrap();
+    let conversation = sponsor
+        .contact_by_voucher(&newcomer_id, bond)
+        .await
+        .unwrap();
+    newcomer
+        .contact_by_voucher(&sponsor_id, bond)
+        .await
+        .unwrap();
     let package = newcomer
         .voucher_key_package(conversation, &newcomer_ports)
         .await
         .unwrap();
-    let early = say(&mut newcomer, &newcomer_ports, &sponsor_id, conversation, "once only").await;
+    let early = say(
+        &mut newcomer,
+        &newcomer_ports,
+        &sponsor_id,
+        conversation,
+        "once only",
+    )
+    .await;
     assert!(early.queued);
     let welcome = sponsor
         .voucher_create(&newcomer_id, conversation, &package, &sponsor_ports)

@@ -135,9 +135,14 @@ mod tests {
         );
         // The policy digest changes only the contact policy.
         assert_eq!(a.group, terms("omega", &[2; 32], [9; 32], 3600, 300).group);
-        assert_eq!(a.history, terms("omega", &[2; 32], [9; 32], 3600, 300).history);
+        assert_eq!(
+            a.history,
+            terms("omega", &[2; 32], [9; 32], 3600, 300).history
+        );
         // The three fields never coincide.
-        assert!(a.group != a.contact_policy && a.group != a.history && a.contact_policy != a.history);
+        assert!(
+            a.group != a.contact_policy && a.group != a.history && a.contact_policy != a.history
+        );
         assert_eq!((a.authority, a.lifetime, a.window), ([9; 32], 3600, 300));
     }
 

@@ -624,7 +624,10 @@ async fn the_member_lists_every_community_this_vault_created() {
     assert_eq!(one[0].id, first.id);
     assert_eq!(one[0].name, first.display_name);
     assert_eq!(one[0].host, first.community_host);
-    assert_eq!((one[0].role.as_str(), one[0].state.as_str()), ("admin", "created"));
+    assert_eq!(
+        (one[0].role.as_str(), one[0].state.as_str()),
+        ("admin", "created")
+    );
     // Finishing forgets the creation but not the community; a second one is added.
     community_creation_finish(&mut device.door, &device.key, Empty {})
         .await
@@ -637,7 +640,9 @@ async fn the_member_lists_every_community_this_vault_created() {
         .unwrap();
     let two = listed(&mut device).await;
     assert_eq!(
-        two.iter().map(|entry| entry.id.as_str()).collect::<Vec<_>>(),
+        two.iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>(),
         [first.id.as_str(), second.id.as_str()]
     );
     // A restarted device with the same custody lists the same two, once each.
@@ -661,7 +666,10 @@ async fn a_community_door_lists_its_own_community_and_says_when_the_owner_is_sil
     let mut device = start_in(&base, &custody, foyer::Scope::Community);
     let own = listed(&mut device).await;
     assert_eq!(own.len(), 1);
-    assert_eq!((own[0].id.as_str(), own[0].role.as_str()), ("wallet", "member"));
+    assert_eq!(
+        (own[0].id.as_str(), own[0].role.as_str()),
+        ("wallet", "member")
+    );
     assert!(own[0].host.starts_with("127.0.0.1:"), "{}", own[0].host);
     // The fixture owner has no lobby: the state is named, not invented.
     assert_eq!(own[0].state, "unavailable");

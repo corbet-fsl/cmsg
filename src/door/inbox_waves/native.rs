@@ -6,13 +6,13 @@
 //! [`AccountWallet`](super::wallet::AccountWallet); neither holds a key, an opening or
 //! a policy. A proof runs on a blocking worker thread, never on the Door's task; the
 //! Door is locked only for the one short account-actor call of an update or settle.
+use super::super::facades::OwnedFuture;
 use super::super::{
     account::{Answer, Applied, Command, Shared},
     accounting::ProvenUpdate,
     courier::SharedDoor,
     registry, Door, ErrorCode, Result,
 };
-use super::super::facades::OwnedFuture;
 use super::account_ports::AccountView;
 use super::wallet::{WalletState, WaveProver};
 use super::witness::UpdateTransport;
@@ -86,8 +86,12 @@ pub struct ActorTransport {
 impl UpdateTransport for ActorTransport {
     async fn update(&mut self, proven: ProvenUpdate) -> Result<Shared<Applied>> {
         let mut door = self.door.lock().await;
-        match registry::account_call_at(&mut door, &self.origin, Command::Update(Shared::new(proven)))
-            .await?
+        match registry::account_call_at(
+            &mut door,
+            &self.origin,
+            Command::Update(Shared::new(proven)),
+        )
+        .await?
         {
             Answer::Updated(applied) => Ok(applied),
             _ => Err(ErrorCode::Unavailable),
@@ -95,7 +99,9 @@ impl UpdateTransport for ActorTransport {
     }
     async fn settle(&mut self, request_id: [u8; 32]) -> Result<()> {
         let mut door = self.door.lock().await;
-        match registry::account_call_at(&mut door, &self.origin, Command::Settle(request_id)).await? {
+        match registry::account_call_at(&mut door, &self.origin, Command::Settle(request_id))
+            .await?
+        {
             Answer::Settled => Ok(()),
             _ => Err(ErrorCode::Unavailable),
         }
@@ -106,7 +112,11 @@ impl UpdateTransport for ActorTransport {
 /// published root) of the member at `origin`, current for each witness load: a
 /// counterpart enrolled after the last load must be found.
 pub trait RosterSource {
-    fn roster<'a>(&'a self, door: &'a SharedDoor, origin: &'a str) -> OwnedFuture<'a, Arc<Checkpoint>>;
+    fn roster<'a>(
+        &'a self,
+        door: &'a SharedDoor,
+        origin: &'a str,
+    ) -> OwnedFuture<'a, Arc<Checkpoint>>;
 }
 
 /// The roster through the member's account actor (`Command::Roster`: a fresh
@@ -126,9 +136,16 @@ impl ActorRoster {
 }
 
 impl RosterSource for ActorRoster {
-    fn roster<'a>(&'a self, door: &'a SharedDoor, origin: &'a str) -> OwnedFuture<'a, Arc<Checkpoint>> {
+    fn roster<'a>(
+        &'a self,
+        door: &'a SharedDoor,
+        origin: &'a str,
+    ) -> OwnedFuture<'a, Arc<Checkpoint>> {
         Box::pin(async move {
-            let now = || ckmg::Clock::now(&mut super::super::custody::SystemClock).map_err(|_| ErrorCode::Clock);
+            let now = || {
+                ckmg::Clock::now(&mut super::super::custody::SystemClock)
+                    .map_err(|_| ErrorCode::Clock)
+            };
             if let Some(roster) = self.cached(now()?) {
                 return Ok(roster);
             }
@@ -309,10 +326,10 @@ where
     O: super::super::inbox_lineage::HandleOpener + Clone + 'static,
     V: super::super::inbox_lineage::CharterView + 'static,
 {
+    use super::super::inbox_lineage::{HandleBook, WavePeerLineage};
     use super::account_ports::{AccountContact, AccountTerms};
     use super::feed_trust::FeedTrust;
     use super::production::ProductionPorts;
-    use super::super::inbox_lineage::{HandleBook, WavePeerLineage};
     let (Some(_), Some(_)) = (&device.artifacts.wave, &device.artifacts.outcome) else {
         return Ok(false);
     };
@@ -522,6 +539,9 @@ mod tests {
             Some(ErrorCode::Unavailable),
             "the ended slot went to the actor, which this origin lacks"
         );
-        assert!(ActorRoster::default().roster(&door(), ORIGIN).await.is_err());
+        assert!(ActorRoster::default()
+            .roster(&door(), ORIGIN)
+            .await
+            .is_err());
     }
 }

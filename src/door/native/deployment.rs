@@ -1,11 +1,10 @@
 //! Public native deployment data; actual custody begins only after login.
 use super::{Clock, DeviceConfiguration, Embedded, Pairing};
 use crate::door::{
-    browser::deployment as budgets, catalog, scenario, Door, ErrorCode, Result, Role,
-    VaultComposer,
+    browser::deployment as budgets, catalog, scenario, Door, ErrorCode, Result, Role, VaultComposer,
 };
-use futures_util::future::LocalBoxFuture;
 use cmsh::tor_discovery::TorWatcher;
+use futures_util::future::LocalBoxFuture;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

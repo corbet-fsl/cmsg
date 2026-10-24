@@ -16,7 +16,7 @@
 use super::{
     courier::SharedDoor,
     inbox_waves::{
-        production::{drain, WaveJobs, WaveWallet, WalletProver},
+        production::{drain, WalletProver, WaveJobs, WaveWallet},
         JobDone, JobOffer, JobResult, ProveJob, Proved,
     },
     Door, ErrorCode, Grant, Result,
@@ -27,7 +27,11 @@ use std::{future::Future, pin::Pin, rc::Rc, time::Duration};
 /// One round of the worker for one origin: drain the job journal with a freshly built
 /// wallet. Returns how many proved jobs were handed back.
 pub trait WaveWorker {
-    fn round(&self, door: SharedDoor, origin: String) -> Pin<Box<dyn Future<Output = Result<usize>>>>;
+    fn round(
+        &self,
+        door: SharedDoor,
+        origin: String,
+    ) -> Pin<Box<dyn Future<Output = Result<usize>>>>;
 }
 
 /// A worker from a wallet builder: each round builds the wallet from the device's
@@ -40,7 +44,11 @@ where
     Fut: Future<Output = Result<W>> + 'static,
     W: WaveWallet + 'static,
 {
-    fn round(&self, door: SharedDoor, origin: String) -> Pin<Box<dyn Future<Output = Result<usize>>>> {
+    fn round(
+        &self,
+        door: SharedDoor,
+        origin: String,
+    ) -> Pin<Box<dyn Future<Output = Result<usize>>>> {
         let wallet = (self.0)(door.clone(), origin.clone());
         Box::pin(async move {
             let mut prover = WalletProver(wallet.await?);
@@ -51,7 +59,11 @@ where
 }
 
 /// The journal actions the worker's lease grants; nothing else.
-const ACTIONS: &[&str] = &["inbox.wave_job_next", "inbox.wave_job_done", "inbox.wave_jobs_recover"];
+const ACTIONS: &[&str] = &[
+    "inbox.wave_job_next",
+    "inbox.wave_job_done",
+    "inbox.wave_jobs_recover",
+];
 
 /// Seconds a lease lives; it is closed after each call anyway.
 const LEASE_SECONDS: u64 = 60;
@@ -92,9 +104,14 @@ pub struct LeaseJobs {
 impl WaveJobs for LeaseJobs {
     async fn recover(&mut self) -> Result<()> {
         let mut door = self.door.lock().await;
-        call(&mut door, &self.origin, "inbox.wave_jobs_recover", json!({}))
-            .await
-            .map(|_| ())
+        call(
+            &mut door,
+            &self.origin,
+            "inbox.wave_jobs_recover",
+            json!({}),
+        )
+        .await
+        .map(|_| ())
     }
     async fn next(&mut self) -> Result<Option<ProveJob>> {
         let value = {
@@ -209,8 +226,14 @@ mod tests {
         let door = door();
         let worker = WalletWorker(|_: SharedDoor, _: String| async { Ok(Never) });
         let outcome = worker.round(door.clone(), ORIGIN.to_owned()).await;
-        assert!(outcome.is_err(), "no Inbox is bound, the journal is unavailable");
-        assert!(door.lock().await.grants.is_empty(), "the lease is closed after the call");
+        assert!(
+            outcome.is_err(),
+            "no Inbox is bound, the journal is unavailable"
+        );
+        assert!(
+            door.lock().await.grants.is_empty(),
+            "the lease is closed after the call"
+        );
     }
 
     #[tokio::test]
@@ -229,7 +252,11 @@ mod tests {
     async fn the_worker_backs_off_after_failures_and_ends_with_the_courier() {
         struct Counting(Rc<Cell<u32>>);
         impl WaveWorker for Counting {
-            fn round(&self, _: SharedDoor, _: String) -> Pin<Box<dyn Future<Output = Result<usize>>>> {
+            fn round(
+                &self,
+                _: SharedDoor,
+                _: String,
+            ) -> Pin<Box<dyn Future<Output = Result<usize>>>> {
                 self.0.set(self.0.get() + 1);
                 Box::pin(async { Err(ErrorCode::Unavailable) })
             }

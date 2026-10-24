@@ -9,8 +9,8 @@
 //!
 //! The newcomer's side lives in the account lifecycle (`account`): it keeps the
 //! per-link bond nonce and the bond in the same custody record (`Book`).
-use super::*;
 use super::inbox_waves::{run_thread, ThreadOut, ThreadStep};
+use super::*;
 use cvch::link::{Bond, IssuerSecret, LinkId, Notice, Reply, Token, NONCE_BYTES};
 use zeroize::Zeroize;
 
@@ -831,7 +831,11 @@ pub(super) async fn prepare_package(door: &mut Door, key: &[u8; 32], code: &str)
         Token::parse(code.trim().trim_start_matches('#')).map_err(|_| ErrorCode::InvalidRequest)?;
     let id = token.id().as_str().to_owned();
     let mut loaded = load(door, &origin).await?;
-    if loaded.book.bonds.iter().any(|bond| !bond.sponsor && bond.link == id)
+    if loaded
+        .book
+        .bonds
+        .iter()
+        .any(|bond| !bond.sponsor && bond.link == id)
         || loaded
             .book
             .nonces

@@ -296,7 +296,10 @@ impl<V: CharterView> CharterView for CellView<'_, V> {
         now: u64,
         inspect: impl FnOnce(&VerifiedCharter) -> Result<T, cnbx::ContactError>,
     ) -> Result<T, cnbx::ContactError> {
-        let mut view = self.0.try_borrow_mut().map_err(|_| cnbx::ContactError::Unavailable)?;
+        let mut view = self
+            .0
+            .try_borrow_mut()
+            .map_err(|_| cnbx::ContactError::Unavailable)?;
         view.with_current(community, now, inspect)
     }
 }
@@ -584,7 +587,10 @@ mod tests {
         );
         // A handle of another member does not open this one.
         let book = HandleBook::default();
-        book.replace(std::collections::BTreeMap::from([("b".repeat(96), vec![1])]));
+        book.replace(std::collections::BTreeMap::from([(
+            "b".repeat(96),
+            vec![1],
+        )]));
         let port = WavePeerLineage::new(book, NoOpen, NoTrust);
         assert!(block_on(port.read(&binding)).is_err());
     }
@@ -594,7 +600,10 @@ mod tests {
         use crate::door::inbox_waves::production::PeerLineageRead;
         let binding = Binding::new("c", &"a".repeat(96)).unwrap();
         let book = HandleBook::default();
-        book.replace(std::collections::BTreeMap::from([("a".repeat(96), b"not a capability".to_vec())]));
+        book.replace(std::collections::BTreeMap::from([(
+            "a".repeat(96),
+            b"not a capability".to_vec(),
+        )]));
         let unreadable = WavePeerLineage::new(book.clone(), TorHandleOpener::new(Dead), NoTrust);
         assert_eq!(
             block_on(unreadable.read(&binding)).err(),
@@ -692,13 +701,22 @@ mod tests {
         let cases: [(&str, Vec<u8>); 6] = [
             ("not json", b"not an announcement".to_vec()),
             // The announcement was made by another member than the one that sent it.
-            ("other member", announcement(&stranger, conversation, &capability_of(&stranger))),
+            (
+                "other member",
+                announcement(&stranger, conversation, &capability_of(&stranger)),
+            ),
             // A genuine announcement of the peer, replayed for another conversation.
             ("other conversation", announcement(&peer, [6; 32], &genuine)),
             // The peer's announcement carrying a handle that is not a read capability.
-            ("not a capability", announcement(&peer, conversation, b"attacker record")),
+            (
+                "not a capability",
+                announcement(&peer, conversation, b"attacker record"),
+            ),
             // The peer's announcement carrying another member's read capability.
-            ("foreign capability", announcement(&peer, conversation, &capability_of(&stranger))),
+            (
+                "foreign capability",
+                announcement(&peer, conversation, &capability_of(&stranger)),
+            ),
             ("empty", Vec::new()),
         ];
         for (name, bytes) in cases {

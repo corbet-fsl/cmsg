@@ -28,9 +28,17 @@ fn every_test_file_is_wired() {
     for entry in std::fs::read_dir(dir.join("tests")).expect("tests dir") {
         let path = entry.expect("entry").path();
         if path.extension().is_some_and(|e| e == "rs") {
-            let stem = path.file_stem().expect("stem").to_string_lossy().into_owned();
-            let wired = hub.contains(&format!("#[path = \"{stem}.rs\"]")) || manifest.contains(&format!("path = \"tests/{stem}.rs\""));
-            assert!(wired, "tests/{stem}.rs is neither a module of tests/cmsg.rs nor a [[test]] target");
+            let stem = path
+                .file_stem()
+                .expect("stem")
+                .to_string_lossy()
+                .into_owned();
+            let wired = hub.contains(&format!("#[path = \"{stem}.rs\"]"))
+                || manifest.contains(&format!("path = \"tests/{stem}.rs\""));
+            assert!(
+                wired,
+                "tests/{stem}.rs is neither a module of tests/cmsg.rs nor a [[test]] target"
+            );
         }
     }
 }

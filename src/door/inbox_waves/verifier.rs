@@ -105,7 +105,9 @@ struct Group {
 impl Group {
     fn read(artifacts: &ProverArtifacts) -> std::result::Result<Self, ComposeError> {
         let (Some(wave), Some(outcome)) = (&artifacts.wave, &artifacts.outcome) else {
-            return Err(config("wave verification needs the wave and outcome circuits"));
+            return Err(config(
+                "wave verification needs the wave and outcome circuits",
+            ));
         };
         let executable = artifacts
             .verifier_executable
@@ -116,8 +118,8 @@ impl Group {
             .as_deref()
             .ok_or_else(|| config("wave verification needs the group manifest"))?;
         let manifest_bytes = read(manifest_file, 65_536)?;
-        let manifest: Manifest = serde_json::from_slice(&manifest_bytes)
-            .map_err(|_| config("group manifest"))?;
+        let manifest: Manifest =
+            serde_json::from_slice(&manifest_bytes).map_err(|_| config("group manifest"))?;
         // The circuit and keys of every program are the one group the manifest names.
         let circuit = read(&wave.circuit_file, 64 << 20)?;
         let keys = read(&wave.keys_file, 1 << 20)?;
@@ -158,9 +160,7 @@ impl Group {
                 .to_vec(),
             g2: g2.try_into().map_err(|_| config("group setup size"))?,
             executable,
-            timeout: Duration::from_secs(
-                artifacts.timeout_seconds.min(VERIFY_TIMEOUT_CAP_SECONDS),
-            ),
+            timeout: Duration::from_secs(artifacts.timeout_seconds.min(VERIFY_TIMEOUT_CAP_SECONDS)),
             threads: artifacts.threads,
             memory_megabytes: artifacts.memory_megabytes,
         };
@@ -283,7 +283,9 @@ pub(crate) mod fixture {
             "outcome": HEXLOWER.encode(&[3; 40]),
         }))
         .unwrap();
-        let g1: Vec<u8> = (0..czkp::native::SRS_G1_BYTES + 64).map(|i| i as u8).collect();
+        let g1: Vec<u8> = (0..czkp::native::SRS_G1_BYTES + 64)
+            .map(|i| i as u8)
+            .collect();
         let g2 = vec![9u8; 128];
         let files = Files {
             artifacts: ProverArtifacts {
@@ -355,14 +357,13 @@ pub(crate) mod fixture {
             valid_until: NOW + 1000,
         }
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::fixture::*;
-    use crate::door::composer::CircuitFiles;
     use super::*;
+    use crate::door::composer::CircuitFiles;
 
     fn call(
         factory: &VerifierFactory<cvfy::NativeVerifier>,

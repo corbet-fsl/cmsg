@@ -218,8 +218,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
             return Err(Error::Expired);
         }
         request.now = completed;
-        let signing = if purpose == Purpose::DeviceSigning || purpose == Purpose::AccountDevice
-        {
+        let signing = if purpose == Purpose::DeviceSigning || purpose == Purpose::AccountDevice {
             let origin = self.live.origin.clone();
             match (&mut self.account, account_armed) {
                 // The account actor armed its own channels: root authorization, then the

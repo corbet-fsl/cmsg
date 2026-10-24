@@ -8,14 +8,14 @@
 //! | [`WitnessStore`] | durable save of a new witness (the embedding seals it with `Account::seal` into the Vault `witness_state` record) |
 //! | [`UpdateTransport`] | the D2 actor: store-before-send, resend unchanged, settle |
 //! | [`DoorUpdateSink`] | candidate and proof in, issuer certificate out |
-use super::account_ports::AccountView;
-use super::wallet::{UpdateSink, WalletState};
 use super::super::{
-    accounting::ProvenUpdate,
     account::{Applied, Shared},
+    accounting::ProvenUpdate,
     facades::OwnedFuture,
     ErrorCode, Result,
 };
+use super::account_ports::AccountView;
+use super::wallet::{UpdateSink, WalletState};
 use cblc::accounting::AccountProofScope;
 use ckmg::wallet_engine::account::{Account, Candidate, Certificate};
 use std::sync::{Arc, Mutex};
@@ -165,9 +165,10 @@ mod tests {
     /// be refused, so a drift between the two spellings fails here.
     #[test]
     fn the_witness_statement_is_the_accounting_wire() {
-        let fixture: serde_json::Value =
-            serde_json::from_str(include_str!("../../../tests/fixture/witness-statement.json"))
-                .unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixture/witness-statement.json"
+        ))
+        .unwrap();
         let parsed: cblc::accounting::AccountStatement =
             bridge(&fixture["statement"]).expect("the accounting wire");
         assert_eq!(parsed.protocol_version, 2);
@@ -178,11 +179,11 @@ mod tests {
 
     #[test]
     fn an_update_proof_travels_as_the_one_step_extension_bundle() {
-        let fixture: serde_json::Value =
-            serde_json::from_str(include_str!("../../../tests/fixture/witness-statement.json"))
-                .unwrap();
-        let statement: cblc::accounting::AccountStatement =
-            bridge(&fixture["statement"]).unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixture/witness-statement.json"
+        ))
+        .unwrap();
+        let statement: cblc::accounting::AccountStatement = bridge(&fixture["statement"]).unwrap();
         let update: cblc::extensions::ExtendedUpdate = bridge(&serde_json::json!({
             "previousInbox": {"root": vec![1u8; 32]},
             "inbox": {"root": vec![2u8; 32]},
@@ -195,7 +196,10 @@ mod tests {
         let step = &bundle["proofs"][0];
         assert_eq!(step["proof"], "ab01");
         assert_eq!(step["inbox"], serde_json::json!(vec![2u8; 32]));
-        assert_eq!(step["state"], serde_json::to_value(statement.next_state).unwrap());
+        assert_eq!(
+            step["state"],
+            serde_json::to_value(statement.next_state).unwrap()
+        );
         assert_eq!(bundle["proofs"].as_array().unwrap().len(), 1);
         // No proof, no update.
         assert!(super::update_bundle(&statement, &update, &[]).is_err());

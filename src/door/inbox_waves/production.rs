@@ -657,7 +657,10 @@ mod tests {
             sender_challenge: [5; 32],
             sender_handle: vec![],
         };
-        assert!(p.terms(&[0; 32], &hello, "peer", NOW, &NoSigner).await.is_err());
+        assert!(p
+            .terms(&[0; 32], &hello, "peer", NOW, &NoSigner)
+            .await
+            .is_err());
     }
 
     /// A scripted job journal: a job stays until it is finished with a proof.

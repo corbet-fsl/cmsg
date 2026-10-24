@@ -10,18 +10,18 @@
 //! prover is a host component that holds the wallet openings: it calls
 //! `inbox.wave_job_next`, proves WITHOUT holding the Door, and returns the
 //! result through `inbox.wave_job_done`.
+pub mod account_ports;
 mod desk;
 pub(crate) mod engine;
-mod ports;
-mod signing;
-pub mod account_ports;
 pub mod feed_trust;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub mod native;
+mod ports;
 pub mod production;
+mod signing;
+pub mod types;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub mod verifier;
-pub mod types;
 pub mod wallet;
 pub mod witness;
 pub mod worker;
@@ -135,15 +135,29 @@ impl ThreadOut {
 
 /// One step of a vouching's direct thread.
 pub(super) enum ThreadStep {
-    KeyPackage { conversation: [u8; 32] },
-    Create { peer: String, conversation: [u8; 32], package: Vec<u8> },
-    Join { peer: String, conversation: [u8; 32], welcome: Vec<u8> },
+    KeyPackage {
+        conversation: [u8; 32],
+    },
+    Create {
+        peer: String,
+        conversation: [u8; 32],
+        package: Vec<u8>,
+    },
+    Join {
+        peer: String,
+        conversation: [u8; 32],
+        welcome: Vec<u8>,
+    },
 }
 
 /// Run one thread step for `origin` inside the same current-policy and clock
 /// bracket as every other Inbox action. Returns the key package or the Welcome
 /// (empty for a join).
-pub(super) async fn run_thread(door: &mut Door, origin: &str, step: ThreadStep) -> Result<ThreadOut> {
+pub(super) async fn run_thread(
+    door: &mut Door,
+    origin: &str,
+    step: ThreadStep,
+) -> Result<ThreadOut> {
     let expires = door
         .grants
         .values()
@@ -164,21 +178,27 @@ pub(super) async fn run_thread(door: &mut Door, origin: &str, step: ThreadStep) 
             floor: door.clock_floor,
         },
         move |vault, ports| match step {
-            ThreadStep::KeyPackage { conversation } => {
-                Box::pin(async move {
-                    vault
-                        .voucher_key_package(conversation, ports)
-                        .await
-                        .map(ThreadOut::Bytes)
-                })
-            }
-            ThreadStep::Create { peer, conversation, package } => Box::pin(async move {
+            ThreadStep::KeyPackage { conversation } => Box::pin(async move {
+                vault
+                    .voucher_key_package(conversation, ports)
+                    .await
+                    .map(ThreadOut::Bytes)
+            }),
+            ThreadStep::Create {
+                peer,
+                conversation,
+                package,
+            } => Box::pin(async move {
                 vault
                     .voucher_create(&peer, conversation, &package, ports)
                     .await
                     .map(ThreadOut::Bytes)
             }),
-            ThreadStep::Join { peer, conversation, welcome } => Box::pin(async move {
+            ThreadStep::Join {
+                peer,
+                conversation,
+                welcome,
+            } => Box::pin(async move {
                 vault
                     .voucher_join(&peer, conversation, &welcome, ports)
                     .await

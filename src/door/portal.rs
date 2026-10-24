@@ -8,16 +8,16 @@
 //! do what. [`open`] (admin passkey) is the superseded path.
 #![cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
 
-use super::{Door, ErrorCode, Result, Role, native::DeviceConfiguration};
+use super::{native::DeviceConfiguration, Door, ErrorCode, Result, Role};
 
 /// Host label that marks an admin portal origin.
 const PORTAL_LABEL: &str = "admin.";
 
 /// Whether `origin` is an admin portal origin: https and `admin.` first label.
 pub fn is_portal_origin(origin: &str) -> bool {
-    origin
-        .strip_prefix("https://")
-        .is_some_and(|host| host.starts_with(PORTAL_LABEL) && !host[PORTAL_LABEL.len()..].is_empty())
+    origin.strip_prefix("https://").is_some_and(|host| {
+        host.starts_with(PORTAL_LABEL) && !host[PORTAL_LABEL.len()..].is_empty()
+    })
 }
 
 /// Build the admin portal Door for a device-key login: no authenticator is bound, the session
@@ -70,7 +70,10 @@ mod tests {
     fn the_device_portal_refuses_a_member_origin_or_role() {
         let member_origin = open_device(configuration("https://toy.example", Role::Admin), &[]);
         assert_eq!(member_origin.err(), Some(ErrorCode::InvalidRequest));
-        let member_role = open_device(configuration("https://admin.toy.example", Role::Member), &[]);
+        let member_role = open_device(
+            configuration("https://admin.toy.example", Role::Member),
+            &[],
+        );
         assert_eq!(member_role.err(), Some(ErrorCode::InvalidRequest));
     }
 

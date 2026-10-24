@@ -5,8 +5,8 @@ use super::profile_owner_tests::{open_as, ProfileOwner};
 use super::*;
 use crate::door::inbox_waves::{
     Answer, Command, ContactRequest, Decision, Delivered, Envelope, HandleRequest, Hello, JobDone,
-    JobResult, Policy, Stage, Terms, WaveDecide, WaveIncoming, WaveMessage, WavePorts, WavePunish, WaveSend,
-    WAVE_VERSION,
+    JobResult, Policy, Stage, Terms, WaveDecide, WaveIncoming, WaveMessage, WavePorts, WavePunish,
+    WaveSend, WAVE_VERSION,
 };
 use cwlt::wave::{
     VerifiedWaveOutcome, VerifiedWaveReservation, WaveContext, WaveOutcome, WaveOutcomeStatement,
@@ -602,7 +602,11 @@ async fn terms_that_come_too_late_replace_the_hello_silently_and_boundedly() {
         let again = status(&mut owner, &ports, Command::Receive(late))
             .await
             .unwrap();
-        assert_eq!((again.role, again.stage), (0, Stage::Hello), "round {round}");
+        assert_eq!(
+            (again.role, again.stage),
+            (0, Stage::Hello),
+            "round {round}"
+        );
         assert!(!seen.contains(&again.nonce));
         nonce = again.nonce;
         seen.push(nonce);
@@ -731,9 +735,18 @@ async fn a_hello_is_countersigned_only_with_a_handle_bound_to_its_conversation()
     };
     // No handle, or one bound to another conversation (a substituted handle), is refused
     // before anything is countersigned, and no wave is created.
-    for bad in [vec![], scripted_handle(&[8; 32]), b"scripted handle:".to_vec()] {
+    for bad in [
+        vec![],
+        scripted_handle(&[8; 32]),
+        b"scripted handle:".to_vec(),
+    ] {
         assert_eq!(
-            status(&mut owner, &ports, Command::Receive(incoming(1, hello(bad)))).await,
+            status(
+                &mut owner,
+                &ports,
+                Command::Receive(incoming(1, hello(bad)))
+            )
+            .await,
             Err(ErrorCode::Refused)
         );
     }
