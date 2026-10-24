@@ -2780,7 +2780,7 @@ checksum = "8fd9f3db6f2cfef61c10613071955154ffdc9e515daebff26de4b54e35038fdd"
 [[package]]
 name = "ctcs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=main#919eebbdab68dc9903d643024ec31df056a08ff4"
+source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=main#47e4b5549e121e88e9510707ed91cd6065b53242"
 dependencies = [
  "ckmg",
  "cwst",
