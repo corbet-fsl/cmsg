@@ -489,4 +489,39 @@ mod tests {
         let (served, ()) = tokio::join!(service.serve(&mut host, || NOW + 1), guest);
         assert_eq!(served, Err(ErrorCode::Refused));
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn frames_of_one_and_ten_scopes_have_the_same_size_class() {
+        let (_net, _service, _host, one) = setup().await;
+        let (_net, _service, _host, ten) = setup().await;
+        // About what one scope and ten scopes carry in a round.
+        let (small, _) = one.seal_round(2, &vec![7u8; 300]).unwrap();
+        let (large, _) = ten.seal_round(2, &vec![7u8; 3_000]).unwrap();
+        assert_eq!(small.len(), large.len());
+        assert_eq!(small.len(), 4096);
+        // Classes double beyond 4 KiB, up to the cap; past it nothing is sealed.
+        let (mid, _) = one.seal_round(2, &vec![7u8; 5_000]).unwrap();
+        assert_eq!(mid.len(), 8192);
+        let (top, _) = one.seal_round(2, &vec![7u8; 60_000]).unwrap();
+        assert_eq!(top.len(), MAX_MESSAGE_BYTES);
+        assert!(one.seal_round(2, &vec![7u8; MAX_MESSAGE_BYTES]).is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn padding_is_stripped_even_for_payloads_ending_in_zeros() {
+        let (net, service, mut host, link) = setup().await;
+        let mut channel = OnionChannel::new(net.clone());
+        let guest = async {
+            let payload = [vec![1u8, 2, 3], vec![0u8; 50]].concat();
+            assert_eq!(
+                round(&mut channel, &link, 1, &payload).await.unwrap(),
+                payload
+            );
+            assert_eq!(
+                round(&mut channel, &link, 2, &[]).await.unwrap(),
+                Vec::<u8>::new()
+            );
+        };
+        let (_, ()) = tokio::join!(service.serve(&mut host, || NOW + 1), guest);
+    }
 }

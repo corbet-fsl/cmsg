@@ -54,6 +54,43 @@ fn random<const N: usize>() -> Result<[u8; N]> {
     Ok(bytes)
 }
 
+/// Bytes a sealed message adds to its padded plaintext: the encapsulated key and the AEAD tag.
+const SEAL_OVERHEAD: usize = ENC + 16;
+/// Smallest sealed message; larger ones double up to [`MAX_MESSAGE_BYTES`].
+const MIN_BUCKET: usize = 4096;
+
+/// Size class of a sealed message carrying `plaintext` bytes: 4 KiB, then powers of two up to
+/// the cap. Every message of a class has exactly this length, so an observer of the carrier
+/// learns only the class, never how many scopes (communities) a pairing brings along.
+fn bucket(plaintext: usize) -> Option<usize> {
+    let needed = plaintext.checked_add(1 + SEAL_OVERHEAD)?;
+    let mut size = MIN_BUCKET;
+    while size < needed {
+        size = size.checked_mul(2)?;
+    }
+    (size <= MAX_MESSAGE_BYTES).then_some(size)
+}
+
+/// ISO 7816-4 padding: 0x80, then zeros, up to the bucket.
+fn pad(plaintext: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
+    let total = bucket(plaintext.len())? - SEAL_OVERHEAD;
+    let mut out = Zeroizing::new(Vec::with_capacity(total));
+    out.extend_from_slice(plaintext);
+    out.push(0x80);
+    out.resize(total, 0);
+    Some(out)
+}
+
+fn unpad(mut padded: Zeroizing<Vec<u8>>) -> Result<Zeroizing<Vec<u8>>> {
+    while padded.last() == Some(&0) {
+        padded.pop();
+    }
+    if padded.pop() != Some(0x80) {
+        return Err(ErrorCode::Refused);
+    }
+    Ok(padded)
+}
+
 fn seal(
     pk: &[u8; 32],
     secret: &[u8; 32],
@@ -61,13 +98,11 @@ fn seal(
     info: &[u8],
     plaintext: &[u8],
 ) -> Result<Vec<u8>> {
-    if plaintext.len() > MAX_MESSAGE_BYTES {
-        return Err(ErrorCode::InvalidRequest);
-    }
+    let plaintext = pad(plaintext).ok_or(ErrorCode::InvalidRequest)?;
     let pk = <Kem as KemTrait>::PublicKey::from_bytes(pk).map_err(|_| ErrorCode::InvalidRequest)?;
     let bundle = PskBundle::new(secret, id).map_err(|_| ErrorCode::InvalidRequest)?;
     let (enc, ciphertext) =
-        hpke::single_shot_seal::<Aead, Kdf, Kem>(&OpModeS::Psk(bundle), &pk, info, plaintext, id)
+        hpke::single_shot_seal::<Aead, Kdf, Kem>(&OpModeS::Psk(bundle), &pk, info, &plaintext, id)
             .map_err(|_| ErrorCode::Unavailable)?;
     let mut out = enc.to_bytes().to_vec();
     out.extend_from_slice(&ciphertext);
@@ -99,6 +134,7 @@ fn open(
     )
     .map(Zeroizing::new)
     .map_err(|_| ErrorCode::Refused)
+    .and_then(unpad)
 }
 
 /// What the new device learns from the link.
@@ -479,10 +515,12 @@ mod tests {
             Some(ErrorCode::Refused)
         );
         assert!(Link::parse(&text).unwrap().seal_round(0, b"x").is_err());
-        assert!(Link::parse(&text)
-            .unwrap()
-            .seal_round(ROUNDS + 1, b"x")
-            .is_err());
+        assert!(
+            Link::parse(&text)
+                .unwrap()
+                .seal_round(ROUNDS + 1, b"x")
+                .is_err()
+        );
     }
 
     #[test]
