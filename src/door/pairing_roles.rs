@@ -511,6 +511,7 @@ mod tests {
             root: key(1),
             identity: None,
             devices: vec![key(2)],
+            delegates: Vec::new(),
             signature: signature(),
         }
     }

@@ -27,6 +27,7 @@ fn lineage(member: &str, device: &SigningKey) -> ckmg::Lineage {
             ckmg::VLD0,
             device.verifying_key().to_bytes(),
         )],
+        delegates: Vec::new(),
         signature: ckmg::Signature::new(ckmg::VLD0, [0; 64]),
     }
 }
