@@ -29,7 +29,7 @@
 //! person nothing either. A [`Host`] that restarts loses its offer: the existing device
 //! shows a new link.
 use super::device_pair::StepChallenge;
-use super::pairing::{Link, Offer, ROUNDS, Received};
+use super::pairing::{Link, Offer, Received, ROUNDS};
 use super::*;
 use std::collections::BTreeSet;
 
@@ -812,13 +812,11 @@ mod tests {
     fn entries_must_be_exactly_the_sessions_scopes_in_order() {
         let scopes = [Scope::Wallet, community("alpha")];
         let entry = |scope: Scope| Entry { scope, value: 1u8 };
-        assert!(
-            values(
-                &scopes,
-                vec![entry(Scope::Wallet), entry(community("alpha"))]
-            )
-            .is_ok()
-        );
+        assert!(values(
+            &scopes,
+            vec![entry(Scope::Wallet), entry(community("alpha"))]
+        )
+        .is_ok());
         assert!(
             values(&scopes, vec![entry(Scope::Wallet)]).is_err(),
             "a scope missing"
