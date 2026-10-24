@@ -18,7 +18,7 @@
 use super::{
     composer_core::DeviceKeys,
     custody::SystemClock,
-    device_join::{derived_salt, payload, stamp_scope, DeviceSign, DeviceUse},
+    device_join::{DeviceSign, derived_salt, stamp_scope},
     foyer::Transport,
     passport::GlobalPassport,
     stamp::{pending_request, request_stamp, resend_stamp},
