@@ -1702,7 +1702,7 @@ dependencies = [
 [[package]]
 name = "cdlv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=main#2a2b75e4e7879c24353c6ef81a7684c10d6d3689"
+source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=main#8e7a01bf4446aa43f43ea59c1c3762afc4f2018e"
 dependencies = [
  "ckmg",
  "ctcs",
@@ -2780,7 +2780,7 @@ checksum = "8fd9f3db6f2cfef61c10613071955154ffdc9e515daebff26de4b54e35038fdd"
 [[package]]
 name = "ctcs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=main#919eebbdab68dc9903d643024ec31df056a08ff4"
+source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=main#47e4b5549e121e88e9510707ed91cd6065b53242"
 dependencies = [
  "ckmg",
  "cwst",
@@ -2792,7 +2792,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#f098caf647e5cb1181001009f6492dba970db812"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#5d020467cdbdf5ee863a15bbd54535b445dbc84b"
 dependencies = [
  "cchr",
  "cgrp",
