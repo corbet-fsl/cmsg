@@ -515,12 +515,10 @@ mod tests {
             Some(ErrorCode::Refused)
         );
         assert!(Link::parse(&text).unwrap().seal_round(0, b"x").is_err());
-        assert!(
-            Link::parse(&text)
-                .unwrap()
-                .seal_round(ROUNDS + 1, b"x")
-                .is_err()
-        );
+        assert!(Link::parse(&text)
+            .unwrap()
+            .seal_round(ROUNDS + 1, b"x")
+            .is_err());
     }
 
     #[test]
