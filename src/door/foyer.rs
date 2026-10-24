@@ -732,7 +732,6 @@ pub(super) fn map_error(error: cfyr::Error) -> ErrorCode {
         cfyr::Error::Reconcile => ErrorCode::Reconcile,
         // A certain refusal: the request window elapsed before the owner's commit.
         cfyr::Error::Expired => ErrorCode::ProofWindowElapsed,
-        cfyr::Error::Clock => ErrorCode::Clock,
     }
 }
 
