@@ -257,11 +257,20 @@ impl PreparedAccount<'_> {
             .account
             .proof_valid_until(self.context.checked_at)
             .map_err(|_| ErrorCode::Unauthorized)?;
-        if final_now < checked
-            || completed_at < final_now
-            || completed_at >= horizon
-            || completed_at >= self.context.enrollment.expires_at
-        {
+        if final_now < checked || completed_at < final_now {
+            return Err(ErrorCode::Unauthorized);
+        }
+        // A proof that completes after its window (or the horizon) is an
+        // overrun: the caller re-prepares as a fresh operation.
+        let window_end = self
+            .context
+            .checked_at
+            .saturating_add(cblc::accounting::GENESIS_PROOF_WINDOW_SECONDS)
+            .min(horizon);
+        if completed_at >= window_end {
+            return Err(ErrorCode::ProofWindowElapsed);
+        }
+        if completed_at >= self.context.enrollment.expires_at {
             return Err(ErrorCode::Unauthorized);
         }
         attempt.completed = true;

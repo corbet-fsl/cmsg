@@ -361,11 +361,14 @@ fn verify_acceptance(
 }
 
 /// The end of a genesis request's proof window: its proof time plus the shared
-/// code constant the operator's acceptance applies.
+/// code constant the operator's acceptance applies, cut by the statement's own
+/// horizon (the end of the rate window that contains the proof time), which no
+/// request may outlive. Passing either is an overrun, never a verdict.
 pub(super) fn genesis_window_end(statement: &AccountStatement) -> u64 {
     statement
         .now
         .saturating_add(cblc::accounting::GENESIS_PROOF_WINDOW_SECONDS)
+        .min(statement.valid_until)
 }
 
 impl AcceptedResponse {
@@ -415,6 +418,10 @@ impl<'p> CurrentEnrollment<'p> {
             return Err(ErrorCode::Unauthorized);
         }
         let authorization = self.authorization().clone();
+        // The operator accepts a genesis only within the checkpoint slot of its
+        // proof; a request never outlives that slot, so an elapsed state A becomes
+        // discardable at the slot end instead of a full window later.
+        let slot_end = self.slot_end();
         let current = self.with_verified(|publication, tree, index, current| {
             let row = tree.entries().get(index).ok_or(ErrorCode::Unauthorized)?;
             let owner: [u8; 32] = B64
@@ -428,18 +435,17 @@ impl<'p> CurrentEnrollment<'p> {
                 || statement.enrollment_root != publication.root
                 || statement.policy != current.material.policy.account
                 || current.now < statement.now
-                || current.now >= statement.valid_until
             {
                 return Err(ErrorCode::Unauthorized);
             }
-            // Never sign a request whose proof window has already elapsed.
+            // Never sign a request whose proof window (or horizon) has already elapsed.
             if current.now >= genesis_window_end(statement) {
                 return Err(ErrorCode::ProofWindowElapsed);
             }
             Ok(Snapshot {
                 grant: current.grant.clone(),
                 origin: current.origin.clone(),
-                expires: current.expires,
+                expires: current.expires.min(slot_end),
                 now: current.now,
                 max_authorization: cblc::accounting::GENESIS_PROOF_WINDOW_SECONDS,
                 extension_policy: current.material.extension_policy.clone(),
@@ -909,6 +915,18 @@ mod tests {
 
     fn key() -> [u8; 32] {
         operator().verifying_key().to_bytes()
+    }
+
+    #[test]
+    fn a_genesis_window_ends_at_the_code_window_or_the_statement_horizon_whichever_is_first() {
+        let window = cblc::accounting::GENESIS_PROOF_WINDOW_SECONDS;
+        let mut early = statement();
+        early.valid_until = early.now + window + 50;
+        assert_eq!(genesis_window_end(&early), early.now + window);
+        // A proof time near the end of its rate window: the horizon cuts the window.
+        let late = statement();
+        assert!(late.valid_until < late.now + window);
+        assert_eq!(genesis_window_end(&late), late.valid_until);
     }
 
     #[test]
