@@ -435,6 +435,7 @@ pub struct PresentedStamp {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
+    use super::super::device_join::DeviceUse;
     use super::*;
 
     /// A device signer that, like ckmg's, prepends the format's tag and derives the salt.

@@ -23,6 +23,9 @@ use composer_core::DeviceKeys;
 use foyer::Transport;
 use std::collections::BTreeMap;
 
+/// Seconds a Keys signing admission of the pairing approval stays valid.
+const SIGN_SECONDS: u64 = 60;
+
 fn secs() -> u64 {
     ckmg::Clock::now(&mut custody::SystemClock).unwrap_or(u64::MAX)
 }
