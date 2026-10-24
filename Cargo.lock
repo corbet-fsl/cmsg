@@ -63,7 +63,7 @@ dependencies = [
  "aes 0.9.3",
  "blake2 0.11.0",
  "blake3",
- "cbc",
+ "cbc 0.2.1",
  "k256 0.14.0",
  "keccak 0.2.2",
  "log",
@@ -284,7 +284,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -295,7 +295,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -711,6 +711,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 
 [[package]]
+name = "async-broadcast"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "435a87a52755b8f27fcf321ac4f04b2802e337c8c4872923137471ec39c37532"
+dependencies = [
+ "event-listener",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "async-channel"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2"
+dependencies = [
+ "concurrent-queue",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "async-compression"
 version = "0.4.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -721,6 +745,113 @@ dependencies = [
  "futures-io",
  "pin-project-lite",
 ]
+
+[[package]]
+name = "async-executor"
+version = "1.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c96bf972d85afc50bf5ab8fe2d54d1586b4e0b46c97c50a0c9e71e2f7bcd812a"
+dependencies = [
+ "async-task",
+ "concurrent-queue",
+ "fastrand",
+ "futures-lite",
+ "pin-project-lite",
+ "slab",
+]
+
+[[package]]
+name = "async-fs"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8034a681df4aed8b8edbd7fbe472401ecf009251c8b40556b304567052e294c5"
+dependencies = [
+ "async-lock",
+ "blocking",
+ "futures-lite",
+]
+
+[[package]]
+name = "async-io"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "456b8a8feb6f42d237746d4b3e9a178494627745c3c56c6ea55d92ba50d026fc"
+dependencies = [
+ "autocfg",
+ "cfg-if",
+ "concurrent-queue",
+ "futures-io",
+ "futures-lite",
+ "parking",
+ "polling",
+ "rustix 1.1.5",
+ "slab",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "async-lock"
+version = "3.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "290f7f2596bd5b78a9fec8088ccd89180d7f9f55b94b0576823bbbdc72ee8311"
+dependencies = [
+ "event-listener",
+ "event-listener-strategy",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "async-process"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc50921ec0055cdd8a16de48773bfeec5c972598674347252c0399676be7da75"
+dependencies = [
+ "async-channel",
+ "async-io",
+ "async-lock",
+ "async-signal",
+ "async-task",
+ "blocking",
+ "cfg-if",
+ "event-listener",
+ "futures-lite",
+ "rustix 1.1.5",
+]
+
+[[package]]
+name = "async-recursion"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f8abc12baad266b1c8cec146854c195b5864b4221d4b2ca7296a7ae82d9e451"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
+]
+
+[[package]]
+name = "async-signal"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52b5aaafa020cf5053a01f2a60e8ff5dccf550f0f77ec54a4e47285ac2bab485"
+dependencies = [
+ "async-io",
+ "async-lock",
+ "atomic-waker",
+ "cfg-if",
+ "futures-core",
+ "futures-io",
+ "rustix 1.1.5",
+ "signal-hook-registry",
+ "slab",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "async-task"
+version = "4.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
 name = "async-trait"
@@ -1191,11 +1322,33 @@ dependencies = [
 
 [[package]]
 name = "block-padding"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8894febbff9f758034a5b8e12d87918f56dfc64a8e1fe757d65e29041538d93"
+dependencies = [
+ "generic-array",
+]
+
+[[package]]
+name = "block-padding"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "710f1dd022ef4e93f8a438b4ba958de7f64308434fa6a87104481645cc30068b"
 dependencies = [
  "hybrid-array",
+]
+
+[[package]]
+name = "blocking"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a70e4329df6cb94385eed412ec92375c3cdd8a6e502493d1229b6414e4036dfa"
+dependencies = [
+ "async-channel",
+ "async-task",
+ "futures-io",
+ "futures-lite",
+ "piper",
 ]
 
 [[package]]
@@ -1406,6 +1559,15 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cbc"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26b52a9543ae338f279b96b0b9fed9c8093744685043739079ce85cd58f289a6"
+dependencies = [
+ "cipher 0.4.4",
+]
+
+[[package]]
+name = "cbc"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce2dc9ee5f88d11e0beb842c88b33c8a5cf0d1329c4b19494af42b07dbfe8896"
@@ -1416,7 +1578,7 @@ dependencies = [
 [[package]]
 name = "cbcn"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cbcn?branch=main#2a2dbbadabde75225fecc73e8975eff1576bbe2d"
+source = "git+https://git.corbet.ch/corbet-foss/cbcn?branch=main#8e45b869c6a981b973e47476095e2dc194f12795"
 dependencies = [
  "csgn",
  "serde",
@@ -1426,7 +1588,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#298e22f43d7ab3160d31af700bda3a23682345fa"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#a7f9f1fa9a222d43e7777ee3412bc38954a2b4ce"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1443,7 +1605,7 @@ dependencies = [
 [[package]]
 name = "cblv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cblv?branch=main#a6be186aba379b6fcbd8800164dcbf9ef14971d7"
+source = "git+https://git.corbet.ch/corbet-foss/cblv?branch=main#f05a07f6a40cba5f81157860020efd95b233c5d7"
 dependencies = [
  "bhttp",
  "getrandom 0.3.4",
@@ -1460,12 +1622,13 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#cfe3fc66b1942f16c574ada3c7839ef131ad1c9a"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#162b133bb8a038b07e9435a929ca0b92eebe3eb5"
 dependencies = [
  "blake3",
  "cchr",
  "cgrd",
  "cgrp",
+ "chacha20poly1305 0.11.0",
  "ckmg",
  "clnk",
  "cnvl",
@@ -1499,18 +1662,22 @@ dependencies = [
 [[package]]
 name = "cchr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=main#93bf2e915212e65679b8959051aedd3b10cb7bf2"
+source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=main#e7a5e01d84f6630840675a6e7ddbea1cba6dfc16"
 dependencies = [
+ "blake3",
  "cbcn",
  "cblv",
  "cgrd",
+ "ckmg",
  "ckyh",
+ "cpsd",
  "crbk",
  "csgn",
  "cshm",
  "schemars 1.2.2",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "url",
  "webauthn-rs-proto",
 ]
@@ -1518,7 +1685,7 @@ dependencies = [
 [[package]]
 name = "cdht"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdht.git?branch=main#1485731a7ec541a04ad1fa4929e0ad31e26b7159"
+source = "git+https://git.corbet.ch/corbet-foss/cdht.git?branch=main#5e45502d3a3debfc969d1851d379b54cf4ce91b0"
 dependencies = [
  "blake3",
  "capnp",
@@ -1535,7 +1702,7 @@ dependencies = [
 [[package]]
 name = "cdlv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=main#1db57a779fffdf7268d3ba2e7954d1410b904b03"
+source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=main#2a2b75e4e7879c24353c6ef81a7684c10d6d3689"
 dependencies = [
  "ckmg",
  "ctcs",
@@ -1558,7 +1725,7 @@ dependencies = [
 [[package]]
 name = "cfbk"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cfbk?branch=main#e03ed80f037b02dcedac1657c4fd23615bae3815"
+source = "git+https://git.corbet.ch/corbet-foss/cfbk?branch=main#b2687ac269b54100805dcd49ec28c5fe5b5f22df"
 
 [[package]]
 name = "cfg-if"
@@ -1575,7 +1742,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cfrm"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=main#c613ac64bcdfc8ff28d89a2dfb54c145dc320794"
+source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=main#8f1b4f742048a1f8b0406ff0a146211eb1e530c6"
 dependencies = [
  "cblv",
  "crbk",
@@ -1595,7 +1762,7 @@ dependencies = [
 [[package]]
 name = "cfry"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cfry.git?branch=main#5b0bccdeb098041d2ddd17f636a0c3bcc1f34587"
+source = "git+https://git.corbet.ch/corbet-foss/cfry.git?branch=main#6edf7637fe1de3206a60d91e44dce00b6778186f"
 dependencies = [
  "bytes",
  "futures",
@@ -1610,13 +1777,14 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=main#df0764d21b27bfee2d6b64e669722767f23dbeb4"
+source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=main#bd653891a2a86818bd9b9d6a8638a54af86eff94"
 dependencies = [
  "cnvy",
  "cpky",
  "cvch",
  "cvld",
  "futures",
+ "getrandom 0.4.3",
  "serde",
  "serde_json",
 ]
@@ -1624,7 +1792,7 @@ dependencies = [
 [[package]]
 name = "cgrd"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrd?branch=main#203900ab71428b910092fb9b0ecc632ac483cae4"
+source = "git+https://git.corbet.ch/corbet-foss/cgrd?branch=main#9df21397c9a7220a78fe110f76c5a0bde0d6eafe"
 dependencies = [
  "bigdecimal",
  "cpns",
@@ -1645,7 +1813,7 @@ dependencies = [
 [[package]]
 name = "cgrp"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=main#4dd8d348b69b16e82667e0897cf39669ea04a89d"
+source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=main#c383eeb892112500000912a17c687a46f749f63c"
 dependencies = [
  "ckmg",
  "cmbl",
@@ -1777,7 +1945,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=main#46b7b1abbb71359b195a4fbd4ba5f23ba52b2c22"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=main#9b7bcabd09ffddca09b785175c55136be31e81cb"
 dependencies = [
  "arti-client",
  "blake3",
@@ -1811,7 +1979,7 @@ dependencies = [
 [[package]]
 name = "ckyh"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckyh?branch=main#745d661d97cd80cdd3f12fb71e65d0c8abb1447a"
+source = "git+https://git.corbet.ch/corbet-foss/ckyh?branch=main#788f42141ca886c608c95e9a92e72c04041a3ad3"
 dependencies = [
  "ciborium",
  "crlt",
@@ -1884,7 +2052,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 [[package]]
 name = "clnk"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/clnk.git?branch=main#bd40405d44d907ac74da4e388abfe86d2f1614eb"
+source = "git+https://git.corbet.ch/corbet-foss/clnk.git?branch=main#2b276e1a7836391377eadcf8bc845c0005f2f3d7"
 dependencies = [
  "cfrm",
  "cmbl",
@@ -1908,7 +2076,7 @@ dependencies = [
 [[package]]
 name = "cmbl"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=main#87995601f9e9373cd8d31777e6e40a6ef1f3024c"
+source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=main#ec7a9f0a2684d4d9a9ccff178c506db209eaa3e1"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
@@ -1927,7 +2095,7 @@ dependencies = [
 [[package]]
 name = "cmmr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmmr.git?branch=main#4e7a53703ccdf75a760af9ad6f4a4b9f429c952e"
+source = "git+https://git.corbet.ch/corbet-foss/cmmr.git?branch=main#9e5b6b05077b66865ad5aff8c369bf32127d068d"
 dependencies = [
  "serde",
 ]
@@ -1997,6 +2165,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "tor-hscrypto",
+ "tor-llcrypto",
  "tor-rtcompat",
  "tower",
  "url",
@@ -2010,7 +2180,7 @@ dependencies = [
 [[package]]
 name = "cmsh"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmsh.git?branch=main#6dea4901930a53e30c828b5275bffabc99e4c88d"
+source = "git+https://git.corbet.ch/corbet-libs/cmsh.git?branch=main#a35ec2dbfe4b69f83ebcd8d3580874eba8f9a0e9"
 dependencies = [
  "async-trait",
  "cdht",
@@ -2025,7 +2195,7 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=main#631e0ef927fd97665db6749969605bea07646d00"
+source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=main#0e5e86d20a86a82c3d4c0ba7776b90eb58285e33"
 dependencies = [
  "cdlv",
  "cgrp",
@@ -2043,7 +2213,7 @@ dependencies = [
 [[package]]
 name = "cnvl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cnvl.git?branch=main#d784ea308c8fcedd4f574dfd306e3334c6ac8afb"
+source = "git+https://git.corbet.ch/corbet-foss/cnvl.git?branch=main#51b2293196f7790595443fde5ff671d347eb8fc1"
 dependencies = [
  "cgrd",
  "chacha20poly1305 0.11.0",
@@ -2059,7 +2229,7 @@ dependencies = [
 [[package]]
 name = "cnvy"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cnvy.git?branch=main#3cbcc575696ca3026f5c53f8dc4c5f20d73034b3"
+source = "git+https://git.corbet.ch/corbet-foss/cnvy.git?branch=main#7aaf41954f60ca6b24a532728f0bf0b7bb03775e"
 dependencies = [
  "cchr",
  "futures-util",
@@ -2152,6 +2322,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e8ccc4ea9f6acc32d102c0f6d471d11d913ad15f20c04de743374861fa1d414"
 
 [[package]]
+name = "concurrent-queue"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2185,6 +2364,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9885fa71e26b8ab7855e2ec7cae6e9b380edff76cd052e07c683a0319d51b3a2"
 dependencies = [
  "futures",
+]
+
+[[package]]
+name = "core-foundation"
+version = "0.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
 ]
 
 [[package]]
@@ -2243,7 +2432,7 @@ dependencies = [
 [[package]]
 name = "cpfl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpfl.git?branch=main#8624b917070fdb0b96512dc01c97a69b854179d4"
+source = "git+https://git.corbet.ch/corbet-foss/cpfl.git?branch=main#0e61663ff68e7f561b44ab813e01c103a6065f98"
 dependencies = [
  "blake3",
  "cgrd",
@@ -2264,7 +2453,7 @@ dependencies = [
 [[package]]
 name = "cpky"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpky.git?branch=main#bfcf4d4f2112d9abf5d849ff456b1bf354d4b4c4"
+source = "git+https://git.corbet.ch/corbet-foss/cpky.git?branch=main#7f7a50ff5a47eff111657b005e1b5f1d6de96937"
 dependencies = [
  "async-trait",
  "axum",
@@ -2300,7 +2489,7 @@ dependencies = [
 [[package]]
 name = "cpns"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpns?branch=main#9470e80c458c7769a0ddc33fb1c25fc4fa6113b1"
+source = "git+https://git.corbet.ch/corbet-foss/cpns?branch=main#37995af124a773460189a57c0bc8a0db4f103708"
 dependencies = [
  "getrandom 0.4.3",
  "sha2 0.11.0",
@@ -2311,7 +2500,7 @@ dependencies = [
 [[package]]
 name = "cprz"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#2c6f3e6ddc52c9316776b2cc7a547b197d1c5ccb"
+source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#aaf54c7c9681c236c97068648fce3ddc02bcc990"
 dependencies = [
  "cprz-blob",
 ]
@@ -2319,7 +2508,7 @@ dependencies = [
 [[package]]
 name = "cprz-blob"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#2c6f3e6ddc52c9316776b2cc7a547b197d1c5ccb"
+source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#aaf54c7c9681c236c97068648fce3ddc02bcc990"
 dependencies = [
  "brotli",
 ]
@@ -2327,12 +2516,12 @@ dependencies = [
 [[package]]
 name = "cprz-pad"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#2c6f3e6ddc52c9316776b2cc7a547b197d1c5ccb"
+source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#aaf54c7c9681c236c97068648fce3ddc02bcc990"
 
 [[package]]
 name = "cpsd"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpsd?branch=main#c43253b08014f0aecb038055db099c018ae6f037"
+source = "git+https://git.corbet.ch/corbet-foss/cpsd?branch=main#08b4e24e6f798f4a893c531fcf0a722b85f844d3"
 dependencies = [
  "ark-bls12-381",
  "ark-ec 0.4.2",
@@ -2391,7 +2580,7 @@ dependencies = [
 [[package]]
 name = "crbk"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#fd5af1caa6b903dd6cbf0e5064510861ab772a5f"
+source = "git+https://git.corbet.ch/corbet-foss/crbk?branch=main#25177ccb974a183be068bcd8c00a3b26d3782928"
 dependencies = [
  "czkp",
  "semver",
@@ -2412,7 +2601,7 @@ dependencies = [
 [[package]]
 name = "crlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/crlt?branch=main#3db630da2dfd176bc665d1617b89a7c0c4ebb2c9"
+source = "git+https://git.corbet.ch/corbet-foss/crlt?branch=main#923abda226ef5f403db4fb1811d8c115e39dcb82"
 dependencies = [
  "deadpool",
  "libsql",
@@ -2530,7 +2719,7 @@ dependencies = [
 [[package]]
 name = "csgn"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/csgn?branch=main#71357f023972eea8c90951da05303eabd9d7e0a2"
+source = "git+https://git.corbet.ch/corbet-foss/csgn?branch=main#8b20605c439edd3e284d31be8cedad4a373c8df3"
 dependencies = [
  "ciborium-ll",
  "coset 0.4.2",
@@ -2543,7 +2732,7 @@ dependencies = [
 [[package]]
 name = "cshm"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cshm?branch=main#088595f28f82734e449780eb20e75efd67e985c7"
+source = "git+https://git.corbet.ch/corbet-foss/cshm?branch=main#856012a561828599dee427fa401eeb646833f3f3"
 dependencies = [
  "bigdecimal",
  "jsonschema",
@@ -2555,7 +2744,7 @@ dependencies = [
 [[package]]
 name = "csrh"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/csrh.git?branch=main#625d57f6e5af8f26f500b3e0ee725a05241382e6"
+source = "git+https://git.corbet.ch/corbet-foss/csrh.git?branch=main#b3f258408a5e671b3f998c5cd7f3cd583f9de4ac"
 dependencies = [
  "cgrd",
  "cpfl",
@@ -2567,7 +2756,7 @@ dependencies = [
 [[package]]
 name = "cswb"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cswb.git?branch=main#2c7f959e466ccad048e164b753b6ee77932b80ab"
+source = "git+https://git.corbet.ch/corbet-foss/cswb.git?branch=main#04a8afaf0239c16020ddb37a2f7830c59657edaf"
 dependencies = [
  "cchr",
  "cmmr",
@@ -2591,7 +2780,7 @@ checksum = "8fd9f3db6f2cfef61c10613071955154ffdc9e515daebff26de4b54e35038fdd"
 [[package]]
 name = "ctcs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=main#d9d63934ffa3a433491fac61f36eee365f99c424"
+source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=main#919eebbdab68dc9903d643024ec31df056a08ff4"
 dependencies = [
  "ckmg",
  "cwst",
@@ -2603,7 +2792,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#1985062c4e346c9b60a02409ce4bb37e2a669300"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#5d020467cdbdf5ee863a15bbd54535b445dbc84b"
 dependencies = [
  "cchr",
  "cgrp",
@@ -2629,7 +2818,7 @@ dependencies = [
 [[package]]
 name = "ctnd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctnd.git?branch=main#1fbb83e65e0b6196d1235ce2223d890b917a4e7b"
+source = "git+https://git.corbet.ch/corbet-foss/ctnd.git?branch=main#84b6dd51c303e2779c3d92dcfc2cbe38c82a330b"
 dependencies = [
  "cgrp",
  "schemars 1.2.2",
@@ -2659,7 +2848,7 @@ dependencies = [
 [[package]]
 name = "ctrn"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctrn.git?branch=main#68eda79a699b99314f70baf5ba651783ca0542df"
+source = "git+https://git.corbet.ch/corbet-foss/ctrn.git?branch=main#b865f0c1b1d8851c5dc8ec6647e93bf706d895a4"
 dependencies = [
  "arti-client",
  "async-trait",
@@ -2745,7 +2934,7 @@ dependencies = [
 [[package]]
 name = "cvch"
 version = "0.2.1"
-source = "git+https://git.corbet.ch/corbet-foss/cvch?branch=main#781cfff36a78af9539c835041f8f9d42b5ed9492"
+source = "git+https://git.corbet.ch/corbet-foss/cvch?branch=main#09d6895d0ead981b04b53a26c750c1832dc08d85"
 dependencies = [
  "cfbk",
  "csgn",
@@ -2764,7 +2953,7 @@ dependencies = [
 [[package]]
 name = "cvfy"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cvfy.git?branch=main#9df6ed09fd142d345c56cbfb68629eeac343c79f"
+source = "git+https://git.corbet.ch/corbet-foss/cvfy.git?branch=main#af69314cf937294c1532d41394ac4e290349043e"
 dependencies = [
  "czkp",
  "data-encoding",
@@ -2776,7 +2965,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#fbdd28d35834076e5934e03fa9161b35fb716a78"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#49ca16d6a8c74445655ed4a49b4011f8a51867ab"
 dependencies = [
  "any_ascii",
  "blind-rsa-signatures",
@@ -2789,6 +2978,7 @@ dependencies = [
  "rustrict",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.21",
  "url",
  "wasm-bindgen",
@@ -2800,8 +2990,9 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=main#3676bcfd3f749364c13747ac6eca10c683d203ce"
+source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=main#f00186f8ca9b257d1d35cdee44090309974e7f6a"
 dependencies = [
+ "aes-gcm 0.10.3",
  "blake3",
  "cchr",
  "cdht",
@@ -2810,18 +3001,25 @@ dependencies = [
  "cpky",
  "cprz",
  "cprz-pad",
+ "cpsd",
  "cwlt",
  "cwst",
  "futures",
+ "getrandom 0.3.4",
+ "js-sys",
+ "keyring",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "zeroize",
 ]
 
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#9ec3847f633af62d41a3153e59a4a9e196e3654d"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#3be3b8eeecaaf0a419a05216b2c5c86f36db3c29"
 dependencies = [
  "blake3",
  "ckmg",
@@ -2842,7 +3040,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#9ec3847f633af62d41a3153e59a4a9e196e3654d"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#3be3b8eeecaaf0a419a05216b2c5c86f36db3c29"
 dependencies = [
  "acvm",
  "barretenberg-rs",
@@ -2868,7 +3066,7 @@ dependencies = [
 [[package]]
 name = "cwst"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwst.git?branch=main#d5e9f93d056c688f8414f4b800119cf959316bb9"
+source = "git+https://git.corbet.ch/corbet-foss/cwst.git?branch=main#4e99ed510d470c94c7015f8a4450542584ee34b8"
 dependencies = [
  "atomicwrites",
  "blake3",
@@ -2891,7 +3089,7 @@ dependencies = [
 [[package]]
 name = "cwvs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwvs.git?branch=main#08d1fba72449cda838569ed2a5042732bb31c094"
+source = "git+https://git.corbet.ch/corbet-foss/cwvs.git?branch=main#69b939ef1098b555ece3cd7861bc41e8f4844b45"
 dependencies = [
  "cdlv",
  "ckmg",
@@ -2908,7 +3106,7 @@ dependencies = [
 [[package]]
 name = "cxch"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cxch.git?branch=main#8feee91e0b330171f1cbec746bbccff0112f13a4"
+source = "git+https://git.corbet.ch/corbet-foss/cxch.git?branch=main#4bf1426ec6b82ef854b4459705b70dfb43b22a64"
 dependencies = [
  "cgrd",
  "cnvl",
@@ -2922,7 +3120,7 @@ dependencies = [
 [[package]]
 name = "czkp"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#f776a8b96304c87eed6c2c050ee31ac9be05a0f4"
+source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#a80284cb2928179b128255fa56f2c7ef9a43b8b1"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
@@ -3083,6 +3281,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
+name = "dbus"
+version = "0.9.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ab69f03cc8c4340c9c8e315114e1658e6775a9b16a04357973aa21cec22b32e"
+dependencies = [
+ "libc",
+ "libdbus-sys",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "dbus-secret-service"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "708b509edf7889e53d7efb0ffadd994cc6c2345ccb62f55cfd6b0682165e4fa6"
+dependencies = [
+ "aes 0.8.4",
+ "block-padding 0.3.3",
+ "cbc 0.1.2",
+ "dbus",
+ "fastrand",
+ "hkdf 0.12.4",
+ "num",
+ "once_cell",
+ "sha2 0.10.9",
+ "zeroize",
+]
+
+[[package]]
 name = "deadpool"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3209,7 +3436,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98e02cd118058400797c74550dca132b57cf2e6af0e9ea0672a83eb186fd655e"
 dependencies = [
  "derive-deftly-macros",
- "heck 0.5.0",
+ "heck 0.4.1",
 ]
 
 [[package]]
@@ -3218,14 +3445,14 @@ version = "1.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba91f619216e76a5eb2515783f7ec2e271938b51aadac592f4930517f4626863"
 dependencies = [
- "heck 0.5.0",
- "indexmap 2.14.2",
+ "heck 0.4.1",
+ "indexmap 1.9.3",
  "itertools 0.15.0",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "sha3 0.12.0",
- "strum 0.28.0",
+ "sha3 0.10.9",
+ "strum 0.25.0",
  "syn 3.0.6",
  "unicode-ident",
  "void",
@@ -3348,7 +3575,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3618,6 +3845,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9eb1aa714776b75c7e67e1da744b81a129b3ff919c8712b5e1b32252c1f07cc7"
 
 [[package]]
+name = "endi"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
+
+[[package]]
 name = "enum-ordinalize"
 version = "3.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3663,6 +3896,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "enumflags2"
+version = "0.7.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1027f7680c853e056ebcec683615fb6fbbc07dbaa13b4d5d9442b146ded4ecef"
+dependencies = [
+ "enumflags2_derive",
+ "serde",
+]
+
+[[package]]
+name = "enumflags2_derive"
+version = "0.7.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67c78a4d8fdf9953a5c9d458f9efe940fd97a0cab0941c075a813ac594733827"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "enumset"
 version = "1.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3696,7 +3950,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3706,6 +3960,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
 dependencies = [
  "parking",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "event-listener-strategy"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
+dependencies = [
+ "event-listener",
  "pin-project-lite",
 ]
 
@@ -4024,6 +4288,19 @@ name = "futures-io"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53c0fa8157de1303bfffdaa1cc2a673bfffb60102f76b0ef4441659124373fed"
+
+[[package]]
+name = "futures-lite"
+version = "2.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f78e10609fe0e0b3f4157ffab1876319b5b0db102a2c60dc4626306dc46b44ad"
+dependencies = [
+ "fastrand",
+ "futures-core",
+ "futures-io",
+ "parking",
+ "pin-project-lite",
+]
 
 [[package]]
 name = "futures-macro"
@@ -4416,6 +4693,12 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "hermit-abi"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
 name = "hex"
@@ -4930,6 +5213,7 @@ version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
+ "block-padding 0.3.3",
  "generic-array",
 ]
 
@@ -4939,7 +5223,7 @@ version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4250ce6452e92010fdf7268ccc5d14faa80bb12fc741938534c58f16804e03c7"
 dependencies = [
- "block-padding",
+ "block-padding 0.4.2",
  "hybrid-array",
 ]
 
@@ -5336,6 +5620,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyring"
+version = "3.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eebcc3aff044e5944a8fbaf69eb277d11986064cba30c468730e8b9909fb551c"
+dependencies = [
+ "dbus-secret-service",
+ "log",
+ "secret-service",
+ "security-framework 2.11.1",
+ "security-framework 3.7.0",
+ "zbus",
+ "zeroize",
+]
+
+[[package]]
 name = "keyvaluedb"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5630,6 +5929,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "libdbus-sys"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "328c4789d42200f1eeec05bd86c9c13c7f091d2ba9a6ea35acdf51f31bc0f043"
+dependencies = [
+ "pkg-config",
+]
+
+[[package]]
 name = "libloading"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5814,6 +6122,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "memoffset"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "merlin"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5988,6 +6305,19 @@ name = "ndk-context"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
+
+[[package]]
+name = "nix"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+ "memoffset",
+]
 
 [[package]]
 name = "nohash-hasher"
@@ -6242,7 +6572,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6672,6 +7002,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ordered-stream"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "os_str_bytes"
 version = "6.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6992,6 +7332,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
+name = "piper"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c835479a4443ded371d6c535cbfd8d31ad92c5d23ae9770a61bc155e4992a3c1"
+dependencies = [
+ "atomic-waker",
+ "fastrand",
+ "futures-io",
+]
+
+[[package]]
 name = "pkcs1"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7037,6 +7388,20 @@ name = "pkg-config"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
+
+[[package]]
+name = "polling"
+version = "3.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d0e4f59085d47d8241c88ead0f274e8a0cb551f3625263c05eb8dd897c34218"
+dependencies = [
+ "cfg-if",
+ "concurrent-queue",
+ "hermit-abi",
+ "pin-project-lite",
+ "rustix 1.1.5",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "poly1305"
@@ -7354,7 +7719,7 @@ dependencies = [
  "derive-deftly",
  "libc",
  "paste",
- "thiserror 2.0.21",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -7411,7 +7776,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8074,7 +8439,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8102,7 +8467,7 @@ dependencies = [
  "openssl-probe",
  "rustls-pki-types",
  "schannel",
- "security-framework",
+ "security-framework 3.7.0",
 ]
 
 [[package]]
@@ -8121,7 +8486,7 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1167586491e2b18b8bfbb293e8180ec17c201c4f076d7cb3070ca964e7598f98"
 dependencies = [
- "core-foundation",
+ "core-foundation 0.10.1",
  "core-foundation-sys",
  "jni",
  "log",
@@ -8130,10 +8495,10 @@ dependencies = [
  "rustls-native-certs",
  "rustls-platform-verifier-android",
  "rustls-webpki",
- "security-framework",
+ "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8365,6 +8730,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "secret-service"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4d35ad99a181be0a60ffcbe85d680d98f87bdc4d7644ade319b87076b9dbfd4"
+dependencies = [
+ "aes 0.8.4",
+ "cbc 0.1.2",
+ "futures-util",
+ "generic-array",
+ "hkdf 0.12.4",
+ "num",
+ "once_cell",
+ "rand 0.8.8",
+ "serde",
+ "sha2 0.10.9",
+ "zbus",
+]
+
+[[package]]
 name = "secret_sharing_and_dkg"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8385,12 +8769,25 @@ dependencies = [
 
 [[package]]
 name = "security-framework"
+version = "2.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
+dependencies = [
+ "bitflags 2.13.2",
+ "core-foundation 0.9.4",
+ "core-foundation-sys",
+ "libc",
+ "security-framework-sys",
+]
+
+[[package]]
+name = "security-framework"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
 dependencies = [
  "bitflags 2.13.2",
- "core-foundation",
+ "core-foundation 0.10.1",
  "core-foundation-sys",
  "libc",
  "security-framework-sys",
@@ -8545,6 +8942,17 @@ dependencies = [
  "itoa",
  "serde",
  "serde_core",
+]
+
+[[package]]
+name = "serde_repr"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d3b1629de253c70a0508c3899572da79ca359fdab27c7920ff00406df418906"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -8903,7 +9311,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -9045,7 +9453,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -9209,7 +9617,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10816,6 +11224,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "uds_windows"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
+dependencies = [
+ "memoffset",
+ "tempfile",
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11362,7 +11781,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11752,6 +12171,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xdg-home"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec1cdab258fb55c0da61328dc52c8764709b249011b2cad0454c72f0bf10a1f6"
+dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "xxhash-rust"
 version = "0.8.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11793,6 +12222,68 @@ dependencies = [
  "quote",
  "syn 3.0.6",
  "synstructure 0.14.0",
+]
+
+[[package]]
+name = "zbus"
+version = "4.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb97012beadd29e654708a0fdb4c84bc046f537aecfde2c3ee0a9e4b4d48c725"
+dependencies = [
+ "async-broadcast",
+ "async-executor",
+ "async-fs",
+ "async-io",
+ "async-lock",
+ "async-process",
+ "async-recursion",
+ "async-task",
+ "async-trait",
+ "blocking",
+ "enumflags2",
+ "event-listener",
+ "futures-core",
+ "futures-sink",
+ "futures-util",
+ "hex",
+ "nix",
+ "ordered-stream",
+ "rand 0.8.8",
+ "serde",
+ "serde_repr",
+ "sha1",
+ "static_assertions",
+ "tracing",
+ "uds_windows",
+ "windows-sys 0.52.0",
+ "xdg-home",
+ "zbus_macros",
+ "zbus_names",
+ "zvariant",
+]
+
+[[package]]
+name = "zbus_macros"
+version = "4.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "267db9407081e90bbfa46d841d3cbc60f59c0351838c4bc65199ecd79ab1983e"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "zvariant_utils",
+]
+
+[[package]]
+name = "zbus_names"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b9b1fef7d021261cc16cba64c351d291b715febe0fa10dc3a443ac5a5022e6c"
+dependencies = [
+ "serde",
+ "static_assertions",
+ "zvariant",
 ]
 
 [[package]]
@@ -11949,4 +12440,41 @@ checksum = "aeec9eaf2dffbbd09201e23bd0ffcbaa33bb8e9266a10734fd7ed90a85eca078"
 dependencies = [
  "cc",
  "pkg-config",
+]
+
+[[package]]
+name = "zvariant"
+version = "4.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2084290ab9a1c471c38fc524945837734fbf124487e105daec2bb57fd48c81fe"
+dependencies = [
+ "endi",
+ "enumflags2",
+ "serde",
+ "static_assertions",
+ "zvariant_derive",
+]
+
+[[package]]
+name = "zvariant_derive"
+version = "4.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73e2ba546bda683a90652bac4a279bc146adad1386f25379cf73200d2002c449"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "zvariant_utils",
+]
+
+[[package]]
+name = "zvariant_utils"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c51bcff7cc3dbb5055396bcf774748c3dab426b4b8659046963523cee4808340"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
