@@ -186,12 +186,12 @@ pub use bridge::VaultHost;
 pub mod identity;
 #[cfg(all(target_arch = "wasm32", feature = "browser-tor"))]
 pub mod mesh;
+#[cfg(all(target_arch = "wasm32", feature = "browser-prover"))]
+pub mod prover;
 #[cfg(all(target_arch = "wasm32", feature = "browser-tor"))]
 pub mod records;
 #[cfg(all(target_arch = "wasm32", feature = "browser-tor"))]
 pub mod restore;
-#[cfg(all(target_arch = "wasm32", feature = "browser-prover"))]
-pub mod prover;
 
 /// One HTTPS (or Oblivious HTTP) transport to a configured service.
 fn open_transport(service: &Service, roots: &[Vec<u8>]) -> Result<foyer::Transport> {
@@ -380,19 +380,33 @@ mod tests {
 
     #[test]
     fn the_community_vault_shape_is_unchanged() {
-        assert!(vault_pair("https://omega.toy.test", "https://vault.omega.toy.test", None).is_ok());
+        assert!(vault_pair(
+            "https://omega.toy.test",
+            "https://vault.omega.toy.test",
+            None
+        )
+        .is_ok());
         assert!(vault_pair(
             "https://omega.toy.test",
             "https://vault.omega.toy.test",
             Some(WALLET)
         )
         .is_ok());
-        assert!(vault_pair("https://omega.toy.test", "https://vault.other.toy.test", None).is_err());
+        assert!(vault_pair(
+            "https://omega.toy.test",
+            "https://vault.other.toy.test",
+            None
+        )
+        .is_err());
     }
 
     #[test]
     fn the_wallet_frame_is_accepted_only_at_the_deployments_exact_wallet_origin() {
-        for member in ["https://toy.test", "https://omega.toy.test", "https://a.b.toy.test"] {
+        for member in [
+            "https://toy.test",
+            "https://omega.toy.test",
+            "https://a.b.toy.test",
+        ] {
             assert!(vault_pair(member, WALLET, Some(WALLET)).is_ok(), "{member}");
             // Without the deployment's wallet origin the frame is refused.
             assert!(vault_pair(member, WALLET, None).is_err(), "{member}");
@@ -403,16 +417,31 @@ mod tests {
     fn every_near_miss_of_the_wallet_shape_is_refused() {
         let member = "https://omega.toy.test";
         let refused = |member: &str, vault: &str, wallet: &str| {
-            assert!(vault_pair(member, vault, Some(wallet)).is_err(), "{member} {vault} {wallet}");
+            assert!(
+                vault_pair(member, vault, Some(wallet)).is_err(),
+                "{member} {vault} {wallet}"
+            );
         };
         // Another port, plain http, or credentials in the frame origin.
-        refused(member, "https://wallet.toy.test:8443", "https://wallet.toy.test:8443");
+        refused(
+            member,
+            "https://wallet.toy.test:8443",
+            "https://wallet.toy.test:8443",
+        );
         refused("https://omega.toy.test:8443", WALLET, WALLET);
         refused(member, "http://wallet.toy.test", "http://wallet.toy.test");
-        refused(member, "https://user@wallet.toy.test", "https://user@wallet.toy.test");
+        refused(
+            member,
+            "https://user@wallet.toy.test",
+            "https://user@wallet.toy.test",
+        );
         // A frame origin that is not exactly the deployment's wallet origin.
         refused(member, "https://wallet.other.test", WALLET);
-        refused(member, "https://wallet.toy.test", "https://wallet.toy.test/");
+        refused(
+            member,
+            "https://wallet.toy.test",
+            "https://wallet.toy.test/",
+        );
         // A member page outside the wallet's base, or a sibling that only shares a suffix.
         refused("https://other.test", WALLET, WALLET);
         refused("https://eviltoy.test", WALLET, WALLET);

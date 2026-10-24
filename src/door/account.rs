@@ -1885,7 +1885,11 @@ mod tests {
             _: &'a str,
             _: &'a str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = std::result::Result<String, ckmg::wallet_engine::Error>> + 'a>,
+            Box<
+                dyn std::future::Future<
+                        Output = std::result::Result<String, ckmg::wallet_engine::Error>,
+                    > + 'a,
+            >,
         > {
             Box::pin(async { Err(ckmg::wallet_engine::Error::Crypto) })
         }
@@ -1895,7 +1899,9 @@ mod tests {
     #[cfg(feature = "browser-prover")]
     #[test]
     fn a_browser_prover_lends_the_browser_variant_while_the_refusing_port_stays_a_refusal() {
-        use ckmg::wallet_engine::browser_prover::{BrowserProver, BrowserProverConfig, SrsLocation};
+        use ckmg::wallet_engine::browser_prover::{
+            BrowserProver, BrowserProverConfig, SrsLocation,
+        };
         use sha2::{Digest, Sha256};
         let directory = std::path::PathBuf::from(
             std::env::var_os("CWLT_NATIVE_PROVER_FIXTURE")

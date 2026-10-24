@@ -27,7 +27,10 @@ pub struct ProvenGenesis {
     pub proof: Vec<u8>,
 }
 
-#[cfg(any(all(feature = "native-prover", not(target_arch = "wasm32")), feature = "browser-prover"))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    feature = "browser-prover"
+))]
 impl ProvenGenesis {
     /// Convert the lower owner's borrowed public proof material into the original
     /// Balance statement. The economic policy is the verified current policy and
@@ -177,7 +180,10 @@ impl SignedApplyExtended {
 
     /// Acceptance binding for the lower owner: request id, EXTENDED request
     /// digest and the pinned operator key from the verified material.
-    #[cfg(any(all(feature = "native-prover", not(target_arch = "wasm32")), feature = "browser-prover"))]
+    #[cfg(any(
+        all(feature = "native-prover", not(target_arch = "wasm32")),
+        feature = "browser-prover"
+    ))]
     pub fn acceptance_binding(
         &self,
         operator_key: [u8; 32],
@@ -260,7 +266,10 @@ impl AcceptedResponse {
     }
 }
 
-#[cfg(any(all(feature = "native-prover", not(target_arch = "wasm32")), feature = "browser-prover"))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    feature = "browser-prover"
+))]
 mod lower {
     //! The holder engine verifies certificate and ancestry itself, from raw
     //! signatures. These conversions only reshape the already decoded response
@@ -322,7 +331,10 @@ mod lower {
         })
     }
 }
-#[cfg(any(all(feature = "native-prover", not(target_arch = "wasm32")), feature = "browser-prover"))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    feature = "browser-prover"
+))]
 pub use lower::response_trust;
 
 /// Digest of the signed acceptance, the same convention the Balance status

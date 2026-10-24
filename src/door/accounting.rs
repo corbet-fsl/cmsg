@@ -23,7 +23,10 @@ pub use checkpoint::VerifiedRoster;
 pub use checkpoint::{CheckpointAcquisition, CurrentEnrollment, SubmittedEnrollment};
 pub use custody::{AccountVault, CommunityAccount};
 pub use genesis::PreparedAccount;
-#[cfg(any(all(feature = "native-prover", not(target_arch = "wasm32")), feature = "browser-prover"))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    feature = "browser-prover"
+))]
 pub use genesis::{ProvenAccount, StagedRequest};
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub use lifecycle::{existing_active, has_pending, voucher_remaining, Activated, Elapsed};
@@ -31,7 +34,10 @@ pub use pending::PendingBinding;
 #[cfg(test)]
 pub(super) use request::fixtures as update_fixtures;
 pub use request::outbox_request_id;
-#[cfg(any(all(feature = "native-prover", not(target_arch = "wasm32")), feature = "browser-prover"))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    feature = "browser-prover"
+))]
 pub use request::response_trust;
 pub use request::{AcceptedResponse, ProvenGenesis, ProvenUpdate, SignedApplyExtended};
 

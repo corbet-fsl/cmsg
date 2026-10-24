@@ -296,7 +296,10 @@ impl Drop for Attempt<'_> {
 }
 
 /// Operation identifiers for Store commits; random, non-zero, never reused.
-#[cfg(any(all(feature = "native-prover", not(target_arch = "wasm32")), feature = "browser-prover"))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    feature = "browser-prover"
+))]
 pub(super) fn operation() -> Result<[u8; 32]> {
     let mut id = [0u8; 32];
     getrandom::fill(&mut id).map_err(|_| ErrorCode::Unavailable)?;
@@ -306,10 +309,16 @@ pub(super) fn operation() -> Result<[u8; 32]> {
     Ok(id)
 }
 
-#[cfg(any(all(feature = "native-prover", not(target_arch = "wasm32")), feature = "browser-prover"))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    feature = "browser-prover"
+))]
 pub use proven::{ProvenAccount, StagedRequest};
 
-#[cfg(any(all(feature = "native-prover", not(target_arch = "wasm32")), feature = "browser-prover"))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    feature = "browser-prover"
+))]
 mod proven {
     //! The proven candidate, the signed request and the durable pending state A/B.
     use super::*;
