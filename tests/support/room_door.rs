@@ -314,6 +314,15 @@ async fn board_through(
             operation: {
                 let mut id = operation;
                 id[0] = connection[0];
+                // The connection byte is random: two boards of one room could
+                // share an operation id and the assembly would answer the
+                // second with a conflict. A counter makes every id unique.
+                static BOARDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                id[8..].copy_from_slice(
+                    &BOARDS
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        .to_be_bytes(),
+                );
                 id
             },
             action: if resume {
