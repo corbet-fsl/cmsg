@@ -32,7 +32,7 @@ fn issuer(now: u64) -> Signer {
     Signer::new("alpha", SecretKey::from_seed(&mut [11; 32]), now - 1, 3600).unwrap()
 }
 
-fn feed(now: u64, revision: u64, minimum: &str) -> Vec<u8> {
+fn feed(now: u64, revision: u64) -> Vec<u8> {
     let mut signer = issuer(now);
     let mut result = json!({
         "revision": revision,
@@ -58,12 +58,7 @@ fn feed(now: u64, revision: u64, minimum: &str) -> Vec<u8> {
         (
             "settings",
             Kind::SettingsSnapshot,
-            json!({
-                "forum.heartbeat_ms":3000,
-                "forum.lease_ms":10000,
-                "forum.minimum_client_version":minimum,
-                "forum.room_passes_per_epoch":4
-            }),
+            json!({ "forum.room_passes_per_epoch":4 }),
         ),
         ("schema", Kind::SchemaSnapshot, schema.clone()),
         (
@@ -172,10 +167,16 @@ fn request(action: &str) -> Vec<u8> {
     .unwrap()
 }
 
+/// The runtime version is below the signed requirement at first, meets it after the first
+/// refresh and is below it again after the second.
 #[tokio::test]
 async fn signed_minimum_version_guards_every_inbox_action_without_disabling_cleanup() {
+    crate::door::with_client_version("0.0.1", minimum_version_guards_every_inbox_action()).await;
+}
+
+async fn minimum_version_guards_every_inbox_action() {
     let now = cbrd::clnk::Clock::now(&crate::door::board::SystemClock).unwrap() / 1000;
-    let server = PublicFeed::new(feed(now, 1, "999.0.0")).await;
+    let server = PublicFeed::new(feed(now, 1)).await;
     let foyer = server.foyer(now).await;
     let (owner, _, checks) = open_fixture().await;
     let mut door = Door::new(
@@ -234,9 +235,10 @@ async fn signed_minimum_version_guards_every_inbox_action_without_disabling_clea
                 .get_mut(&foyer::Scope::Community)
                 .unwrap(),
             live_now(),
-            feed(now, 2, env!("CARGO_PKG_VERSION")),
+            feed(now, 2),
         )
         .await;
+    crate::door::set_client_version(env!("CARGO_PKG_VERSION"));
     for action in [
         "inbox.snapshot",
         "inbox.history",
@@ -265,9 +267,10 @@ async fn signed_minimum_version_guards_every_inbox_action_without_disabling_clea
                 .get_mut(&foyer::Scope::Community)
                 .unwrap(),
             live_now(),
-            feed(now, 3, "999.0.0"),
+            feed(now, 3),
         )
         .await;
+    crate::door::set_client_version("0.0.1");
     for action in ["runtime.status", "vault.lock", "client.revoke"] {
         assert!(matches!(
             door.dispatch(
@@ -291,7 +294,7 @@ fn live_now() -> u64 {
 #[tokio::test]
 async fn current_original_charter_allows_real_committed_inbox_history() {
     let now = 2_000_000_000;
-    let server = PublicFeed::new(feed(now, 1, env!("CARGO_PKG_VERSION"))).await;
+    let server = PublicFeed::new(feed(now, 1)).await;
     let foyer = server.foyer(now).await;
     let mut current = foyer.current_policy();
     let (mut owner, _, checks) = open_fixture().await;
@@ -323,8 +326,12 @@ async fn current_original_charter_allows_real_committed_inbox_history() {
 
 #[tokio::test]
 async fn minimum_version_raised_while_real_keys_wait_withholds_completed_history() {
+    crate::door::with_client_version(env!("CARGO_PKG_VERSION"), raised_while_keys_wait()).await;
+}
+
+async fn raised_while_keys_wait() {
     let now = 2_000_000_000;
-    let server = PublicFeed::new(feed(now, 1, env!("CARGO_PKG_VERSION"))).await;
+    let server = PublicFeed::new(feed(now, 1)).await;
     let mut foyer = server.foyer(now).await;
     let mut current = foyer.current_policy();
     let (mut owner, gate, checks) = open_fixture().await;
@@ -347,9 +354,8 @@ async fn minimum_version_raised_while_real_keys_wait_withholds_completed_history
     ));
     assert!(read.as_mut().now_or_never().is_none());
     assert_eq!(checks.get(), 1);
-    server
-        .refresh(&mut foyer, now, feed(now, 2, "999.0.0"))
-        .await;
+    server.refresh(&mut foyer, now, feed(now, 2)).await;
+    crate::door::set_client_version("0.0.1");
     drop(held);
     assert_eq!(read.await.err(), Some(ErrorCode::UnsupportedVersion));
     Box::new(owner).lock().await;
@@ -361,7 +367,7 @@ async fn minimum_version_raised_while_real_keys_wait_withholds_completed_history
 async fn expired_grant_regressed_clock_or_disposed_current_foyer_withhold_real_waited_reads() {
     for failure in [0, 1, 2] {
         let now = 2_000_000_000;
-        let server = PublicFeed::new(feed(now, 1, env!("CARGO_PKG_VERSION"))).await;
+        let server = PublicFeed::new(feed(now, 1)).await;
         let foyer = server.foyer(now).await;
         let mut current = foyer.current_policy();
         let (mut owner, gate, checks) = open_fixture().await;

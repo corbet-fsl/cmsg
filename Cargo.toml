@@ -93,6 +93,7 @@ cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "main", de
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
+cmsg = { path = ".", features = ["client-version-fixture"] }
 cpky = { git = "https://git.corbet.ch/corbet-foss/cpky.git", branch = "main", features = ["test-authenticator"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
@@ -140,6 +141,9 @@ private-tor-fixture = ["native-tor"]
 # Test only: named interruption points in the composer (door::interrupt) for kill-and-resume
 # harnesses. Production builds never enable it.
 interrupt-points = []
+# Test only: run a future as an older client (`door::with_client_version`) to exercise the
+# minimum-client-version gate. Always enabled for this crate's own tests; production builds never enable it.
+client-version-fixture = []
 browser-tor = ["ckmg/browser-tor", "cmsh/tor-records", "dep:ctrn"]
 
 [[example]]

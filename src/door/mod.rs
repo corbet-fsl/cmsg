@@ -21,6 +21,8 @@ mod composition;
 pub mod courier;
 mod creating;
 mod current;
+#[cfg(feature = "client-version-fixture")]
+pub use current::{set_client_version, with_client_version};
 pub mod device_join;
 pub mod device_pair;
 mod device_session;

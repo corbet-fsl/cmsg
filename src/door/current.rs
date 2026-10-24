@@ -8,12 +8,40 @@ pub(super) struct Scope<'a> {
     pub floor: u64,
 }
 
+#[cfg(feature = "client-version-fixture")]
+tokio::task_local! {
+    static CLIENT_VERSION: std::cell::RefCell<String>;
+}
+
+/// Run `future` as a client of the given (older) version. Test fixture only.
+#[cfg(feature = "client-version-fixture")]
+pub async fn with_client_version<F: std::future::Future>(version: &str, future: F) -> F::Output {
+    CLIENT_VERSION
+        .scope(std::cell::RefCell::new(version.to_owned()), future)
+        .await
+}
+
+/// Change the version the running future reports (a requirement raised mid-test).
+/// Test fixture only; a no-op outside [`with_client_version`].
+#[cfg(feature = "client-version-fixture")]
+pub fn set_client_version(version: &str) {
+    let _ = CLIENT_VERSION.try_with(|v| *v.borrow_mut() = version.to_owned());
+}
+
+fn client_version() -> String {
+    #[cfg(feature = "client-version-fixture")]
+    if let Ok(version) = CLIENT_VERSION.try_with(|v| v.borrow().clone()) {
+        return version;
+    }
+    env!("CARGO_PKG_VERSION").to_owned()
+}
+
 pub(super) fn check_version(charter: &cfyr::trust::VerifiedCharter, now: u64) -> Result<()> {
     let settings = clnk::cfrm::crbk::ForumSettings::from_snapshot(
         charter.settings(now).map_err(|_| ErrorCode::Refused)?,
     )
     .map_err(|_| ErrorCode::Refused)?;
-    let version = env!("CARGO_PKG_VERSION")
+    let version = client_version()
         .parse()
         .map_err(|_| ErrorCode::Unavailable)?;
     if !settings.accepts_client(&version) {
@@ -100,4 +128,30 @@ pub(super) async fn read_with<T: 'static, P: ?Sized>(
     let completed = time(&clock, scope.expires, started)?;
     policy(current, &scope, completed)?;
     Ok((result, completed))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cbrd::clnk::cfrm::crbk;
+
+    /// The release requirement (`FORUM_MINIMUM_CLIENT_VERSION`) is met by this crate's own
+    /// version: a runtime never refuses itself, and a bump of either constant is noticed.
+    #[test]
+    fn this_runtime_meets_the_forum_minimum() {
+        let mut book = crbk::Rulebook::default();
+        crbk::define_forum_settings(&mut book).unwrap();
+        let snapshot = crbk::Snapshot {
+            community: "alpha".into(),
+            kind: crbk::SnapshotKind::Settings,
+            revision: 1,
+            policy_epoch: 1,
+            issued: 0,
+            content: book.resolve(&crbk::Values::new()).unwrap(),
+        };
+        let settings = crbk::ForumSettings::from_snapshot(&snapshot).unwrap();
+        let own = env!("CARGO_PKG_VERSION").parse().unwrap();
+        assert!(settings.accepts_client(&own));
+        assert_eq!(client_version(), env!("CARGO_PKG_VERSION"));
+    }
 }

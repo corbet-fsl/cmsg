@@ -148,9 +148,7 @@ impl<A> LateMemberAuthority<A> {
         let board = match request.action {
             Action::SignDeviceEd25519 => !self.account_armed.get(),
             Action::LendProfileCustody => {
-                request.target.is_none()
-                    && request.statement.is_none()
-                    && request.signing.is_none()
+                request.target.is_none() && request.statement.is_none() && request.signing.is_none()
             }
             _ => false,
         };
