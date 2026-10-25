@@ -506,12 +506,7 @@ impl<'p> PreparedEnrollment<'p> {
     pub async fn submit_for_initialization(mut self) -> Result<SubmittedEnrollment<'p>> {
         let expected = self.expected_entry()?;
         let wire = serde_json::to_value(&self.delegation).map_err(|_| ErrorCode::InvalidRequest)?;
-        let response = self
-            .admission
-            .lease
-            .submit_enrollment(wire, now)
-            .await
-            .map_err(|_| ErrorCode::Reconcile)?;
+        let response = Box::pin(submit_with_resend(&mut self.admission.lease, wire)).await?;
         let response: enrollment::EnrollmentEntry =
             serde_json::from_value(response).map_err(|_| ErrorCode::Reconcile)?;
         let current = self.expected_entry().map_err(|_| ErrorCode::Reconcile)?;
@@ -562,5 +557,123 @@ impl<'p> PreparedEnrollment<'p> {
             return Err(ErrorCode::Unauthorized);
         }
         Ok(output)
+    }
+}
+
+/// The two enrollment sends of one lease: the first, and the single resend of the
+/// identical stored bytes.
+trait EnrollmentPort {
+    async fn first(
+        &mut self,
+        wire: serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, cfyr::Error>;
+    async fn resend(&mut self) -> std::result::Result<serde_json::Value, cfyr::Error>;
+}
+
+impl EnrollmentPort for cfyr::membership::AccountGrantLease<'_, Transport> {
+    async fn first(
+        &mut self,
+        wire: serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, cfyr::Error> {
+        self.submit_enrollment(wire, now).await
+    }
+    async fn resend(&mut self) -> std::result::Result<serde_json::Value, cfyr::Error> {
+        self.resend_enrollment(now).await
+    }
+}
+
+/// An uncertain `account_enroll` (Reconcile: the write may have been applied) is sent
+/// once more with the identical stored bytes, within the `GENESIS_REPREPARES`
+/// budget. The owner registry answers an identical replay with the original entry
+/// and refuses different content, so a resend never creates a second enrollment.
+/// Any other failure, or a failed resend, ends as Reconcile.
+async fn submit_with_resend(
+    port: &mut impl EnrollmentPort,
+    wire: serde_json::Value,
+) -> Result<serde_json::Value> {
+    const _: () = assert!(super::account::GENESIS_REPREPARES >= 1);
+    match port.first(wire).await {
+        Ok(value) => Ok(value),
+        Err(cfyr::Error::Reconcile) => port.resend().await.map_err(|_| ErrorCode::Reconcile),
+        Err(_) => Err(ErrorCode::Reconcile),
+    }
+}
+
+#[cfg(test)]
+mod resend_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    struct Fake {
+        first: std::result::Result<Value, cfyr::Error>,
+        resend: std::result::Result<Value, cfyr::Error>,
+        sent: Vec<Value>,
+        resends: usize,
+    }
+
+    impl Fake {
+        fn new(
+            first: std::result::Result<Value, cfyr::Error>,
+            resend: std::result::Result<Value, cfyr::Error>,
+        ) -> Self {
+            Self {
+                first,
+                resend,
+                sent: Vec::new(),
+                resends: 0,
+            }
+        }
+    }
+
+    impl EnrollmentPort for Fake {
+        async fn first(&mut self, wire: Value) -> std::result::Result<Value, cfyr::Error> {
+            self.sent.push(wire);
+            self.first.clone()
+        }
+        async fn resend(&mut self) -> std::result::Result<Value, cfyr::Error> {
+            self.resends += 1;
+            self.resend.clone()
+        }
+    }
+
+    fn block<T>(f: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(f)
+    }
+
+    #[test]
+    fn reconcile_is_resent_once_and_the_resend_success_is_the_result() {
+        let mut port = Fake::new(Err(cfyr::Error::Reconcile), Ok(json!("original")));
+        let out = block(submit_with_resend(&mut port, json!({"d": 1})));
+        assert_eq!(out, Ok(json!("original")));
+        assert_eq!((port.sent.len(), port.resends), (1, 1));
+    }
+
+    #[test]
+    fn a_first_success_is_never_resent() {
+        let mut port = Fake::new(Ok(json!(1)), Ok(json!(2)));
+        assert_eq!(
+            block(submit_with_resend(&mut port, json!({}))),
+            Ok(json!(1))
+        );
+        assert_eq!(port.resends, 0);
+    }
+
+    #[test]
+    fn persistent_failure_is_resent_exactly_once_then_surfaces() {
+        let mut port = Fake::new(Err(cfyr::Error::Reconcile), Err(cfyr::Error::Reconcile));
+        let out = block(submit_with_resend(&mut port, json!({})));
+        assert_eq!(out, Err(ErrorCode::Reconcile));
+        assert_eq!((port.sent.len(), port.resends), (1, 1));
+    }
+
+    #[test]
+    fn other_failures_are_not_resent() {
+        let mut port = Fake::new(Err(cfyr::Error::Unauthorized), Ok(json!(2)));
+        let out = block(submit_with_resend(&mut port, json!({})));
+        assert_eq!(out, Err(ErrorCode::Reconcile));
+        assert_eq!(port.resends, 0);
     }
 }
