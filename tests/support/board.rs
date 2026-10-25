@@ -24,7 +24,6 @@ fn configured() -> (Door, ClientToken) {
             member_origin: Some("https://example.test".into()),
             read_policy: ReadPolicy {
                 admission_action: "fixture".into(),
-                maximum_snapshot_age: 60,
             },
             #[cfg(feature = "ohttp")]
             ohttp: crate::door::ohttp::fixture_endpoint(),

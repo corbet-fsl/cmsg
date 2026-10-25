@@ -124,11 +124,7 @@ fn own_handover<B: cwst::backend::Backend>(
 ) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
     let policy = context
         .charter
-        .admission_policy(
-            context.policy.admission_action,
-            now,
-            context.policy.maximum_snapshot_age,
-        )
+        .current_admission_policy(context.policy.admission_action, now)
         .map_err(|_| ErrorCode::Refused)?;
     let signed_schema = context
         .charter

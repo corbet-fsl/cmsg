@@ -52,8 +52,9 @@ None accepts a publication, member identity, revision floor, device signature,
 policy snapshot, possession object or authority verdict. Raw network search
 entries are never public results; Search produces its original Discovery DTOs.
 
-Forum configuration requires an explicit `read_policy` (admission action and
-maximum signed-snapshot age); missing, empty or zero policy values refuse.
+Forum configuration requires an explicit `read_policy` (the admission action); a missing or
+empty action refuses, and a `maximum_snapshot_age` key is refused as an unknown field: the snapshot age
+limit is the code constant `cchr::MAXIMUM_SNAPSHOT_AGE`, never a setting.
 Trusted construction uses `Door::configure_board_with_owner` with that
 configuration and the shared `board::CommittedOwner`, or
 `Door::bind_board_with_owner` for an already constructed original Board.

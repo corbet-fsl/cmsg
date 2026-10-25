@@ -167,7 +167,7 @@ impl Door {
 }
 
 fn validate_policy(policy: &ReadPolicy) -> Result<()> {
-    if policy.admission_action.is_empty() || policy.maximum_snapshot_age == 0 {
+    if policy.admission_action.is_empty() {
         return Err(ErrorCode::InvalidRequest);
     }
     Ok(())

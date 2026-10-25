@@ -342,7 +342,6 @@ async fn browser_owner_has_private_pairing_bounded_admission_and_drained_disposa
             member_origin: None,
             read_policy: board::ReadPolicy {
                 admission_action: "fixture".into(),
-                maximum_snapshot_age: 60,
             },
         }),
         services: vec![browser::Service {

@@ -32,13 +32,13 @@ impl<B: cwst::backend::Backend> CommittedRead<'_, B> {
     }
 }
 
-/// Explicit trusted deployment policy. No default action or snapshot age exists;
-/// neither field is accepted by a public Board action.
+/// Explicit trusted deployment policy. No default action exists and it is not accepted by a public
+/// Board action. The snapshot age is not configurable: it is `cchr::MAXIMUM_SNAPSHOT_AGE`; a
+/// configuration that still names it is refused as an unknown field.
 #[derive(Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadPolicy {
     pub admission_action: String,
-    pub maximum_snapshot_age: u64,
 }
 
 /// Original device signature with its live exact-command signing intent. The
@@ -337,7 +337,6 @@ impl Door {
         if board.community() != self.config.community
             || self.boards.contains_key(origin)
             || policy.admission_action.is_empty()
-            || policy.maximum_snapshot_age == 0
         {
             return Err(ErrorCode::InvalidRequest);
         }
@@ -396,7 +395,6 @@ pub(super) fn with_context<B: cwst::backend::Backend, T>(
                 charter,
                 policy: cbrd::ReadPolicy {
                     admission_action: &policy.admission_action,
-                    maximum_snapshot_age: policy.maximum_snapshot_age,
                 },
                 contact: read.contact,
             };
@@ -439,11 +437,7 @@ fn publication<B: cwst::backend::Backend>(
 ) -> Result<Vec<u8>> {
     let policy = context
         .charter
-        .admission_policy(
-            context.policy.admission_action,
-            now,
-            context.policy.maximum_snapshot_age,
-        )
+        .current_admission_policy(context.policy.admission_action, now)
         .map_err(|_| ErrorCode::Refused)?;
     let signed_schema = context
         .charter

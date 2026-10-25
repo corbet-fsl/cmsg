@@ -17,7 +17,6 @@ fn forum() -> Configuration {
         member_origin: None,
         read_policy: ReadPolicy {
             admission_action: "fixture".into(),
-            maximum_snapshot_age: 60,
         },
         #[cfg(feature = "ohttp")]
         ohttp: crate::door::ohttp::fixture_endpoint(),
@@ -53,7 +52,6 @@ async fn restoring_host_retains_validated_board_until_custody_is_bound() {
     assert!(door.vaults.is_empty());
     let pending = pending.unwrap();
     assert_eq!(pending.policy.admission_action, "fixture");
-    assert_eq!(pending.policy.maximum_snapshot_age, 60);
     assert_eq!(pending.board.community(), "alpha");
     assert_eq!(pending.board.status().connection, clnk::State::Disconnected);
     let (door, pending) = configuration(None).construct_restoring().unwrap();
@@ -63,10 +61,9 @@ async fn restoring_host_retains_validated_board_until_custody_is_bound() {
 
 #[tokio::test]
 async fn restoring_host_refuses_invalid_forum_policy_before_creating_custody() {
-    for (action, age) in [("", 60), ("fixture", 0)] {
+    {
         let mut invalid = forum();
-        invalid.read_policy.admission_action = action.into();
-        invalid.read_policy.maximum_snapshot_age = age;
+        invalid.read_policy.admission_action = String::new();
         assert!(matches!(
             configuration(Some(invalid)).construct_restoring(),
             Err(ErrorCode::InvalidRequest)
@@ -80,6 +77,10 @@ async fn restoring_host_refuses_invalid_forum_policy_before_creating_custody() {
     assert!(serde_json::from_value::<Configuration>(wire).is_err());
     let mut wire = serde_json::to_value(forum()).unwrap();
     wire["read_policy"]["accepted"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<Configuration>(wire).is_err());
+    // The snapshot age limit is a code constant: a configuration naming it is refused.
+    let mut wire = serde_json::to_value(forum()).unwrap();
+    wire["read_policy"]["maximum_snapshot_age"] = serde_json::json!(60);
     assert!(serde_json::from_value::<Configuration>(wire).is_err());
 }
 
