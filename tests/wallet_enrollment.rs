@@ -34,8 +34,31 @@ fn fixture() -> Value {
 /// capacity; running them concurrently makes admission depend on timing.
 static FIXTURE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-#[tokio::test(flavor = "multi_thread")]
-async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community() {
+// This test drives the full wallet lifecycle in one thread (enrollment, login,
+// passport issuance/cancel/re-issue, recovery, community join with real ceremonies
+// against the foyer fixture). Its future exceeds the default 2 MiB test-thread stack
+// even when boxed (the async state machine is constructed on the stack), so it runs
+// on an explicit 8 MiB thread, matching the server runtime's 8 MiB workers that xtask
+// already uses for test runs (RUST_MIN_STACK=8388608).
+#[test]
+fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community() {
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("wallet enrollment runtime")
+                .block_on(
+                    same_certified_wallet_restores_its_holder_issues_and_joins_a_community_body(),
+                )
+        })
+        .expect("spawn wallet enrollment thread")
+        .join()
+        .expect("wallet enrollment thread");
+}
+
+async fn same_certified_wallet_restores_its_holder_issues_and_joins_a_community_body() {
     let _gate = FIXTURE_GATE.lock().await;
     tokio::time::timeout(Duration::from_secs(180), async {
         let f = fixture();
