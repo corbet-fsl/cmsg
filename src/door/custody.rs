@@ -156,9 +156,55 @@ pub struct TransportAuthority<C> {
     last_time: u64,
 }
 
+/// Closes the session lifetime for good unless the check was accepted or could not
+/// be determined. An undetermined check (`Error::Unavailable`: Records, membership
+/// or policy could not be read right now) refuses only this operation: the lifetime
+/// stays open, nothing is cached, and the next operation checks afresh. Every
+/// definite negative (revoked, unauthorized, expired, clock) and any cancelled
+/// check close it, as before.
 struct CheckGuard {
     closed: Rc<Cell<bool>>,
     accepted: bool,
+}
+impl CheckGuard {
+    fn new(lifetime: &CustodyLifetime) -> Self {
+        Self {
+            closed: lifetime.closed.clone(),
+            accepted: false,
+        }
+    }
+    /// The verdict comes from the check's own result type, never from a message.
+    fn settle<T>(&mut self, result: &Result<T, Error>) {
+        self.accepted = matches!(result, Ok(_) | Err(Error::Unavailable));
+    }
+}
+
+/// A Foyer (membership) refusal: only "cannot be determined now" is undetermined.
+fn foyer_refusal(error: cfyr::Error) -> Error {
+    match error {
+        cfyr::Error::Unavailable | cfyr::Error::Throttled => Error::Unavailable,
+        cfyr::Error::Expired => Error::Expired,
+        _ => Error::Unauthorized,
+    }
+}
+/// A Records refusal: only an unreachable record engine is undetermined.
+fn records_refusal(error: cvlt::RecordError) -> Error {
+    match error {
+        cvlt::RecordError::Unavailable => Error::Unavailable,
+        cvlt::RecordError::Invalid | cvlt::RecordError::Limit => Error::Unauthorized,
+    }
+}
+/// A community policy (trust feed) refusal: not yet current or momentarily busy or
+/// unreachable is undetermined; a trust failure is a definite negative.
+fn policy_refusal(error: cfyr::trust::Error) -> Error {
+    match error {
+        cfyr::trust::Error::Unavailable
+        | cfyr::trust::Error::Busy
+        | cfyr::trust::Error::Timeout
+        | cfyr::trust::Error::Network
+        | cfyr::trust::Error::Trust(cchr::Error::Unavailable) => Error::Unavailable,
+        _ => Error::Unauthorized,
+    }
 }
 impl Drop for CheckGuard {
     fn drop(&mut self) {
@@ -181,13 +227,10 @@ impl<C: Clock> ckmg::Authority for TransportAuthority<C> {
         {
             return Err(Error::Unauthorized);
         }
-        let mut guard = CheckGuard {
-            closed: self.lifetime.closed.clone(),
-            accepted: false,
-        };
-        self.observe(&request).await?;
-        guard.accepted = true;
-        Ok(())
+        let mut guard = CheckGuard::new(&self.lifetime);
+        let result = self.observe(&request).await.map(|_| ());
+        guard.settle(&result);
+        result
     }
 }
 
@@ -220,7 +263,7 @@ impl<C: Clock> TransportAuthority<C> {
         if failed_clock {
             return Err(Error::Clock);
         }
-        let observed = observed.map_err(|_| Error::Unavailable)?;
+        let observed = observed.map_err(foyer_refusal)?;
         let after = self.clock.now()?;
         if after < floor {
             return Err(Error::Clock);
@@ -389,6 +432,135 @@ fn pair_base_matches(evidence: &[u8], live: Option<[u8; 32]>) -> bool {
 }
 
 #[cfg(test)]
+mod verdict_tests {
+    use super::{foyer_refusal, policy_refusal, records_refusal, CheckGuard};
+    use ckmg::Error;
+    use std::{cell::Cell, rc::Rc};
+
+    /// Settles one check with `result`, drops the guard and reports whether the
+    /// session lifetime was closed for good.
+    fn closed_after(result: Result<(), Error>) -> bool {
+        let closed = Rc::new(Cell::new(false));
+        let mut guard = CheckGuard {
+            closed: closed.clone(),
+            accepted: false,
+        };
+        guard.settle(&result);
+        drop(guard);
+        closed.get()
+    }
+
+    #[test]
+    fn an_undetermined_check_refuses_the_operation_and_keeps_the_session_open() {
+        assert!(!closed_after(Ok(())));
+        assert!(!closed_after(Err(Error::Unavailable)));
+        // The next operation checks afresh on the same open lifetime.
+        let closed = Rc::new(Cell::new(false));
+        for result in [
+            Err(Error::Unavailable),
+            Ok(()),
+            Err(Error::Unavailable),
+            Ok(()),
+        ] {
+            let mut guard = CheckGuard {
+                closed: closed.clone(),
+                accepted: false,
+            };
+            guard.settle(&result);
+        }
+        assert!(!closed.get());
+    }
+
+    #[test]
+    fn a_definite_negative_or_a_cancelled_check_closes_the_session_for_good() {
+        for error in [
+            Error::Revoked,
+            Error::Unauthorized,
+            Error::Expired,
+            Error::Clock,
+            Error::Limit,
+        ] {
+            assert!(closed_after(Err(error)), "{error:?}");
+        }
+        // A closed lifetime stays closed even when a later check is accepted.
+        let closed = Rc::new(Cell::new(false));
+        let mut guard = CheckGuard {
+            closed: closed.clone(),
+            accepted: false,
+        };
+        guard.settle(&Err::<(), _>(Error::Revoked));
+        drop(guard);
+        let mut guard = CheckGuard {
+            closed: closed.clone(),
+            accepted: false,
+        };
+        guard.settle(&Ok(()));
+        drop(guard);
+        assert!(closed.get());
+        // A check dropped before it settled (cancelled) closes.
+        let cancelled = Rc::new(Cell::new(false));
+        drop(CheckGuard {
+            closed: cancelled.clone(),
+            accepted: false,
+        });
+        assert!(cancelled.get());
+    }
+
+    #[test]
+    fn an_undetermined_verdict_comes_from_the_typed_refusal_not_from_a_message() {
+        use cfyr::trust::Error as Policy;
+        // Undetermined: the answer could not be had right now.
+        assert_eq!(foyer_refusal(cfyr::Error::Unavailable), Error::Unavailable);
+        assert_eq!(foyer_refusal(cfyr::Error::Throttled), Error::Unavailable);
+        assert_eq!(
+            records_refusal(cvlt::RecordError::Unavailable),
+            Error::Unavailable
+        );
+        for undetermined in [
+            Policy::Unavailable,
+            Policy::Busy,
+            Policy::Timeout,
+            Policy::Network,
+            Policy::Trust(cchr::Error::Unavailable),
+        ] {
+            assert_eq!(policy_refusal(undetermined), Error::Unavailable);
+        }
+        // Definite: never reported as undetermined, so the session closes.
+        for definite in [
+            cfyr::Error::Unauthorized,
+            cfyr::Error::Forbidden,
+            cfyr::Error::Refused,
+            cfyr::Error::Reconcile,
+            cfyr::Error::HeldInLobby,
+            cfyr::Error::WrongHost,
+            cfyr::Error::Invalid,
+        ] {
+            assert_eq!(foyer_refusal(definite), Error::Unauthorized, "{definite:?}");
+        }
+        assert_eq!(foyer_refusal(cfyr::Error::Expired), Error::Expired);
+        for definite in [cvlt::RecordError::Invalid, cvlt::RecordError::Limit] {
+            assert_eq!(records_refusal(definite), Error::Unauthorized);
+        }
+        for definite in [
+            Policy::Configuration,
+            Policy::Stopped,
+            Policy::Obsolete,
+            Policy::Response,
+            Policy::Exhausted,
+            Policy::ClockRegression,
+            Policy::BehindAnnouncement,
+            Policy::Trust(cchr::Error::Unauthenticated),
+        ] {
+            assert_eq!(
+                policy_refusal(definite),
+                Error::Unauthorized,
+                "{definite:?}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod pair_tests {
     use super::pair_base_matches;
 
@@ -463,14 +635,55 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
         {
             return Err(Error::Unauthorized);
         }
-        let mut guard = CheckGuard {
-            closed: self.live.lifetime.closed.clone(),
-            accepted: false,
-        };
+        let mut guard = CheckGuard::new(&self.live.lifetime);
+        let result = self.current_lineage(request, signing, pair).await;
+        guard.settle(&result);
+        result
+    }
+
+    async fn check_record_recipient(&mut self, request: Authorization<'_>) -> Result<(), Error> {
+        self.check_scoped_current(request, current_member::Purpose::RecordRecipient)
+            .await
+    }
+    async fn check_device_signing(&mut self, request: Authorization<'_>) -> Result<(), Error> {
+        self.check_scoped_current(request, current_member::Purpose::DeviceSigning)
+            .await
+    }
+    async fn check_account_signing(&mut self, request: Authorization<'_>) -> Result<(), Error> {
+        self.check_scoped_current(request, current_member::Purpose::AccountSigning)
+            .await
+    }
+    fn discard_current_attempt(&mut self) {
+        self.discard_pending_current();
+    }
+    fn check_account_signing_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
+        self.finish_scoped_current(request, current_member::Purpose::AccountSigning)
+    }
+    fn check_record_recipient_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
+        self.finish_scoped_current(request, current_member::Purpose::RecordRecipient)
+    }
+    fn check_device_signing_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
+        self.finish_scoped_current(request, current_member::Purpose::DeviceSigning)
+    }
+    fn check_account_device_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
+        self.finish_scoped_current(request, current_member::Purpose::AccountDevice)
+    }
+}
+
+impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
+    /// The fresh, uncached current check of the generic member actions: live
+    /// membership, the Records lineage and the community policy, then the one-use
+    /// intent. Each step reports its own typed verdict (see `CheckGuard`).
+    async fn current_lineage(
+        &mut self,
+        mut request: Authorization<'_>,
+        signing: bool,
+        pair: bool,
+    ) -> Result<(), Error> {
         self.live.observe(&request).await?;
         // No HTTPS/Store/custody guard survives into this network await. The
         // independent node owner can perform its own fresh transport checks.
-        let read = self.records.read().await.map_err(|_| Error::Unavailable)?;
+        let read = self.records.read().await.map_err(records_refusal)?;
         let (now, membership_expires) = self.live.observe(&request).await?;
         let lifetime = &self.live.lifetime;
         let clock = &mut self.live.clock;
@@ -525,7 +738,7 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
                 }
                 Ok(completed)
             })
-            .map_err(|_| Error::Unavailable)??;
+            .map_err(policy_refusal)??;
         self.live.last_time = completed;
         self.live.lifetime.check(&request)?;
         if signing {
@@ -537,36 +750,7 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
                 .ok_or(Error::Unauthorized)?
                 .consume(&request, &self.live.origin)?;
         }
-        guard.accepted = true;
         Ok(())
-    }
-
-    async fn check_record_recipient(&mut self, request: Authorization<'_>) -> Result<(), Error> {
-        self.check_scoped_current(request, current_member::Purpose::RecordRecipient)
-            .await
-    }
-    async fn check_device_signing(&mut self, request: Authorization<'_>) -> Result<(), Error> {
-        self.check_scoped_current(request, current_member::Purpose::DeviceSigning)
-            .await
-    }
-    async fn check_account_signing(&mut self, request: Authorization<'_>) -> Result<(), Error> {
-        self.check_scoped_current(request, current_member::Purpose::AccountSigning)
-            .await
-    }
-    fn discard_current_attempt(&mut self) {
-        self.discard_pending_current();
-    }
-    fn check_account_signing_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
-        self.finish_scoped_current(request, current_member::Purpose::AccountSigning)
-    }
-    fn check_record_recipient_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
-        self.finish_scoped_current(request, current_member::Purpose::RecordRecipient)
-    }
-    fn check_device_signing_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
-        self.finish_scoped_current(request, current_member::Purpose::DeviceSigning)
-    }
-    fn check_account_device_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
-        self.finish_scoped_current(request, current_member::Purpose::AccountDevice)
     }
 }
 

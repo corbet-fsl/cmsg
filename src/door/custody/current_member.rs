@@ -134,15 +134,24 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
 
     pub(super) async fn check_scoped_current(
         &mut self,
-        mut request: Authorization<'_>,
+        request: Authorization<'_>,
         purpose: Purpose,
     ) -> Result<(), Error> {
         self.discard_pending_current();
         self.live.lifetime.check(&request)?;
-        let mut guard = CheckGuard {
-            closed: self.live.lifetime.closed.clone(),
-            accepted: false,
-        };
+        let mut guard = CheckGuard::new(&self.live.lifetime);
+        let result = self.scoped_current(request, purpose).await;
+        guard.settle(&result);
+        result
+    }
+
+    /// One fresh, uncached check. Each step reports its own typed verdict: only an
+    /// undetermined one (`Error::Unavailable`) leaves the lifetime open.
+    async fn scoped_current(
+        &mut self,
+        mut request: Authorization<'_>,
+        purpose: Purpose,
+    ) -> Result<(), Error> {
         shape(&request, purpose)?;
         let account_armed = self.account.as_ref().is_some_and(|a| a.armed.get());
         match purpose {
@@ -156,7 +165,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         self.live.observe(&request).await?;
         // The node transport can check its own owner while this forced read
         // awaits: no source session guard is retained until after the read.
-        let read = self.records.read().await.map_err(|_| Error::Unavailable)?;
+        let read = self.records.read().await.map_err(records_refusal)?;
         let started = self.live.clock.now()?;
         if started < request.now || started < self.live.last_time {
             return Err(Error::Clock);
@@ -183,7 +192,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         if failed {
             return Err(Error::Clock);
         }
-        let mut lease = observed.map_err(|_| Error::Unavailable)?;
+        let mut lease = observed.map_err(foyer_refusal)?;
         let lifetime = &self.live.lifetime;
         let expected_origin = &self.live.origin;
         let clock = &mut self.live.clock;
@@ -213,7 +222,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         if failed {
             return Err(Error::Clock);
         }
-        let (until, completed) = checked.map_err(|_| Error::Unavailable)?;
+        let (until, completed) = checked.map_err(foyer_refusal)?;
         if completed >= until? {
             return Err(Error::Expired);
         }
@@ -268,7 +277,6 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         if let Some(reached) = self.reached_current.take() {
             let _ = reached.send(());
         }
-        guard.accepted = true;
         Ok(())
     }
 
@@ -277,11 +285,19 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         request: Authorization<'_>,
         purpose: Purpose,
     ) -> Result<u64, Error> {
-        let mut pending = self.pending_current.take().ok_or(Error::Unauthorized)?;
-        let mut guard = CheckGuard {
-            closed: self.live.lifetime.closed.clone(),
-            accepted: false,
-        };
+        let pending = self.pending_current.take().ok_or(Error::Unauthorized)?;
+        let mut guard = CheckGuard::new(&self.live.lifetime);
+        let result = self.finish_pending(pending, request, purpose);
+        guard.settle(&result);
+        result
+    }
+
+    fn finish_pending(
+        &mut self,
+        mut pending: PendingCurrent,
+        request: Authorization<'_>,
+        purpose: Purpose,
+    ) -> Result<u64, Error> {
         shape(&request, purpose)?;
         if pending.purpose != purpose
             || pending.statement != request.statement
@@ -337,12 +353,11 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         if failed {
             return Err(Error::Clock);
         }
-        let (until, completed) = checked.map_err(|_| Error::Unavailable)?;
+        let (until, completed) = checked.map_err(foyer_refusal)?;
         if completed >= until? {
             return Err(Error::Expired);
         }
         self.live.lifetime.check(&request)?;
-        guard.accepted = true;
         // Taking the attempt releases the held original session on every exit.
         Ok(completed)
     }
