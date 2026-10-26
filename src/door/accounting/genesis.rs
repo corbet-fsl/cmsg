@@ -26,16 +26,40 @@ pub struct PreparedAccount<'p> {
 pub(super) fn proof_window(policy: &cblc::accounting::AccountPolicy, now: u64) -> Result<u64> {
     Ok(policy
         .proof_valid_until(now)
-        .map_err(|_| ErrorCode::Unauthorized)?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?
         .saturating_sub(now)
         .min(cblc::accounting::GENESIS_PROOF_WINDOW_SECONDS))
 }
 
 fn hex<const N: usize>(value: &str) -> Result<[u8; N]> {
     HEX.decode(value.as_bytes())
-        .map_err(|_| ErrorCode::Unauthorized)?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?
         .try_into()
-        .map_err(|_| ErrorCode::Unauthorized)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })
 }
 
 /// The wallet engine's view of the community's signed account policy.
@@ -79,16 +103,40 @@ pub(super) fn roster_row(tree: &enrollment::EnrollmentTree, index: usize) -> Res
     Ok(Enrollment {
         member: B64
             .decode(row.member_id.as_bytes())
-            .map_err(|_| ErrorCode::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?
             .try_into()
-            .map_err(|_| ErrorCode::Unauthorized)?,
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?,
         key: hex(&row.account_key)?,
         secret_hash: hex(&row.secret_hash)?,
         starts_at: row.issued_at,
         expires_at: row.expires_at,
         delegation_digest: hex(&row.delegation_digest)?,
         leaf: *tree.leaves().get(index).ok_or(ErrorCode::Unauthorized)?,
-        index: index.try_into().map_err(|_| ErrorCode::Unauthorized)?,
+        index: index.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?,
         path: *tree.paths().get(index).ok_or(ErrorCode::Unauthorized)?,
     })
 }
@@ -107,9 +155,25 @@ fn context(
     }
     let member = B64
         .decode(row.member_id.as_bytes())
-        .map_err(|_| ErrorCode::Unauthorized)?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?
         .try_into()
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     let policy = &current.material.policy.account;
     let extension = &current.material.extension_policy;
     Ok(GenesisContext {
@@ -156,9 +220,14 @@ impl<'p> CurrentEnrollment<'p> {
             .ok()
             .flatten()
             .and_then(|raw| {
-                super::super::vouching::Book::decode(Some(raw.as_slice()))
-                    .ok()?
-                    .vouchee_bond()
+                let book = match super::super::vouching::Book::decode(Some(raw.as_slice())) {
+                    Ok(book) => book,
+                    Err(__cause) => {
+                        crate::door::cause::print(file!(), line!(), "Book::decode", &__cause);
+                        return None;
+                    }
+                };
+                book.vouchee_bond()
             })
             .map(|(sponsor, secret)| VoucherBond { sponsor, secret });
         let (context, material, material_digest, origin, checked, window) =
@@ -182,7 +251,15 @@ impl<'p> CurrentEnrollment<'p> {
             .await?
             .prepare_community_genesis(context.clone(), checked)
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let mut prepared = PreparedAccount {
             enrollment: self,
             candidate,
@@ -254,7 +331,15 @@ impl PreparedAccount<'_> {
             .await?
             .check_community_genesis(&self.candidate, &self.context, checked)
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         self.enrollment.refresh().await?;
         account.check(&self.origin).await?;
         // The final current owner cut follows all external work. A later proof
@@ -287,7 +372,15 @@ impl PreparedAccount<'_> {
             .policy
             .account
             .proof_valid_until(self.context.checked_at)
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         if final_now < checked || completed_at < final_now {
             return Err(ErrorCode::Unauthorized);
         }
@@ -329,7 +422,15 @@ impl Drop for Attempt<'_> {
 ))]
 pub(super) fn operation() -> Result<[u8; 32]> {
     let mut id = [0u8; 32];
-    getrandom::fill(&mut id).map_err(|_| ErrorCode::Unavailable)?;
+    getrandom::fill(&mut id).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     if id == [0; 32] {
         return Err(ErrorCode::Unavailable);
     }
@@ -402,14 +503,30 @@ mod proven {
                     .await?
                     .prove_community_genesis(candidate, &context, native, || Ok(now()))
                     .await
-                    .map_err(|_| ErrorCode::Unauthorized)?,
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })?,
                 #[cfg(feature = "browser-prover")]
                 crate::door::account::GenesisProver::Browser(browser) => account
                     .vault()
                     .await?
                     .prove_community_genesis_browser(candidate, &context, browser, || Ok(now()))
                     .await
-                    .map_err(|_| ErrorCode::Unauthorized)?,
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })?,
                 crate::door::account::GenesisProver::None(never, _) => match never {},
             };
             Ok(ProvenAccount {
@@ -485,7 +602,15 @@ mod proven {
                     .await?
                     .community_genesis_material(&self.proof, &self.context, checked)
                     .await
-                    .map_err(|_| ErrorCode::Unauthorized)?;
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })?;
                 ProvenGenesis::from_material(&material, &policy)?
             };
             let signed = self
@@ -512,7 +637,15 @@ mod proven {
                     now(),
                 )
                 .await
-                .map_err(|_| ErrorCode::Reconcile)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                })?;
             Ok(StagedRequest { signed })
         }
 
@@ -543,14 +676,38 @@ mod proven {
             let trust = self
                 .enrollment
                 .with_verified(|_, _, _, current| response_trust(&current.material))
-                .map_err(|_| ErrorCode::Reconcile)?
-                .map_err(|_| ErrorCode::Reconcile)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                })?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                })?;
             account
                 .vault()
                 .await?
                 .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
                 .await
-                .map_err(|_| ErrorCode::Reconcile)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                })?;
             Ok(response.acceptance().accepted_at)
         }
     }

@@ -13,6 +13,7 @@ pub mod accounting;
 mod actor;
 pub mod board;
 pub mod browser;
+pub(crate) mod cause;
 mod communities;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub mod composer;
@@ -185,7 +186,15 @@ impl Configuration {
 }
 
 fn validate_origin(value: &str) -> Result<()> {
-    let parsed = url::Url::parse(value).map_err(|_| ErrorCode::InvalidRequest)?;
+    let parsed = url::Url::parse(value).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     let local = parsed
         .host_str()
         .is_some_and(|host| host == "localhost" || host == "127.0.0.1" || host == "[::1]");
@@ -210,11 +219,15 @@ impl ClientToken {
         if bytes.len() != 43 {
             return Err(ErrorCode::Unauthorized);
         }
-        let _decoded = Zeroizing::new(
-            BASE64URL_NOPAD
-                .decode(&bytes)
-                .map_err(|_| ErrorCode::Unauthorized)?,
-        );
+        let _decoded = Zeroizing::new(BASE64URL_NOPAD.decode(&bytes).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?);
         // Strict 43-byte base64url is exactly 32 decoded bytes and guarantees
         // ASCII, so UTF-8 is infallible.
         let text = std::str::from_utf8(&bytes).expect("base64url is ASCII");
@@ -531,7 +544,15 @@ impl Door {
             return Err(ErrorCode::Capacity);
         }
         let mut bytes = Zeroizing::new([0u8; 32]);
-        getrandom::fill(bytes.as_mut()).map_err(|_| ErrorCode::Unavailable)?;
+        getrandom::fill(bytes.as_mut()).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let token = ClientToken(Zeroizing::new(BASE64URL_NOPAD.encode(bytes.as_ref())));
         self.insert_client(token, origin, actions, expires)
     }
@@ -610,8 +631,15 @@ impl Door {
             version: u16,
             body: Box<serde_json::value::RawValue>,
         }
-        let request: WireInvocation =
-            serde_json::from_slice(bytes).map_err(|_| ErrorCode::InvalidRequest)?;
+        let request: WireInvocation = serde_json::from_slice(bytes).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let local = registry::action(&request.action);
         let remote = foyer::action(&request.action);
         let version = local

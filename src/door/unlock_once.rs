@@ -37,7 +37,15 @@ impl DeviceUnlock {
         let (credential, outcome) = client
             .sign_in(options)
             .await
-            .map_err(|_| ErrorCode::Refused)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Refused",
+                    ErrorCode::Refused,
+                    &__cause,
+                )
+            })?
             .into_parts();
         let VaultOutcome::Ready(unlock) = outcome else {
             return Err(ErrorCode::Unavailable);
@@ -61,7 +69,15 @@ impl DeviceUnlock {
     /// hold it: the wallet vault needs the passkey (`Unauthorized`).
     pub fn wallet_opening(&self) -> Result<cvlt::PreparedOpen> {
         match &self.held {
-            Held::Ceremony(wallet) => wallet.wallet().map_err(|_| ErrorCode::Refused),
+            Held::Ceremony(wallet) => wallet.wallet().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Refused",
+                    ErrorCode::Refused,
+                    &__cause,
+                )
+            }),
             Held::Resumed(_) => Err(ErrorCode::Unauthorized),
         }
     }
@@ -79,7 +95,15 @@ impl DeviceUnlock {
             Held::Ceremony(wallet) => wallet.community(fingerprint, scope),
             Held::Resumed(bundle) => bundle.community(fingerprint, scope),
         }
-        .map_err(|_| ErrorCode::InvalidRequest)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })
     }
 
     /// The wallet passkey's unlock. A resumed start does not hold it: the wallet vault
@@ -100,15 +124,38 @@ impl DeviceUnlock {
         address: &str,
         fingerprint: &[u8; 32],
     ) -> Result<cvlt::Outcome> {
-        let (mut record, cipher) = self
-            .wallet_unlock()?
-            .index_record(network)
-            .map_err(|_| ErrorCode::Unavailable)?;
-        let entry = cvlt::MembershipEntry::new(address, *fingerprint)
-            .map_err(|_| ErrorCode::InvalidRequest)?;
+        let (mut record, cipher) =
+            self.wallet_unlock()?
+                .index_record(network)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
+        let entry = cvlt::MembershipEntry::new(address, *fingerprint).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         cvlt::add_entry(&mut record, &cipher, &mut ckmg::SystemEntropy, entry)
             .await
-            .map_err(|_| ErrorCode::Unavailable)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })
     }
 
     /// The memberships the wallet's index lists. `None`: the record is unavailable, which is
@@ -117,14 +164,30 @@ impl DeviceUnlock {
         &self,
         network: N,
     ) -> Result<Option<cvlt::MembershipIndex>> {
-        let (mut record, cipher) = self
-            .wallet_unlock()?
-            .index_record(network)
-            .map_err(|_| ErrorCode::Unavailable)?;
+        let (mut record, cipher) =
+            self.wallet_unlock()?
+                .index_record(network)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
         cvlt::read_index(&mut record, &cipher)
             .await
             .map(|read| read.map(|(_, index)| index))
-            .map_err(|_| ErrorCode::Unavailable)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })
     }
 
     /// The community device key (lineage device) this device presents in `scope`:
@@ -132,7 +195,15 @@ impl DeviceUnlock {
     pub fn community_device(&self, fingerprint: &[u8; 32], scope: &str) -> Result<ckmg::PublicKey> {
         self.community_opening(fingerprint, scope)?
             .device()
-            .map_err(|_| ErrorCode::InvalidRequest)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })
     }
 }
 
@@ -214,7 +285,10 @@ impl LocalData for LocalDirectory {
         match std::fs::remove_dir_all(&self.0) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(_) => Err(ErrorCode::Unavailable),
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "Err ErrorCode::Unavailable", &__cause);
+                Err(ErrorCode::Unavailable)
+            }
         }
     }
 }
@@ -229,7 +303,15 @@ impl LocalData for LocalDatabases {
         let names: Vec<&str> = self.0.iter().map(String::as_str).collect();
         cvlt::erase_local_databases(&names)
             .await
-            .map_err(|_| ErrorCode::Unavailable)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })
     }
 }
 
@@ -261,19 +343,38 @@ pub async fn persist<S: UnlockStore>(
     policy: UnlockPolicy,
 ) -> Result<()> {
     if policy.ask_every_start {
-        return store.forget().await.map_err(|_| ErrorCode::Unavailable);
+        return store.forget().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        });
     }
     let bundle = match &unlock.held {
-        Held::Ceremony(wallet) => wallet
-            .resume_bundle(joined)
-            .map_err(|_| ErrorCode::InvalidRequest)?,
+        Held::Ceremony(wallet) => wallet.resume_bundle(joined).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?,
         // A resumed start already persisted its bundle; it cannot add communities.
         Held::Resumed(_) => return Ok(()),
     };
-    store
-        .save(&bundle)
-        .await
-        .map_err(|_| ErrorCode::Unavailable)
+    store.save(&bundle).await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
 }
 
 /// "Lock this device" (placeholder wording): wipe the persisted unlock and drop the
@@ -281,7 +382,15 @@ pub async fn persist<S: UnlockStore>(
 /// the community sessions is the caller's logout.
 pub async fn lock<S: UnlockStore>(store: &S, unlock: DeviceUnlock) -> Result<()> {
     drop(unlock);
-    store.forget().await.map_err(|_| ErrorCode::Unavailable)
+    store.forget().await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
 }
 
 /// The device learned it was revoked (always ordered by the user from another device):
@@ -294,7 +403,15 @@ pub async fn revoked<S: UnlockStore, L: LocalData>(
     drop(unlock);
     let forgotten = store.forget().await;
     local.erase().await?;
-    forgotten.map_err(|_| ErrorCode::Unavailable)
+    forgotten.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

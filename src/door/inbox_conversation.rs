@@ -92,7 +92,15 @@ pub(crate) enum Answer {
 
 pub(super) fn operation() -> Result<[u8; 32]> {
     let mut bytes = [0; 32];
-    Entropy::fill(&mut ckmg::SystemEntropy, &mut bytes).map_err(|_| ErrorCode::Unavailable)?;
+    Entropy::fill(&mut ckmg::SystemEntropy, &mut bytes).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     Ok(bytes)
 }
 

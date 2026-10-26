@@ -128,7 +128,15 @@ impl NativeDeployment {
     /// The same from the private-network fixture document (`TOR_FIXTURE_JSON` of the
     /// ctrn driver), which is a serialized Arti client configuration.
     pub fn with_private_network_json(self, fixture: &[u8]) -> Result<Self> {
-        let network = serde_json::from_slice(fixture).map_err(|_| ErrorCode::InvalidRequest)?;
+        let network = serde_json::from_slice(fixture).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         self.with_private_network(network)
     }
 }
@@ -184,7 +192,15 @@ impl NativeDeployment {
                 let community = self.runtime.community.clone();
                 let mut roots = Vec::new();
                 for file in &self.tls_root_files {
-                    roots.push(std::fs::read(file).map_err(|_| ErrorCode::Unavailable)?);
+                    roots.push(std::fs::read(file).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unavailable",
+                            ErrorCode::Unavailable,
+                            &__cause,
+                        )
+                    })?);
                 }
                 let mut runtime = self.runtime;
                 if runtime.role != Role::Member {
@@ -242,8 +258,15 @@ impl TorDeployment {
         {
             return Err(ErrorCode::InvalidRequest);
         }
-        let directory =
-            std::fs::symlink_metadata(&self.store_directory).map_err(|_| ErrorCode::Unavailable)?;
+        let directory = std::fs::symlink_metadata(&self.store_directory).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         if !directory.is_dir() {
             return Err(ErrorCode::InvalidRequest);
         }
@@ -266,7 +289,15 @@ impl TorDeployment {
             max_payload: self.messages.max_payload,
             timeout_ms: self.messages.timeout_ms,
         };
-        messages.validate().map_err(|_| ErrorCode::InvalidRequest)?;
+        messages.validate().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let storage = self
             .storage
             .map(|storage| -> Result<_> {
@@ -277,8 +308,15 @@ impl TorDeployment {
                     public_per_record: storage.watches.public_per_record,
                     capacity: storage.watches.capacity,
                 };
-                cdht::watches::InboundWatches::new(watches)
-                    .map_err(|_| ErrorCode::InvalidRequest)?;
+                cdht::watches::InboundWatches::new(watches).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::InvalidRequest",
+                        ErrorCode::InvalidRequest,
+                        &__cause,
+                    )
+                })?;
                 Ok((
                     cdht::Capacity {
                         records: storage.records,
@@ -294,10 +332,26 @@ impl TorDeployment {
             remaining = remaining
                 .checked_sub(bytes.len())
                 .ok_or(ErrorCode::Capacity)?;
-            let peer = cdht::rpc::UnverifiedPeerInfoBytes::from_bytes(bytes)
-                .map_err(|_| ErrorCode::InvalidRequest)?;
+            let peer =
+                cdht::rpc::UnverifiedPeerInfoBytes::from_bytes(bytes).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::InvalidRequest",
+                        ErrorCode::InvalidRequest,
+                        &__cause,
+                    )
+                })?;
             peer.verify_extension(&scenario::Verifier)
-                .map_err(|_| ErrorCode::InvalidRequest)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::InvalidRequest",
+                        ErrorCode::InvalidRequest,
+                        &__cause,
+                    )
+                })?;
             bootstrap.push(peer);
         }
         // Same public namespace as browser deployment; never caller-selected.

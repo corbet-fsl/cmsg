@@ -86,8 +86,21 @@ fn whole_millis(value: &JsValue) -> Option<u64> {
 /// The prediction for the stored measurement of this circuit version, announced to the frame.
 async fn forecast_for(id: &str) -> Option<Forecast> {
     let millis = whole_millis(&stored_millis(id).await)?;
-    let forecast = calibration::forecast(millis, GENESIS_PROOF_WINDOW_SECONDS).ok()?;
-    announce("forecast", &serde_json::to_string(&forecast).ok()?);
+    let forecast = match calibration::forecast(millis, GENESIS_PROOF_WINDOW_SECONDS) {
+        Ok(forecast) => forecast,
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "calibration::forecast", &__cause);
+            return None;
+        }
+    };
+    let announced = match serde_json::to_string(&forecast) {
+        Ok(announced) => announced,
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "serde_json::to_string", &__cause);
+            return None;
+        }
+    };
+    announce("forecast", &announced);
     Some(forecast)
 }
 
@@ -127,9 +140,9 @@ impl ProofWorker for WorkerPort {
             }
             // A fresh copy for the transfer; the glue detaches it, the caller zeroizes `input`.
             let bytes = Uint8Array::from(input.as_bytes());
-            let proved = proved_millis(setup, &bytes)
-                .await
-                .map_err(|_| Error::Crypto)?;
+            let proved = proved_millis(setup, &bytes).await.map_err(|__cause| {
+                crate::door::cause::emit(file!(), line!(), "Error::Crypto", Error::Crypto, &__cause)
+            })?;
             let reply = js_sys::Reflect::get(&proved, &JsValue::from_str("reply"))
                 .ok()
                 .and_then(|reply| reply.as_string())
@@ -158,9 +171,15 @@ async fn fetch_checked(
     maximum: u32,
 ) -> std::result::Result<Vec<u8>, ComposeError> {
     let refused = |what: &str| ComposeError::Config(what.into());
-    let bytes = fetch_material(path, maximum)
-        .await
-        .map_err(|_| refused("prover material"))?;
+    let bytes = fetch_material(path, maximum).await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "refused prover material",
+            refused("prover material"),
+            &__cause,
+        )
+    })?;
     let bytes = Uint8Array::new(&bytes).to_vec();
     if data_encoding::HEXLOWER.encode(&Sha256::digest(&bytes)) != sha256 {
         return Err(refused("prover material digest"));
@@ -206,8 +225,15 @@ pub async fn configure(
 /// its circuit, key and setup (the engine checks them): the `BrowserProver`. Without this call
 /// a browser build lends [`RefusingProver`], which refuses every proof before any vault step.
 pub fn lend(config: BrowserProverConfig) -> Result<Arc<dyn AccountProver>> {
-    let prover =
-        BrowserProver::new(config, Arc::new(WorkerPort)).map_err(|_| ErrorCode::Unavailable)?;
+    let prover = BrowserProver::new(config, Arc::new(WorkerPort)).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     Ok(Arc::new(prover))
 }
 
@@ -215,7 +241,15 @@ pub fn lend(config: BrowserProverConfig) -> Result<Arc<dyn AccountProver>> {
 pub async fn lend_deployed(
     deployment: &ProverDeployment,
 ) -> std::result::Result<Arc<dyn AccountProver>, ComposeError> {
-    lend(configure(deployment).await?).map_err(|_| ComposeError::Config("browser prover".into()))
+    lend(configure(deployment).await?).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ComposeError::Config browser prover into",
+            ComposeError::Config("browser prover".into()),
+            &__cause,
+        )
+    })
 }
 
 /// Calibrate this device (decided 2026-10-23): when the page is idle, prove the shipped dummy input
@@ -232,23 +266,54 @@ pub async fn calibrate(
         8 << 20,
     )
     .await?;
-    let prover =
-        BrowserProver::new(config, Arc::new(WorkerPort)).map_err(|_| refused("browser prover"))?;
+    let prover = BrowserProver::new(config, Arc::new(WorkerPort)).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "refused browser prover",
+            refused("browser prover"),
+            &__cause,
+        )
+    })?;
     let measured = calibrate_in_worker(
         prover.setup_json(),
         prover.circuit_id(),
         &Uint8Array::from(&input[..]),
     )
     .await
-    .map_err(|_| refused("calibration"))?;
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "refused calibration",
+            refused("calibration"),
+            &__cause,
+        )
+    })?;
     let Some(millis) = whole_millis(&measured) else {
         return Ok(None);
     };
-    let forecast = calibration::forecast(millis, GENESIS_PROOF_WINDOW_SECONDS)
-        .map_err(|_| refused("calibration"))?;
+    let forecast =
+        calibration::forecast(millis, GENESIS_PROOF_WINDOW_SECONDS).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "refused calibration",
+                refused("calibration"),
+                &__cause,
+            )
+        })?;
     announce(
         "calibrated",
-        &serde_json::to_string(&forecast).map_err(|_| refused("calibration"))?,
+        &serde_json::to_string(&forecast).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "refused calibration",
+                refused("calibration"),
+                &__cause,
+            )
+        })?,
     );
     Ok(Some(forecast))
 }

@@ -50,7 +50,15 @@ fn info(base: &[u8], round: u8) -> Vec<u8> {
 
 fn random<const N: usize>() -> Result<[u8; N]> {
     let mut bytes = [0u8; N];
-    getrandom::fill(&mut bytes).map_err(|_| ErrorCode::Unavailable)?;
+    getrandom::fill(&mut bytes).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     Ok(bytes)
 }
 
@@ -99,11 +107,35 @@ fn seal(
     plaintext: &[u8],
 ) -> Result<Vec<u8>> {
     let plaintext = pad(plaintext).ok_or(ErrorCode::InvalidRequest)?;
-    let pk = <Kem as KemTrait>::PublicKey::from_bytes(pk).map_err(|_| ErrorCode::InvalidRequest)?;
-    let bundle = PskBundle::new(secret, id).map_err(|_| ErrorCode::InvalidRequest)?;
+    let pk = <Kem as KemTrait>::PublicKey::from_bytes(pk).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
+    let bundle = PskBundle::new(secret, id).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     let (enc, ciphertext) =
         hpke::single_shot_seal::<Aead, Kdf, Kem>(&OpModeS::Psk(bundle), &pk, info, &plaintext, id)
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
     let mut out = enc.to_bytes().to_vec();
     out.extend_from_slice(&ciphertext);
     Ok(out)
@@ -119,9 +151,24 @@ fn open(
     if message.len() <= ENC || message.len() > MAX_MESSAGE_BYTES + ENC + 16 {
         return Err(ErrorCode::InvalidRequest);
     }
-    let enc = <Kem as KemTrait>::EncappedKey::from_bytes(&message[..ENC])
-        .map_err(|_| ErrorCode::InvalidRequest)?;
-    let bundle = PskBundle::new(secret, id).map_err(|_| ErrorCode::InvalidRequest)?;
+    let enc = <Kem as KemTrait>::EncappedKey::from_bytes(&message[..ENC]).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
+    let bundle = PskBundle::new(secret, id).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     // Every failure to open is the same refusal: a wrong secret, a forged or an
     // altered message are indistinguishable.
     hpke::single_shot_open::<Aead, Kdf, Kem>(
@@ -133,7 +180,15 @@ fn open(
         id,
     )
     .map(Zeroizing::new)
-    .map_err(|_| ErrorCode::Refused)
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })
     .and_then(unpad)
 }
 
@@ -153,9 +208,15 @@ impl Link {
             .strip_prefix(PREFIX)
             .filter(|_| text.len() <= MAX_LINK_CHARS)
             .ok_or(ErrorCode::InvalidRequest)?;
-        let bytes = BASE64URL_NOPAD
-            .decode(body.as_bytes())
-            .map_err(|_| ErrorCode::InvalidRequest)?;
+        let bytes = BASE64URL_NOPAD.decode(body.as_bytes()).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         if BASE64URL_NOPAD.encode(&bytes) != body {
             return Err(ErrorCode::InvalidRequest);
         }
@@ -168,26 +229,73 @@ impl Link {
         if take(1)?[0] != VERSION {
             return Err(ErrorCode::UnsupportedVersion);
         }
-        let secret = Zeroizing::new(
-            take(32)?
-                .try_into()
-                .map_err(|_| ErrorCode::InvalidRequest)?,
-        );
-        let id = take(16)?
-            .try_into()
-            .map_err(|_| ErrorCode::InvalidRequest)?;
-        let recipient = take(32)?
-            .try_into()
-            .map_err(|_| ErrorCode::InvalidRequest)?;
+        let secret = Zeroizing::new(take(32)?.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?);
+        let id = take(16)?.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
+        let recipient = take(32)?.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let scheme_len = usize::from(take(1)?[0]);
-        let scheme =
-            std::str::from_utf8(take(scheme_len)?).map_err(|_| ErrorCode::InvalidRequest)?;
-        let scheme = cmsh::Scheme::new(scheme).map_err(|_| ErrorCode::InvalidRequest)?;
-        let address_len = usize::from(u16::from_be_bytes(
-            take(2)?.try_into().map_err(|_| ErrorCode::InvalidRequest)?,
-        ));
-        let address = cmsh::Address::new(scheme, take(address_len)?.to_vec())
-            .map_err(|_| ErrorCode::InvalidRequest)?;
+        let scheme = std::str::from_utf8(take(scheme_len)?).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
+        let scheme = cmsh::Scheme::new(scheme).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
+        let address_len = usize::from(u16::from_be_bytes(take(2)?.try_into().map_err(
+            |__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            },
+        )?));
+        let address =
+            cmsh::Address::new(scheme, take(address_len)?.to_vec()).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })?;
         if at != bytes.len() {
             return Err(ErrorCode::InvalidRequest);
         }
@@ -315,13 +423,28 @@ impl Offer {
         let (private, public) = <Kem as KemTrait>::derive_keypair(&random::<32>()?);
         let scheme = address.scheme().as_str().as_bytes();
         let address_bytes = address.bytes();
-        let address_len =
-            u16::try_from(address_bytes.len()).map_err(|_| ErrorCode::InvalidRequest)?;
+        let address_len = u16::try_from(address_bytes.len()).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let mut bytes = vec![VERSION];
         bytes.extend_from_slice(&*secret);
         bytes.extend_from_slice(&id);
         bytes.extend_from_slice(&public.to_bytes());
-        bytes.push(u8::try_from(scheme.len()).map_err(|_| ErrorCode::InvalidRequest)?);
+        bytes.push(u8::try_from(scheme.len()).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?);
         bytes.extend_from_slice(scheme);
         bytes.extend_from_slice(&address_len.to_be_bytes());
         bytes.extend_from_slice(address_bytes);

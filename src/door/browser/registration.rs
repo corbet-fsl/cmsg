@@ -126,7 +126,15 @@ mod runtime {
 
     fn feed_origin(base: &str) -> Result<String, ComposeError> {
         Ok(url::Url::parse(base)
-            .map_err(|_| ComposeError::Config("service base".into()))?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ComposeError::Config service base into",
+                    ComposeError::Config("service base".into()),
+                    &__cause,
+                )
+            })?
             .origin()
             .ascii_serialization())
     }

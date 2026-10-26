@@ -197,7 +197,15 @@ pub async fn verify_reservation_with<C: cwlt::wave::ProofCheck>(
     verifier
         .verify(statement, proof, expected, now)
         .await
-        .map_err(|_| super::super::ErrorCode::Refused)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "super::super::ErrorCode::Refused",
+                super::super::ErrorCode::Refused,
+                &__cause,
+            )
+        })
 }
 
 /// See [`verify_reservation_with`].
@@ -213,5 +221,13 @@ pub async fn verify_outcome_with<C: cwlt::wave::ProofCheck>(
     verifier
         .verify_outcome(statement, proof, expected, outcome, receipt_digest, now)
         .await
-        .map_err(|_| super::super::ErrorCode::Refused)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "super::super::ErrorCode::Refused",
+                super::super::ErrorCode::Refused,
+                &__cause,
+            )
+        })
 }

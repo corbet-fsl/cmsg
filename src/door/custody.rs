@@ -88,7 +88,15 @@ impl CustodyLifetime {
         observed: &cvlt::VerifiedLineageObservation<'_>,
         now: u64,
     ) -> Result<(), Error> {
-        let lineage = observed.lineage(now).map_err(|_| Error::Unauthorized)?;
+        let lineage = observed.lineage(now).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })?;
         if lineage.binding != self.binding {
             return Err(Error::Unauthorized);
         }
@@ -132,7 +140,15 @@ impl Clock for SystemClock {
         {
             Ok(std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|_| Error::Clock)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Clock",
+                        Error::Clock,
+                        &__cause,
+                    )
+                })?
                 .as_secs())
         }
         #[cfg(target_arch = "wasm32")]
@@ -700,12 +716,28 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
                     // back to an older accepting head after a failed verification.
                     let candidate = evidence
                         .verify_for(current, stamps, lifetime.binding.member(), now)
-                        .map_err(|_| Error::Unauthorized)?;
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "Error::Unauthorized",
+                                Error::Unauthorized,
+                                &__cause,
+                            )
+                        })?;
                     let wins = match &selected {
                         None => true,
                         Some(previous) => candidate
                             .compare_conflict(previous, now)
-                            .map_err(|_| Error::Unauthorized)?
+                            .map_err(|__cause| {
+                                crate::door::cause::emit(
+                                    file!(),
+                                    line!(),
+                                    "Error::Unauthorized",
+                                    Error::Unauthorized,
+                                    &__cause,
+                                )
+                            })?
                             .is_gt(),
                     };
                     if wins {
@@ -721,9 +753,15 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
                     return Err(Error::Unauthorized);
                 }
                 lifetime.observe_lineage(&selected, completed)?;
-                let lineage = selected
-                    .lineage(completed)
-                    .map_err(|_| Error::Unauthorized)?;
+                let lineage = selected.lineage(completed).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Unauthorized",
+                        Error::Unauthorized,
+                        &__cause,
+                    )
+                })?;
                 if request.root != Some(lineage.root)
                     || request.epoch != lineage.epoch
                     || (!pair

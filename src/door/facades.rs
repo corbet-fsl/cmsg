@@ -528,9 +528,15 @@ where
         if !store.is_scope(self.binding.community()) {
             return Err(ErrorCode::Unauthorized);
         }
-        self.inbox
-            .view(conversation, &store)
-            .map_err(|_| ErrorCode::Refused)
+        self.inbox.view(conversation, &store).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Refused",
+                ErrorCode::Refused,
+                &__cause,
+            )
+        })
     }
     async fn sign_transcript(
         &mut self,
@@ -630,7 +636,15 @@ where
             self.view(request.conversation)
                 .await?
                 .snapshot(&request.peer)
-                .map_err(|_| ErrorCode::Refused)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })
         })
     }
     fn history(&mut self, request: Conversation) -> OwnedFuture<'_, Vec<cnbx::Message>> {
@@ -641,7 +655,15 @@ where
             self.view(request.conversation)
                 .await?
                 .relation(&request.peer)
-                .map_err(|_| ErrorCode::Refused)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })
         })
     }
     fn delivery(&mut self, request: Delivery) -> OwnedFuture<'_, Option<cnbx::DeliveryStatus>> {
@@ -929,7 +951,15 @@ impl Door {
         if self.meshes.contains_key(origin) {
             return Err(ErrorCode::InvalidRequest);
         }
-        let listener = mesh.listen().await.map_err(|_| ErrorCode::Unavailable)?;
+        let listener = mesh.listen().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         // One address must never be published for two memberships of this device:
         // peers could link the pseudonyms. Production gives every origin its own
         // onion key (derived per community); refuse a backend that does not.

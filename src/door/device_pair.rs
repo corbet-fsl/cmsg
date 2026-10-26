@@ -97,8 +97,15 @@ impl PairingActions {
         let digest =
             cfyr::device_session::pair_payload(name, member, &key, &session, Some(&revision));
         let pair = StampAction::new(
-            ActionKind::new(cfyr::device_session::PAIR_ACTION)
-                .map_err(|_| ErrorCode::Unavailable)?,
+            ActionKind::new(cfyr::device_session::PAIR_ACTION).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?,
             PayloadDigest::from_bytes(digest),
             StampSalt::from_bytes(salt),
         );
@@ -279,10 +286,26 @@ where
                 .live_global_wallet(wallet_origin.into())
                 .observe_lease(now)
                 .await
-                .map_err(|_| ErrorCode::Unauthorized)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?
                 .stamp_challenge(now)
                 .await
-                .map_err(|_| ErrorCode::Unauthorized)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })
         };
         let mut rng = passport::rand::rngs::OsRng;
         // An earlier attempt was interrupted after its request was durably begun: send the
@@ -296,10 +319,26 @@ where
             let assertion = |options: Value| async move {
                 let (credential, _) = keys
                     .confirm("pairing stamp")
-                    .map_err(|_| ErrorCode::Refused)?
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Refused",
+                            ErrorCode::Refused,
+                            &__cause,
+                        )
+                    })?
                     .sign_in(options)
                     .await
-                    .map_err(|_| ErrorCode::Refused)?
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Refused",
+                            ErrorCode::Refused,
+                            &__cause,
+                        )
+                    })?
                     .into_parts();
                 // A pairing stamp always carries its own passkey assertion (never the birth grant).
                 Ok(Some(credential.as_json().clone()))
@@ -328,14 +367,29 @@ pub async fn begin(community: &mut Foyer<Transport>) -> Result<StepChallenge> {
     let request = community
         .call("presentation_challenge", json!({}))
         .await
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
     Ok(StepChallenge {
         id: request["challenge"]
             .as_str()
             .ok_or(ErrorCode::Unavailable)?
             .to_owned(),
-        request: serde_json::from_value(request["request"].clone())
-            .map_err(|_| ErrorCode::Unavailable)?,
+        request: serde_json::from_value(request["request"].clone()).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?,
     })
 }
 
@@ -369,18 +423,42 @@ where
                 current.key_ring().clone(),
             )
         })
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
     let (proof, stamp) = wallet
         .with_global_passport(|holder| -> Result<_> {
             let mut rng = passport::rand::rngs::OsRng;
             let proof = holder
                 .present(&mut rng, &expected, &challenge.request, now())
-                .map_err(|_| ErrorCode::Unauthorized)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?;
             let stamp = match step {
                 Step::Add => Some(
                     holder
                         .present_stamp(&mut rng, actions.scope(), action, at)
-                        .map_err(|_| ErrorCode::Unauthorized)?
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unauthorized",
+                                ErrorCode::Unauthorized,
+                                &__cause,
+                            )
+                        })?
                         .to_bytes(),
                 ),
                 Step::Activate => None,
@@ -403,7 +481,15 @@ where
                     "signature": signature,
                 }))
                 .await
-                .map_err(|_| ErrorCode::Reconcile)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                })?;
             Ok(Some(PresentedStamp {
                 presentation: stamp,
                 at,
@@ -417,7 +503,15 @@ where
                     "signature": signature,
                 }))
                 .await
-                .map_err(|_| ErrorCode::Reconcile)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                })?;
             Ok(None)
         }
     }

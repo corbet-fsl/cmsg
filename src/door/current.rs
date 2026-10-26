@@ -37,13 +37,35 @@ fn client_version() -> String {
 }
 
 pub(super) fn check_version(charter: &cfyr::trust::VerifiedCharter, now: u64) -> Result<()> {
-    let settings = clnk::cfrm::crbk::ForumSettings::from_snapshot(
-        charter.settings(now).map_err(|_| ErrorCode::Refused)?,
-    )
-    .map_err(|_| ErrorCode::Refused)?;
-    let version = client_version()
-        .parse()
-        .map_err(|_| ErrorCode::Unavailable)?;
+    let settings = clnk::cfrm::crbk::ForumSettings::from_snapshot(charter.settings(now).map_err(
+        |__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Refused",
+                ErrorCode::Refused,
+                &__cause,
+            )
+        },
+    )?)
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })?;
+    let version = client_version().parse().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     if !settings.accepts_client(&version) {
         return Err(ErrorCode::UnsupportedVersion);
     }
@@ -51,7 +73,15 @@ pub(super) fn check_version(charter: &cfyr::trust::VerifiedCharter, now: u64) ->
 }
 
 fn time(clock: &impl clnk::Clock, expires: u64, floor: u64) -> Result<u64> {
-    let now = clock.now().map_err(|_| ErrorCode::Clock)? / 1000;
+    let now = clock.now().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Clock",
+            ErrorCode::Clock,
+            &__cause,
+        )
+    })? / 1000;
     if now < floor {
         return Err(ErrorCode::Clock);
     }
@@ -84,7 +114,15 @@ fn policy(
             }
             check_version(charter, now)
         })
-        .map_err(|_| ErrorCode::Unavailable)?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?
 }
 
 pub(super) async fn read<T: 'static>(

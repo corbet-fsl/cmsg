@@ -106,17 +106,41 @@ impl Door {
         binding: ckmg::Binding,
         window: TimeWindow,
     ) -> super::Result<(TransportClient, TransportOwner)> {
-        let device = prepared.device().map_err(|_| ErrorCode::Unavailable)?;
+        let device = prepared.device().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let (authority, lifetime) =
             self.transport_authority(origin, binding.clone(), device, custody::SystemClock)?;
         let member = self.member_authority_builder(origin, &authority)?;
         let foyer = self.custody_current_policy(origin)?;
         let session = prepared
             .transport(binding, custody::SystemClock, authority)
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         let node = *session
             .public_key()
-            .map_err(|_| ErrorCode::Unavailable)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
             .value();
         let (requests, receiver) = mpsc::channel(REQUESTS);
         let (stop, stopped) = oneshot::channel();
@@ -158,7 +182,15 @@ impl TransportOwner {
         }
         initial
             .require_independent_owner(&self.foyer)
-            .map_err(|_| ErrorCode::Unauthorized)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })
     }
 
     /// Consume the captured original Foyer ports once, after Records handles
@@ -211,7 +243,10 @@ impl TransportOwner {
         match self.task.take().expect("owned transport task").await {
             Ok(()) => Ok(()),
             Err(error) if error.is_cancelled() => Ok(()),
-            Err(_) => Err(ErrorCode::Reconcile),
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "Err ErrorCode::Reconcile", &__cause);
+                Err(ErrorCode::Reconcile)
+            }
         }
     }
 }
@@ -266,7 +301,15 @@ async fn execute(
             .native_initializer(scope)
             .await
             .map(Response::Initializer)
-            .map_err(|_| Error::Unavailable);
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unavailable",
+                    Error::Unavailable,
+                    &__cause,
+                )
+            });
     }
     session
         .with_node(|signer, cipher| {
@@ -311,16 +354,40 @@ async fn execute(
             }
         })
         .await
-        .map_err(|_| Error::Unavailable)?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })?
 }
 
 fn now_us() -> Result<u64, Error> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|_| Error::Unavailable)?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })?
         .as_micros()
         .try_into()
-        .map_err(|_| Error::Unavailable)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })
 }
 struct Signer<'a>(ckmg::Vld0Signer<'a>);
 impl cdht::Signer for Signer<'_> {
@@ -328,7 +395,9 @@ impl cdht::Signer for Signer<'_> {
         *self.0.public_key()
     }
     fn sign(&self, bytes: &[u8]) -> Result<[u8; 64], Error> {
-        self.0.sign(bytes).map_err(|_| Error::Signer)
+        self.0.sign(bytes).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Error::Signer", Error::Signer, &__cause)
+        })
     }
 }
 struct Cipher<'a>(ckmg::Vld0NodeCipher<'a>);
@@ -342,7 +411,9 @@ impl EnvelopeCipher for Cipher<'_> {
         nonce: &[u8; 24],
         bytes: &[u8],
     ) -> Result<zeroize::Zeroizing<Vec<u8>>, Error> {
-        self.0.crypt(peer, nonce, bytes).map_err(|_| Error::Crypto)
+        self.0.crypt(peer, nonce, bytes).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Error::Crypto", Error::Crypto, &__cause)
+        })
     }
 }
 /// Original strict Keys VLD0 verification, shared by native network owners.
@@ -396,14 +467,27 @@ impl TransportClient {
     async fn request(&self, make: impl FnOnce() -> Operation) -> Result<Response, Error> {
         // Hold through reply consumption, bounding completed-but-unconsumed
         // replies as well as queued and actively executing requests.
-        let _pending = self.pending.try_acquire().map_err(|_| Error::Unavailable)?;
+        let _pending = self.pending.try_acquire().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })?;
         // Reserve before allocating/copying. Full queues refuse immediately;
         // waiting producer futures cannot accumulate unbounded owned packets.
         let receive = {
-            let slot = self
-                .requests
-                .try_reserve()
-                .map_err(|_| Error::Unavailable)?;
+            let slot = self.requests.try_reserve().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unavailable",
+                    Error::Unavailable,
+                    &__cause,
+                )
+            })?;
             let (reply, receive) = oneshot::channel();
             slot.send(Request {
                 operation: make(),
@@ -411,7 +495,15 @@ impl TransportClient {
             });
             receive
         };
-        receive.await.map_err(|_| Error::Unavailable)?
+        receive.await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })?
     }
     async fn sign(&self, bytes: &[u8], destination: &NodeId) -> Result<SignedOperation, Error> {
         bounded(bytes)?;
@@ -435,8 +527,15 @@ impl TransportClient {
         match self
             .request(|| Operation::Initialize { scope })
             .await
-            .map_err(|_| ErrorCode::Unavailable)?
-        {
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })? {
             Response::Initializer(value) => Ok(value),
             _ => Err(ErrorCode::Unavailable),
         }

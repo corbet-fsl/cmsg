@@ -32,7 +32,15 @@ where
             .retain_lineage_evidence(evidence, operation)
             .await
             .map(|_| ())
-            .map_err(|_| ErrorCode::Reconcile)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })
     }
 
     pub(super) async fn acknowledge_pairing_owned(

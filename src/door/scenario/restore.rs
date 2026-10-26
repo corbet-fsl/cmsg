@@ -83,7 +83,15 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
             let temporary = file.with_extension("tmp");
             std::fs::write(&temporary, retained.advertisement()?.as_bytes())
                 .and_then(|()| std::fs::rename(&temporary, file))
-                .map_err(|_| ErrorCode::Unavailable)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
         }
         // C8 A: a registered device-key member's custody was bound when the app started
         // (`composer::restore_device_login`); its Vault is not recovered a second time.
@@ -230,7 +238,15 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> VaultComposer for Composer<W
                 .as_ref()
                 .ok_or(ErrorCode::Unavailable)?
                 .records()?;
-            *result = serde_json::to_value(status).map_err(|_| ErrorCode::Unavailable)?;
+            *result = serde_json::to_value(status).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
             attempt.completed = true;
             Ok(())
         }

@@ -42,7 +42,9 @@ pub(crate) fn stamp_options(
     let id = BASE64URL_NOPAD
         .decode(id.as_bytes())
         .or_else(|_| BASE64URL.decode(id.as_bytes()))
-        .map_err(|_| refused())?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?;
     if id != credential || public.get("userVerification") != Some(&Value::from("required")) {
         return Err(refused());
     }
@@ -53,7 +55,9 @@ pub(crate) fn stamp_options(
 /// The public signed fields of the passkey answer, as the wallet's `stamp_issue` takes them.
 pub(crate) fn assertion_fields(credential: Value) -> Result<Value> {
     let public: ckyh::PublicKeyCredential =
-        serde_json::from_value(credential).map_err(|_| refused())?;
+        serde_json::from_value(credential).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?;
     Ok(serde_json::json!({
         "credential_id": public.raw_id.to_vec(),
         "client_data_json": public.response.client_data_json.to_vec(),
@@ -88,10 +92,15 @@ where
 /// the member (every presentation reveals the epoch). The answer already arrived, so an
 /// unreadable publication is `Reconcile`, as for every other late failure.
 async fn published_epoch(issuance: &mut GlobalStampIssuance<Transport>) -> Result<u64> {
-    issuance
-        .verified_epoch(now)
-        .await
-        .map_err(|_| ErrorCode::Reconcile)
+    issuance.verified_epoch(now).await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Reconcile",
+            ErrorCode::Reconcile,
+            &__cause,
+        )
+    })
 }
 
 /// Send the SAME request bytes of an interrupted attempt again (`request` from
@@ -128,8 +137,24 @@ where
     wallet
         .same_stamp_wallet(&mut issuance)
         .await
-        .map_err(|_| ErrorCode::Reconcile)?;
-    let blind = BlindStamp::from_bytes(&answer).map_err(|_| ErrorCode::Reconcile)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
+    let blind = BlindStamp::from_bytes(&answer).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Reconcile",
+            ErrorCode::Reconcile,
+            &__cause,
+        )
+    })?;
     let epoch = published_epoch(&mut issuance).await?;
     wallet.finish_stamp(rng, &blind, epoch).await?;
     Ok(true)
@@ -167,12 +192,18 @@ where
     let (key, challenge, options) = issuance
         .with_current(now, |_, _, key, challenge, options| -> Result<_> {
             Ok((
-                StampPublicKey::from_bytes(key).map_err(|_| refused())?,
-                IssuanceChallenge::from_bytes(challenge.try_into().map_err(|_| refused())?),
+                StampPublicKey::from_bytes(key).map_err(|__cause| {
+                    crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+                })?,
+                IssuanceChallenge::from_bytes(challenge.try_into().map_err(|__cause| {
+                    crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+                })?),
                 options.clone(),
             ))
         })
-        .map_err(|_| refused())??;
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })??;
     wallet.cancel_stamp(rng).await?;
     let request = wallet.begin_stamp(rng, &key, &challenge, actions).await?;
     let options = stamp_options(
@@ -189,14 +220,38 @@ where
         }
         None => issuance.issue_birth(request.to_bytes(), now).await,
     }
-    .map_err(|_| ErrorCode::Reconcile)?;
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Reconcile",
+            ErrorCode::Reconcile,
+            &__cause,
+        )
+    })?;
     // The wallet answered; the stamp is not retained yet.
     super::interrupt::point("stamp-answered");
     wallet
         .same_stamp_wallet(&mut issuance)
         .await
-        .map_err(|_| ErrorCode::Reconcile)?;
-    let blind = BlindStamp::from_bytes(&answer).map_err(|_| ErrorCode::Reconcile)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
+    let blind = BlindStamp::from_bytes(&answer).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Reconcile",
+            ErrorCode::Reconcile,
+            &__cause,
+        )
+    })?;
     let epoch = published_epoch(&mut issuance).await?;
     wallet.finish_stamp(rng, &blind, epoch).await
 }

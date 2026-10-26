@@ -91,10 +91,15 @@ where
     pub async fn finish(&mut self) -> Result<()> {
         for (_, phase) in std::mem::take(&mut self.phases) {
             if let Phase::Accepted(accepted) = phase {
-                accepted
-                    .acknowledge()
-                    .await
-                    .map_err(|_| ErrorCode::Unavailable)?;
+                accepted.acknowledge().await.map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
             }
         }
         Ok(())
@@ -107,7 +112,15 @@ fn possession<'a>(
     challenge: &'a StepChallenge,
     device: &[u8; 32],
 ) -> Result<PairingPossession<'a>> {
-    PairingPossession::new(name, step, &challenge.id, device).map_err(|_| ErrorCode::InvalidRequest)
+    PairingPossession::new(name, step, &challenge.id, device).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })
 }
 
 impl<B, C, E, T> GuestSteps for DoorGuest<B, C, E, T>
@@ -137,7 +150,15 @@ where
                 self.entropy.clone(),
             )
             .await
-            .map_err(|_| ErrorCode::Refused)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Refused",
+                    ErrorCode::Refused,
+                    &__cause,
+                )
+            })?;
         self.phases.insert(scope.clone(), Phase::Requested(guest));
         Ok(request)
     }
@@ -155,7 +176,15 @@ where
         )?;
         Ok(guest
             .sign_possession(&message)
-            .map_err(|_| ErrorCode::Refused)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Refused",
+                    ErrorCode::Refused,
+                    &__cause,
+                )
+            })?
             .to_vec())
     }
 
@@ -169,13 +198,29 @@ where
         let Some(Phase::Requested(guest)) = self.phases.remove(scope) else {
             return Err(ErrorCode::InvalidRequest);
         };
-        let accepted = guest.accept(&grant).await.map_err(|_| ErrorCode::Refused)?;
+        let accepted = guest.accept(&grant).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Refused",
+                ErrorCode::Refused,
+                &__cause,
+            )
+        })?;
         let device = *grant.request.device.value();
         let signature = {
             let message = possession(&name, PairingStep::Activate, &challenge, &device)?;
             accepted
                 .sign_possession(&message)
-                .map_err(|_| ErrorCode::Refused)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })?
                 .to_vec()
         };
         self.phases.insert(scope.clone(), Phase::Accepted(accepted));

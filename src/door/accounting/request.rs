@@ -57,7 +57,15 @@ impl ProvenGenesis {
             settlement_marker: public.settlement_marker,
             policy: policy.clone(),
         };
-        acct::statement_bytes(&statement).map_err(|_| ErrorCode::Unauthorized)?;
+        acct::statement_bytes(&statement).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         Ok(Self {
             statement,
             scope: material.scope.clone(),
@@ -128,7 +136,15 @@ pub(super) fn genesis_bundle(next_state: &[u8; 32], proof: &[u8]) -> Result<Vec<
             "proof": data_encoding::HEXLOWER.encode(proof),
         }],
     }))
-    .map_err(|_| ErrorCode::Unavailable)
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
 }
 
 fn genesis_update() -> ExtendedUpdate {
@@ -214,8 +230,15 @@ impl SignedApplyExtended {
         if outbox.is_empty() || outbox.len() > pending::MAX_OUTBOX {
             return Err(ErrorCode::Unauthorized);
         }
-        let wire: AccountServiceRequest =
-            serde_json::from_slice(&outbox).map_err(|_| ErrorCode::Unauthorized)?;
+        let wire: AccountServiceRequest = serde_json::from_slice(&outbox).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let AccountServiceRequest::ApplyExtended {
             request, update, ..
         } = wire
@@ -223,10 +246,25 @@ impl SignedApplyExtended {
             return Err(ErrorCode::Unauthorized);
         };
         Ok(Self {
-            request_digest: acct::account_request_digest(&request)
-                .map_err(|_| ErrorCode::Unauthorized)?,
+            request_digest: acct::account_request_digest(&request).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?,
             extended_request_digest: extensions::extended_request_digest(&request, &update, policy)
-                .map_err(|_| ErrorCode::Unauthorized)?,
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?,
             request: *request,
             update,
             outbox,
@@ -278,7 +316,15 @@ mod lower {
     use ckmg::wallet_engine::account as engine;
 
     fn signature(bytes: &[u8]) -> Result<[u8; 64]> {
-        bytes.try_into().map_err(|_| ErrorCode::Unauthorized)
+        bytes.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })
     }
 
     impl AcceptedResponse {
@@ -295,8 +341,15 @@ mod lower {
                     root: ancestry.root,
                     frozen_leaf: ancestry.frozen_leaf,
                     signature: signature(&ancestry.signature)?,
-                    record: serde_json::to_vec(&ancestry.record)
-                        .map_err(|_| ErrorCode::Unauthorized)?,
+                    record: serde_json::to_vec(&ancestry.record).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })?,
                 }),
             };
             Ok(engine::AcceptedResponse {
@@ -304,7 +357,15 @@ mod lower {
                     accepted_at: self.acceptance.accepted_at,
                     signature: signature(
                         &B64.decode(self.acceptance.signature.as_bytes())
-                            .map_err(|_| ErrorCode::Unauthorized)?,
+                            .map_err(|__cause| {
+                                crate::door::cause::emit(
+                                    file!(),
+                                    line!(),
+                                    "ErrorCode::Unauthorized",
+                                    ErrorCode::Unauthorized,
+                                    &__cause,
+                                )
+                            })?,
                     )?,
                 },
                 certificate: signature(&self.certificate.signature)?,
@@ -340,11 +401,26 @@ pub use lower::response_trust;
 /// Digest of the signed acceptance, the same convention the Balance status
 /// response uses for an embedded acceptance (message bytes then signature).
 fn acceptance_digest(acceptance: &AccountAcceptance) -> Result<[u8; 32]> {
-    let mut bytes =
-        acct::account_acceptance_bytes(acceptance).map_err(|_| ErrorCode::Unauthorized)?;
+    let mut bytes = acct::account_acceptance_bytes(acceptance).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?;
     bytes.extend_from_slice(
         &B64.decode(acceptance.signature.as_bytes())
-            .map_err(|_| ErrorCode::Unauthorized)?,
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?,
     );
     Ok(Sha256::digest(bytes).into())
 }
@@ -365,7 +441,15 @@ fn verify_acceptance(
         policy,
         operator_key,
     )
-    .map_err(|_| ErrorCode::Unauthorized)?;
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?;
     if acceptance.request_digest != expected.extended_request_digest {
         return Err(ErrorCode::Unauthorized);
     }
@@ -425,7 +509,15 @@ impl<'p> CurrentEnrollment<'p> {
         R: Records,
     {
         let statement = &genesis.statement;
-        acct::statement_bytes(statement).map_err(|_| ErrorCode::Unauthorized)?;
+        acct::statement_bytes(statement).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         if !statement.genesis || genesis.proof.is_empty() {
             return Err(ErrorCode::Unauthorized);
         }
@@ -434,9 +526,25 @@ impl<'p> CurrentEnrollment<'p> {
             let row = tree.entries().get(index).ok_or(ErrorCode::Unauthorized)?;
             let owner: [u8; 32] = B64
                 .decode(row.member_id.as_bytes())
-                .map_err(|_| ErrorCode::Unauthorized)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?
                 .try_into()
-                .map_err(|_| ErrorCode::Unauthorized)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?;
             // The statement must be exactly this member's genesis under the
             // verified current roster and economic policy.
             if statement.owner != owner
@@ -518,7 +626,15 @@ impl AccountAdmission<'_> {
         R: Records,
     {
         let mut request_id = [0u8; 32];
-        getrandom::fill(&mut request_id).map_err(|_| ErrorCode::Unavailable)?;
+        getrandom::fill(&mut request_id).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         if request_id == [0; 32] {
             return Err(ErrorCode::Unavailable);
         }
@@ -541,8 +657,15 @@ impl AccountAdmission<'_> {
             proof: proof.to_vec(),
             signature: String::new(),
         };
-        let transcript =
-            acct::account_request_bytes(&request).map_err(|_| ErrorCode::Unauthorized)?;
+        let transcript = acct::account_request_bytes(&request).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         account.check(&current.origin).await?;
         let lineage = account
             .vault()
@@ -550,14 +673,30 @@ impl AccountAdmission<'_> {
             .keys()
             .lineage()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let device = account
             .vault()
             .await?
             .keys()
             .device_public_key()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         if lineage.binding.community() != self.cohort.scope
             || lineage.binding.member() != self.cohort.member
             || device.value() != &self.cohort.device
@@ -584,7 +723,15 @@ impl AccountAdmission<'_> {
                 },
                 current.now,
             )
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let signature = account
             .vault()
             .await?
@@ -595,7 +742,15 @@ impl AccountAdmission<'_> {
                 expires_at,
             )
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         request.signature = B64.encode(&signature);
         // Both owners must still be current after the signing awaits.
         account.check(&current.origin).await?;
@@ -607,18 +762,41 @@ impl AccountAdmission<'_> {
         {
             return Err(ErrorCode::Unauthorized);
         }
-        let request_digest =
-            acct::account_request_digest(&request).map_err(|_| ErrorCode::Unauthorized)?;
+        let request_digest = acct::account_request_digest(&request).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let extended_request_digest =
             extensions::extended_request_digest(&request, &update, &current.extension_policy)
-                .map_err(|_| ErrorCode::Unauthorized)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?;
         let wire = AccountServiceRequest::ApplyExtended {
             grant: current.grant,
             authorization,
             request: Box::new(request.clone()),
             update: update.clone(),
         };
-        let outbox = serde_json::to_vec(&wire).map_err(|_| ErrorCode::Unauthorized)?;
+        let outbox = serde_json::to_vec(&wire).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         if outbox.len() > pending::MAX_OUTBOX {
             return Err(ErrorCode::Unauthorized);
         }
@@ -656,7 +834,15 @@ impl AccountAdmission<'_> {
         R: Records,
     {
         let statement = &proven.statement;
-        acct::statement_bytes(statement).map_err(|_| ErrorCode::Unauthorized)?;
+        acct::statement_bytes(statement).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         if statement.genesis || proven.proof.is_empty() {
             return Err(ErrorCode::Unauthorized);
         }
@@ -664,9 +850,25 @@ impl AccountAdmission<'_> {
             self.authorize_device(account, intents).await?;
         let owner: [u8; 32] = B64
             .decode(current.grant.member_id.as_bytes())
-            .map_err(|_| ErrorCode::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?
             .try_into()
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         if statement.owner != owner
             || statement.policy != current.material.policy.account
             || current.now < statement.now
@@ -702,7 +904,15 @@ pub fn outbox_request_id(outbox: &[u8]) -> Result<[u8; 32]> {
     if outbox.is_empty() || outbox.len() > pending::MAX_OUTBOX {
         return Err(ErrorCode::Unauthorized);
     }
-    match serde_json::from_slice(outbox).map_err(|_| ErrorCode::Unauthorized)? {
+    match serde_json::from_slice(outbox).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })? {
         AccountServiceRequest::ApplyExtended { request, .. } => Ok(request.request_id),
         _ => Err(ErrorCode::Unauthorized),
     }
@@ -725,7 +935,15 @@ impl AccountAdmission<'_> {
     pub async fn send_signed(&mut self, signed: &SignedApplyExtended) -> Result<AcceptedResponse> {
         let before = self.current()?;
         let wire: serde_json::Value =
-            serde_json::from_slice(&signed.outbox).map_err(|_| ErrorCode::Unauthorized)?;
+            serde_json::from_slice(&signed.outbox).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let response = self
             .lease
             .apply_account(wire, now)
@@ -737,7 +955,15 @@ impl AccountAdmission<'_> {
                 _ => ErrorCode::Reconcile,
             })?;
         let response: AccountServiceResponse =
-            serde_json::from_value(response).map_err(|_| ErrorCode::Reconcile)?;
+            serde_json::from_value(response).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
         let AccountServiceResponse::ApplyExtended {
             acceptance,
             certificate,
@@ -746,7 +972,15 @@ impl AccountAdmission<'_> {
         else {
             return Err(ErrorCode::Reconcile);
         };
-        let after = self.current().map_err(|_| ErrorCode::Reconcile)?;
+        let after = self.current().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
         if after.material != before.material
             || after.material_digest != before.material_digest
             || after.grant != before.grant
@@ -759,7 +993,15 @@ impl AccountAdmission<'_> {
             &after.material.extension_policy,
             &after.material.account_response_key,
         )
-        .map_err(|_| ErrorCode::Reconcile)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
         Ok(AcceptedResponse {
             acceptance,
             certificate,

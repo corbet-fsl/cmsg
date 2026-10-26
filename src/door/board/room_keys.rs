@@ -68,7 +68,15 @@ impl Keyring {
         if record.len() > MAX_RECORD {
             return Err(Refusal::Record);
         }
-        let ring: Self = serde_json::from_slice(record).map_err(|_| Refusal::Record)?;
+        let ring: Self = serde_json::from_slice(record).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Refusal::Record",
+                Refusal::Record,
+                &__cause,
+            )
+        })?;
         let owners: BTreeSet<_> = ring.keys.iter().map(|held| &held.owner).collect();
         if ring.keys.len() > MAX_KEYS || owners.len() != ring.keys.len() {
             return Err(Refusal::Record);
@@ -77,7 +85,15 @@ impl Keyring {
     }
 
     pub(in crate::door) fn encode(&self) -> Result<Vec<u8>, Refusal> {
-        serde_json::to_vec(self).map_err(|_| Refusal::Record)
+        serde_json::to_vec(self).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Refusal::Record",
+                Refusal::Record,
+                &__cause,
+            )
+        })
     }
 
     /// The members whose keys this device holds for the room.
@@ -104,13 +120,27 @@ impl Keyring {
         if epoch < joined {
             return Err(Refusal::BeforeJoin);
         }
-        let handover = RoomHandover::from_bytes(payload).map_err(|_| Refusal::Malformed)?;
+        let handover = RoomHandover::from_bytes(payload).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Refusal::Malformed",
+                Refusal::Malformed,
+                &__cause,
+            )
+        })?;
         let context = handover.context().clone();
         // Envelope checks that the key's owner is exactly `sender`, that it is
         // this community's and that it is not this device's own key.
-        let key = custody
-            .adopt_room(&handover, sender)
-            .map_err(|_| Refusal::Sender)?;
+        let key = custody.adopt_room(&handover, sender).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Refusal::Sender",
+                Refusal::Sender,
+                &__cause,
+            )
+        })?;
         let version = (context.profile_revision, context.key_generation);
         match self.keys.iter().find(|held| held.owner == sender) {
             Some(held) if version < (held.profile_revision, held.key_generation) => {
@@ -121,7 +151,15 @@ impl Keyring {
         }
         let wrapped = key
             .wrap_room(group)
-            .map_err(|_| Refusal::Custody)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Refusal::Custody",
+                    Refusal::Custody,
+                    &__cause,
+                )
+            })?
             .as_bytes()
             .to_vec();
         self.keys.retain(|held| held.owner != sender);
@@ -160,7 +198,18 @@ impl Keyring {
             .restore_room(
                 context,
                 group,
-                &WrappedReadKey::from_bytes(&held.wrapped).ok()?,
+                &match WrappedReadKey::from_bytes(&held.wrapped) {
+                    Ok(key) => key,
+                    Err(__cause) => {
+                        crate::door::cause::print(
+                            file!(),
+                            line!(),
+                            "WrappedReadKey::from_bytes",
+                            &__cause,
+                        );
+                        return None;
+                    }
+                },
             )
             .ok()
     }
@@ -178,7 +227,15 @@ impl Keyring {
 pub(in crate::door) fn handover(key: &ReadKey<'_>) -> Result<zeroize::Zeroizing<Vec<u8>>, Refusal> {
     key.room_handover()
         .and_then(|handover| handover.to_bytes())
-        .map_err(|_| Refusal::Custody)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Refusal::Custody",
+                Refusal::Custody,
+                &__cause,
+            )
+        })
 }
 
 #[cfg(test)]

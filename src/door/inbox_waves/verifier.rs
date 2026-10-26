@@ -76,8 +76,15 @@ fn pinned(bytes: &[u8], expected: &str) -> std::result::Result<(), ComposeError>
 
 /// The hex verification key of `program` inside the group's key file.
 fn program_key(keys: &[u8], program: Program) -> std::result::Result<Vec<u8>, ComposeError> {
-    let mut group: BTreeMap<String, String> =
-        serde_json::from_slice(keys).map_err(|_| config("group key file"))?;
+    let mut group: BTreeMap<String, String> = serde_json::from_slice(keys).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "config group key file",
+            config("group key file"),
+            &__cause,
+        )
+    })?;
     let key = HEXLOWER
         .decode(
             group
@@ -85,7 +92,15 @@ fn program_key(keys: &[u8], program: Program) -> std::result::Result<Vec<u8>, Co
                 .ok_or_else(|| config("the group carries no key for the program"))?
                 .as_bytes(),
         )
-        .map_err(|_| config("group key file"))?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "config group key file",
+                config("group key file"),
+                &__cause,
+            )
+        })?;
     if key.is_empty() || key.len() > czkp::native::MAX_KEY_BYTES {
         return Err(config("group key size"));
     }
@@ -122,8 +137,15 @@ impl Group {
             .as_deref()
             .ok_or_else(|| config("wave verification needs the group manifest"))?;
         let manifest_bytes = read(manifest_file, 65_536)?;
-        let manifest: Manifest =
-            serde_json::from_slice(&manifest_bytes).map_err(|_| config("group manifest"))?;
+        let manifest: Manifest = serde_json::from_slice(&manifest_bytes).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "config group manifest",
+                config("group manifest"),
+                &__cause,
+            )
+        })?;
         // The circuit and keys of every program are the one group the manifest names.
         let circuit = read(&wave.circuit_file, 64 << 20)?;
         let keys = read(&wave.keys_file, 1 << 20)?;
@@ -162,7 +184,15 @@ impl Group {
                 .get(..czkp::native::SRS_G1_BYTES)
                 .ok_or_else(|| config("group setup size"))?
                 .to_vec(),
-            g2: g2.try_into().map_err(|_| config("group setup size"))?,
+            g2: g2.try_into().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "config group setup size",
+                    config("group setup size"),
+                    &__cause,
+                )
+            })?,
             executable,
             timeout: Duration::from_secs(artifacts.timeout_seconds.min(VERIFY_TIMEOUT_CAP_SECONDS)),
             threads: artifacts.threads,
@@ -170,8 +200,15 @@ impl Group {
         };
         // Refuse unusable limits and a relative worker path now, not at the first wave.
         for program in [Program::Wave, Program::Outcome] {
-            cvfy::NativeVerifier::new(group.config(program))
-                .map_err(|_| config("wave verifier settings"))?;
+            cvfy::NativeVerifier::new(group.config(program)).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "config wave verifier settings",
+                    config("wave verifier settings"),
+                    &__cause,
+                )
+            })?;
         }
         Ok(group)
     }

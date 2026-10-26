@@ -90,7 +90,15 @@ fn verify_tree(
     }
     publication
         .verify_signature(&current.material.account_response_key)
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     let mut verified = Vec::with_capacity(publication.delegations.len());
     for row in &publication.delegations {
         if row.delegation.expires_at < end {
@@ -105,14 +113,29 @@ fn verify_tree(
             },
             current.now,
         )
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         if enrollment::EnrollmentEntry::from_verified(&value) != row.entry {
             return Err(ErrorCode::Unauthorized);
         }
         verified.push(value);
     }
-    let tree = enrollment::EnrollmentTree::from_verified(&verified)
-        .map_err(|_| ErrorCode::Unauthorized)?;
+    let tree = enrollment::EnrollmentTree::from_verified(&verified).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?;
     // The signed transcript sorts rows. Require their received order to be the
     // same canonical order before assigning a holder its original leaf position.
     if tree.root() != publication.root
@@ -165,9 +188,25 @@ impl<'p> SubmittedEnrollment<'p> {
             .lease
             .current_enrollment_checkpoint(now)
             .await
-            .map_err(|_| ErrorCode::Reconcile)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
         let publication: Option<enrollment::EnrollmentPublication> =
-            serde_json::from_value(response).map_err(|_| ErrorCode::Reconcile)?;
+            serde_json::from_value(response).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
         let publication = publication.ok_or(ErrorCode::Unavailable)?;
         let current = self.prepared.admission.current()?;
         if self.prepared.expected_entry()? != self.entry {
@@ -235,19 +274,45 @@ impl CurrentEnrollment<'_> {
             .lease
             .current_enrollment_checkpoint(now)
             .await
-            .map_err(|_| ErrorCode::Reconcile)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
         let publication: Option<enrollment::EnrollmentPublication> =
-            serde_json::from_value(response).map_err(|_| ErrorCode::Reconcile)?;
+            serde_json::from_value(response).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
         let publication = publication.ok_or(ErrorCode::Unauthorized)?;
         let current = self.enrolled.prepared.admission.current()?;
         let same = publication.signature == self.publication.signature
-            && publication
-                .signing_bytes()
-                .map_err(|_| ErrorCode::Unauthorized)?
-                == self
-                    .publication
-                    .signing_bytes()
-                    .map_err(|_| ErrorCode::Unauthorized)?;
+            && publication.signing_bytes().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })? == self.publication.signing_bytes().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         if same {
             let (_, index) = verify(
                 &publication,
@@ -279,7 +344,15 @@ impl CurrentEnrollment<'_> {
             }
             publication
                 .verify_signature(&current.material.account_response_key)
-                .map_err(|_| ErrorCode::Unauthorized)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?;
         }
         self.failed = false;
         Ok(())
@@ -397,9 +470,25 @@ impl AccountAdmission<'_> {
             .lease
             .current_enrollment_checkpoint(now)
             .await
-            .map_err(|_| ErrorCode::Reconcile)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
         let publication: Option<enrollment::EnrollmentPublication> =
-            serde_json::from_value(response).map_err(|_| ErrorCode::Reconcile)?;
+            serde_json::from_value(response).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
         let publication = publication.ok_or(ErrorCode::Unavailable)?;
         let current = self.current()?;
         let tree = verify_tree(&publication, &current, &self.cohort, 0)?;
@@ -413,8 +502,17 @@ impl AccountAdmission<'_> {
         let rows = roster_rows(&tree)?;
         final_cut(self, &current, &publication, 0)?;
         let checkpoint =
-            ckmg::wallet_engine::account::Checkpoint::from_rows(publication.root, rows)
-                .map_err(|_| ErrorCode::Unauthorized)?;
+            ckmg::wallet_engine::account::Checkpoint::from_rows(publication.root, rows).map_err(
+                |__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                },
+            )?;
         Ok(VerifiedRoster {
             checkpoint: std::sync::Arc::new(checkpoint),
             expires_at: publication.expires_at,

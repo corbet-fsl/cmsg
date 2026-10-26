@@ -181,17 +181,38 @@ impl<I: Identity, W: TorWatcher + 'static> Network<I, W> {
         control: Rc<Control>,
     ) -> Result<Self> {
         let messages = transport.messages();
-        let listener = messages
-            .listen()
-            .await
-            .map_err(|_| ErrorCode::Unavailable)?;
-        let endpoint = ctrn::OnionEndpoint::from_address(listener.address())
-            .map_err(|_| ErrorCode::Unavailable)?;
+        let listener = messages.listen().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
+        let endpoint =
+            ctrn::OnionEndpoint::from_address(listener.address()).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         let time = identity.envelope_time();
         let window = identity.envelope_window();
         let advertisement = identity
             .advertise(Advertisement {
-                timestamp_us: time.now_us().map_err(|_| ErrorCode::Clock)?,
+                timestamp_us: time.now_us().map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Clock",
+                        ErrorCode::Clock,
+                        &__cause,
+                    )
+                })?,
                 capabilities: if config.storage.is_some() {
                     vec![DHTV]
                 } else {
@@ -206,9 +227,26 @@ impl<I: Identity, W: TorWatcher + 'static> Network<I, W> {
                 }],
             })
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
-        let own = UnverifiedPeerInfoBytes::from_bytes(advertisement.as_bytes().to_vec())
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
+        let own = UnverifiedPeerInfoBytes::from_bytes(advertisement.as_bytes().to_vec()).map_err(
+            |__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            },
+        )?;
         let discovery = Arc::new(
             TorDiscovery::new(
                 TorDiscoveryConfig {
@@ -224,7 +262,15 @@ impl<I: Identity, W: TorWatcher + 'static> Network<I, W> {
                 },
                 &listener,
             )
-            .map_err(|_| ErrorCode::InvalidRequest)?,
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })?,
         );
         let applications = Arc::new(
             TorApplications::new(
@@ -232,11 +278,28 @@ impl<I: Identity, W: TorWatcher + 'static> Network<I, W> {
                 config.application_queue,
                 config.application_payload,
             )
-            .map_err(|_| ErrorCode::InvalidRequest)?,
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })?,
         );
         let records = Arc::new(
-            TorRecords::new(discovery, watcher, config.storage, config.records)
-                .map_err(|_| ErrorCode::InvalidRequest)?,
+            TorRecords::new(discovery, watcher, config.storage, config.records).map_err(
+                |__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::InvalidRequest",
+                        ErrorCode::InvalidRequest,
+                        &__cause,
+                    )
+                },
+            )?,
         );
         let serving = records.clone();
         let serving_applications = applications.clone();
@@ -261,7 +324,15 @@ impl<I: Identity, W: TorWatcher + 'static> Network<I, W> {
                 )
                 .boxed_local();
             let result = match select(Abortable::new(run, registration), stopped).await {
-                Either::Left((Ok(result), _)) => result.map_err(|_| ErrorCode::Unavailable),
+                Either::Left((Ok(result), _)) => result.map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                }),
                 _ => Ok(()), // explicit stop/cancellation; all original watches become lost
             };
             serving.transport_lost();
@@ -273,9 +344,19 @@ impl<I: Identity, W: TorWatcher + 'static> Network<I, W> {
             records,
             applications,
             advertisement,
-            done: async move { completion.await.map_err(|_| ErrorCode::Reconcile)? }
-                .boxed_local()
-                .shared(),
+            done: async move {
+                completion.await.map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                })?
+            }
+            .boxed_local()
+            .shared(),
         })
     }
 
@@ -374,11 +455,26 @@ impl<I: ClientIdentity, W: TorWatcher + 'static> Client<I, W> {
                 clock: transport.clock(),
                 limits: config.discovery,
             })
-            .map_err(|_| ErrorCode::InvalidRequest)?,
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })?,
         );
         let records = Arc::new(
-            TorRecords::new(discovery, watcher, None, config.records)
-                .map_err(|_| ErrorCode::InvalidRequest)?,
+            TorRecords::new(discovery, watcher, None, config.records).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })?,
         );
         Ok(Self { transport, records })
     }

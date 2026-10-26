@@ -128,11 +128,27 @@ struct Done {
 }
 
 fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    serde_json::to_vec(value).map_err(|_| ErrorCode::InvalidRequest)
+    serde_json::to_vec(value).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })
 }
 
 fn decode<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
-    serde_json::from_slice(bytes).map_err(|_| ErrorCode::InvalidRequest)
+    serde_json::from_slice(bytes).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })
 }
 
 /// The entries' values, once their scopes are exactly `scopes` in order.
@@ -396,7 +412,15 @@ impl<S: GuestSteps, C: Channel, P: FnMut(&GuestRecord) -> Result<()>> Guest<S, C
         if self.record.sent.len() == index {
             let payload = payload.ok_or(ErrorCode::InvalidRequest)?;
             let mut seed = [0u8; 32];
-            getrandom::fill(&mut seed).map_err(|_| ErrorCode::Unavailable)?;
+            getrandom::fill(&mut seed).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
             let (message, _) = link.seal_round_with(&seed, round, &payload)?;
             self.record.sent.push(SentRound { seed, message });
             (self.save)(&self.record)?;

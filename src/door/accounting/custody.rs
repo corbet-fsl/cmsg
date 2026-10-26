@@ -71,23 +71,39 @@ where
         let mut vault = vault;
         let (lineage, credential, device) = {
             let mut vault = vault.open().await?;
-            let lineage = vault
-                .keys()
-                .lineage()
-                .await
-                .map_err(|_| ErrorCode::Unauthorized)?;
+            let lineage = vault.keys().lineage().await.map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
             let credential = vault
                 .keys()
                 .device_info()
                 .await
-                .map_err(|_| ErrorCode::Unauthorized)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?
                 .authority_reference()
                 .to_vec();
-            let device = vault
-                .keys()
-                .device_public_key()
-                .await
-                .map_err(|_| ErrorCode::Unauthorized)?;
+            let device = vault.keys().device_public_key().await.map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
             (lineage, credential, device)
         };
         if lineage.binding.community() == "wallet"
@@ -123,21 +139,45 @@ where
             .keys()
             .lineage()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let reference = self
             .vault()
             .await?
             .keys()
             .device_info()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let device = self
             .vault()
             .await?
             .keys()
             .device_public_key()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         if lineage != self.lineage
             || reference.authority_reference() != self.credential
             || device != self.device
@@ -159,7 +199,15 @@ where
             .await?
             .community_credential()
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         match self
             .vault()
             .await?
@@ -169,7 +217,10 @@ where
             Ok(_) => Ok(()),
             Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
             Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),
-            Err(_) => Err(ErrorCode::Unavailable),
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "Err ErrorCode::Unavailable", &__cause);
+                Err(ErrorCode::Unavailable)
+            }
         }
     }
 
@@ -183,7 +234,15 @@ where
             .community_credential()
             .await
             .map(|credential| credential.map(|bytes| bytes.to_vec()))
-            .map_err(|_| ErrorCode::Unavailable)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })
     }
 
     /// The owed account update (exact signed bytes) from its own Vault record,
@@ -195,7 +254,15 @@ where
             .await?
             .update_outbox()
             .await
-            .map_err(|_| ErrorCode::Unavailable)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })
     }
 
     /// Replace the owed update by compare-and-swap against what the caller read
@@ -216,7 +283,10 @@ where
             Ok(_) => Ok(()),
             Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
             Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),
-            Err(_) => Err(ErrorCode::Unavailable),
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "Err ErrorCode::Unavailable", &__cause);
+                Err(ErrorCode::Unavailable)
+            }
         }
     }
 
@@ -229,7 +299,15 @@ where
             .await?
             .voucher_custody()
             .await
-            .map_err(|_| ErrorCode::Unavailable)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })
     }
 
     /// Replace the voucher custody by compare-and-swap against what the caller
@@ -250,7 +328,10 @@ where
             Ok(_) => Ok(()),
             Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
             Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),
-            Err(_) => Err(ErrorCode::Unavailable),
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "Err ErrorCode::Unavailable", &__cause);
+                Err(ErrorCode::Unavailable)
+            }
         }
     }
 
@@ -336,29 +417,68 @@ where
         let origin = self.origin.clone();
         self.check(&origin).await?;
         let mut vault = self.vault.open().await?;
-        let stored = vault
-            .witness_state()
-            .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+        let stored = vault.witness_state().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         match stored {
             Some(bytes) => {
                 let sealed = ckmg::wallet_engine::account::SealedAccount::from_bytes(&bytes)
-                    .map_err(|_| ErrorCode::Unauthorized)?;
-                let engine = vault
-                    .keys()
-                    .wallet_engine()
-                    .await
-                    .map_err(|_| ErrorCode::Unauthorized)?;
-                engine
-                    .restore_account(&sealed, roster)
-                    .map_err(|_| ErrorCode::Unauthorized)
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })?;
+                let engine = vault.keys().wallet_engine().await.map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?;
+                engine.restore_account(&sealed, roster).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })
             }
             None => vault
                 .restore_accepted_account()
                 .await
-                .map_err(|_| ErrorCode::Unauthorized)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?
                 .witness(roster)
-                .map_err(|_| ErrorCode::Unauthorized),
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                }),
         }
     }
 
@@ -373,16 +493,33 @@ where
         let origin = self.origin.clone();
         self.check(&origin).await?;
         let mut vault = self.vault.open().await?;
-        let engine = vault
-            .keys()
-            .wallet_engine()
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
-        let sealed = account.seal(&engine).map_err(|_| ErrorCode::Refused)?;
-        let current = vault
-            .witness_state()
-            .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+        let engine = vault.keys().wallet_engine().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
+        let sealed = account.seal(&engine).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Refused",
+                ErrorCode::Refused,
+                &__cause,
+            )
+        })?;
+        let current = vault.witness_state().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         match vault
             .replace_witness_state(current.as_ref().map(|c| c.as_slice()), sealed.as_bytes())
             .await
@@ -390,7 +527,10 @@ where
             Ok(_) => Ok(()),
             Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
             Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),
-            Err(_) => Err(ErrorCode::Unavailable),
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "Err ErrorCode::Unavailable", &__cause);
+                Err(ErrorCode::Unavailable)
+            }
         }
     }
 }

@@ -216,7 +216,13 @@ pub(super) fn credential_valid_until(cose: &[u8]) -> Option<u64> {
 }
 
 fn take<'a>(input: &mut &'a [u8], length: u64) -> Option<&'a [u8]> {
-    let length = usize::try_from(length).ok()?;
+    let length = match usize::try_from(length) {
+        Ok(length) => length,
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "usize::try_from", &__cause);
+            return None;
+        }
+    };
     if input.len() < length {
         return None;
     }

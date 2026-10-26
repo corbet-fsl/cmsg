@@ -35,7 +35,9 @@ pub async fn reopen_initial_publication<'p, B: cwst::backend::Backend>(
     cvlt::InitialError,
 > {
     let (credential, vault) = authentication.into_parts();
-    let id = credential.credential_id().map_err(|_| refused())?;
+    let id = credential.credential_id().map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })?;
     let cfyr::passkeys::VaultOutcome::Ready(unlock) = vault else {
         return Err(refused());
     };
@@ -65,7 +67,11 @@ pub async fn reopen_initial_publication_opened<'p, B: cwst::backend::Backend>(
     ),
     cvlt::InitialError,
 > {
-    if id != initial.credential_id().map_err(|_| refused())? {
+    if id
+        != initial.credential_id().map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
+    {
         return Err(refused());
     }
     let mut clock = SharedClock::new(clock);
@@ -80,7 +86,9 @@ pub async fn reopen_initial_publication_opened<'p, B: cwst::backend::Backend>(
             },
             |current| current.community().to_owned(),
         )
-        .map_err(|_| refused())?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?;
     if failed {
         return Err(cvlt::InitialError::Keys(Error::Clock));
     }
@@ -92,7 +100,11 @@ pub async fn reopen_initial_publication_opened<'p, B: cwst::backend::Backend>(
         Opening::Opened(opening) => opening,
     };
     let creation = opening.reopen_initial(backend).await?;
-    if creation.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+    if creation.enrollment_commitment()?
+        != initial.seed().map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
+    {
         return Err(refused());
     }
     initial
@@ -102,7 +114,9 @@ pub async fn reopen_initial_publication_opened<'p, B: cwst::backend::Backend>(
                 u64::MAX
             })
         })
-        .map_err(|_| refused())?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?;
     if failed {
         return Err(cvlt::InitialError::Keys(Error::Clock));
     }
@@ -126,11 +140,18 @@ pub async fn reopen_device_initial_publication<'p, B: cwst::backend::Backend>(
     cvlt::InitialError,
 > {
     let device = opening.device().map_err(cvlt::InitialError::Open)?;
-    if initial.credential_id().map_err(|_| refused())? != device.value() {
+    if initial.credential_id().map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })? != device.value()
+    {
         return Err(refused());
     }
     let creation = opening.reopen_initial(backend).await?;
-    if creation.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+    if creation.enrollment_commitment()?
+        != initial.seed().map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
+    {
         return Err(refused());
     }
     let mut clock = SharedClock::new(clock);
@@ -142,7 +163,9 @@ pub async fn reopen_device_initial_publication<'p, B: cwst::backend::Backend>(
                 u64::MAX
             })
         })
-        .map_err(|_| refused())?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?;
     if failed {
         return Err(cvlt::InitialError::Keys(Error::Clock));
     }
@@ -171,11 +194,26 @@ pub async fn prepare_initial_publication<
     InitialPublicationError,
 > {
     let mut clock = SharedClock::new(clock);
-    if creation.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+    if creation.enrollment_commitment()?
+        != initial.seed().map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
+    {
         return Err(refused().into());
     }
-    let certificate = initial.certificate_bytes().map_err(|_| refused())?.to_vec();
-    let member = initial.observation().map_err(|_| refused())?.member.clone();
+    let certificate = initial
+        .certificate_bytes()
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
+        .to_vec();
+    let member = initial
+        .observation()
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
+        .member
+        .clone();
     let challenge = creation
         .receipt()
         .passkey_challenge()
@@ -193,32 +231,46 @@ pub async fn prepare_initial_publication<
             |current| {
                 let certificate = current
                     .passkey_certificate(&certificate, &member, now)
-                    .map_err(|_| refused())?;
-                serde_json::to_value(certificate.request(challenge, now).map_err(|_| refused())?)
-                    .map_err(|_| refused())
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+                    })?;
+                serde_json::to_value(certificate.request(challenge, now).map_err(|__cause| {
+                    crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+                })?)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+                })
             },
         )
-        .map_err(|_| refused())??;
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })??;
     if failed {
         return Err(cvlt::InitialError::Keys(Error::Clock).into());
     }
     let (public, unused_unlock) = passkeys
         .sign_in(options)
         .await
-        .map_err(|_| refused())?
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
         .into_parts();
     drop(unused_unlock);
     // Parse only through the original secret-rejecting Keyhole response codec;
     // it alone decodes the original WebAuthn signed byte fields.
     if serde_json::to_vec(public.as_json())
-        .map_err(|_| refused())?
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
         .len()
         > cvlt::MAX_LINEAGE_EVIDENCE_BYTES
     {
         return Err(refused().into());
     }
     let public: ckyh::PublicKeyCredential =
-        serde_json::from_value(public.into_json()).map_err(|_| refused())?;
+        serde_json::from_value(public.into_json()).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?;
     let assertion = ckyh::lineage::Assertion {
         credential_id: public.raw_id.to_vec(),
         client_data_json: public.response.client_data_json.to_vec(),
@@ -255,14 +307,20 @@ pub async fn prepare_initial_publication<
                     &member,
                     now,
                 )
-                .map_err(|_| refused())
+                .map_err(|__cause| {
+                    crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+                })
             },
         )
-        .map_err(|_| refused())??;
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })??;
     if failed {
         return Err(cvlt::InitialError::Keys(Error::Clock).into());
     }
-    let expires = initial.expires().map_err(|_| refused())?;
+    let expires = initial.expires().map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })?;
     let creation = creation
         .prepare(&evidence, expires, &mut clock, entropy)
         .await?;
@@ -299,12 +357,23 @@ pub async fn prepare_birth_publication<B: cwst::backend::Backend>(
     entropy: &mut impl ckmg::Entropy,
 ) -> Result<cvlt::InitialCreation<B>, InitialPublicationError> {
     let mut clock = SharedClock::new(clock);
-    let seed = initial.seed().map_err(|_| refused())?;
+    let seed = initial.seed().map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })?;
     if creation.enrollment_commitment()? != seed {
         return Err(refused().into());
     }
-    let member = initial.observation().map_err(|_| refused())?.member.clone();
-    if wallet.user().map_err(|_| refused())? != member {
+    let member = initial
+        .observation()
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
+        .member
+        .clone();
+    if wallet.user().map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })? != member
+    {
         return Err(refused().into());
     }
     let digest = creation
@@ -326,8 +395,12 @@ pub async fn prepare_birth_publication<B: cwst::backend::Backend>(
         return Err(InitialPublicationError::Foyer(cfyr::Error::Reconcile));
     }
     let evidence = cchr::BirthGenesisEvidence::new(creation.receipt().clone(), statement, at);
-    let evidence_bytes = evidence.to_bytes().map_err(|_| refused())?;
-    let expires = initial.expires().map_err(|_| refused())?;
+    let evidence_bytes = evidence.to_bytes().map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })?;
+    let expires = initial.expires().map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })?;
     let (_, author) = creation
         .receipt()
         .attested_lineage()
@@ -353,17 +426,24 @@ pub async fn prepare_birth_publication<B: cwst::backend::Backend>(
                     &member,
                     now,
                 )
-                .map_err(|_| refused())?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+                })?;
                 if verified.statement().device() != &device
                     || verified.statement().commitment() != &seed
                 {
                     return Err(refused());
                 }
-                cvlt::LineageEvidence::prepare_birth(current, evidence, &member, now)
-                    .map_err(|_| refused())
+                cvlt::LineageEvidence::prepare_birth(current, evidence, &member, now).map_err(
+                    |__cause| {
+                        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+                    },
+                )
             },
         )
-        .map_err(|_| refused())??;
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })??;
     if failed {
         return Err(cvlt::InitialError::Keys(Error::Clock).into());
     }
@@ -421,7 +501,11 @@ where
     WR: cvlt::Records,
 {
     let mut clock = SharedClock::new(clock);
-    if creation.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+    if creation.enrollment_commitment()?
+        != initial.seed().map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
+    {
         return Err(refused().into());
     }
     let (_, author) = creation
@@ -429,13 +513,23 @@ where
         .attested_lineage()
         .map_err(cvlt::InitialError::Keys)?;
     // Only the device lease of the key that attested the receipt.
-    if initial.credential_id().map_err(|_| refused())? != author.value() {
+    if initial.credential_id().map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })? != author.value()
+    {
         return Err(refused().into());
     }
-    let member = initial.observation().map_err(|_| refused())?.member.clone();
+    let member = initial
+        .observation()
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
+        .member
+        .clone();
     let at = creation.genesis_at()?;
-    let action =
-        cvlt::lineage_genesis_action(creation.receipt(), salt, at).map_err(|_| refused())?;
+    let action = cvlt::lineage_genesis_action(creation.receipt(), salt, at).map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })?;
     let mut failed = false;
     let scope = initial
         .with_current(
@@ -445,9 +539,15 @@ where
                     u64::MAX
                 })
             },
-            |current| cvlt::lineage_stamp_scope(current).map_err(|_| refused()),
+            |current| {
+                cvlt::lineage_stamp_scope(current).map_err(|__cause| {
+                    crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+                })
+            },
         )
-        .map_err(|_| refused())??;
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })??;
     if failed {
         return Err(cvlt::InitialError::Keys(Error::Clock).into());
     }
@@ -458,8 +558,12 @@ where
             holder.present_stamp(&mut cwlt::passport::rand::rngs::OsRng, &scope, &action, at)
         })
         .await
-        .map_err(|_| refused())?
-        .map_err(|_| refused())?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?;
     let now = clock.now().map_err(cvlt::InitialError::Keys)?;
     let evidence = initial
         .with_current(
@@ -483,10 +587,14 @@ where
                     &member,
                     now,
                 )
-                .map_err(|_| refused())
+                .map_err(|__cause| {
+                    crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+                })
             },
         )
-        .map_err(|_| refused())??;
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })??;
     if failed {
         return Err(cvlt::InitialError::Keys(Error::Clock).into());
     }
@@ -494,8 +602,12 @@ where
     let bound =
         cvlt::GenesisStampEvidence::new(creation.receipt().clone(), &presentation, salt, at)
             .to_bytes()
-            .map_err(|_| refused())?;
-    let expires = initial.expires().map_err(|_| refused())?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+            })?;
+    let expires = initial.expires().map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })?;
     let creation = creation
         .prepare(&evidence, expires, &mut clock, entropy)
         .await?;
@@ -543,17 +655,41 @@ fn verified_reference<'a>(
         Some(stamps) => evidence.verify_with_stamps(current, stamps, member, now),
         None => evidence.verify(current, member, now),
     }
-    .map_err(|_| Error::Unauthorized)?;
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "Error::Unauthorized",
+            Error::Unauthorized,
+            &__cause,
+        )
+    })?;
     let reference = if evidence.is_stamp() {
         observed
             .author(now)
-            .map_err(|_| Error::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?
             .value()
             .to_vec()
     } else {
         observed
             .credential_id(now)
-            .map_err(|_| Error::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?
             .to_vec()
     };
     Ok((observed, reference))
@@ -580,15 +716,24 @@ impl<C: Clock> Completion<'_, C> {
             || request.sealed_digest != &self.sealed_digest
             || !same_intent(request.intent, &self.intent)
             || request.authority_reference
-                != self
-                    .initial
-                    .credential_id()
-                    .map_err(|_| Error::Unauthorized)?
-            || self
-                .initial
-                .publication()
-                .map_err(|_| Error::Unauthorized)?
-                != Some(self.publication)
+                != self.initial.credential_id().map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Unauthorized",
+                        Error::Unauthorized,
+                        &__cause,
+                    )
+                })?
+            || self.initial.publication().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })? != Some(self.publication)
         {
             return Err(Error::Unauthorized);
         }
@@ -602,12 +747,25 @@ impl<C: Clock> Completion<'_, C> {
             return Err(Error::Unauthorized);
         }
         let evidence = cvlt::LineageEvidence::from_packed(&request.intent.packed_evidence)
-            .map_err(|_| Error::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let (lineage, author) = request.receipt.attested_lineage()?;
-        let observation = self
-            .initial
-            .observation()
-            .map_err(|_| Error::Unauthorized)?;
+        let observation = self.initial.observation().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })?;
         if observation.member != lineage.binding.member()
             || !observation.device_keys.contains(author.value())
         {
@@ -637,8 +795,24 @@ impl<C: Clock> Completion<'_, C> {
                         lineage.binding.member(),
                         now,
                     )?;
-                    if observed.lineage(now).map_err(|_| Error::Unauthorized)? != lineage
-                        || observed.author(now).map_err(|_| Error::Unauthorized)? != author
+                    if observed.lineage(now).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Unauthorized",
+                            Error::Unauthorized,
+                            &__cause,
+                        )
+                    })? != lineage
+                        || observed.author(now).map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "Error::Unauthorized",
+                                Error::Unauthorized,
+                                &__cause,
+                            )
+                        })? != author
                         || reference != request.authority_reference
                     {
                         return Err(Error::Unauthorized);
@@ -646,11 +820,27 @@ impl<C: Clock> Completion<'_, C> {
                     Ok(())
                 },
             )
-            .map_err(|_| Error::Unauthorized)??;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })??;
         if failed {
             return Err(Error::Clock);
         }
-        let completed = self.initial.checked_at().map_err(|_| Error::Unauthorized)?;
+        let completed = self.initial.checked_at().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })?;
         if completed < now || completed >= request.intent.expires {
             return Err(Error::Clock);
         }
@@ -704,11 +894,18 @@ async fn retain_publication<B: cwst::backend::Backend>(
     stamps: Option<cvlt::StampTrust>,
     clock: &mut impl Clock,
 ) -> Result<cvlt::InitialCreation<B>, cvlt::InitialError> {
-    if creation.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+    if creation.enrollment_commitment()?
+        != initial.seed().map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
+    {
         return Err(refused());
     }
     let publication = creation.publication_commitment()?;
-    if initial.publication().map_err(|_| refused())? != Some(publication) {
+    if initial.publication().map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })? != Some(publication)
+    {
         return Err(refused());
     }
     let (intent, location, sealed_digest) = creation.completion_binding()?;
@@ -766,11 +963,27 @@ impl<C: Clock, R: cdht::runtime::Backend> ckmg::Authority for AcknowledgmentAuth
                 })
             })
             .await
-            .map_err(|_| Error::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?;
         if failed {
             return Err(Error::Clock);
         }
-        let read = self.records.read().await.map_err(|_| Error::Unavailable)?;
+        let read = self.records.read().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unavailable",
+                Error::Unavailable,
+                &__cause,
+            )
+        })?;
         initial
             .refresh(|| {
                 clock.now().unwrap_or_else(|_| {
@@ -779,7 +992,15 @@ impl<C: Clock, R: cdht::runtime::Backend> ckmg::Authority for AcknowledgmentAuth
                 })
             })
             .await
-            .map_err(|_| Error::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?;
         if failed {
             return Err(Error::Clock);
         }
@@ -787,21 +1008,60 @@ impl<C: Clock, R: cdht::runtime::Backend> ckmg::Authority for AcknowledgmentAuth
         if now < request.now || now >= self.completion.intent.expires {
             return Err(Error::Clock);
         }
-        let observation = initial.observation().map_err(|_| Error::Unauthorized)?;
+        let observation = initial.observation().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })?;
         if observation.member != lineage.binding.member()
             || !observation.device_keys.contains(author.value())
-            || initial.publication().map_err(|_| Error::Unauthorized)?
-                != Some(self.completion.publication)
+            || initial.publication().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })? != Some(self.completion.publication)
         {
             return Err(Error::Unauthorized);
         }
         let original = cvlt::LineageEvidence::from_packed(&self.completion.intent.packed_evidence)
-            .map_err(|_| Error::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?
             .to_bytes()
-            .map_err(|_| Error::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let credential = initial
             .credential_id()
-            .map_err(|_| Error::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?
             .to_vec();
         initial
             .with_current(
@@ -818,7 +1078,16 @@ impl<C: Clock, R: cdht::runtime::Backend> ckmg::Authority for AcknowledgmentAuth
                         return Err(Error::Unauthorized);
                     }
                     let evidence = &read.evidence()[0];
-                    if evidence.to_bytes().map_err(|_| Error::Unauthorized)? != original {
+                    if evidence.to_bytes().map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Unauthorized",
+                            Error::Unauthorized,
+                            &__cause,
+                        )
+                    })? != original
+                    {
                         return Err(Error::Unauthorized);
                     }
                     let (actual, reference) = verified_reference(
@@ -828,8 +1097,24 @@ impl<C: Clock, R: cdht::runtime::Backend> ckmg::Authority for AcknowledgmentAuth
                         lineage.binding.member(),
                         now,
                     )?;
-                    if actual.lineage(now).map_err(|_| Error::Unauthorized)? != lineage
-                        || actual.author(now).map_err(|_| Error::Unauthorized)? != author
+                    if actual.lineage(now).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Unauthorized",
+                            Error::Unauthorized,
+                            &__cause,
+                        )
+                    })? != lineage
+                        || actual.author(now).map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "Error::Unauthorized",
+                                Error::Unauthorized,
+                                &__cause,
+                            )
+                        })? != author
                         || reference != credential
                     {
                         return Err(Error::Unauthorized);
@@ -837,11 +1122,27 @@ impl<C: Clock, R: cdht::runtime::Backend> ckmg::Authority for AcknowledgmentAuth
                     Ok(())
                 },
             )
-            .map_err(|_| Error::Unauthorized)??;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })??;
         if failed {
             return Err(Error::Clock);
         }
-        if initial.checked_at().map_err(|_| Error::Unauthorized)? >= self.completion.intent.expires
+        if initial.checked_at().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })? >= self.completion.intent.expires
         {
             return Err(Error::Expired);
         }
@@ -905,11 +1206,18 @@ async fn acknowledge_publication<B: cwst::backend::Backend, N: cdht::Network>(
     clock: &mut impl Clock,
     entropy: &mut impl ckmg::Entropy,
 ) -> Result<cvlt::InitialCreation<B>, cvlt::InitialError> {
-    if read.enrollment_commitment()? != initial.seed().map_err(|_| refused())? {
+    if read.enrollment_commitment()?
+        != initial.seed().map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
+    {
         return Err(refused());
     }
     let publication = read.publication_commitment()?;
-    if initial.publication().map_err(|_| refused())? != Some(publication) {
+    if initial.publication().map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })? != Some(publication)
+    {
         return Err(refused());
     }
     let mut clock = SharedClock::new(clock);
@@ -922,7 +1230,9 @@ async fn acknowledge_publication<B: cwst::backend::Backend, N: cdht::Network>(
             })
         })
         .await
-        .map_err(|_| refused())?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?;
     if failed {
         return Err(cvlt::InitialError::Keys(Error::Clock));
     }

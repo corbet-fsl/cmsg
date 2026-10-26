@@ -51,7 +51,15 @@ fn current(
     if charter
         .revocations()
         .passkey_revoked(credential)
-        .map_err(|_| ErrorCode::Unauthorized)?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?
     {
         return Err(ErrorCode::Unauthorized);
     }
@@ -60,32 +68,74 @@ fn current(
         return Err(ErrorCode::Unauthorized);
     }
     let material: PublicVerifierMaterial =
-        serde_json::from_slice(balance.payload()).map_err(|_| ErrorCode::Unauthorized)?;
+        serde_json::from_slice(balance.payload()).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     material
         .validate_at(charter.community(), checked)
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     if material.revision != balance.revision() || material.policy_epoch != charter.policy_epoch() {
         return Err(ErrorCode::Unauthorized);
     }
     let period = crbk::RecordEpochSettings::from_snapshot(
-        charter
-            .settings(checked)
-            .map_err(|_| ErrorCode::Unauthorized)?,
+        charter.settings(checked).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?,
         &configuration.period_key,
     )
-    .map_err(|_| ErrorCode::Unauthorized)?
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?
     .period_seconds;
     let epoch = material
         .record_epoch
         .as_ref()
         .ok_or(ErrorCode::Unavailable)?;
     let community: [u8; 32] = Sha256::digest(charter.community().as_bytes()).into();
-    epoch
-        .validate(&community, period)
-        .map_err(|_| ErrorCode::Unauthorized)?;
-    epoch
-        .check_time(checked)
-        .map_err(|_| ErrorCode::Unauthorized)?;
+    epoch.validate(&community, period).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?;
+    epoch.check_time(checked).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?;
     let owner = account_owner(&member.member).ok_or(ErrorCode::Unauthorized)?;
     Ok(CurrentRecord {
         material,
@@ -138,25 +188,46 @@ where
     R: Records,
     W: AccountSlot,
 {
-    let projection = vault
-        .account_projection()
-        .await
-        .map_err(|_| ErrorCode::Unauthorized)?;
-    let lineage = vault
-        .keys()
-        .lineage()
-        .await
-        .map_err(|_| ErrorCode::Unauthorized)?;
-    let reference = vault
-        .keys()
-        .device_info()
-        .await
-        .map_err(|_| ErrorCode::Unauthorized)?;
+    let projection = vault.account_projection().await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?;
+    let lineage = vault.keys().lineage().await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?;
+    let reference = vault.keys().device_info().await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?;
     let device = *vault
         .keys()
         .device_public_key()
         .await
-        .map_err(|_| ErrorCode::Unauthorized)?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?
         .value();
     if lineage.binding.community() != expected.scope
         || lineage.binding.member() != expected.member
@@ -190,7 +261,15 @@ where
         .with_current(now, |charter, member, credential, origin, checked| {
             current(configuration, charter, member, credential, origin, checked)
         })
-        .map_err(|_| ErrorCode::Unauthorized)??;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })??;
     let original = account(vault, &expected).await?;
     let length = expected
         .material
@@ -199,11 +278,24 @@ where
         .ok_or(ErrorCode::Unavailable)?
         .download_bytes
         .try_into()
-        .map_err(|_| ErrorCode::Unavailable)?;
-    let object = source
-        .download(length, now)
-        .await
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
+    let object = source.download(length, now).await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     if account(vault, &expected).await? != original {
         return Err(ErrorCode::Unauthorized);
     }
@@ -221,17 +313,47 @@ where
                         .as_ref()
                         .ok_or(ErrorCode::Unavailable)?;
                     // Authenticate the real descriptor and full object digest BEFORE HPKE.
-                    epoch
-                        .check_object(&object)
-                        .map_err(|_| ErrorCode::Unauthorized)?;
+                    epoch.check_object(&object).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })?;
                     recipient
                         .receive(epoch, observed.period, observed.owner, &object, checked)
-                        .map_err(|_| ErrorCode::Unauthorized)
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unauthorized",
+                                ErrorCode::Unauthorized,
+                                &__cause,
+                            )
+                        })
                 })
-                .map_err(|_| ErrorCode::Unauthorized)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?
         })
         .await
-        .map_err(|_| ErrorCode::Unauthorized)??;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })??;
     if account(vault, &expected).await? != original {
         return Err(ErrorCode::Unauthorized);
     }
@@ -249,15 +371,39 @@ where
                     observed.owner,
                     checked,
                 )
-                .map_err(|_| ErrorCode::Unauthorized)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?;
             Ok::<_, ErrorCode>(observed)
         })
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     let observed = observed?;
     observed
         .material
         .validate_at(&observed.scope, completed)
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     received
         .check(
             observed
@@ -268,7 +414,15 @@ where
             observed.owner,
             completed,
         )
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     // No await follows the original owner completion sample/object lifetime cut.
     Ok(received)
 }
@@ -287,7 +441,15 @@ pub fn current_epoch(
                 .record_epoch
                 .ok_or(ErrorCode::Unavailable)
         })
-        .map_err(|_| ErrorCode::Unauthorized)?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?
 }
 
 /// The validity window of one record epoch, as the community's current signed
@@ -329,7 +491,15 @@ impl RecordCurrent {
         let window = self
             .0
             .lock()
-            .map_err(|_| ErrorCode::Unavailable)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
             .ok_or(ErrorCode::Unavailable)?;
         if now < window.starts_at || now >= window.expires_at {
             return Err(ErrorCode::Unavailable);
@@ -343,7 +513,17 @@ impl RecordCurrent {
 /// epoch). The ports are bound per member origin, as is this cell.
 impl super::inbox_waves::production::OwnRecordCheck for RecordCurrent {
     fn check<'a>(&'a self, _binding: &'a ckmg::Binding) -> super::facades::OwnedFuture<'a, ()> {
-        Box::pin(async move { self.check_at(SystemClock.now().map_err(|_| ErrorCode::Clock)?) })
+        Box::pin(async move {
+            self.check_at(SystemClock.now().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Clock",
+                    ErrorCode::Clock,
+                    &__cause,
+                )
+            })?)
+        })
     }
 }
 
@@ -380,7 +560,15 @@ impl RecordWork {
         let proof = self
             .prover
             .prove_record_epoch(&self.evidence)
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         Ok(RecordProof {
             record: self.record,
             proof,
@@ -391,7 +579,15 @@ impl RecordWork {
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 fn operation() -> Result<[u8; 32]> {
     let mut id = [0; 32];
-    getrandom::fill(&mut id).map_err(|_| ErrorCode::Unavailable)?;
+    getrandom::fill(&mut id).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     Ok(id)
 }
 
@@ -411,25 +607,50 @@ where
     R: Records,
 {
     let epoch = received.epoch().clone();
-    if vault
-        .record_ready(&epoch, now())
-        .await
-        .map_err(|_| ErrorCode::Unauthorized)?
-    {
+    if vault.record_ready(&epoch, now()).await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })? {
         return Ok(None);
     }
-    let accepted = vault
-        .restore_accepted_account()
-        .await
-        .map_err(|_| ErrorCode::Unauthorized)?;
+    let accepted = vault.restore_accepted_account().await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?;
     // The key is durable before proving: a restart proves again with the same key.
     let key = vault
         .begin_record_epoch(&epoch, accepted.owner(), now(), operation()?)
         .await
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     let evidence = accepted
         .record_epoch(received, key, now())
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     Ok(Some(RecordWork {
         record: evidence.record().clone(),
         evidence,
@@ -453,7 +674,15 @@ where
     vault
         .finish_record_epoch(proof.record, proof.proof, operation()?)
         .await
-        .map_err(|_| ErrorCode::Unauthorized)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })
 }
 
 /// The per-epoch preparation the background job runs: skip when the current
@@ -475,11 +704,15 @@ where
 {
     let epoch = current_epoch(&mut source, configuration)?;
     let window = RecordWindow::of(&epoch);
-    if vault
-        .record_ready(&epoch, now())
-        .await
-        .map_err(|_| ErrorCode::Unauthorized)?
-    {
+    if vault.record_ready(&epoch, now()).await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })? {
         return Ok((window, None));
     }
     let received = receive_common_record(source, vault, configuration).await?;
@@ -516,7 +749,15 @@ where
     };
     let proof = tokio::task::spawn_blocking(move || work.prove())
         .await
-        .map_err(|_| ErrorCode::Unavailable)??;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })??;
     finish_record(vault, proof).await
 }
 
@@ -595,9 +836,25 @@ mod tests {
 /// community pseudonym (lowercase hex, as the lobby and the identity binding name it).
 /// This is the id the accounting ledger and the enrollment roster know the member by.
 pub(super) fn account_owner(pseudonym: &str) -> Option<[u8; 32]> {
-    let pseudonym: [u8; 48] = HEX.decode(pseudonym.as_bytes()).ok()?.try_into().ok()?;
-    B64.decode(cblc::admission::member_id(&pseudonym).as_bytes())
-        .ok()?
-        .try_into()
-        .ok()
+    let pseudonym: [u8; 48] = match HEX.decode(pseudonym.as_bytes()) {
+        Ok(decoded) => match decoded.try_into() {
+            Ok(pseudonym) => pseudonym,
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "try_into", &__cause);
+                return None;
+            }
+        },
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "HEX.decode", &__cause);
+            return None;
+        }
+    };
+    let decoded = match B64.decode(cblc::admission::member_id(&pseudonym).as_bytes()) {
+        Ok(decoded) => decoded,
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "B64.decode", &__cause);
+            return None;
+        }
+    };
+    decoded.try_into().ok()
 }

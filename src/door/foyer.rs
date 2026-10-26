@@ -395,7 +395,15 @@ impl Binding {
             .as_mut()
             .ok_or(ErrorCode::Unavailable)?;
         let result = client.call(name, body).await.map_err(map_error)?;
-        check_result_size(&result).map_err(|_| ErrorCode::Unavailable)?;
+        check_result_size(&result).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         Ok(result)
     }
 
@@ -530,11 +538,27 @@ impl Door {
         memberships: &mut super::identity::Memberships,
         data: &mut impl super::identity::LocalData,
     ) -> Result<Vec<super::identity::Fingerprint>> {
-        let now = ckmg::Clock::now(&mut custody::SystemClock).map_err(|_| ErrorCode::Clock)?;
+        let now = ckmg::Clock::now(&mut custody::SystemClock).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Clock",
+                ErrorCode::Clock,
+                &__cause,
+            )
+        })?;
         let ended = self
             .wallet_current_policy(origin)?
             .with_current(now, |charter| charter.ended().to_vec())
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         Ok(memberships.retire_ended(&ended, data))
     }
 
@@ -605,7 +629,20 @@ impl Door {
 impl Binding {
     /// Founding-key fingerprint the community trust is anchored to, if it is.
     pub(super) fn community_fingerprint(&mut self) -> Option<super::identity::Fingerprint> {
-        let trust = self.community().ok()?.trust().ok()?;
+        let community = match self.community() {
+            Ok(community) => community,
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "community", &__cause);
+                return None;
+            }
+        };
+        let trust = match community.trust() {
+            Ok(trust) => trust,
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "trust", &__cause);
+                return None;
+            }
+        };
         trust
             .fingerprint()
             .copied()
@@ -669,11 +706,19 @@ pub(super) async fn refresh(
     let clock = || {
         match cbrd::clnk::Clock::now(&board::SystemClock) {
             Ok(milliseconds) => milliseconds / 1000,
-            Err(_) => {
-                // An unusable clock must not grant freshness. The original
-                // bounded-time owner refuses this value; never reuse old time.
-                failed_clock.set(true);
-                u64::MAX
+            Err(__cause) => {
+                crate::door::cause::print(
+                    file!(),
+                    line!(),
+                    "An unusable clock must not grant freshness The original bounded",
+                    &__cause,
+                );
+                {
+                    // An unusable clock must not grant freshness. The original
+                    // bounded-time owner refuses this value; never reuse old time.
+                    failed_clock.set(true);
+                    u64::MAX
+                }
             }
         }
     };
@@ -690,7 +735,15 @@ pub(super) async fn refresh(
     }
     result.map_err(trust_error)?;
     drop(trust);
-    let now = cbrd::clnk::Clock::now(&board::SystemClock).map_err(|_| ErrorCode::Clock)? / 1000;
+    let now = cbrd::clnk::Clock::now(&board::SystemClock).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Clock",
+            ErrorCode::Clock,
+            &__cause,
+        )
+    })? / 1000;
     #[cfg(feature = "ohttp")]
     let feed = binding.sessions.feed.clone();
     let mut verified = None;

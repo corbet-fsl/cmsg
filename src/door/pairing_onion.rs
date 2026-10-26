@@ -69,7 +69,15 @@ impl<B: cmsh::Backend> Channel for OnionChannel<B> {
             .backend
             .app_call(address, message)
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         if reply.is_empty() || reply.len() > MAX_MESSAGE_BYTES {
             return Err(ErrorCode::InvalidRequest);
         }
@@ -90,7 +98,15 @@ impl OnionOffer {
         backend: &B,
         now: u64,
     ) -> Result<(Self, Offer, String)> {
-        let listener = backend.listen().await.map_err(|_| ErrorCode::Unavailable)?;
+        let listener = backend.listen().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let (offer, link) = Offer::new(listener.address(), now)?;
         Ok((Self { listener }, offer, link))
     }
@@ -112,8 +128,24 @@ impl OnionOffer {
             }
             let wait = Duration::from_secs(expires - now);
             let event = match tokio::time::timeout(wait, self.listener.next()).await {
-                Err(_) => return Err(ErrorCode::Refused),
-                Ok(Err(_)) => return Err(ErrorCode::Unavailable),
+                Err(__cause) => {
+                    crate::door::cause::print(
+                        file!(),
+                        line!(),
+                        "return Err ErrorCode::Refused",
+                        &__cause,
+                    );
+                    return Err(ErrorCode::Refused);
+                }
+                Ok(Err(__cause)) => {
+                    crate::door::cause::print(
+                        file!(),
+                        line!(),
+                        "return Err ErrorCode::Unavailable",
+                        &__cause,
+                    );
+                    return Err(ErrorCode::Unavailable);
+                }
                 Ok(Ok(event)) => event,
             };
             calls += 1;
@@ -175,7 +207,15 @@ pub mod ephemeral {
 
     fn random<const N: usize>() -> Result<[u8; N]> {
         let mut bytes = [0u8; N];
-        getrandom::fill(&mut bytes).map_err(|_| ErrorCode::Unavailable)?;
+        getrandom::fill(&mut bytes).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         Ok(bytes)
     }
 
@@ -192,12 +232,28 @@ pub mod ephemeral {
             scope: scope.clone(),
             seed: zeroize::Zeroizing::new(random::<32>()?),
         });
-        let network = ArtiNetwork::new(runtime, tor, directories, identity)
-            .map_err(|_| ErrorCode::Unavailable)?;
+        let network = ArtiNetwork::new(runtime, tor, directories, identity).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let clock = Arc::new(TokioClock::default());
         let node = Arc::new(
-            ctrn::Node::new(Arc::new(network), clock.clone(), scope, limits)
-                .map_err(|_| ErrorCode::InvalidRequest)?,
+            ctrn::Node::new(Arc::new(network), clock.clone(), scope, limits).map_err(
+                |__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::InvalidRequest",
+                        ErrorCode::InvalidRequest,
+                        &__cause,
+                    )
+                },
+            )?,
         );
         let messages = ctrn::messages::Messages::new(
             node.clone(),
@@ -210,8 +266,24 @@ pub mod ephemeral {
                 timeout_ms: 60_000,
             },
         )
-        .map_err(|_| ErrorCode::InvalidRequest)?;
-        node.start().await.map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
+        node.start().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         Ok(EphemeralTor {
             node,
             backend: Arc::new(cmsh::Tor(messages)),
@@ -239,9 +311,15 @@ mod tests {
     #[cmsh::async_trait]
     impl cmsh::ReplyPort for Port {
         async fn send(self: Box<Self>, payload: &[u8]) -> std::result::Result<(), cmsh::Error> {
-            self.0
-                .send(payload.to_vec())
-                .map_err(|_| cmsh::Error::new(cmsh::ErrorKind::Closed, "gone"))
+            self.0.send(payload.to_vec()).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cmsh::Error::new cmsh::ErrorKind::Closed gone",
+                    cmsh::Error::new(cmsh::ErrorKind::Closed, "gone"),
+                    &__cause,
+                )
+            })
         }
     }
     struct Live {
@@ -303,9 +381,12 @@ mod tests {
             let closed = || cmsh::Error::new(cmsh::ErrorKind::Closed, "gone");
             let (reply_tx, reply_rx) = oneshot::channel();
             let tx = self.tx.lock().unwrap().clone().ok_or_else(closed)?;
-            tx.send((payload.to_vec(), reply_tx))
-                .map_err(|_| closed())?;
-            reply_rx.await.map_err(|_| closed())
+            tx.send((payload.to_vec(), reply_tx)).map_err(|__cause| {
+                crate::door::cause::emit(file!(), line!(), "closed", closed(), &__cause)
+            })?;
+            reply_rx.await.map_err(|__cause| {
+                crate::door::cause::emit(file!(), line!(), "closed", closed(), &__cause)
+            })
         }
     }
     fn net() -> Arc<Net> {

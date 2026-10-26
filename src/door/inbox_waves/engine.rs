@@ -55,12 +55,28 @@ fn replayed(error: &cnbx::Error) -> bool {
 }
 
 fn now() -> Result<u64> {
-    Clock::now(&mut custody::SystemClock).map_err(|_| ErrorCode::Clock)
+    Clock::now(&mut custody::SystemClock).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Clock",
+            ErrorCode::Clock,
+            &__cause,
+        )
+    })
 }
 
 fn random() -> Result<[u8; 32]> {
     let mut bytes = [0; 32];
-    Entropy::fill(&mut ckmg::SystemEntropy, &mut bytes).map_err(|_| ErrorCode::Unavailable)?;
+    Entropy::fill(&mut ckmg::SystemEntropy, &mut bytes).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     Ok(bytes)
 }
 
@@ -73,7 +89,15 @@ fn operation(nonce: &[u8; 32], step: &str) -> [u8; 32] {
 }
 
 fn blob_statement<T: serde::de::DeserializeOwned>(blob: &Blob) -> Result<T> {
-    serde_json::from_slice(&blob.statement).map_err(|_| ErrorCode::InvalidRequest)
+    serde_json::from_slice(&blob.statement).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })
 }
 
 /// The community-wide ordered contexts of one wave, derived from the exchanged
@@ -149,7 +173,10 @@ impl cnbx::DeviceAuthority for Devices<'_> {
 struct Own<'a>(&'a dyn WavePorts);
 impl cnbx::OwnRecord for Own<'_> {
     async fn matches_newest_epoch(&mut self, binding: &Binding) -> std::result::Result<(), ()> {
-        self.0.own_record(binding).await.map_err(|_| ())
+        self.0
+            .own_record(binding)
+            .await
+            .map_err(|__cause| crate::door::cause::emit(file!(), line!(), "error", (), &__cause))
     }
 }
 
@@ -175,7 +202,15 @@ where
 
     async fn write_desk(&mut self, desk: &Desk, op: [u8; 32]) -> Result<()> {
         let bytes = desk.encode()?;
-        let expected = self.store.version().map_err(|_| ErrorCode::Unavailable)?;
+        let expected = self.store.version().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         self.store
             .commit(
                 expected,
@@ -189,7 +224,15 @@ where
             )
             .await
             .map(|_| ())
-            .map_err(|_| ErrorCode::Reconcile)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })
     }
 
     /// The claim that lets this member SEND in the still-Pending conversation
@@ -236,8 +279,15 @@ where
     /// The counterpart's binding, after the checks that need no evidence: it is another
     /// member and this member did not block it.
     fn peer_binding(&self, peer: &str) -> Result<Binding> {
-        let peer_binding =
-            Binding::new(self.binding.community(), peer).map_err(|_| ErrorCode::InvalidRequest)?;
+        let peer_binding = Binding::new(self.binding.community(), peer).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         if peer == self.binding.member() {
             return Err(ErrorCode::InvalidRequest);
         }
@@ -279,7 +329,15 @@ where
         )
         .await
         .map_err(inbox_error)?;
-        serde_json::to_vec(&announcement).map_err(|_| ErrorCode::InvalidRequest)
+        serde_json::to_vec(&announcement).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })
     }
 
     /// The newest announcement of `peer` that was verified on receipt and is still held by
@@ -329,8 +387,15 @@ where
     /// journal's newest one, else the one a wave of the desk holds. Nothing is looked up
     /// by pseudonym: without either, the peer stays unreadable.
     fn prime(&self, desk: &Desk, peer: &str) -> Result<()> {
-        let binding =
-            Binding::new(self.binding.community(), peer).map_err(|_| ErrorCode::InvalidRequest)?;
+        let binding = Binding::new(self.binding.community(), peer).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let retained = self
             .inbox
             .contacts(self.store)
@@ -756,8 +821,15 @@ where
         }
         // The sender's own handle is verified against the charter-verified lineage bound to
         // its pseudonym before anything is countersigned; a substituted handle is refused.
-        let peer_binding =
-            Binding::new(self.binding.community(), peer).map_err(|_| ErrorCode::InvalidRequest)?;
+        let peer_binding = Binding::new(self.binding.community(), peer).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         self.ports
             .accept_handle(HandleRequest {
                 peer: &peer_binding,
@@ -884,8 +956,16 @@ where
         }
         // The recipient's own handle is verified before its consent is accepted or anything
         // is offered; a substituted handle is refused.
-        let peer_binding = Binding::new(self.binding.community(), &session.peer)
-            .map_err(|_| ErrorCode::InvalidRequest)?;
+        let peer_binding =
+            Binding::new(self.binding.community(), &session.peer).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })?;
         self.ports
             .accept_handle(HandleRequest {
                 peer: &peer_binding,
@@ -1400,7 +1480,15 @@ where
                 &nonce,
                 &format!(
                     "recover.{}",
-                    self.store.version().map_err(|_| ErrorCode::Unavailable)?
+                    self.store
+                        .version()
+                        .map_err(|__cause| crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unavailable",
+                            ErrorCode::Unavailable,
+                            &__cause
+                        ))?
                 ),
             ),
         )
@@ -1652,7 +1740,15 @@ where
         op: [u8; 32],
     ) -> Result<()> {
         let bytes = desk.encode()?;
-        let expected = self.store.version().map_err(|_| ErrorCode::Unavailable)?;
+        let expected = self.store.version().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let mut changes = vec![Change::Put {
             owner: OWNER,
             key: KEY,
@@ -1674,7 +1770,15 @@ where
             .commit(expected, op, &changes, &[])
             .await
             .map(|_| ())
-            .map_err(|_| ErrorCode::Reconcile)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })
     }
 }
 

@@ -117,10 +117,26 @@ impl clnk::Clock for SystemClock {
         let time = u64::try_from(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|_| cmmr::Error::Unavailable)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "cmmr::Error::Unavailable",
+                        cmmr::Error::Unavailable,
+                        &__cause,
+                    )
+                })?
                 .as_millis(),
         )
-        .map_err(|_| cmmr::Error::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cmmr::Error::Unavailable",
+                cmmr::Error::Unavailable,
+                &__cause,
+            )
+        })?;
         #[cfg(target_arch = "wasm32")]
         let time = {
             let time = js_sys::Date::now();
@@ -179,7 +195,15 @@ fn validate_policy(policy: &ReadPolicy) -> Result<()> {
 fn forum_transport(config: &Configuration, origin: &str) -> Result<Transport> {
     #[cfg(feature = "ohttp")]
     {
-        let forum = url::Url::parse(&config.forum_origin).map_err(|_| ErrorCode::InvalidRequest)?;
+        let forum = url::Url::parse(&config.forum_origin).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let authority = forum.host_str().ok_or(ErrorCode::InvalidRequest)?;
         let authority = match forum.port() {
             Some(port) => format!("{authority}:{port}"),
@@ -198,7 +222,15 @@ fn forum_transport(config: &Configuration, origin: &str) -> Result<Transport> {
     {
         let mut roots = Vec::new();
         for file in &config.tls_root_files {
-            roots.push(std::fs::read(file).map_err(|_| ErrorCode::InvalidRequest)?);
+            roots.push(std::fs::read(file).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })?);
         }
         Transport::with_roots(
             config.forum_origin.clone(),
@@ -238,12 +270,28 @@ fn construct_board(
         .map_err(before_send)?
         .with_anonymous_rooms(rooms);
     cbrd::Board::new(community.into(), link)
-        .map_err(|_| ErrorCode::InvalidRequest)?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?
         .with_search(cbrd::ViewLimits {
             candidates: config.search_candidates,
             publication_bytes: config.search_publication_bytes,
         })
-        .map_err(|_| ErrorCode::InvalidRequest)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })
 }
 
 fn possession() -> cfrm::Possession {
@@ -273,7 +321,15 @@ async fn execute(door: &mut Door, key: &[u8; 32], request: cfrm::Request) -> Res
     let foyer = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     let now = current::version(foyer, &door.config.community, expires, door.clock_floor)?;
     let mut nonce = [0; 16];
-    getrandom::fill(&mut nonce).map_err(|_| ErrorCode::Unavailable)?;
+    getrandom::fill(&mut nonce).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     let prepared = board.prepare(request, nonce)?;
     let facades::SignedBoard {
         signature,
@@ -305,7 +361,15 @@ pub(super) async fn ensure_room(door: &mut Door, key: &[u8; 32], room: [u8; 16])
     let foyer = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     let now = current::version(foyer, &door.config.community, expires, door.clock_floor)?;
     let mut nonce = [0; 16];
-    getrandom::fill(&mut nonce).map_err(|_| ErrorCode::Unavailable)?;
+    getrandom::fill(&mut nonce).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     let prepared = board.room_prepare_epoch(nonce)?;
     let facades::SignedBoard {
         signature,
@@ -315,8 +379,24 @@ pub(super) async fn ensure_room(door: &mut Door, key: &[u8; 32], room: [u8; 16])
     board.room_receive_epoch(prepared, signature).await?;
     drop(epoch);
     let mut operation = [0; 16];
-    getrandom::fill(&mut operation).map_err(|_| ErrorCode::Unavailable)?;
-    getrandom::fill(&mut nonce).map_err(|_| ErrorCode::Unavailable)?;
+    getrandom::fill(&mut operation).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
+    getrandom::fill(&mut nonce).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     let prepared = board.room_prepare_pass(room, operation, nonce)?;
     let facades::SignedBoard {
         signature,
@@ -326,7 +406,15 @@ pub(super) async fn ensure_room(door: &mut Door, key: &[u8; 32], room: [u8; 16])
     let connection = board.room_receive_pass(prepared, signature).await?;
     drop(pass);
     let mut command = [0; 16];
-    getrandom::fill(&mut command).map_err(|_| ErrorCode::Unavailable)?;
+    getrandom::fill(&mut command).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     command[0] = connection[0];
     board
         .execute_room(cbrd::clnk::cmbl::Request {

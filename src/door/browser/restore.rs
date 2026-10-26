@@ -117,18 +117,50 @@ impl<W: TorWatcher + 'static> Composer<W> {
             let mut record = prepared
                 .tor_records(network.clone())
                 .await
-                .map_err(|_| ErrorCode::Unavailable)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
             record
                 .checkpoint(&prepared.locator())
                 .await
-                .map_err(|_| ErrorCode::Unavailable)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?
         }; // The borrowed passkey record is dropped before consuming PreparedOpen.
         let backend = cwst::browser::IndexedDb::open(&config.database)
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         self.database = Some(backend.clone());
         // Use the original runtime clock after the network/database awaits.
-        let completed = custody::SystemClock.now().map_err(|_| ErrorCode::Clock)?;
+        let completed = custody::SystemClock.now().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Clock",
+                ErrorCode::Clock,
+                &__cause,
+            )
+        })?;
         if completed < now {
             return Err(ErrorCode::Clock);
         }
@@ -143,8 +175,24 @@ impl<W: TorWatcher + 'static> Composer<W> {
                     completed,
                 )
             })
-            .map_err(|_| ErrorCode::Unavailable)?
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let member = match stamps {
             Some(stamps) => member.with_stamps(stamps),
             None => member,
@@ -228,7 +276,15 @@ impl<W: TorWatcher + 'static> VaultComposer for Composer<W> {
                 .as_ref()
                 .ok_or(ErrorCode::Unavailable)?
                 .records()?;
-            *result = serde_json::to_value(status).map_err(|_| ErrorCode::Unavailable)?;
+            *result = serde_json::to_value(status).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
             attempt.bound = true;
             Ok(())
         }

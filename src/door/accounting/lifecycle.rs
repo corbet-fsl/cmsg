@@ -71,10 +71,24 @@ where
         .await?
         .restore_accepted_account()
         .await
-        .map_err(|_| ErrorCode::Unavailable)?;
-    accepted
-        .voucher_remaining(role, now)
-        .map_err(|_| ErrorCode::Unavailable)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
+    accepted.voucher_remaining(role, now).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
 }
 
 /// Whether a durable pending request already exists (the member enrolled and
@@ -89,7 +103,10 @@ where
 {
     match account.vault().await {
         Ok(mut vault) => vault.reopen_pending_genesis(now()).await.is_ok(),
-        Err(_) => false,
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "false", &__cause);
+            false
+        }
     }
 }
 
@@ -113,7 +130,15 @@ impl AccountAdmission<'_> {
             .await?
             .reopen_pending_genesis(now())
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         if opened.binding.acceptance.operator_key != current.material.account_response_key {
             return Err(ErrorCode::Unauthorized);
         }
@@ -156,14 +181,43 @@ impl AccountAdmission<'_> {
             return Err(ErrorCode::ProofWindowElapsed);
         }
         let response = self.send_signed(&signed).await?;
-        let trust = response_trust(&self.current().map_err(|_| ErrorCode::Reconcile)?.material)
-            .map_err(|_| ErrorCode::Reconcile)?;
+        let trust = response_trust(
+            &self
+                .current()
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                })?
+                .material,
+        )
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
         account
             .vault()
             .await?
             .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
             .await
-            .map_err(|_| ErrorCode::Reconcile)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
         Ok(response.acceptance().accepted_at)
     }
 
@@ -214,7 +268,15 @@ impl AccountAdmission<'_> {
             .await?
             .discarded_genesis()
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         match verdict(
             &status,
             signed.request_id(),
@@ -240,7 +302,15 @@ impl AccountAdmission<'_> {
                     .await?
                     .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
                     .await
-                    .map_err(|_| ErrorCode::Reconcile)?;
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Reconcile",
+                            ErrorCode::Reconcile,
+                            &__cause,
+                        )
+                    })?;
                 return Ok(Elapsed::Adopted(response.acceptance().accepted_at));
             }
         }
@@ -255,7 +325,15 @@ impl AccountAdmission<'_> {
                 operation()?,
             )
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         Ok(Elapsed::Discarded)
     }
 
@@ -286,7 +364,15 @@ impl AccountAdmission<'_> {
                 .saturating_add(current.material.policy.max_authorization_seconds),
         );
         let mut challenge = [0u8; 32];
-        getrandom::fill(&mut challenge).map_err(|_| ErrorCode::Unavailable)?;
+        getrandom::fill(&mut challenge).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         if expires_at <= current.now || challenge == [0; 32] {
             return Err(ErrorCode::Unavailable);
         }
@@ -300,8 +386,15 @@ impl AccountAdmission<'_> {
             expires_at,
             signature: String::new(),
         };
-        let transcript =
-            acct::account_status_bytes(&request).map_err(|_| ErrorCode::Unauthorized)?;
+        let transcript = acct::account_status_bytes(&request).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         account.check(&current.origin).await?;
         let lineage = account
             .vault()
@@ -309,14 +402,30 @@ impl AccountAdmission<'_> {
             .keys()
             .lineage()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let device = account
             .vault()
             .await?
             .keys()
             .device_public_key()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         if B64.encode(device.value()) != current.grant.chat_public_key
             || B64.encode(lineage.root.value()) != authorization.root_public_key
         {
@@ -340,29 +449,69 @@ impl AccountAdmission<'_> {
                 },
                 current.now,
             )
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let signature = account
             .vault()
             .await?
             .keys()
             .sign_device_ed25519_current(ckmg::DeviceFormat::AccountStatus, &transcript, expires_at)
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         request.signature = B64.encode(&signature);
         let wire = serde_json::to_value(AccountServiceRequest::Status {
             grant: current.grant.clone(),
             authorization,
             request: request.clone(),
         })
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         // A read: a failure changes nothing and the next join asks again.
         let response = self
             .lease
             .apply_account(wire, now)
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         let AccountServiceResponse::Status(status) =
-            serde_json::from_value(response).map_err(|_| ErrorCode::Unavailable)?
+            serde_json::from_value(response).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
         else {
             return Err(ErrorCode::Unavailable);
         };
@@ -375,7 +524,15 @@ impl AccountAdmission<'_> {
             &request,
             &after.material.account_response_key,
         )
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         Ok((request, status))
     }
 
@@ -396,7 +553,15 @@ impl AccountAdmission<'_> {
             .await?
             .restore_accepted_account()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let outbox_settled = account
             .vault()
             .await?
@@ -428,7 +593,9 @@ impl AccountAdmission<'_> {
         let (current, opened) = match self.reopen_checked(account).await {
             Ok(value) => value,
             Err(refusal) => {
-                return Self::already_active(account).await.map_err(|_| refusal);
+                return Self::already_active(account).await.map_err(|__cause| {
+                    crate::door::cause::emit(file!(), line!(), "refusal", refusal, &__cause)
+                });
             }
         };
         if !opened.accepted() {
@@ -440,7 +607,15 @@ impl AccountAdmission<'_> {
             .await?
             .begin_account_activation(&trust, now())
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         account.check(&current.origin).await?;
         let before = self.current()?;
         if before.material != current.material
@@ -459,14 +634,35 @@ impl AccountAdmission<'_> {
             .await?
             .commit_account_activation(activation, operation()?, operation()?)
             .await
-            .map_err(|_| ErrorCode::Reconcile)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
         // The account is durable now; a failing recheck only reports uncertainty
         // and the next activation finds it already active.
-        account
-            .check(&current.origin)
-            .await
-            .map_err(|_| ErrorCode::Reconcile)?;
-        self.current().map_err(|_| ErrorCode::Reconcile)?;
+        account.check(&current.origin).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
+        self.current().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
         Ok(Activated {
             version: activated.version,
             accepted_at: activated.accepted_at,
@@ -518,9 +714,25 @@ fn owner_absence(
 ) -> Result<OwnerAbsence> {
     fn decode<const N: usize>(value: &str) -> Result<[u8; N]> {
         B64.decode(value.as_bytes())
-            .map_err(|_| ErrorCode::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?
             .try_into()
-            .map_err(|_| ErrorCode::Unauthorized)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })
     }
     if status.acceptance.is_some() || request.request_id.is_some() {
         return Err(ErrorCode::Unauthorized);

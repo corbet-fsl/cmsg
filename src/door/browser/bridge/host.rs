@@ -45,7 +45,15 @@ impl State {
     }
     fn receive(&self, event: MessageEvent) {
         let request = payload(&event, MAX_REQUEST).and_then(|bytes| {
-            serde_json::from_str::<Request>(&bytes).map_err(|_| ErrorCode::InvalidRequest)
+            serde_json::from_str::<Request>(&bytes).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })
         });
         let Ok(request) = request else {
             self.close();
@@ -203,11 +211,27 @@ impl VaultHost {
         }
         let parent = window
             .parent()
-            .map_err(|_| ErrorCode::Unavailable)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
             .ok_or(ErrorCode::Unauthorized)?;
         let top = window
             .top()
-            .map_err(|_| ErrorCode::Unavailable)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
             .ok_or(ErrorCode::Unauthorized)?;
         if js_sys::Object::is(parent.as_ref(), window.as_ref())
             || !js_sys::Object::is(parent.as_ref(), top.as_ref())
@@ -261,7 +285,15 @@ impl VaultHost {
                 return;
             }
             let connect = || -> Result<()> {
-                let channel = web_sys::MessageChannel::new().map_err(|_| ErrorCode::Unavailable)?;
+                let channel = web_sys::MessageChannel::new().map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
                 let port = channel.port1();
                 let weak = Rc::downgrade(&state);
                 let handler = Closure::wrap(Box::new(move |event| {
@@ -283,7 +315,15 @@ impl VaultHost {
                         &member_origin,
                         &transfer,
                     )
-                    .map_err(|_| ErrorCode::Unavailable)?;
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unavailable",
+                            ErrorCode::Unavailable,
+                            &__cause,
+                        )
+                    })?;
                 state.reply(Reply::Ready);
                 Ok(())
             };
@@ -321,7 +361,15 @@ impl VaultHost {
             let disposed = JsFuture::from(runtime.dispose())
                 .await
                 .map(|_| ())
-                .map_err(|_| ErrorCode::Reconcile);
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                });
             owner.reply(Reply::Closed {
                 id: owner.close_id.get(),
                 error: disposed.err(),
@@ -341,28 +389,70 @@ impl VaultHost {
             window,
             hello,
             leaving,
-            done: async move { completion.await.map_err(|_| ErrorCode::Reconcile)? }
-                .boxed_local()
-                .shared(),
+            done: async move {
+                completion.await.map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                })?
+            }
+            .boxed_local()
+            .shared(),
             retained: None,
         };
         // Construct the Drop guard before registering either listener: every
         // later setup failure removes both callbacks and drains the real owner.
         host.window
             .add_event_listener_with_callback("message", host.hello.as_ref().unchecked_ref())
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         host.window
             .add_event_listener_with_callback("pagehide", host.leaving.as_ref().unchecked_ref())
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         // Configuration/Wasm startup can finish after the frame's load event.
         // Announce only after both guards exist; the UI answers with the same
         // original handshake and this owner still verifies its exact parent.
         host.window
             .parent()
-            .map_err(|_| ErrorCode::Unavailable)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
             .ok_or(ErrorCode::Unauthorized)?
             .post_message(&JsValue::from_str(READY), &announce_origin)
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         Ok(host)
     }
 }
@@ -393,7 +483,15 @@ impl VaultHost {
                 return Err(ErrorCode::Capacity);
             }
             let config: VaultHostConfiguration =
-                serde_json::from_str(&configuration).map_err(|_| ErrorCode::InvalidRequest)?;
+                serde_json::from_str(&configuration).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::InvalidRequest",
+                        ErrorCode::InvalidRequest,
+                        &__cause,
+                    )
+                })?;
             if config.runtime.role != Role::Member {
                 return Err(ErrorCode::Unauthorized);
             }
@@ -445,8 +543,16 @@ impl VaultHost {
                 if configuration.len() > MAX_BODY_BYTES {
                     return Err(error(ErrorCode::Capacity));
                 }
-                let config: VaultHostConfiguration = serde_json::from_str(&configuration)
-                    .map_err(|_| error(ErrorCode::InvalidRequest))?;
+                let config: VaultHostConfiguration =
+                    serde_json::from_str(&configuration).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "error ErrorCode::InvalidRequest",
+                            error(ErrorCode::InvalidRequest),
+                            &__cause,
+                        )
+                    })?;
                 let (Some(wallet_origin), Some(registration)) =
                     (config.wallet_origin, config.registration)
                 else {
@@ -458,14 +564,30 @@ impl VaultHost {
                 let Some(deployment) = &registration.prover else {
                     return Ok(JsValue::NULL);
                 };
-                let forecast = super::super::prover::calibrate(deployment)
-                    .await
-                    .map_err(|_| error(ErrorCode::Unavailable))?;
+                let forecast =
+                    super::super::prover::calibrate(deployment)
+                        .await
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "error ErrorCode::Unavailable",
+                                error(ErrorCode::Unavailable),
+                                &__cause,
+                            )
+                        })?;
                 Ok(match forecast {
-                    Some(forecast) => JsValue::from_str(
-                        &serde_json::to_string(&forecast)
-                            .map_err(|_| error(ErrorCode::Unavailable))?,
-                    ),
+                    Some(forecast) => {
+                        JsValue::from_str(&serde_json::to_string(&forecast).map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "error ErrorCode::Unavailable",
+                                error(ErrorCode::Unavailable),
+                                &__cause,
+                            )
+                        })?)
+                    }
                     None => JsValue::NULL,
                 })
             }
@@ -486,7 +608,15 @@ impl VaultHost {
             return Err(refused("configuration size"));
         }
         let config: VaultHostConfiguration =
-            serde_json::from_str(&configuration).map_err(|_| refused("configuration"))?;
+            serde_json::from_str(&configuration).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "refused configuration",
+                    refused("configuration"),
+                    &__cause,
+                )
+            })?;
         let (Some(wallet_origin), Some(registration)) = (config.wallet_origin, config.registration)
         else {
             return Err(refused("wallet frame configuration"));
@@ -498,14 +628,40 @@ impl VaultHost {
             return Err(refused("wallet frame origin"));
         }
         // The member page and this frame are a pinned wallet pair before any ceremony runs.
-        vault_pair(&config.member_origin, &wallet_origin, Some(&wallet_origin))
-            .map_err(|_| refused("wallet pair"))?;
-        if actual_origin().map_err(|_| refused("frame origin"))? != wallet_origin {
+        vault_pair(&config.member_origin, &wallet_origin, Some(&wallet_origin)).map_err(
+            |__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "refused wallet pair",
+                    refused("wallet pair"),
+                    &__cause,
+                )
+            },
+        )?;
+        if actual_origin().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "refused frame origin",
+                refused("frame origin"),
+                &__cause,
+            )
+        })? != wallet_origin
+        {
             return Err(refused("frame origin"));
         }
         let context =
             cfyr::passkeys::Context::new(&registration.passkey_origin, &registration.rp_id)
-                .map_err(|_| refused("passkey context"))?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "refused passkey context",
+                        refused("passkey context"),
+                        &__cause,
+                    )
+                })?;
         let mut keys = DeviceKeys::new(
             cfyr::passkeys::Client::new(context, cfyr::passkeys::browser::Browser),
             &registration.passkey_origin,

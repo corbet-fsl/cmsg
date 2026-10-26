@@ -55,7 +55,15 @@ impl BrowserRuntime {
             .ok_or(ErrorCode::Unavailable)?
             .location()
             .origin()
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         // Page runtimes cannot house decrypted Vault custody. The isolated
         // vault frame owns that lifetime behind the separate UI channel.
         if origin != actual || !door.vaults.is_empty() {
@@ -160,9 +168,19 @@ impl BrowserRuntime {
             sender: RefCell::new(sender),
             pending: Rc::new(Cell::new(0)),
             closed: Cell::new(false),
-            done: async move { completion.await.map_err(|_| ErrorCode::Reconcile)? }
-                .boxed_local()
-                .shared(),
+            done: async move {
+                completion.await.map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                })?
+            }
+            .boxed_local()
+            .shared(),
         })
     }
 }
@@ -222,8 +240,15 @@ impl BrowserRuntime {
         if raw.len() > MAX_BODY_BYTES {
             return Err(ErrorCode::Capacity);
         }
-        let configuration: Configuration =
-            serde_json::from_str(raw).map_err(|_| ErrorCode::InvalidRequest)?;
+        let configuration: Configuration = serde_json::from_str(raw).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let origin = configuration.origin.clone();
         let role = configuration.role;
         let door = configuration.construct()?;

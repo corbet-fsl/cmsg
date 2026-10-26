@@ -118,7 +118,15 @@ pub(super) struct Desk {
 
 impl Desk {
     pub fn load<B: cwst::backend::Backend>(store: &cwst::Store<B>) -> Result<Self> {
-        match store.read(OWNER, KEY).map_err(|_| ErrorCode::Unavailable)? {
+        match store.read(OWNER, KEY).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })? {
             None => Ok(Self::default()),
             Some(bytes) => Self::decode(bytes),
         }
@@ -128,7 +136,15 @@ impl Desk {
         if bytes.len() > MAX_BYTES {
             return Err(ErrorCode::Capacity);
         }
-        let desk: Self = serde_json::from_slice(bytes).map_err(|_| ErrorCode::Unavailable)?;
+        let desk: Self = serde_json::from_slice(bytes).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         if desk.waves.len() > MAX_WAVES || desk.jobs.len() > MAX_JOBS {
             return Err(ErrorCode::Capacity);
         }
@@ -136,7 +152,15 @@ impl Desk {
     }
 
     pub fn encode(&self) -> Result<Vec<u8>> {
-        let bytes = serde_json::to_vec(self).map_err(|_| ErrorCode::Unavailable)?;
+        let bytes = serde_json::to_vec(self).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         if bytes.len() > MAX_BYTES {
             return Err(ErrorCode::Capacity);
         }

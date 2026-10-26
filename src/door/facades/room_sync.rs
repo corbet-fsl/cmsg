@@ -107,9 +107,15 @@ where
             policy,
             refused: refused_set,
         } = task;
-        let mut frames = L::room_frames(board, room)
-            .await
-            .map_err(|_| Fail::Unavailable)?;
+        let mut frames = L::room_frames(board, room).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Unavailable",
+                Fail::Unavailable,
+                &__cause,
+            )
+        })?;
         let start = self.room_keys_standing(group).await?.epoch;
         let (mut admitted, mut caught_up, mut refused) = (0, 0, 0);
         let (mut pending, mut raced) = (false, false);
@@ -161,17 +167,31 @@ where
                 // read the room once more, then apply it instead.
                 Err(Fail::Reconcile | Fail::Storage) if context.is_none() && !raced => {
                     raced = true;
-                    frames = L::room_frames(board, room)
-                        .await
-                        .map_err(|_| Fail::Unavailable)?;
+                    frames = L::room_frames(board, room).await.map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Fail::Unavailable",
+                            Fail::Unavailable,
+                            &__cause,
+                        )
+                    })?;
                 }
                 Err(Fail::Unavailable | Fail::Reconcile | Fail::Storage) => {
                     pending = true;
                     break;
                 }
-                Err(_) => {
-                    refused_set.insert((room, frames.ordering, sequence));
-                    refused += 1;
+                Err(__cause) => {
+                    crate::door::cause::print(
+                        file!(),
+                        line!(),
+                        "refused_set insert room frames ordering sequence refused 1",
+                        &__cause,
+                    );
+                    {
+                        refused_set.insert((room, frames.ordering, sequence));
+                        refused += 1;
+                    }
                 }
             }
         }

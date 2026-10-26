@@ -84,11 +84,27 @@ impl<N: cdht::Network + Clone> RecoveryOwners<'_, N> {
             .recovery
             .tor_passkey_records(network.clone(), &mut SystemClock, &mut self.authority)
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         let retained = if backend
             .read()
             .await
-            .map_err(|_| ErrorCode::Unavailable)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
             .is_some()
         {
             None
@@ -97,7 +113,15 @@ impl<N: cdht::Network + Clone> RecoveryOwners<'_, N> {
                 self.recovery
                     .tor_checkpoint(network, &mut SystemClock, &mut self.authority)
                     .await
-                    .map_err(|_| ErrorCode::Unavailable)?,
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unavailable",
+                            ErrorCode::Unavailable,
+                            &__cause,
+                        )
+                    })?,
             )
         };
         let owners = cvlt::Owners {
@@ -111,13 +135,29 @@ impl<N: cdht::Network + Clone> RecoveryOwners<'_, N> {
             Some(retained) => self.recovery.restore(retained, backend, owners).await,
             None => self.recovery.open_existing(backend, owners).await,
         }
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let vault = if account_only {
             vault.restore_account_only_custody().await
         } else {
             vault.restore_wallet_custody().await
         }
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         guard.accepted = true;
         Ok(RestoredVault {
             vault,
@@ -146,21 +186,60 @@ impl MemberAuthorityBuilder {
             candidate
                 .read_lineage(&mut SystemClock, &mut admission)
                 .await
-                .map_err(|_| ErrorCode::Unauthorized)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?
         };
         let backend = cvlt::TorLineageRecord::provisional_lineage(network.clone(), reader)
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
-        let record = cdht::runtime::Record::new(backend).map_err(|_| ErrorCode::Unavailable)?;
-        let records =
-            cvlt::LineageRecords::new(vec![record]).map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
+        let record = cdht::runtime::Record::new(backend).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
+        let records = cvlt::LineageRecords::new(vec![record]).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let mut provisional = self.bind(records, SystemClock)?;
         // This normal member check forces the DHT read and then fresh HTTPS and
         // current certificate/assertion verification, before any Store cipher.
         let recovery = candidate
             .authorize(&mut SystemClock, &mut provisional)
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let MemberAuthority {
             live,
             policy,
@@ -185,15 +264,44 @@ impl MemberAuthorityBuilder {
             last_time: live.last_time,
             stamps,
         };
-        let reader = recovery
-            .lineage_reader()
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        let reader = recovery.lineage_reader().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let backend = cvlt::TorLineageRecord::member_lineage(network, reader)
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
-        let record = cdht::runtime::Record::new(backend).map_err(|_| ErrorCode::Unavailable)?;
-        let records =
-            cvlt::LineageRecords::new(vec![record]).map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
+        let record = cdht::runtime::Record::new(backend).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
+        let records = cvlt::LineageRecords::new(vec![record]).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let (authority, intent, intents, request, arm) =
             builder.bind_with_account_intents(records, SystemClock)?;
         guard.accepted = true;
@@ -250,8 +358,15 @@ impl<C: Clock> ckmg::Authority for RecoveryAuthority<'_, C> {
             closed: self.live.lifetime.closed.clone(),
             accepted: false,
         };
-        let evidence =
-            cvlt::LineageEvidence::from_bytes(request.evidence).map_err(|_| Error::Unauthorized)?;
+        let evidence = cvlt::LineageEvidence::from_bytes(request.evidence).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })?;
         let (now, membership_expires) = self.live.observe(&request).await?;
         let lifetime = &self.live.lifetime;
         let clock = &mut self.live.clock;
@@ -266,7 +381,15 @@ impl<C: Clock> ckmg::Authority for RecoveryAuthority<'_, C> {
                 // it says nothing about the current lineage in the DHT.
                 let observed = evidence
                     .verify_for(current, stamps, lifetime.binding.member(), now)
-                    .map_err(|_| Error::Unauthorized)?;
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Unauthorized",
+                            Error::Unauthorized,
+                            &__cause,
+                        )
+                    })?;
                 let completed = clock.now()?;
                 if completed < now {
                     return Err(Error::Clock);
@@ -274,9 +397,15 @@ impl<C: Clock> ckmg::Authority for RecoveryAuthority<'_, C> {
                 if completed >= membership_expires {
                     return Err(Error::Unauthorized);
                 }
-                let lineage = observed
-                    .lineage(completed)
-                    .map_err(|_| Error::Unauthorized)?;
+                let lineage = observed.lineage(completed).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Unauthorized",
+                        Error::Unauthorized,
+                        &__cause,
+                    )
+                })?;
                 if &lineage.binding != request.binding
                     || request.root != Some(lineage.root)
                     || request.epoch != lineage.epoch
@@ -287,7 +416,15 @@ impl<C: Clock> ckmg::Authority for RecoveryAuthority<'_, C> {
                 }
                 Ok(completed)
             })
-            .map_err(|_| Error::Unavailable)??;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unavailable",
+                    Error::Unavailable,
+                    &__cause,
+                )
+            })??;
         self.live.last_time = completed;
         self.live.lifetime.check(&request)?;
         guard.accepted = true;
@@ -313,7 +450,15 @@ impl Door {
         now: u64,
     ) -> super::super::Result<(cvlt::PreparedOpen, Binding, Option<cvlt::StampTrust>)> {
         let (prepared, stamps) = self.take_login_custody(origin, token, now)?;
-        let device = prepared.device().map_err(|_| ErrorCode::Unauthorized)?;
+        let device = prepared.device().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let mut membership = self.live_membership(origin)?;
         let mut clock = SystemClock;
         let mut floor = now;
@@ -330,16 +475,40 @@ impl Door {
                 }
             })
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
-        let completed = clock.now().map_err(|_| ErrorCode::Clock)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
+        let completed = clock.now().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Clock",
+                ErrorCode::Clock,
+                &__cause,
+            )
+        })?;
         if clock_failed || completed < floor {
             return Err(ErrorCode::Clock);
         }
         if completed >= observed.expires || !observed.device_keys.contains(device.value()) {
             return Err(ErrorCode::Unauthorized);
         }
-        let binding = Binding::new(&self.config.community, &observed.member)
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        let binding =
+            Binding::new(&self.config.community, &observed.member).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         Ok((prepared, binding, stamps))
     }
 
@@ -400,13 +569,37 @@ impl Door {
             let mut record = prepared
                 .tor_records(network.clone())
                 .await
-                .map_err(|_| ErrorCode::Unavailable)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
             record
                 .checkpoint(&prepared.locator())
                 .await
-                .map_err(|_| ErrorCode::Unavailable)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?
         }; // Release the borrowed record before consuming PreparedOpen.
-        let completed = SystemClock.now().map_err(|_| ErrorCode::Clock)?;
+        let completed = SystemClock.now().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Clock",
+                ErrorCode::Clock,
+                &__cause,
+            )
+        })?;
         if completed < now {
             return Err(ErrorCode::Clock);
         }
@@ -414,8 +607,24 @@ impl Door {
             .with_current(completed, |current| {
                 prepared.prepare_recovery(&checkpoint, current, stamps, binding.member(), completed)
             })
-            .map_err(|_| ErrorCode::Unavailable)?
-            .map_err(|_| ErrorCode::Unauthorized)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })
     }
 
     /// Give the Board's device signing of an already opened Vault (the open path binds

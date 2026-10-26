@@ -35,7 +35,15 @@ pub(super) async fn start(door: &mut Door, key: &[u8; 32]) -> Result<Status> {
         .ok_or(ErrorCode::Unavailable)?
         .clone();
     let context = config.context()?;
-    let page = url::Url::parse(&config.page).map_err(|_| ErrorCode::InvalidRequest)?;
+    let page = url::Url::parse(&config.page).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     let binding = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     if binding.uncertain {
         return Err(ErrorCode::Reconcile);

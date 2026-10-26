@@ -30,7 +30,15 @@ fn digest<T: serde::Serialize>(purpose: &[u8], value: &T) -> Result<[u8; 32]> {
     let mut hash = Sha256::new();
     hash.update(DOMAIN);
     hash.update(purpose);
-    hash.update(serde_json::to_vec(value).map_err(|_| ErrorCode::Unauthorized)?);
+    hash.update(serde_json::to_vec(value).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?);
     Ok(hash.finalize().into())
 }
 
@@ -45,7 +53,15 @@ pub(super) fn outbox_digest(outbox: &[u8]) -> Result<[u8; 32]> {
 fn put(out: &mut Vec<u8>, value: &[u8]) -> Result<()> {
     out.extend_from_slice(
         &u32::try_from(value.len())
-            .map_err(|_| ErrorCode::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?
             .to_be_bytes(),
     );
     out.extend_from_slice(value);
@@ -62,14 +78,26 @@ fn take<'a>(input: &mut &'a [u8], n: usize) -> Result<&'a [u8]> {
 }
 
 fn var<'a>(input: &mut &'a [u8], max: usize) -> Result<&'a [u8]> {
-    let n = u32::from_be_bytes(
-        take(input, 4)?
-            .try_into()
-            .map_err(|_| ErrorCode::Unauthorized)?,
-    );
+    let n = u32::from_be_bytes(take(input, 4)?.try_into().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?);
     take(
         input,
-        usize::try_from(n).map_err(|_| ErrorCode::Unauthorized)?,
+        usize::try_from(n).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?,
     )
     .and_then(|value| {
         if value.len() > max {
@@ -149,21 +177,53 @@ impl PendingBinding {
         if take(&mut input, DOMAIN.len())? != DOMAIN {
             return Err(ErrorCode::Unauthorized);
         }
-        let origin = String::from_utf8(var(&mut input, MAX_ORIGIN)?.to_vec())
-            .map_err(|_| ErrorCode::Unauthorized)?;
-        let lineage = take(&mut input, 32)?
-            .try_into()
-            .map_err(|_| ErrorCode::Unauthorized)?;
-        let device = take(&mut input, 32)?
-            .try_into()
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        let origin =
+            String::from_utf8(var(&mut input, MAX_ORIGIN)?.to_vec()).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
+        let lineage = take(&mut input, 32)?.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
+        let device = take(&mut input, 32)?.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let credential = var(&mut input, MAX_CREDENTIAL)?.to_vec();
-        let balance_payload = take(&mut input, 32)?
-            .try_into()
-            .map_err(|_| ErrorCode::Unauthorized)?;
-        let outbox_digest = take(&mut input, 32)?
-            .try_into()
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        let balance_payload = take(&mut input, 32)?.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
+        let outbox_digest = take(&mut input, 32)?.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         if !input.is_empty() {
             return Err(ErrorCode::Unauthorized);
         }

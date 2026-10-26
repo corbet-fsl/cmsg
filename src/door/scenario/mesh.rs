@@ -83,7 +83,15 @@ impl Tasks {
             match task.await {
                 Ok(()) => {}
                 Err(error) if error.is_cancelled() => {}
-                Err(_) => return Err(ErrorCode::Reconcile),
+                Err(__cause) => {
+                    crate::door::cause::print(
+                        file!(),
+                        line!(),
+                        "return Err ErrorCode::Reconcile",
+                        &__cause,
+                    );
+                    return Err(ErrorCode::Reconcile);
+                }
             }
         }
         let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
@@ -265,9 +273,19 @@ impl<W: TorWatcher + 'static> Owner<W> {
                     }),
                     stop: Notify::new(),
                 }),
-                done: async move { completion.await.map_err(|_| ErrorCode::Reconcile)? }
-                    .boxed_local()
-                    .shared(),
+                done: async move {
+                    completion.await.map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Reconcile",
+                            ErrorCode::Reconcile,
+                            &__cause,
+                        )
+                    })?
+                }
+                .boxed_local()
+                .shared(),
             }),
         };
         // Installed before the returned future is polled: dropping an unpolled
@@ -286,7 +304,15 @@ impl<W: TorWatcher + 'static> Owner<W> {
                 }))
                 .backend(applications?)
                 .build()
-                .map_err(|_| ErrorCode::InvalidRequest)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::InvalidRequest",
+                        ErrorCode::InvalidRequest,
+                        &__cause,
+                    )
+                })?;
                 let control = owner.control.clone();
                 let lifetime = MeshLifetime::new(move || control.close());
                 door.bind_mesh_owned(origin, mesh, Some(lifetime)).await?;

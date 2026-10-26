@@ -50,16 +50,37 @@ impl NativeWaveProver {
 async fn run(job: PreparedProof) -> Result<Vec<u8>> {
     tokio::task::spawn_blocking(move || job.run())
         .await
-        .map_err(|_| ErrorCode::Unavailable)?
-        .map_err(|_| ErrorCode::Unavailable)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })
 }
 
 impl WaveProver for NativeWaveProver {
     async fn prove_update(&mut self, input: &UpdateInput) -> Result<Vec<u8>> {
-        let job = self
-            .update
-            .prepare_update(input)
-            .map_err(|_| ErrorCode::Refused)?;
+        let job = self.update.prepare_update(input).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Refused",
+                ErrorCode::Refused,
+                &__cause,
+            )
+        })?;
         run(job).await
     }
     async fn prove_evidence(&mut self, evidence: &Evidence) -> Result<Vec<u8>> {
@@ -68,9 +89,15 @@ impl WaveProver for NativeWaveProver {
         } else {
             &self.wave
         };
-        let job = prover
-            .prepare_wave_evidence(evidence)
-            .map_err(|_| ErrorCode::Refused)?;
+        let job = prover.prepare_wave_evidence(evidence).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Refused",
+                ErrorCode::Refused,
+                &__cause,
+            )
+        })?;
         run(job).await
     }
 }
@@ -143,8 +170,15 @@ impl RosterSource for ActorRoster {
     ) -> OwnedFuture<'a, Arc<Checkpoint>> {
         Box::pin(async move {
             let now = || {
-                ckmg::Clock::now(&mut super::super::custody::SystemClock)
-                    .map_err(|_| ErrorCode::Clock)
+                ckmg::Clock::now(&mut super::super::custody::SystemClock).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Clock",
+                        ErrorCode::Clock,
+                        &__cause,
+                    )
+                })
             };
             if let Some(roster) = self.cached(now()?) {
                 return Ok(roster);
@@ -268,13 +302,29 @@ where
                     guard
                         .current_policy(&origin)?
                         .with_current(now, |charter| super::feed_trust::derive(charter, leaf, now))
-                        .map_err(|_| ErrorCode::Unavailable)??
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unavailable",
+                                ErrorCode::Unavailable,
+                                &__cause,
+                            )
+                        })??
                 };
                 trust.set(fresh.clone());
                 // The circuit's issuer key is the ring key of the period that holds the
                 // acceptance of the states this round produces (now).
                 let issuer_key = czkp::issuer_keys::key_at(&fresh.wave.certificate_keys, now)
-                    .map_err(|_| ErrorCode::Unavailable)?;
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unavailable",
+                            ErrorCode::Unavailable,
+                            &__cause,
+                        )
+                    })?;
                 Ok(AccountWallet {
                     state,
                     prover: provers()?,
@@ -339,14 +389,29 @@ where
     let verifier = device
         .artifacts
         .wave_verifier_factory()
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
     let view = WitnessView::default();
     let trust = FeedTrust::default();
     let clock = || ckmg::Clock::now(&mut super::super::custody::SystemClock).ok();
     let entropy = || -> Result<[u8; 32]> {
         let mut nonce = [0u8; 32];
-        ckmg::Entropy::fill(&mut ckmg::SystemEntropy, &mut nonce)
-            .map_err(|_| ErrorCode::Unavailable)?;
+        ckmg::Entropy::fill(&mut ckmg::SystemEntropy, &mut nonce).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         Ok(nonce)
     };
     let ports = ProductionPorts::new(
@@ -365,7 +430,15 @@ where
     let provers: Rc<dyn Fn() -> Result<NativeWaveProver>> = Rc::new(move || {
         artifacts
             .wave_provers()
-            .map_err(|_| ErrorCode::Unavailable)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
             .ok_or(ErrorCode::Unavailable)
     });
     let worker = device_worker(provers, ActorRoster::default(), view, trust);

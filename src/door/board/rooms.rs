@@ -125,7 +125,15 @@ fn own_handover<B: cwst::backend::Backend>(
     let policy = context
         .charter
         .current_admission_policy(context.policy.admission_action, now)
-        .map_err(|_| ErrorCode::Refused)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Refused",
+                ErrorCode::Refused,
+                &__cause,
+            )
+        })?;
     let signed_schema = context
         .charter
         .publication(cchr::Kind::Schema)
@@ -139,7 +147,15 @@ fn own_handover<B: cwst::backend::Backend>(
             contact: context.contact,
         },
     )
-    .map_err(|_| ErrorCode::Refused)?
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })?
     else {
         return Ok(None);
     };
@@ -150,17 +166,47 @@ fn own_handover<B: cwst::backend::Backend>(
             "profile.keys",
             &verified.transcript().revision.to_be_bytes(),
         )
-        .map_err(|_| ErrorCode::Reconcile)?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?
         .ok_or(ErrorCode::Unavailable)?;
     let key = custody
         .restore(
             verified.context(),
-            &cbrd::cnvl::WrappedReadKey::from_bytes(wrapped).map_err(|_| ErrorCode::Refused)?,
+            &cbrd::cnvl::WrappedReadKey::from_bytes(wrapped).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Refused",
+                    ErrorCode::Refused,
+                    &__cause,
+                )
+            })?,
         )
-        .map_err(|_| ErrorCode::Refused)?;
-    room_keys::handover(&key)
-        .map(Some)
-        .map_err(|_| ErrorCode::Refused)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Refused",
+                ErrorCode::Refused,
+                &__cause,
+            )
+        })?;
+    room_keys::handover(&key).map(Some).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })
 }
 
 fn link(error: cbrd::clnk::ErrorCode) -> ErrorCode {
@@ -195,7 +241,15 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         let board = &self.inner.board;
         let Some(pending) = self.joins.open.get(&join.room) else {
             let mut seed = [0; 32];
-            getrandom::fill(&mut seed).map_err(|_| ErrorCode::Unavailable)?;
+            getrandom::fill(&mut seed).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
             let (key, public) = JoinKey::derive(&seed);
             let request = R::request_room_join(board, join.room, public)
                 .await
@@ -664,7 +718,15 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         }
         let source = self.group_policy(expires).await?;
         let evidence = self.owner.room_evidence(room.group, &source).await?;
-        let state = serde_json::to_vec(&evidence).map_err(|_| ErrorCode::Unavailable)?;
+        let state = serde_json::to_vec(&evidence).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let board = &self.inner.board;
         let mut answered = 0;
         for (to, public) in requests {
@@ -748,7 +810,15 @@ pub(in crate::door) async fn room_listing(
         }
         let (board, _) = handles(door, key)?;
         let mut operation = [0; 16];
-        getrandom::fill(&mut operation).map_err(|_| ErrorCode::Unavailable)?;
+        getrandom::fill(&mut operation).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let sent = board
             .execute_room(cbrd::clnk::cmbl::Request {
                 room: item.room,

@@ -22,8 +22,15 @@ impl<'de> Visitor<'de> for Container {
     fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> std::result::Result<Value, A::Error> {
         let mut values = Vec::new();
         while let Some(raw) = sequence.next_element::<&'de RawValue>()? {
-            values
-                .push(parse(raw, self.depth).map_err(|_| de::Error::custom("invalid JSON value"))?);
+            values.push(parse(raw, self.depth).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "de::Error::custom invalid JSON value",
+                    de::Error::custom("invalid JSON value"),
+                    &__cause,
+                )
+            })?);
         }
         Ok(Value::Array(values))
     }
@@ -34,8 +41,15 @@ impl<'de> Visitor<'de> for Container {
                 return Err(de::Error::custom("duplicate field"));
             }
             let raw = map.next_value::<&'de RawValue>()?;
-            let value =
-                parse(raw, self.depth).map_err(|_| de::Error::custom("invalid JSON value"))?;
+            let value = parse(raw, self.depth).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "de::Error::custom invalid JSON value",
+                    de::Error::custom("invalid JSON value"),
+                    &__cause,
+                )
+            })?;
             values.insert(name, value);
         }
         Ok(Value::Object(values))
@@ -54,8 +68,24 @@ fn parse(raw: &RawValue, depth: usize) -> Result<Value> {
         Some(b'[') => decoder.deserialize_seq(Container { depth: depth + 1 }),
         _ => Value::deserialize(&mut decoder),
     }
-    .map_err(|_| ErrorCode::InvalidRequest)?;
-    decoder.end().map_err(|_| ErrorCode::InvalidRequest)?;
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
+    decoder.end().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     if let Value::Number(number) = &value {
         if number.as_f64().is_none_or(|number| !number.is_finite()) {
             return Err(ErrorCode::InvalidRequest);
@@ -65,6 +95,14 @@ fn parse(raw: &RawValue, depth: usize) -> Result<Value> {
 }
 
 pub(super) fn unique_value(raw: &str) -> Result<Value> {
-    let raw: &RawValue = serde_json::from_str(raw).map_err(|_| ErrorCode::InvalidRequest)?;
+    let raw: &RawValue = serde_json::from_str(raw).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     parse(raw, 0)
 }

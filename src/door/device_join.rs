@@ -68,16 +68,40 @@ pub(crate) fn payload(format: ckmg::DeviceFormat, message: Vec<u8>) -> Result<Ve
 /// refused here: its scope cannot be computed from verified data. A wrong value would only
 /// make the community refuse the stamp.
 pub async fn stamp_scope(community: &mut Foyer<Transport>, name: &str) -> Result<StampScope> {
-    let id = CommunityId::new(name.as_bytes()).map_err(|_| ErrorCode::Unavailable)?;
+    let id = CommunityId::new(name.as_bytes()).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     let founding = community
         .current_policy()
         .with_current(now(), |current| current.fingerprint().copied())
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
     if founding.is_none() {
         let feed = community
             .call("trust_feed", json!({}))
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         if feed
             .get("genesis")
             .is_some_and(|genesis| !genesis.is_null())
@@ -105,7 +129,15 @@ pub async fn derived_salt(
     sign.sign(DeviceUse::Salt, salted)
         .await?
         .try_into()
-        .map_err(|_| ErrorCode::Unavailable)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })
 }
 
 /// Open the community session of a device-key member before its creation is activated: the
@@ -119,10 +151,15 @@ pub async fn open_session(
     device: &ckmg::PublicKey,
     sign: &mut impl DeviceSign,
 ) -> Result<cfyr::SessionInfo> {
-    let challenge = community
-        .begin_device_session()
-        .await
-        .map_err(|_| ErrorCode::Unavailable)?;
+    let challenge = community.begin_device_session().await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     let signature = sign
         .sign(
             DeviceUse::Sign(ckmg::DeviceFormat::DeviceSession),
@@ -132,7 +169,15 @@ pub async fn open_session(
     community
         .finish_device_session(challenge.nonce, user, *device.value(), signature)
         .await
-        .map_err(|_| ErrorCode::Unauthorized)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })
 }
 
 /// Join `name` through `community` (a session-less Foyer of that community) and return the
@@ -185,7 +230,15 @@ where
     // Unguessable for the wallet, stable across restarts of this device.
     let salt = derived_salt(name, device, b"", sign).await?;
     let action = StampAction::new(
-        ActionKind::new(cfyr::device_session::JOIN_ACTION).map_err(|_| ErrorCode::Unavailable)?,
+        ActionKind::new(cfyr::device_session::JOIN_ACTION).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?,
         PayloadDigest::from_bytes(cfyr::device_session::join_payload(&key, &seed)),
         StampSalt::from_bytes(salt),
     );
@@ -215,10 +268,26 @@ where
                 .live_global_wallet(wallet_origin.into())
                 .observe_lease(now)
                 .await
-                .map_err(|_| ErrorCode::Unauthorized)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?
                 .stamp_challenge(now)
                 .await
-                .map_err(|_| ErrorCode::Unauthorized)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })
         };
         let mut rng = passport::rand::rngs::OsRng;
         // An earlier attempt was interrupted after its request was durably begun (possibly
@@ -303,13 +372,29 @@ where
     let request = community
         .call("presentation_challenge", json!({}))
         .await
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
     let challenge = request["challenge"]
         .as_str()
         .ok_or(ErrorCode::Unavailable)?
         .to_owned();
     let signed: Vec<u8> =
-        serde_json::from_value(request["request"].clone()).map_err(|_| ErrorCode::Unavailable)?;
+        serde_json::from_value(request["request"].clone()).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
     let mut policy = community.current_policy();
     let expected = policy
         .with_current(now(), |current| {
@@ -318,17 +403,41 @@ where
                 current.key_ring().clone(),
             )
         })
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
     let (proof, stamp) = wallet
         .with_global_passport(|holder| -> Result<_> {
             let mut rng = passport::rand::rngs::OsRng;
             let proof = holder
                 .present(&mut rng, &expected, &signed, now())
-                .map_err(|_| ErrorCode::Unauthorized)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?;
             let stamp = match action {
                 Some(action) => holder
                     .present_stamp(&mut rng, scope, action, now())
-                    .map_err(|_| ErrorCode::Unauthorized)?
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })?
                     .to_bytes(),
                 None => Vec::new(),
             };
@@ -354,7 +463,15 @@ where
             "signature": signature,
         }))
         .await
-        .map_err(|_| ErrorCode::Reconcile)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -439,7 +556,15 @@ mod tests {
             std::future::ready(match what {
                 DeviceUse::Salt => ckmg::passkey::device_salt(&prf, "a", &payload)
                     .map(|salt| salt.to_vec())
-                    .map_err(|_| ErrorCode::Unauthorized),
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    }),
                 DeviceUse::Sign(_) => Err(ErrorCode::Unauthorized),
             })
         };

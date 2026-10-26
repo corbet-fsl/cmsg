@@ -97,8 +97,20 @@ pub fn decode_reachability(bytes: &[u8]) -> Vec<Address> {
         .into_iter()
         .take(MAX_ADDRESSES)
         .filter_map(|item| {
-            let scheme = Scheme::new(&item.scheme).ok()?;
-            let bytes = BASE64URL_NOPAD.decode(item.address.as_bytes()).ok()?;
+            let scheme = match Scheme::new(&item.scheme) {
+                Ok(scheme) => scheme,
+                Err(__cause) => {
+                    crate::door::cause::print(file!(), line!(), "Scheme::new", &__cause);
+                    return None;
+                }
+            };
+            let bytes = match BASE64URL_NOPAD.decode(item.address.as_bytes()) {
+                Ok(bytes) => bytes,
+                Err(__cause) => {
+                    crate::door::cause::print(file!(), line!(), "BASE64URL_NOPAD.decode", &__cause);
+                    return None;
+                }
+            };
             Address::new(scheme, bytes).ok()
         })
         .collect()
@@ -275,7 +287,15 @@ pub(super) struct Lease {
 impl Lease {
     pub(super) fn open(door: &mut Door, origin: &str, now: u64, seconds: u64) -> Result<Self> {
         let mut key = [0u8; 32];
-        getrandom::fill(&mut key).map_err(|_| ErrorCode::Unavailable)?;
+        getrandom::fill(&mut key).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         door.grants.insert(
             key,
             Grant {
@@ -298,7 +318,15 @@ impl Lease {
 }
 
 fn typed<T: serde::de::DeserializeOwned>(value: Value) -> Result<T> {
-    serde_json::from_value(value).map_err(|_| ErrorCode::Unavailable)
+    serde_json::from_value(value).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
 }
 
 /// (peer, conversation) of every wave that has opened a conversation.
@@ -384,7 +412,10 @@ pub(super) async fn receive(
                 Err(ErrorCode::Refused) => {
                     shared.push(&peer, Body::WaveAck { nonce, kind });
                 }
-                Err(_) => report.dropped += 1,
+                Err(__cause) => {
+                    crate::door::cause::print(file!(), line!(), "report dropped 1", &__cause);
+                    report.dropped += 1
+                }
             }
         }
         Body::WaveAck { nonce, kind } => {
@@ -817,7 +848,10 @@ async fn gather(
         if state.attended {
             match lease.call(door, "board.heartbeat", json!({})).await {
                 Ok(_) => state.report.heartbeats += 1,
-                Err(_) => state.attended = false,
+                Err(__cause) => {
+                    crate::door::cause::print(file!(), line!(), "state attended false", &__cause);
+                    state.attended = false
+                }
             }
         }
     }

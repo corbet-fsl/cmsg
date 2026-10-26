@@ -69,7 +69,15 @@ impl VaultBridgeConfiguration {
             &self.vault_origin,
             self.wallet_origin.as_deref(),
         )?;
-        let page = url::Url::parse(&self.vault_url).map_err(|_| ErrorCode::InvalidRequest)?;
+        let page = url::Url::parse(&self.vault_url).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         if page.origin().ascii_serialization() != self.vault_origin
             || !page.username().is_empty()
             || page.password().is_some()
@@ -143,8 +151,24 @@ pub(crate) fn bridge_contract() -> Value {
 fn vault_pair(member: &str, vault: &str, wallet: Option<&str>) -> Result<()> {
     validate_origin(member)?;
     validate_origin(vault)?;
-    let member = url::Url::parse(member).map_err(|_| ErrorCode::InvalidRequest)?;
-    let parsed = url::Url::parse(vault).map_err(|_| ErrorCode::InvalidRequest)?;
+    let member = url::Url::parse(member).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
+    let parsed = url::Url::parse(vault).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     if member.scheme() != "https"
         || parsed.scheme() != "https"
         || member.port_or_known_default() != parsed.port_or_known_default()
@@ -203,18 +227,41 @@ fn open_transport(service: &Service, roots: &[Vec<u8>]) -> Result<foyer::Transpo
             service.host.clone(),
             None,
         )
-        .map_err(|_| ErrorCode::InvalidRequest)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })
     }
     #[cfg(all(not(feature = "ohttp"), not(target_arch = "wasm32")))]
     {
         foyer::Transport::with_roots(service.base.clone(), service.host.clone(), None, roots)
-            .map_err(|_| ErrorCode::InvalidRequest)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })
     }
     #[cfg(all(not(feature = "ohttp"), target_arch = "wasm32"))]
     {
         let _ = roots;
-        foyer::Transport::new(service.base.clone(), service.host.clone(), None)
-            .map_err(|_| ErrorCode::InvalidRequest)
+        foyer::Transport::new(service.base.clone(), service.host.clone(), None).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })
     }
 }
 
@@ -295,7 +342,15 @@ impl Configuration {
                 community_feed = Some(service.ohttp.feed());
             }
             let feed_origin = url::Url::parse(&service.base)
-                .map_err(|_| ErrorCode::InvalidRequest)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::InvalidRequest",
+                        ErrorCode::InvalidRequest,
+                        &__cause,
+                    )
+                })?
                 .origin()
                 .ascii_serialization();
             let transport = open_transport(&service, roots)?;
@@ -317,7 +372,15 @@ impl Configuration {
                 // Retry jitter is fresh runtime entropy, never a persistent
                 // deployment timestamp or a value selected by an action body.
                 let mut entropy = [0; 8];
-                getrandom::fill(&mut entropy).map_err(|_| ErrorCode::Unavailable)?;
+                getrandom::fill(&mut entropy).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
                 trust.following.retry_entropy = u64::from_le_bytes(entropy);
                 #[cfg(not(target_arch = "wasm32"))]
                 let trust = if wallet {
@@ -331,7 +394,18 @@ impl Configuration {
                 } else {
                     cfyr::trust::Trust::browser(trust.publishing, trust.following)
                 };
-                foyer::Foyer::with_trust(transport, trust.map_err(|_| ErrorCode::InvalidRequest)?)
+                foyer::Foyer::with_trust(
+                    transport,
+                    trust.map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::InvalidRequest",
+                            ErrorCode::InvalidRequest,
+                            &__cause,
+                        )
+                    })?,
+                )
             } else {
                 foyer::Foyer::new(transport)
             };

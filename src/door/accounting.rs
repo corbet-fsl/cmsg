@@ -132,8 +132,16 @@ where
                     if current.community() == "wallet" || !member.device_keys.contains(&device) {
                         return Err(ErrorCode::Unauthorized);
                     }
-                    let scope = CommunityId::new(current.community().as_bytes())
-                        .map_err(|_| ErrorCode::Unauthorized)?;
+                    let scope =
+                        CommunityId::new(current.community().as_bytes()).map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unauthorized",
+                                ErrorCode::Unauthorized,
+                                &__cause,
+                            )
+                        })?;
                     if HEX.encode(&holder.pseudonym(&scope).to_bytes()) != member.member {
                         return Err(ErrorCode::Unauthorized);
                     }
@@ -141,9 +149,15 @@ where
                         scope,
                         current.key_ring().clone(),
                     );
-                    let request = expected
-                        .authenticate(signed, checked)
-                        .map_err(|_| ErrorCode::Unauthorized)?;
+                    let request = expected.authenticate(signed, checked).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })?;
                     let expiry = request.epoch_expiry().ok_or(ErrorCode::Unauthorized)?;
                     let gates = request
                         .required_gates()
@@ -157,7 +171,15 @@ where
                     ));
                     let proof = holder
                         .present(rng, &expected, signed, checked)
-                        .map_err(|_| ErrorCode::Unauthorized)?
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unauthorized",
+                                ErrorCode::Unauthorized,
+                                &__cause,
+                            )
+                        })?
                         .to_bytes();
                     Ok((
                         proof,
@@ -173,26 +195,63 @@ where
                         },
                     ))
                 })
-                .map_err(|_| ErrorCode::Unauthorized)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?
         })
         .await
-        .map_err(|_| ErrorCode::Unauthorized)??;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })??;
     // Proof generation and the global owner's fresh post-check may have waited.
     // Re-authenticate the original still-live challenge before issuing anything.
     challenge
         .with_current(now, |current, member, _, signed, checked| {
             cohort.check(current, member, signed, device)?;
             let expected = AuthenticatedCommunity::from_authenticated_origin(
-                CommunityId::new(current.community().as_bytes())
-                    .map_err(|_| ErrorCode::Unauthorized)?,
+                CommunityId::new(current.community().as_bytes()).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?,
                 current.key_ring().clone(),
             );
-            expected
-                .authenticate(signed, checked)
-                .map_err(|_| ErrorCode::Unauthorized)?;
+            expected.authenticate(signed, checked).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
             Ok(())
         })
-        .map_err(|_| ErrorCode::Unauthorized)??;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })??;
     let lease = challenge
         .finish(proof, device, now)
         .await
@@ -251,11 +310,26 @@ impl AccountAdmission<'_> {
                         return Err(ErrorCode::Unauthorized);
                     }
                     let material: cblc::publication::PublicVerifierMaterial =
-                        serde_json::from_slice(balance.payload())
-                            .map_err(|_| ErrorCode::Unauthorized)?;
+                        serde_json::from_slice(balance.payload()).map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unauthorized",
+                                ErrorCode::Unauthorized,
+                                &__cause,
+                            )
+                        })?;
                     material
                         .validate_at(current.community(), checked)
-                        .map_err(|_| ErrorCode::Unauthorized)?;
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unauthorized",
+                                ErrorCode::Unauthorized,
+                                &__cause,
+                            )
+                        })?;
                     if material.policy_epoch != current.policy_epoch()
                         || material.revision != balance.revision()
                     {
@@ -267,9 +341,24 @@ impl AccountAdmission<'_> {
                         policy_keys: current.key_ring().clone(),
                     };
                     let grant: admission::AdmissionGrant = serde_json::from_value(wire.clone())
-                        .map_err(|_| ErrorCode::Unauthorized)?;
-                    admission::verify_admission(&grant, &trust, checked)
-                        .map_err(|_| ErrorCode::Unauthorized)?;
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unauthorized",
+                                ErrorCode::Unauthorized,
+                                &__cause,
+                            )
+                        })?;
+                    admission::verify_admission(&grant, &trust, checked).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })?;
                     if grant.policy_epoch != cohort.epoch
                         || grant.passport_policy_digest != cohort.digest
                         || grant.pseudonym != cohort.member
@@ -287,9 +376,25 @@ impl AccountAdmission<'_> {
                     }
                     let standing = current
                         .settings(checked)
-                        .map_err(|_| ErrorCode::Unauthorized)?
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unauthorized",
+                                ErrorCode::Unauthorized,
+                                &__cause,
+                            )
+                        })?
                         .standing_params()
-                        .map_err(|_| ErrorCode::Unauthorized)?;
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unauthorized",
+                                ErrorCode::Unauthorized,
+                                &__cause,
+                            )
+                        })?;
                     Ok(CurrentAdmission {
                         standing,
                         material_digest: Sha256::digest(balance.payload()).into(),
@@ -302,7 +407,15 @@ impl AccountAdmission<'_> {
                     })
                 },
             )
-            .map_err(|_| ErrorCode::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?
     }
 }
 
@@ -335,7 +448,15 @@ impl<'p> AccountAdmission<'p> {
             .keys()
             .prepare_account_device(expires)
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let current = self.current()?;
         if plan.binding().community() != self.cohort.scope
             || plan.binding().member() != self.cohort.member
@@ -361,26 +482,63 @@ impl<'p> AccountAdmission<'p> {
         let root = intents
             .root
             .admit(command, current.now)
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let authorization = account
             .vault()
             .await?
             .keys()
             .authorize_account_device(plan)
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let current = self.current()?;
         if expires > current.expires {
             return Err(ErrorCode::Unauthorized);
         }
-        let authorization: admission::DeviceAuthorization = serde_json::from_slice(
-            &authorization
-                .to_bytes()
-                .map_err(|_| ErrorCode::Unauthorized)?,
-        )
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        let authorization: admission::DeviceAuthorization =
+            serde_json::from_slice(&authorization.to_bytes().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         admission::verify_device_authorization(&authorization, &current.grant, current.now)
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         Ok((authorization, root, current, expires))
     }
 }
@@ -408,7 +566,15 @@ impl<'p> AccountAdmission<'p> {
             .await?
             .account_projection()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let (authorization, root, current, expires) =
             self.authorize_device(account, intents).await?;
         let mut delegation = enrollment::AccountingDelegation {
@@ -422,23 +588,45 @@ impl<'p> AccountAdmission<'p> {
             expires_at: expires,
             signature: String::new(),
         };
-        let transcript = delegation
-            .signing_bytes()
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        let transcript = delegation.signing_bytes().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let lineage = account
             .vault()
             .await?
             .keys()
             .lineage()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let device = account
             .vault()
             .await?
             .keys()
             .device_public_key()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let current = self.current()?;
         if lineage.binding.community() != self.cohort.scope
             || lineage.binding.member() != self.cohort.member
@@ -468,7 +656,15 @@ impl<'p> AccountAdmission<'p> {
                 },
                 current.now,
             )
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let signature = account
             .vault()
             .await?
@@ -479,7 +675,15 @@ impl<'p> AccountAdmission<'p> {
                 expires,
             )
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         delegation.signature = B64.encode(&signature);
         account.check(&admitted_origin).await?;
         let mut prepared = PreparedEnrollment {
@@ -505,11 +709,35 @@ impl<'p> PreparedEnrollment<'p> {
     /// The returned registry receipt still proves no common-root installation.
     pub async fn submit_for_initialization(mut self) -> Result<SubmittedEnrollment<'p>> {
         let expected = self.expected_entry()?;
-        let wire = serde_json::to_value(&self.delegation).map_err(|_| ErrorCode::InvalidRequest)?;
+        let wire = serde_json::to_value(&self.delegation).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let response = Box::pin(submit_with_resend(&mut self.admission.lease, wire)).await?;
         let response: enrollment::EnrollmentEntry =
-            serde_json::from_value(response).map_err(|_| ErrorCode::Reconcile)?;
-        let current = self.expected_entry().map_err(|_| ErrorCode::Reconcile)?;
+            serde_json::from_value(response).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
+        let current = self.expected_entry().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
         if response != expected || current != expected {
             return Err(ErrorCode::Reconcile);
         }
@@ -530,7 +758,15 @@ impl<'p> PreparedEnrollment<'p> {
             },
             current.now,
         )
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         Ok(enrollment::EnrollmentEntry::from_verified(&verified))
     }
     /// Reborrow the exact public original request only while the retained owner
@@ -550,7 +786,15 @@ impl<'p> PreparedEnrollment<'p> {
             },
             current.now,
         )
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let output = use_delegation(&self.delegation);
         let completed = self.admission.current()?;
         if completed.now >= self.delegation.expires_at {
@@ -594,8 +838,19 @@ async fn submit_with_resend(
     const _: () = assert!(super::account::GENESIS_REPREPARES >= 1);
     match port.first(wire).await {
         Ok(value) => Ok(value),
-        Err(cfyr::Error::Reconcile) => port.resend().await.map_err(|_| ErrorCode::Reconcile),
-        Err(_) => Err(ErrorCode::Reconcile),
+        Err(cfyr::Error::Reconcile) => port.resend().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        }),
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "Err ErrorCode::Reconcile", &__cause);
+            Err(ErrorCode::Reconcile)
+        }
     }
 }
 

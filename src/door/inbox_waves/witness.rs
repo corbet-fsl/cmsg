@@ -33,11 +33,27 @@ impl WitnessCell {
         self.0
             .lock()
             .map(|account| account.clone())
-            .map_err(|_| ErrorCode::Unavailable)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })
     }
 
     fn replace(&self, account: &Account) -> Result<()> {
-        *self.0.lock().map_err(|_| ErrorCode::Unavailable)? = account.clone();
+        *self.0.lock().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })? = account.clone();
         Ok(())
     }
 }
@@ -97,8 +113,24 @@ impl<T: UpdateTransport> DoorUpdateSink<T> {
 /// The public statement and effect, spelled by the witness crate, read as the accounting
 /// owner spells them (same camelCase wire; unknown fields are refused).
 fn bridge<S: serde::Serialize, D: serde::de::DeserializeOwned>(value: &S) -> Result<D> {
-    serde_json::from_value(serde_json::to_value(value).map_err(|_| ErrorCode::Refused)?)
-        .map_err(|_| ErrorCode::Refused)
+    serde_json::from_value(serde_json::to_value(value).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })?)
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })
 }
 
 /// The ledger reads the proof of every extended update as the extension bundle: one
@@ -120,7 +152,15 @@ fn update_bundle(
             "proof": data_encoding::HEXLOWER.encode(proof),
         }],
     }))
-    .map_err(|_| ErrorCode::Refused)
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })
 }
 
 impl<T: UpdateTransport> UpdateSink for DoorUpdateSink<T> {
@@ -136,11 +176,20 @@ impl<T: UpdateTransport> UpdateSink for DoorUpdateSink<T> {
         };
         let applied = self.transport.update(proven).await?;
         let certificate = applied.response().certificate();
-        let signature: [u8; 64] = certificate
-            .signature
-            .as_slice()
-            .try_into()
-            .map_err(|_| ErrorCode::Refused)?;
+        let signature: [u8; 64] =
+            certificate
+                .signature
+                .as_slice()
+                .try_into()
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })?;
         self.owed = Some(applied.request_id());
         Ok(Certificate {
             accepted_at: certificate.accepted_at,

@@ -63,10 +63,26 @@ pub fn derive(charter: &cchr::VerifiedCharter, authority: [u8; 32], now: u64) ->
         return Err(ErrorCode::Unavailable);
     }
     let material: cblc::publication::PublicVerifierMaterial =
-        serde_json::from_slice(balance.payload()).map_err(|_| ErrorCode::Unauthorized)?;
+        serde_json::from_slice(balance.payload()).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     material
         .validate_at(charter.community(), now)
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     if material.revision != balance.revision() || material.policy_epoch != charter.policy_epoch() {
         return Err(ErrorCode::Unauthorized);
     }
@@ -76,8 +92,24 @@ pub fn derive(charter: &cchr::VerifiedCharter, authority: [u8; 32], now: u64) ->
         .ok_or(ErrorCode::Unavailable)?;
     let wave: cwlt::wave::WavePolicy = serde_json::to_value(descriptor)
         .and_then(serde_json::from_value)
-        .map_err(|_| ErrorCode::Unauthorized)?;
-    wave.validate().map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
+    wave.validate().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?;
     if now < wave.valid_from || now >= wave.valid_until {
         return Err(ErrorCode::Unavailable);
     }

@@ -362,7 +362,15 @@ impl Door {
 }
 
 fn now(expires: u64) -> Result<u64> {
-    let now = clnk::Clock::now(&SystemClock).map_err(|_| ErrorCode::Clock)? / 1000;
+    let now = clnk::Clock::now(&SystemClock).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Clock",
+            ErrorCode::Clock,
+            &__cause,
+        )
+    })? / 1000;
     if now >= expires {
         return Err(ErrorCode::Unauthorized);
     }
@@ -404,7 +412,15 @@ pub(super) fn with_context<B: cwst::backend::Backend, T>(
             }
             Ok(output)
         })
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
     result
 }
 
@@ -422,13 +438,37 @@ fn current_record_epoch(
             }
             let balance = charter.balance().ok_or(ErrorCode::Unavailable)?;
             let material: cblc::publication::PublicVerifierMaterial =
-                serde_json::from_slice(balance.payload()).map_err(|_| ErrorCode::Unauthorized)?;
+                serde_json::from_slice(balance.payload()).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?;
             material
                 .validate_at(community, started)
-                .map_err(|_| ErrorCode::Unauthorized)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?;
             material.record_epoch.ok_or(ErrorCode::Unavailable)
         })
-        .map_err(|_| ErrorCode::Unavailable)?
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?
 }
 
 fn publication<B: cwst::backend::Backend>(
@@ -438,7 +478,15 @@ fn publication<B: cwst::backend::Backend>(
     let policy = context
         .charter
         .current_admission_policy(context.policy.admission_action, now)
-        .map_err(|_| ErrorCode::Refused)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Refused",
+                ErrorCode::Refused,
+                &__cause,
+            )
+        })?;
     let signed_schema = context
         .charter
         .publication(cchr::Kind::Schema)
@@ -452,7 +500,15 @@ fn publication<B: cwst::backend::Backend>(
             contact: context.contact,
         },
     )
-    .map_err(|_| ErrorCode::Refused)?
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })?
     .ok_or(ErrorCode::Unavailable)?;
     // Only the original committed Profile crosses the upcoming network await.
     // It is reloaded and compared after each wait, never accepted as an input.
@@ -549,7 +605,15 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
         };
         // Board hides Link's completion classification. Retain the original
         // request after failure/cancellation; never infer that it is retryable.
-        let pending = received.map_err(|_| ErrorCode::Reconcile)?;
+        let pending = received.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
         let community = disclosure.board.community().to_owned();
         let board = &mut *disclosure.board;
         let current = &mut self.current;
@@ -683,7 +747,15 @@ async fn attendance<T: clnk::Transport, R, O: CommittedOwner>(
     board
         .enter(signature, record_proof)
         .await
-        .map_err(|_| ErrorCode::Reconcile)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
     // An accepted network response alone does not permit reporting presence.
     // Reload current Profile/Keys/Contacts and the same Foyer after this await.
     match current_publication(owner, current, policy, &community, expires).await {
@@ -726,8 +798,15 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
         }
         let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
         if let Some(bytes) = owner.desk_load().await.map_err(group_error)? {
-            let record: DeskRecord =
-                serde_json::from_slice(&bytes).map_err(|_| ErrorCode::Reconcile)?;
+            let record: DeskRecord = serde_json::from_slice(&bytes).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
             self.desk.proposals = record
                 .proposals
                 .into_iter()
@@ -780,7 +859,15 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
                 .map(|(group, sent)| (*group, sent.clone()))
                 .collect(),
         };
-        let bytes = serde_json::to_vec(&record).map_err(|_| ErrorCode::Reconcile)?;
+        let bytes = serde_json::to_vec(&record).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
         let owner = self.owner.groups().ok_or(ErrorCode::Unavailable)?;
         owner.desk_save(&bytes).await.map_err(group_error)
     }
@@ -1367,7 +1454,15 @@ async fn page(
     let foyer = door.foyers.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;
     let now = current::version(foyer, &door.config.community, expires, door.clock_floor)?;
     let mut nonce = [0; 16];
-    getrandom::fill(&mut nonce).map_err(|_| ErrorCode::Unavailable)?;
+    getrandom::fill(&mut nonce).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     let prepared = board.prepare(request, nonce)?;
     let facades::SignedBoard {
         signature,

@@ -575,10 +575,15 @@ impl AccountActor {
     }
 
     pub(super) async fn call(&mut self, command: Command) -> Result<Answer> {
-        self.actor
-            .call(command)
-            .await
-            .map_err(|_| ErrorCode::Unavailable)?
+        self.actor.call(command).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?
     }
 }
 
@@ -1094,10 +1099,15 @@ mod run {
         A: Authority,
         R: Records,
     {
-        let mut lease = membership
-            .observe_lease(clock)
-            .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+        let mut lease = membership.observe_lease(clock).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let mut lobby = lease.lobby(clock).await.map_err(map_error)?;
         if let Some(handle) = join.handle.as_deref() {
             match lobby.get("handle").and_then(Value::as_str) {
@@ -1328,9 +1338,25 @@ mod run {
                                         }),
                                     )
                                 }),
-                            Err(_) => Err(ErrorCode::Unavailable),
+                            Err(__cause) => {
+                                crate::door::cause::print(
+                                    file!(),
+                                    line!(),
+                                    "Err ErrorCode::Unavailable",
+                                    &__cause,
+                                );
+                                Err(ErrorCode::Unavailable)
+                            }
                         },
-                        Err(_) => Err(ErrorCode::Unavailable),
+                        Err(__cause) => {
+                            crate::door::cause::print(
+                                file!(),
+                                line!(),
+                                "Err ErrorCode::Unavailable",
+                                &__cause,
+                            );
+                            Err(ErrorCode::Unavailable)
+                        }
                     };
                     mailbox.reply(reply);
                     continue;

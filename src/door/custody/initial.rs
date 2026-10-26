@@ -116,7 +116,15 @@ impl<B: cwst::backend::Backend> InitialEnrollment<B> {
                         self.device_salt(&payload).map(|salt| salt.to_vec())
                     }
                 }
-                .map_err(|_| crate::door::ErrorCode::Unauthorized),
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "crate::door::ErrorCode::Unauthorized",
+                        crate::door::ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                }),
             )
         }
     }
@@ -208,9 +216,12 @@ pub async fn retain_initial_enrollment<B: cwst::backend::Backend>(
     let finish = pending
         .prepare_finish(foyer, credential, || match clock.now() {
             Ok(now) => now,
-            Err(_) => {
-                failed_clock = true;
-                u64::MAX
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "failed_clock true u64::MAX", &__cause);
+                {
+                    failed_clock = true;
+                    u64::MAX
+                }
             }
         })
         .await
@@ -295,9 +306,12 @@ pub async fn retain_global_initial_enrollment_opened<B: cwst::backend::Backend>(
     let finish = pending
         .prepare_finish(foyer, credential, || match clock.now() {
             Ok(now) => now,
-            Err(_) => {
-                failed_clock = true;
-                u64::MAX
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "failed_clock true u64::MAX", &__cause);
+                {
+                    failed_clock = true;
+                    u64::MAX
+                }
             }
         })
         .await
@@ -446,17 +460,27 @@ impl<C: Clock> Activation<'_, C> {
             || request.durable.generation != self.durable.generation
             || request.durable.digest != self.durable.digest
             || request.authority_reference
-                != self
-                    .initial
-                    .credential_id()
-                    .map_err(|_| Error::Unauthorized)?
+                != self.initial.credential_id().map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Unauthorized",
+                        Error::Unauthorized,
+                        &__cause,
+                    )
+                })?
         {
             return Err(Error::Unauthorized);
         }
-        let observation = self
-            .initial
-            .observation()
-            .map_err(|_| Error::Unauthorized)?;
+        let observation = self.initial.observation().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })?;
         if observation.member != request.binding.member()
             || !observation
                 .device_keys
@@ -469,9 +493,12 @@ impl<C: Clock> Activation<'_, C> {
         let clock = &mut self.clock;
         let mut sample = || match clock.now() {
             Ok(now) => now,
-            Err(_) => {
-                failed_clock = true;
-                u64::MAX
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "failed_clock true u64::MAX", &__cause);
+                {
+                    failed_clock = true;
+                    u64::MAX
+                }
             }
         };
         let scope = self.initial.with_current(&mut sample, |current| {
@@ -482,10 +509,26 @@ impl<C: Clock> Activation<'_, C> {
         if failed_clock {
             return Err(Error::Clock);
         }
-        if !scope.map_err(|_| Error::Unauthorized)? {
+        if !scope.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })? {
             return Err(Error::Unauthorized);
         }
-        let completed = completed.map_err(|_| Error::Unauthorized)?;
+        let completed = completed.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })?;
         if completed < request.now {
             return Err(Error::Clock);
         }
@@ -528,10 +571,15 @@ pub async fn activate_initial<B: cwst::backend::Backend>(
 ) -> Result<cvlt::InitialCreation<B>, cvlt::InitialError> {
     let candidate = enrollment.candidate;
     let seed = candidate.commitment()?;
-    if initial
-        .seed()
-        .map_err(|_| cvlt::InitialError::Keys(Error::Unauthorized))?
-        != seed
+    if initial.seed().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "cvlt::InitialError::Keys Error::Unauthorized",
+            cvlt::InitialError::Keys(Error::Unauthorized),
+            &__cause,
+        )
+    })? != seed
     {
         return Err(cvlt::InitialError::Keys(Error::Unauthorized));
     }

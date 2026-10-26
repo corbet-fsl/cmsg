@@ -11,7 +11,15 @@ fn native_runtime() -> Result<tor_rtcompat::tokio::TokioRustlsRuntime> {
     if rustls::crypto::CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
     }
-    tor_rtcompat::tokio::TokioRustlsRuntime::current().map_err(|_| ErrorCode::Unavailable)
+    tor_rtcompat::tokio::TokioRustlsRuntime::current().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
 }
 
 /// Trusted native process configuration. No identity seed, session, endpoint,
@@ -54,7 +62,15 @@ impl Door {
                 clock.clone(),
                 configuration.limits,
             )
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         let stopped = node.clone();
         let lifetime = MeshLifetime::new(move || stopped.stop());
         let messages = ctrn::messages::Messages::new(
@@ -65,14 +81,38 @@ impl Door {
             clock,
             configuration.messages,
         )
-        .map_err(|_| ErrorCode::InvalidRequest)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let mesh = cmsh::Mesh::builder(Arc::new(|future: cmsh::BoxFuture<'static, ()>| {
             tokio::spawn(future);
         }))
         .backend(Arc::new(cmsh::Tor(messages)))
         .build()
-        .map_err(|_| ErrorCode::InvalidRequest)?;
-        node.start().await.map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
+        node.start().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         // bind_mesh_owned waits for actual onion publication and retains the
         // actual bounded receiver. A failed/dropped await drops the stop guard.
         let bound = self.bind_mesh_owned(origin, mesh, Some(lifetime)).await;

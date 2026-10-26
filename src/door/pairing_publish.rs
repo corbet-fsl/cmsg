@@ -34,8 +34,18 @@ pub fn prepare_revision_evidence(
     if !matches!(receipt.change, ckmg::Change::DeviceAuthorized(_)) {
         return Err(refused());
     }
-    let presentation = StampPresentation::from_bytes(&stamp.presentation).map_err(|_| refused())?;
-    let now = clock.now().map_err(|_| ErrorCode::Clock)?;
+    let presentation = StampPresentation::from_bytes(&stamp.presentation).map_err(|__cause| {
+        crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+    })?;
+    let now = clock.now().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Clock",
+            ErrorCode::Clock,
+            &__cause,
+        )
+    })?;
     policy
         .with_current(now, |current| {
             cvlt::LineageEvidence::prepare_revision(
@@ -51,7 +61,11 @@ pub fn prepare_revision_evidence(
                 actions.member(),
                 now,
             )
-            .map_err(|_| refused())
+            .map_err(|__cause| {
+                crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+            })
         })
-        .map_err(|_| refused())?
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "refused", refused(), &__cause)
+        })?
 }

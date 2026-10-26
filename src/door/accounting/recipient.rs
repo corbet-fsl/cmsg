@@ -30,16 +30,40 @@ impl AccountAdmission<'_> {
             self.authorize_device(account, intents).await?;
         let owner: [u8; 32] = B64
             .decode(current.grant.member_id.as_bytes())
-            .map_err(|_| ErrorCode::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?
             .try_into()
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let recipient_key = account
             .vault()
             .await?
             .keys()
             .with_record_recipient(|recipient| recipient.public_key())
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let expires_at = expires
             .min(
                 current
@@ -57,7 +81,15 @@ impl AccountAdmission<'_> {
             .keys()
             .lineage()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let mut request = RecipientRequest {
             community: Sha256::digest(current.trust.community_id.as_bytes()).into(),
             owner,
@@ -68,14 +100,30 @@ impl AccountAdmission<'_> {
             expires_at,
             signature: String::new(),
         };
-        let transcript = recipient_bytes(&request).map_err(|_| ErrorCode::Unauthorized)?;
+        let transcript = recipient_bytes(&request).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let device = account
             .vault()
             .await?
             .keys()
             .device_public_key()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         if lineage.binding.community() != self.cohort.scope
             || lineage.binding.member() != self.cohort.member
             || device.value() != &self.cohort.device
@@ -103,7 +151,15 @@ impl AccountAdmission<'_> {
                 },
                 current.now,
             )
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let signature = account
             .vault()
             .await?
@@ -114,7 +170,15 @@ impl AccountAdmission<'_> {
                 expires_at,
             )
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         request.signature = B64.encode(&signature);
         account.check(&current.origin).await?;
         let after = self.current()?;
@@ -127,13 +191,37 @@ impl AccountAdmission<'_> {
             authorization,
             request,
         })
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let response = self
             .lease
             .apply_account(wire, now)
             .await
-            .map_err(|_| ErrorCode::Reconcile)?;
-        match serde_json::from_value(response).map_err(|_| ErrorCode::Reconcile)? {
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
+        match serde_json::from_value(response).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })? {
             AccountServiceResponse::RecordRecipient {
                 recipient_key: registered,
             } if registered == recipient_key => Ok(()),

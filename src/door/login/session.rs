@@ -353,7 +353,15 @@ impl Door {
             Custody::Passkey(VaultOutcome::Ready(unlock)) => {
                 cvlt::PreparedOpen::new(unlock, &self.config.community)
                     .map(|opening| (opening, None))
-                    .map_err(|_| ErrorCode::Refused)
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Refused",
+                            ErrorCode::Refused,
+                            &__cause,
+                        )
+                    })
             }
             Custody::Passkey(VaultOutcome::Locked(_)) => Err(ErrorCode::Unavailable),
             Custody::Opening { opening, stamps } => Ok((opening, Some(stamps))),
@@ -376,7 +384,15 @@ impl Door {
         if binding.role != Role::Member || binding.sessions.primary != self.custody_scope() {
             return Err(ErrorCode::Unauthorized);
         }
-        opening.device().map_err(|_| ErrorCode::Unauthorized)?;
+        opening.device().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         self.device_logins.insert(
             origin.to_owned(),
             DeviceLogin {
@@ -467,7 +483,15 @@ async fn open_device(
                 opening
                     .sign_device_session(&payload)
                     .map(|signature| signature.to_vec())
-                    .map_err(|_| ErrorCode::Unauthorized)
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })
             }
             _ => Err(ErrorCode::Unauthorized),
         })
@@ -552,7 +576,15 @@ impl Door {
                 }
             })
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         if clock_failed {
             return Err(ErrorCode::Clock);
         }
@@ -564,7 +596,15 @@ impl Door {
             .ok_or(ErrorCode::Unavailable)?
             .current_identity()
             .await?;
-        let completed = clock.now().map_err(|_| ErrorCode::Clock)?;
+        let completed = clock.now().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Clock",
+                ErrorCode::Clock,
+                &__cause,
+            )
+        })?;
         if completed < floor {
             return Err(ErrorCode::Clock);
         }

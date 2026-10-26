@@ -35,11 +35,25 @@ async fn call<T: serde::de::DeserializeOwned>(
         version: 1,
         body,
     };
-    let bytes = serde_json::to_vec(&invocation).map_err(|_| ErrorCode::InvalidRequest)?;
+    let bytes = serde_json::to_vec(&invocation).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     match door.dispatch(origin, token, &bytes, now).await {
-        Output::Ok { result, .. } => {
-            serde_json::from_value(result).map_err(|_| ErrorCode::Unavailable)
-        }
+        Output::Ok { result, .. } => serde_json::from_value(result).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        }),
         Output::Error { error } => Err(error),
     }
 }
@@ -76,8 +90,15 @@ pub async fn finish(
         Some(proved) => JobResult::Proved { proved },
         None => JobResult::Failed,
     };
-    let body = serde_json::to_value(JobDone { id: job.id, result })
-        .map_err(|_| ErrorCode::InvalidRequest)?;
+    let body = serde_json::to_value(JobDone { id: job.id, result }).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     call(door, origin, token, now, "inbox.wave_job_done", body).await
 }
 

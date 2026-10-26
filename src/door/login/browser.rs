@@ -85,14 +85,30 @@ impl Gesture {
         wasm_bindgen_futures::spawn_local(async move {
             let result = match Abortable::new(prepared.owner.wait(), registration).await {
                 Ok(result) => result,
-                Err(_) => Err(cfyr::passkeys::Error::Cancelled),
+                Err(__cause) => {
+                    crate::door::cause::print(
+                        file!(),
+                        line!(),
+                        "Err cfyr::passkeys::Error::Cancelled",
+                        &__cause,
+                    );
+                    Err(cfyr::passkeys::Error::Cancelled)
+                }
             };
             {
                 let mut slot = state.borrow_mut();
                 if slot.generation == generation {
                     slot.status = Some(match &result {
                         Ok(_) => CallbackStatus::HandedBack,
-                        Err(_) => CallbackStatus::Cancelled,
+                        Err(__cause) => {
+                            crate::door::cause::print(
+                                file!(),
+                                line!(),
+                                "CallbackStatus::Cancelled",
+                                &__cause,
+                            );
+                            CallbackStatus::Cancelled
+                        }
                     });
                     slot.abort.take();
                     slot.deadline.take();

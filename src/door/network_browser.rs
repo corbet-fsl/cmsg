@@ -85,9 +85,19 @@ impl ctrn::messages::Spawn for DriverSpawner {
             id,
             (
                 abort,
-                async move { completion.await.map_err(|_| ErrorCode::Reconcile) }
-                    .boxed_local()
-                    .shared(),
+                async move {
+                    completion.await.map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Reconcile",
+                            ErrorCode::Reconcile,
+                            &__cause,
+                        )
+                    })
+                }
+                .boxed_local()
+                .shared(),
             ),
         );
         let drivers = Arc::downgrade(&self.0);
@@ -232,7 +242,15 @@ impl<C: ckmg::Clock, A: ckmg::Authority> BrowserTor<C, A> {
             limits.operation_ms as u32,
             limits.streams as u32,
         )
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let initializer = session
             .browser_initializer(scope)
             .await
@@ -240,7 +258,15 @@ impl<C: ckmg::Clock, A: ckmg::Authority> BrowserTor<C, A> {
         let clock = Arc::new(Clock);
         let node = initializer
             .initialize(factory, clock.clone(), limits)
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         let mut starting = Starting(Some(node.clone()));
         let drivers = Arc::new(Drivers {
             maximum: limits.streams,
@@ -257,9 +283,25 @@ impl<C: ckmg::Clock, A: ckmg::Authority> BrowserTor<C, A> {
                 clock.clone(),
                 configuration.messages,
             )
-            .map_err(|_| ErrorCode::InvalidRequest)?,
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })?,
         );
-        node.start().await.map_err(|_| ErrorCode::Unavailable)?;
+        node.start().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let public_key = session.public_key().map_err(keys_error)?;
         let (stop, stopped) = oneshot::channel();
         let owner = Self {
@@ -317,7 +359,15 @@ impl<C: ckmg::Clock, A: ckmg::Authority> BrowserTor<C, A> {
             return Err(ErrorCode::Unavailable);
         }
         let result = result
-            .map_err(|_| ErrorCode::Unavailable)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
             .map_err(keys_error);
         drop(session);
         if result.is_err() {

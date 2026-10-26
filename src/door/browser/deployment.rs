@@ -144,7 +144,15 @@ mod runtime {
                 max_payload: self.messages.max_payload,
                 timeout_ms: self.messages.timeout_ms,
             };
-            messages.validate().map_err(|_| ErrorCode::InvalidRequest)?;
+            messages.validate().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })?;
             let storage = self
                 .storage
                 .map(|storage| -> Result<_> {
@@ -157,8 +165,15 @@ mod runtime {
                     };
                     // Reuse the original inbound policy validation. Refusing
                     // client watches does not disable serving others' watches.
-                    cdht::watches::InboundWatches::new(watches)
-                        .map_err(|_| ErrorCode::InvalidRequest)?;
+                    cdht::watches::InboundWatches::new(watches).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::InvalidRequest",
+                            ErrorCode::InvalidRequest,
+                            &__cause,
+                        )
+                    })?;
                     Ok((
                         cdht::Capacity {
                             records: storage.records,
@@ -174,10 +189,26 @@ mod runtime {
                 remaining = remaining
                     .checked_sub(bytes.len())
                     .ok_or(ErrorCode::Capacity)?;
-                let peer = cdht::rpc::UnverifiedPeerInfoBytes::from_bytes(bytes)
-                    .map_err(|_| ErrorCode::InvalidRequest)?;
+                let peer =
+                    cdht::rpc::UnverifiedPeerInfoBytes::from_bytes(bytes).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::InvalidRequest",
+                            ErrorCode::InvalidRequest,
+                            &__cause,
+                        )
+                    })?;
                 peer.verify_extension(&browser::records::Verifier)
-                    .map_err(|_| ErrorCode::InvalidRequest)?;
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::InvalidRequest",
+                            ErrorCode::InvalidRequest,
+                            &__cause,
+                        )
+                    })?;
                 bootstrap.push(peer);
             }
             Ok(Validated {

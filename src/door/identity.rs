@@ -29,8 +29,21 @@ pub struct Fingerprint(pub [u8; 32]);
 impl Fingerprint {
     /// Parse the 64-character lowercase hexadecimal form.
     pub fn from_hex(text: &str) -> Option<Self> {
-        let bytes = HEX.decode(text.as_bytes()).ok()?;
-        Some(Self(bytes.try_into().ok()?))
+        let bytes = match HEX.decode(text.as_bytes()) {
+            Ok(bytes) => bytes,
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "HEX.decode", &__cause);
+                return None;
+            }
+        };
+        let bytes = match bytes.try_into() {
+            Ok(bytes) => bytes,
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "try_into", &__cause);
+                return None;
+            }
+        };
+        Some(Self(bytes))
     }
     /// Lowercase hexadecimal form.
     pub fn to_hex(&self) -> String {

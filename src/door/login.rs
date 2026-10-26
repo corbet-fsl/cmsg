@@ -52,7 +52,15 @@ pub use callback::CliLogin;
 
 impl Configuration {
     pub(crate) fn context(&self) -> Result<cfyr::passkeys::Context> {
-        let page = url::Url::parse(&self.page).map_err(|_| ErrorCode::InvalidRequest)?;
+        let page = url::Url::parse(&self.page).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         if page.scheme() != "https"
             || page.origin().ascii_serialization() != self.origin
             || !page.username().is_empty()
@@ -65,8 +73,15 @@ impl Configuration {
         {
             return Err(ErrorCode::InvalidRequest);
         }
-        cfyr::passkeys::Context::new(&self.origin, &self.relying_party)
-            .map_err(|_| ErrorCode::InvalidRequest)
+        cfyr::passkeys::Context::new(&self.origin, &self.relying_party).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })
     }
 }
 

@@ -73,7 +73,15 @@ where
             let mut keys = self.keys.lock().await;
             let legacy = self.legacy.borrow().clone();
             if !legacy.is_empty() {
-                let bytes = legacy.to_bytes().map_err(|_| ErrorCode::Unavailable)?;
+                let bytes = legacy.to_bytes().map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
                 keys.import_signing_ledger(&bytes)
                     .await
                     .map_err(unavailable)?;
@@ -81,9 +89,25 @@ where
             }
             let sealed =
                 cwlt::account_owner::DurableAccountOwner::committed_sealed(self.store, &self.scope)
-                    .map_err(|_| ErrorCode::Unavailable)?;
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unavailable",
+                            ErrorCode::Unavailable,
+                            &__cause,
+                        )
+                    })?;
             let expires = Clock::now(&mut super::super::custody::SystemClock)
-                .map_err(|_| ErrorCode::Clock)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Clock",
+                        ErrorCode::Clock,
+                        &__cause,
+                    )
+                })?
                 .saturating_add(ADMISSION_SECONDS);
             keys.sign_account_digest(phase, slot, digest, &sealed, expires)
                 .await

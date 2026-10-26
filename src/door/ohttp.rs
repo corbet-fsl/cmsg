@@ -82,7 +82,15 @@ impl OhttpEndpoint {
             keys: entries,
         }
         .verify()
-        .map_err(|_| ErrorCode::InvalidRequest)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         Ok(Keys {
             feed: self.feed.clone(),
             configured: Arc::new(keys),
@@ -91,7 +99,15 @@ impl OhttpEndpoint {
 
     /// The wire for the gateway whose inner authority is `service`.
     pub(super) fn wire(&self, service: &str) -> Result<Wire> {
-        let url = url::Url::parse(&self.relay).map_err(|_| ErrorCode::InvalidRequest)?;
+        let url = url::Url::parse(&self.relay).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         if url.scheme() != "https" {
             return Err(ErrorCode::InvalidRequest);
         }
@@ -128,7 +144,15 @@ fn outer() -> Result<Outer> {
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map(ReqwestPost)
-        .map_err(|_| ErrorCode::Unavailable)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -146,9 +170,25 @@ impl Post for ReqwestPost {
             .body(body)
             .send()
             .await
-            .map_err(|_| cblv::Error::Transport)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cblv::Error::Transport",
+                    cblv::Error::Transport,
+                    &__cause,
+                )
+            })?;
         let status = response.status().as_u16();
-        let bytes = response.bytes().await.map_err(|_| cblv::Error::Transport)?;
+        let bytes = response.bytes().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cblv::Error::Transport",
+                cblv::Error::Transport,
+                &__cause,
+            )
+        })?;
         if bytes.len() > 1 << 20 {
             return Err(cblv::Error::Transport);
         }

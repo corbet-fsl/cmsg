@@ -12,7 +12,15 @@ use wasm_bindgen::prelude::*;
 use zeroize::Zeroizing;
 
 fn deployment_of(json: &str) -> Result<ProverDeployment, JsValue> {
-    serde_json::from_str(json).map_err(|_| JsValue::from_str("deployment"))
+    serde_json::from_str(json).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "JsValue::from_str deployment",
+            JsValue::from_str("deployment"),
+            &__cause,
+        )
+    })
 }
 
 /// Prove `input` (the private witness JSON) for the statement `public_json` (its public
@@ -26,15 +34,36 @@ pub async fn probe_prove(
     input: &str,
 ) -> Result<String, JsValue> {
     let deployment = deployment_of(deployment)?;
-    let config = configure(&deployment)
-        .await
-        .map_err(|_| JsValue::from_str("configure"))?;
-    let prover = BrowserProver::new(config, Arc::new(WorkerPort))
-        .map_err(|_| JsValue::from_str("prover"))?;
+    let config = configure(&deployment).await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "JsValue::from_str configure",
+            JsValue::from_str("configure"),
+            &__cause,
+        )
+    })?;
+    let prover = BrowserProver::new(config, Arc::new(WorkerPort)).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "JsValue::from_str prover",
+            JsValue::from_str("prover"),
+            &__cause,
+        )
+    })?;
     let (public_inputs, proof) = prover
         .probe_prove(public_json, Zeroizing::new(input.to_owned()))
         .await
-        .map_err(|_| JsValue::from_str("refused"))?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "JsValue::from_str refused",
+                JsValue::from_str("refused"),
+                &__cause,
+            )
+        })?;
     let hex = |bytes: &[u8]| data_encoding::HEXLOWER.encode(bytes);
     let reply = serde_json::json!({
         "verified": true,
@@ -48,11 +77,24 @@ pub async fn probe_prove(
 #[wasm_bindgen]
 pub async fn probe_setup(deployment: &str) -> Result<String, JsValue> {
     let deployment = deployment_of(deployment)?;
-    let config = configure(&deployment)
-        .await
-        .map_err(|_| JsValue::from_str("configure"))?;
-    let prover = BrowserProver::new(config, Arc::new(WorkerPort))
-        .map_err(|_| JsValue::from_str("prover"))?;
+    let config = configure(&deployment).await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "JsValue::from_str configure",
+            JsValue::from_str("configure"),
+            &__cause,
+        )
+    })?;
+    let prover = BrowserProver::new(config, Arc::new(WorkerPort)).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "JsValue::from_str prover",
+            JsValue::from_str("prover"),
+            &__cause,
+        )
+    })?;
     Ok(prover.setup_json().to_owned())
 }
 
@@ -61,8 +103,22 @@ pub async fn probe_setup(deployment: &str) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub async fn probe_calibrate(deployment: &str) -> Result<String, JsValue> {
     let deployment = deployment_of(deployment)?;
-    let forecast = calibrate(&deployment)
-        .await
-        .map_err(|_| JsValue::from_str("calibration"))?;
-    serde_json::to_string(&forecast).map_err(|_| JsValue::from_str("calibration"))
+    let forecast = calibrate(&deployment).await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "JsValue::from_str calibration",
+            JsValue::from_str("calibration"),
+            &__cause,
+        )
+    })?;
+    serde_json::to_string(&forecast).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "JsValue::from_str calibration",
+            JsValue::from_str("calibration"),
+            &__cause,
+        )
+    })
 }

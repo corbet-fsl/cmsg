@@ -206,7 +206,15 @@ impl Book {
             book.version = BOOK_VERSION;
             return Ok(book);
         };
-        let book: Self = serde_json::from_slice(record).map_err(|_| ErrorCode::Unavailable)?;
+        let book: Self = serde_json::from_slice(record).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         if book.version != BOOK_VERSION {
             return Err(ErrorCode::Unavailable);
         }
@@ -216,7 +224,15 @@ impl Book {
     pub(super) fn encode(&self) -> Result<Zeroizing<Vec<u8>>> {
         serde_json::to_vec(self)
             .map(Zeroizing::new)
-            .map_err(|_| ErrorCode::Unavailable)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })
     }
 
     fn issued(&self, id: &str) -> Option<&Issued> {
@@ -254,8 +270,15 @@ impl Book {
     /// The bond nonce for `link` (the part after `#`): the stored one, or a new
     /// one that the caller must save before it is used.
     pub(super) fn nonce_for(&mut self, link: &str) -> Result<[u8; NONCE_BYTES]> {
-        let token = Token::parse(link.trim().trim_start_matches('#'))
-            .map_err(|_| ErrorCode::InvalidRequest)?;
+        let token = Token::parse(link.trim().trim_start_matches('#')).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let id = token.id().as_str().to_owned();
         if let Some(have) = self.nonces.iter().find(|entry| entry.link == id) {
             return from_hex(&have.nonce)
@@ -265,7 +288,15 @@ impl Book {
         if self.nonces.len() >= MAXIMUM_BONDS {
             return Err(ErrorCode::Capacity);
         }
-        let nonce: [u8; NONCE_BYTES] = cvch::link::entropy().map_err(|_| ErrorCode::Unavailable)?;
+        let nonce: [u8; NONCE_BYTES] = cvch::link::entropy().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         self.nonces.push(NonceEntry {
             link: id,
             nonce: to_hex(&nonce),
@@ -299,8 +330,15 @@ impl Book {
     /// The newcomer's device keeps the bond it derived at redemption and drops
     /// the nonce that produced it.
     pub(super) fn add_vouchee_bond(&mut self, link: &str, bond: &Bond) -> Result<()> {
-        let token = Token::parse(link.trim().trim_start_matches('#'))
-            .map_err(|_| ErrorCode::InvalidRequest)?;
+        let token = Token::parse(link.trim().trim_start_matches('#')).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let id = token.id().as_str().to_owned();
         self.add_bond(BondEntry {
             sponsor: false,
@@ -321,10 +359,21 @@ impl Book {
             .iter()
             .rev()
             .find(|bond| !bond.sponsor && !bond.sponsor_id.is_empty())?;
-        Some((
-            from_hex(&entry.sponsor_id)?.try_into().ok()?,
-            from_hex(&entry.bond)?.try_into().ok()?,
-        ))
+        let sponsor = match from_hex(&entry.sponsor_id)?.try_into() {
+            Ok(sponsor) => sponsor,
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "try_into", &__cause);
+                return None;
+            }
+        };
+        let bond = match from_hex(&entry.bond)?.try_into() {
+            Ok(bond) => bond,
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "try_into", &__cause);
+                return None;
+            }
+        };
+        Some((sponsor, bond))
     }
 
     /// The issuer's device reads the people the community reports for `link`
@@ -333,13 +382,29 @@ impl Book {
         let (token, secret) = {
             let link = self.issued(id).ok_or(ErrorCode::Refused)?;
             (
-                Token::parse(&link.fragment).map_err(|_| ErrorCode::Unavailable)?,
+                Token::parse(&link.fragment).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?,
                 from_hex(&link.key)
                     .and_then(|bytes| IssuerSecret::from_bytes(&bytes).ok())
                     .ok_or(ErrorCode::Unavailable)?,
             )
         };
-        let link_id = LinkId::parse(id).map_err(|_| ErrorCode::Unavailable)?;
+        let link_id = LinkId::parse(id).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let mut opened = Vec::new();
         for entry in entries {
             // A notice that does not open, or that names someone else than the
@@ -494,7 +559,15 @@ pub struct Decided {
 }
 
 fn now() -> Result<u64> {
-    ckmg::Clock::now(&mut super::custody::SystemClock).map_err(|_| ErrorCode::Clock)
+    ckmg::Clock::now(&mut super::custody::SystemClock).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Clock",
+            ErrorCode::Clock,
+            &__cause,
+        )
+    })
 }
 
 fn applicant_id(link: &str, member: &str) -> String {
@@ -503,7 +576,15 @@ fn applicant_id(link: &str, member: &str) -> String {
 
 fn split_applicant(id: &str) -> Result<(&str, &str)> {
     let (link, member) = id.split_once(':').ok_or(ErrorCode::InvalidRequest)?;
-    LinkId::parse(link).map_err(|_| ErrorCode::InvalidRequest)?;
+    LinkId::parse(link).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     if member.is_empty() {
         return Err(ErrorCode::InvalidRequest);
     }
@@ -653,12 +734,28 @@ async fn owner<T: serde::de::DeserializeOwned>(
     let operation = foyer::owner_operation(name).ok_or(ErrorCode::Unavailable)?;
     let binding = door.foyers.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
     let answer = binding.call(operation, body).await?;
-    serde_json::from_value(answer).map_err(|_| ErrorCode::Unavailable)
+    serde_json::from_value(answer).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
 }
 
 fn manage_body(book: &Book, id: &str) -> Result<Value> {
     let link = book.issued(id).ok_or(ErrorCode::Refused)?;
-    let token = Token::parse(&link.fragment).map_err(|_| ErrorCode::Unavailable)?;
+    let token = Token::parse(&link.fragment).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     let manage = token.manage();
     Ok(serde_json::json!({ "id": id, "secret": manage.secret_hex().as_str() }))
 }
@@ -715,7 +812,15 @@ async fn endorse(
 /// thread. A reply is stored before it is posted and posted unchanged until its
 /// content grows; a later reply replaces the earlier one at the community.
 async fn post_replies(door: &mut Door, origin: &str, loaded: &mut Loaded, id: &str) -> Result<()> {
-    let link_id = LinkId::parse(id).map_err(|_| ErrorCode::Unavailable)?;
+    let link_id = LinkId::parse(id).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     let mut changed = false;
     let count = loaded.book.bonds.len();
     for at in 0..count {
@@ -742,8 +847,20 @@ async fn post_replies(door: &mut Door, origin: &str, loaded: &mut Loaded, id: &s
             };
             let credential_of = endorsement.as_ref().map(|have| have.credential.clone());
             let endorsement = endorsement.and_then(|have| {
-                let device: [u8; 32] = from_hex(&have.device)?.try_into().ok()?;
-                let signature: [u8; 64] = from_hex(&have.signature)?.try_into().ok()?;
+                let device: [u8; 32] = match from_hex(&have.device)?.try_into() {
+                    Ok(device) => device,
+                    Err(__cause) => {
+                        crate::door::cause::print(file!(), line!(), "try_into", &__cause);
+                        return None;
+                    }
+                };
+                let signature: [u8; 64] = match from_hex(&have.signature)?.try_into() {
+                    Ok(signature) => signature,
+                    Err(__cause) => {
+                        crate::door::cause::print(file!(), line!(), "try_into", &__cause);
+                        return None;
+                    }
+                };
                 cvch::link::Endorsement::new(&have.handle, device, signature).ok()
             });
             let credential = credential_of
@@ -827,8 +944,15 @@ pub(super) async fn settle_vouchee(
 /// yet) redeems without; the contact then exists but the thread does not.
 pub(super) async fn prepare_package(door: &mut Door, key: &[u8; 32], code: &str) -> Result<()> {
     let origin = origin_of(door, key)?;
-    let token =
-        Token::parse(code.trim().trim_start_matches('#')).map_err(|_| ErrorCode::InvalidRequest)?;
+    let token = Token::parse(code.trim().trim_start_matches('#')).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     let id = token.id().as_str().to_owned();
     let mut loaded = load(door, &origin).await?;
     if loaded
@@ -1030,7 +1154,10 @@ async fn sync(door: &mut Door, origin: &str, loaded: &mut Loaded) -> Result<Vec<
                 .await
                 .ok()
                 .map(|remaining| remaining.saturating_sub(held(&loaded.book, started).0)),
-            Err(_) => None,
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "None", &__cause);
+                None
+            }
         }
     } else {
         None
@@ -1120,7 +1247,15 @@ pub(super) async fn vouched_by(
         })
         .collect();
     for (link, fragment) in candidates {
-        let token = Token::parse(&fragment).map_err(|_| ErrorCode::Unavailable)?;
+        let token = Token::parse(&fragment).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let presentation = token.presentation();
         let body = serde_json::json!({
             "id": link,
@@ -1139,7 +1274,15 @@ pub(super) async fn vouched_by(
             .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
             .map(Bond::from_bytes)
             .ok_or(ErrorCode::Unavailable)?;
-        let link_id = LinkId::parse(&link).map_err(|_| ErrorCode::Unavailable)?;
+        let link_id = LinkId::parse(&link).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         // Anything that does not open, parse or verify is ignored: a sponsor
         // that signs wrongly is no sponsor to show.
         let Ok(reply) = bond
@@ -1236,14 +1379,42 @@ pub(super) async fn endorsement_wire(
     door: &mut Door,
     origin: &str,
 ) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
-    let loaded = load(door, origin).await.ok()?;
+    let loaded = match load(door, origin).await {
+        Ok(loaded) => loaded,
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "load", &__cause);
+            return None;
+        }
+    };
     let have = loaded.book.received.first()?;
-    let device: [u8; 32] = from_hex(&have.device)?.try_into().ok()?;
-    let signature: [u8; 64] = from_hex(&have.signature)?.try_into().ok()?;
-    let wire = cvch::link::Endorsement::new(&have.handle, device, signature)
-        .ok()?
-        .to_bytes()
-        .ok()?;
+    let device: [u8; 32] = match from_hex(&have.device)?.try_into() {
+        Ok(device) => device,
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "try_into", &__cause);
+            return None;
+        }
+    };
+    let signature: [u8; 64] = match from_hex(&have.signature)?.try_into() {
+        Ok(signature) => signature,
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "try_into", &__cause);
+            return None;
+        }
+    };
+    let endorsement = match cvch::link::Endorsement::new(&have.handle, device, signature) {
+        Ok(endorsement) => endorsement,
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "Endorsement::new", &__cause);
+            return None;
+        }
+    };
+    let wire = match endorsement.to_bytes() {
+        Ok(wire) => wire,
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "to_bytes", &__cause);
+            return None;
+        }
+    };
     let snapshot = have.snapshot.as_deref().and_then(from_hex);
     Some((wire, snapshot))
 }
@@ -1339,7 +1510,15 @@ pub(super) async fn link_create(
         .and_then(Value::as_str)
         .and_then(super::record::account_owner)
         .ok_or(ErrorCode::Unavailable)?;
-    let (token, secret) = Token::generate(sponsor).map_err(|_| ErrorCode::Unavailable)?;
+    let (token, secret) = Token::generate(sponsor).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     let registration = token.registration();
     let id = registration.id().as_str().to_owned();
     let mut loaded = load(door, &origin).await?;
@@ -1453,7 +1632,15 @@ async fn waiting_all(door: &mut Door, origin: &str, loaded: &Loaded) -> Result<V
         let secret = from_hex(&issued.key)
             .and_then(|bytes| IssuerSecret::from_bytes(&bytes).ok())
             .ok_or(ErrorCode::Unavailable)?;
-        let link_id = LinkId::parse(&id).map_err(|_| ErrorCode::Unavailable)?;
+        let link_id = LinkId::parse(&id).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         for entry in waiting.waiting {
             let handle = from_hex(&entry.notice)
                 .and_then(|sealed| Notice::open(&sealed, &secret, &link_id).ok())

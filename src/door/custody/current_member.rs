@@ -77,7 +77,15 @@ fn verify_read(
         || charter
             .revocations()
             .passkey_revoked(credential)
-            .map_err(|_| Error::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?
     {
         return Err(Error::Revoked);
     }
@@ -85,12 +93,28 @@ fn verify_read(
     for evidence in read.evidence() {
         let candidate = evidence
             .verify_for(charter, stamps, lifetime.binding.member(), now)
-            .map_err(|_| Error::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let wins = match &selected {
             None => true,
             Some(previous) => candidate
                 .compare_conflict(previous, now)
-                .map_err(|_| Error::Unauthorized)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Unauthorized",
+                        Error::Unauthorized,
+                        &__cause,
+                    )
+                })?
                 .is_gt(),
         };
         if wins {
@@ -99,7 +123,15 @@ fn verify_read(
     }
     let selected = selected.ok_or(Error::Unavailable)?;
     lifetime.observe_lineage(&selected, now)?;
-    let lineage = selected.lineage(now).map_err(|_| Error::Unauthorized)?;
+    let lineage = selected.lineage(now).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "Error::Unauthorized",
+            Error::Unauthorized,
+            &__cause,
+        )
+    })?;
     if &lineage.binding != request.binding
         || request.root != Some(lineage.root)
         || request.epoch != lineage.epoch

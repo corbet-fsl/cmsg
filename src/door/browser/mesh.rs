@@ -46,7 +46,15 @@ impl<I: Identity, W: TorWatcher + 'static> Control<I, W> {
                 None => Ok(()),
             };
             let pump_result = match pump_done {
-                Some(done) => done.await.map_err(|_| ErrorCode::Reconcile),
+                Some(done) => done.await.map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                }),
                 None => Ok(()),
             };
             if let Some(finished) = finished {
@@ -152,9 +160,19 @@ impl<I: Identity, W: TorWatcher + 'static> Owner<I, W> {
                 pump: RefCell::new(None),
                 pump_done: RefCell::new(None),
                 finished: RefCell::new(Some(finished)),
-                done: async move { completion.await.map_err(|_| ErrorCode::Reconcile)? }
-                    .boxed_local()
-                    .shared(),
+                done: async move {
+                    completion.await.map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Reconcile",
+                            ErrorCode::Reconcile,
+                            &__cause,
+                        )
+                    })?
+                }
+                .boxed_local()
+                .shared(),
             }),
         };
         // Install ownership before returning the future: even an unpolled bind
@@ -172,7 +190,15 @@ impl<I: Identity, W: TorWatcher + 'static> Owner<I, W> {
             let mesh = cmsh::Mesh::builder(Arc::new(Spawner(Rc::downgrade(&owner.control))))
                 .backend(applications)
                 .build()
-                .map_err(|_| ErrorCode::InvalidRequest)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::InvalidRequest",
+                        ErrorCode::InvalidRequest,
+                        &__cause,
+                    )
+                })?;
             let control = owner.control.clone();
             // Facade destruction revokes the same network retained by the composer.
             let lifetime = MeshLifetime::new(move || control.close());

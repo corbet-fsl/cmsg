@@ -34,16 +34,28 @@ where
         origin: String,
         mut vault: Vault<B, C, E, A, R, GlobalPassportCustody>,
     ) -> Result<Self> {
-        let lineage = vault
-            .keys()
-            .lineage()
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        let lineage = vault.keys().lineage().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let credential = vault
             .keys()
             .device_info()
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?
             .authority_reference()
             .to_vec();
         if lineage.binding.community() != "wallet" || credential.is_empty() {
@@ -60,18 +72,24 @@ where
     }
 
     async fn current(&mut self) -> Result<()> {
-        let lineage = self
-            .vault
-            .keys()
-            .lineage()
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
-        let device = self
-            .vault
-            .keys()
-            .device_info()
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        let lineage = self.vault.keys().lineage().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
+        let device = self.vault.keys().device_info().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         if lineage != self.lineage || device.authority_reference() != self.credential {
             return Err(ErrorCode::Unauthorized);
         }
@@ -79,7 +97,16 @@ where
     }
 
     async fn same_wallet(&mut self, issuer: &mut GlobalPassportIssuance<Transport>) -> Result<()> {
-        if issuer.origin(now).map_err(|_| ErrorCode::Unauthorized)? != self.origin {
+        if issuer.origin(now).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })? != self.origin
+        {
             return Err(ErrorCode::Unauthorized);
         }
         self.current().await?;
@@ -90,8 +117,25 @@ where
                 }
                 Ok(())
             })
-            .map_err(|_| ErrorCode::Unauthorized)??;
-        if issuer.origin(now).map_err(|_| ErrorCode::Unauthorized)? != self.origin {
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })??;
+        if issuer.origin(now).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })? != self.origin
+        {
             return Err(ErrorCode::Unauthorized);
         }
         Ok(())
@@ -107,7 +151,15 @@ where
             .vault
             .with_global_passport(read)
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         self.current().await?;
         Ok(output)
     }
@@ -126,21 +178,57 @@ where
         let (public, challenge) = issuer
             .with_current(now, |_, _, public, challenge, _| {
                 Ok((
-                    IssuerPublicKey::from_bytes(public).map_err(|_| ErrorCode::Unauthorized)?,
-                    IssuanceChallenge::from_bytes(
-                        challenge.try_into().map_err(|_| ErrorCode::Unauthorized)?,
-                    ),
+                    IssuerPublicKey::from_bytes(public).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })?,
+                    IssuanceChallenge::from_bytes(challenge.try_into().map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })?),
                 ))
             })
-            .map_err(|_| ErrorCode::Unauthorized)??;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })??;
         let request = self
             .vault
             .begin_global_passport_issuance(operation()?, rng, &public, &challenge)
             .await
-            .map_err(|_| ErrorCode::Reconcile)?;
-        self.same_wallet(issuer)
-            .await
-            .map_err(|_| ErrorCode::Reconcile)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
+        self.same_wallet(issuer).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
         Ok(request)
     }
 
@@ -157,8 +245,24 @@ where
         self.vault
             .cancel_global_passport_issuance(operation, rng)
             .await
-            .map_err(|_| ErrorCode::Reconcile)?;
-        self.current().await.map_err(|_| ErrorCode::Reconcile)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
+        self.current().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })
     }
 
     /// Destroy this local holder and Keys owner through the original lock path.
@@ -180,7 +284,16 @@ where
         &mut self,
         issuance: &mut cfyr::membership::GlobalStampIssuance<Transport>,
     ) -> Result<()> {
-        if issuance.origin(now).map_err(|_| ErrorCode::Unauthorized)? != self.origin {
+        if issuance.origin(now).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })? != self.origin
+        {
             return Err(ErrorCode::Unauthorized);
         }
         self.current().await?;
@@ -191,7 +304,15 @@ where
                 }
                 Ok(())
             })
-            .map_err(|_| ErrorCode::Unauthorized)??;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })??;
         Ok(())
     }
 
@@ -215,7 +336,15 @@ where
         self.vault
             .begin_global_stamp(operation()?, rng, issuer, challenge, actions, now())
             .await
-            .map_err(|_| ErrorCode::Reconcile)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })
     }
 
     /// Retain the wallet's answer after Wallet verified its signature.
@@ -232,7 +361,15 @@ where
         self.vault
             .finish_global_stamp(operation()?, rng, blind, expected_epoch, now())
             .await
-            .map_err(|_| ErrorCode::Reconcile)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })
     }
 
     /// Drop a pending stamp request (an earlier attempt whose outcome is settled).
@@ -244,13 +381,29 @@ where
         self.vault
             .cancel_global_stamp(operation()?, rng)
             .await
-            .map_err(|_| ErrorCode::Reconcile)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })
     }
 }
 
 fn operation() -> Result<[u8; 32]> {
     let mut operation = [0; 32];
-    getrandom::fill(&mut operation).map_err(|_| ErrorCode::Unavailable)?;
+    getrandom::fill(&mut operation).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     if operation == [0; 32] {
         return Err(ErrorCode::Unavailable);
     }
@@ -311,28 +464,78 @@ where
                     ckmg::DeviceFormat::WalletBirthPassport,
                     &ckmg::wallet_birth_passport_payload(&request),
                 )
-                .map_err(|_| ErrorCode::Refused)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })?;
             issuer.issue_birth(request, signature, now).await
         }
         None => issuer.issue(request, now).await,
     }
-    .map_err(|_| ErrorCode::Reconcile)?;
-    wallet
-        .same_wallet(&mut issuer)
-        .await
-        .map_err(|_| ErrorCode::Reconcile)?;
-    let response = BlindPassport::from_bytes(&response).map_err(|_| ErrorCode::Reconcile)?;
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Reconcile",
+            ErrorCode::Reconcile,
+            &__cause,
+        )
+    })?;
+    wallet.same_wallet(&mut issuer).await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Reconcile",
+            ErrorCode::Reconcile,
+            &__cause,
+        )
+    })?;
+    let response = BlindPassport::from_bytes(&response).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Reconcile",
+            ErrorCode::Reconcile,
+            &__cause,
+        )
+    })?;
     wallet
         .vault
         .finish_global_passport_issuance(
-            operation().map_err(|_| ErrorCode::Reconcile)?,
+            operation().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?,
             rng,
             &response,
         )
         .await
-        .map_err(|_| ErrorCode::Reconcile)?;
-    wallet
-        .same_wallet(&mut issuer)
-        .await
-        .map_err(|_| ErrorCode::Reconcile)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
+    wallet.same_wallet(&mut issuer).await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Reconcile",
+            ErrorCode::Reconcile,
+            &__cause,
+        )
+    })
 }

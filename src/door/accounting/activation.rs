@@ -45,14 +45,30 @@ pub fn prove(
             .cloned()
             .ok_or(ErrorCode::InvalidRequest)?,
     )
-    .map_err(|_| ErrorCode::InvalidRequest)?;
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     let extension: cblc::extensions::ExtensionPolicy = serde_json::from_value(
         terms
             .get("extension_policy")
             .cloned()
             .ok_or(ErrorCode::InvalidRequest)?,
     )
-    .map_err(|_| ErrorCode::InvalidRequest)?;
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     // The values of the community's rulebook as the hub resolved them; the engine
     // refuses the proof unless their digest is the extension policy's.
     let values: std::collections::BTreeMap<String, Value> = serde_json::from_value(
@@ -61,8 +77,24 @@ pub fn prove(
             .cloned()
             .ok_or(ErrorCode::InvalidRequest)?,
     )
-    .map_err(|_| ErrorCode::InvalidRequest)?;
-    let standing = crbk::standing_params(&values).map_err(|_| ErrorCode::InvalidRequest)?;
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
+    let standing = crbk::standing_params(&values).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     let observed = terms
         .get("observed_at")
         .and_then(Value::as_u64)
@@ -78,7 +110,15 @@ pub fn prove(
             owner,
         },
     )
-    .map_err(|_| ErrorCode::Unavailable)?;
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     let public = &proven.public;
     let statement = cblc::accounting::AccountStatement {
         protocol_version: public.protocol_version,
@@ -96,10 +136,26 @@ pub fn prove(
         settlement_marker: public.settlement_marker,
         policy: account.clone(),
     };
-    cblc::accounting::statement_bytes(&statement).map_err(|_| ErrorCode::Unauthorized)?;
+    cblc::accounting::statement_bytes(&statement).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?;
     // The ledger verifies an activation as an extension update bundle.
     Ok(Activation {
-        statement: serde_json::to_value(&statement).map_err(|_| ErrorCode::Unavailable)?,
+        statement: serde_json::to_value(&statement).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?,
         proof: super::request::genesis_bundle(&statement.next_state, &proven.proof)?,
     })
 }
@@ -148,7 +204,8 @@ impl ActivationProver for NativeActivationProver {
                     jobs.remove(&key);
                     ActivationPoll::Ready(activation)
                 }
-                Some(Err(_)) => {
+                Some(Err(__cause)) => {
+                    crate::door::cause::print(file!(), line!(), "ActivationPoll::Failed", &__cause);
                     drop(slot);
                     jobs.remove(&key);
                     ActivationPoll::Failed
@@ -162,7 +219,15 @@ impl ActivationProver for NativeActivationProver {
         std::thread::spawn(move || {
             let result = artifacts
                 .prover()
-                .map_err(|_| ErrorCode::Unavailable)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })
                 .and_then(|prover| prove(&prover, &address, owner, &terms));
             if let Ok(mut slot) = slot.lock() {
                 *slot = Some(result);

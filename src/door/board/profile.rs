@@ -44,12 +44,29 @@ impl ProfilePublish {
         if self.rules.len() > cbrd::cgrd::MAX_ITEMS {
             return Err(ErrorCode::InvalidRequest);
         }
-        let profile =
-            serde_json::from_value(self.profile).map_err(|_| ErrorCode::InvalidRequest)?;
+        let profile = serde_json::from_value(self.profile).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let rules = self
             .rules
             .into_iter()
-            .map(|rule| serde_json::from_value(rule).map_err(|_| ErrorCode::InvalidRequest))
+            .map(|rule| {
+                serde_json::from_value(rule).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::InvalidRequest",
+                        ErrorCode::InvalidRequest,
+                        &__cause,
+                    )
+                })
+            })
             .collect::<Result<Vec<_>>>()?;
         Ok(cbrd::Edit {
             profile,

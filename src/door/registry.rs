@@ -412,9 +412,9 @@ macro_rules! actions {
             authority: Authority::LocalClient, effect: Effect::$effect,
             body: schema::<$body>, result: schema::<$result>,
             handler: |door, key, body| Box::pin(async move {
-                let body = serde_json::from_str::<$body>(body).map_err(|_| ErrorCode::InvalidRequest)?;
+                let body = serde_json::from_str::<$body>(body).map_err(|__cause| crate::door::cause::emit(file!(), line!(), "ErrorCode::InvalidRequest", ErrorCode::InvalidRequest, &__cause))?;
                 let (result, events) = $handler(door, key, body).await?;
-                Ok((serde_json::to_value(result).map_err(|_| ErrorCode::Unavailable)?, events))
+                Ok((serde_json::to_value(result).map_err(|__cause| crate::door::cause::emit(file!(), line!(), "ErrorCode::Unavailable", ErrorCode::Unavailable, &__cause))?, events))
             }),
         }),+];
     };

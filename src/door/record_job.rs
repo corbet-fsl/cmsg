@@ -57,7 +57,15 @@ pub async fn step(door: &SharedDoor, origin: &str, job: &Shared<RecordJob>) -> R
     };
     let proof = tokio::task::spawn_blocking(move || work.prove())
         .await
-        .map_err(|_| ErrorCode::Unavailable)??;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })??;
     let mut guard = door.lock().await;
     match super::registry::account_call_at(
         &mut guard,
@@ -102,10 +110,18 @@ pub async fn run(
                 retry = cadence.retry.max(1);
                 cadence.check
             }
-            Err(_) => {
-                let now = retry;
-                retry = (retry * 2).min(cadence.check.max(1));
-                now
+            Err(__cause) => {
+                crate::door::cause::print(
+                    file!(),
+                    line!(),
+                    "let now retry retry retry 2 min cadence check max 1 now",
+                    &__cause,
+                );
+                {
+                    let now = retry;
+                    retry = (retry * 2).min(cadence.check.max(1));
+                    now
+                }
             }
         };
     }

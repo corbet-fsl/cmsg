@@ -75,8 +75,24 @@ impl CliLogin {
             let final_state = match Abortable::new(prepared.complete(), registration).await {
                 Ok(Ok(())) => CallbackStatus::HandedBack,
                 Ok(Err(cfyr::passkeys::Error::Cancelled)) => CallbackStatus::Cancelled,
-                Ok(Err(_)) => CallbackStatus::Reconcile,
-                Err(_) => CallbackStatus::Reconcile,
+                Ok(Err(__cause)) => {
+                    crate::door::cause::print(
+                        file!(),
+                        line!(),
+                        "CallbackStatus::Reconcile",
+                        &__cause,
+                    );
+                    CallbackStatus::Reconcile
+                }
+                Err(__cause) => {
+                    crate::door::cause::print(
+                        file!(),
+                        line!(),
+                        "CallbackStatus::Reconcile",
+                        &__cause,
+                    );
+                    CallbackStatus::Reconcile
+                }
             };
             state.set(final_state);
             Ok(json(final_state).into())

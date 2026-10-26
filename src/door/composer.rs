@@ -281,9 +281,15 @@ impl ProverArtifacts {
             srs_g1: g1,
             num_points: 2_621_440,
             srs_g2_digest: sha(&g2),
-            srs_g2: g2
-                .try_into()
-                .map_err(|_| ComposeError::Config("srs g2 size".into()))?,
+            srs_g2: g2.try_into().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ComposeError::Config srs g2 size into",
+                    ComposeError::Config("srs g2 size".into()),
+                    &__cause,
+                )
+            })?,
             timeout: Duration::from_secs(self.timeout_seconds),
             maximum_parallel: 1,
             threads: self.threads,
@@ -557,7 +563,15 @@ where
             )?;
             let context =
                 cpky::Context::new(&settings.global.passkey_origin, &settings.global.rp_id)
-                    .map_err(|_| super::ErrorCode::InvalidRequest)?;
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "super::ErrorCode::InvalidRequest",
+                            super::ErrorCode::InvalidRequest,
+                            &__cause,
+                        )
+                    })?;
             let mut keys = DeviceKeys::new(
                 Client::new(context, authenticator()),
                 &settings.global.passkey_origin,

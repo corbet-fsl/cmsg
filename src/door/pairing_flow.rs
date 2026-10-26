@@ -8,7 +8,15 @@ use super::*;
 use crate::door::facades::PairApproved;
 
 fn now() -> Result<u64> {
-    ckmg::Clock::now(&mut custody::SystemClock).map_err(|_| ErrorCode::Clock)
+    ckmg::Clock::now(&mut custody::SystemClock).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Clock",
+            ErrorCode::Clock,
+            &__cause,
+        )
+    })
 }
 
 impl Door {
@@ -20,9 +28,15 @@ impl Door {
         origin: &str,
         request: &ckmg::PairingRequest,
     ) -> Result<PairApproved> {
-        request
-            .verify(now()?)
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        request.verify(now()?).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let vault = self.vaults.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
         vault.pair_device(request, origin).await
     }

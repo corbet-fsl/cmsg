@@ -29,10 +29,15 @@ fn window() -> Result<Window> {
     web_sys::window().ok_or(ErrorCode::Unavailable)
 }
 fn actual_origin() -> Result<String> {
-    window()?
-        .location()
-        .origin()
-        .map_err(|_| ErrorCode::Unavailable)
+    window()?.location().origin().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
 }
 fn same_source(event: &MessageEvent, expected: &Window, origin: &str) -> bool {
     event.is_trusted()
@@ -60,9 +65,25 @@ fn payload(event: &MessageEvent, maximum: usize) -> Result<String> {
     Ok(value)
 }
 fn post<T: Serialize>(port: &MessagePort, message: &T) -> Result<()> {
-    let bytes = serde_json::to_string(message).map_err(|_| ErrorCode::InvalidRequest)?;
+    let bytes = serde_json::to_string(message).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     port.post_message(&JsValue::from_str(&bytes))
-        .map_err(|_| ErrorCode::Reconcile)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })
 }
 fn output(output: Output) -> JsValue {
     serde_json::to_string(&output)

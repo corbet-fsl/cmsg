@@ -392,7 +392,13 @@ pub(crate) async fn lease<'p>(
 
 /// Fingerprint the community trust of this Foyer is anchored to, if it is.
 pub(crate) fn anchored(api: &mut Foyer<Transport>) -> Option<identity::Fingerprint> {
-    let trust = api.trust().ok()?;
+    let trust = match api.trust() {
+        Ok(trust) => trust,
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "trust", &__cause);
+            return None;
+        }
+    };
     trust.fingerprint().copied().map(identity::Fingerprint)
 }
 
@@ -400,8 +406,17 @@ pub(crate) fn anchored(api: &mut Foyer<Transport>) -> Option<identity::Fingerpri
 /// community's fingerprint; it is dropped here and never sent.
 pub(crate) fn guard(api: &mut Foyer<Transport>, credential: &Value) -> Result<(), ComposeError> {
     match anchored(api) {
-        Some(fingerprint) => identity::guard_assertion(credential, &fingerprint)
-            .map_err(|_| ComposeError::Inconsistent("a passkey of another community")),
+        Some(fingerprint) => {
+            identity::guard_assertion(credential, &fingerprint).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ComposeError::Inconsistent a passkey of another community",
+                    ComposeError::Inconsistent("a passkey of another community"),
+                    &__cause,
+                )
+            })
+        }
         None => Ok(()),
     }
 }
@@ -577,7 +592,10 @@ where
             {
                 Ok(reopened) => enrollment = Some(reopened),
                 // Activation may have landed before its marker: the creation is then the owner.
-                Err(_) if stage == Stage::Authorized => stage = Stage::Activated,
+                Err(__cause) if stage == Stage::Authorized => {
+                    crate::door::cause::print(file!(), line!(), "stage Stage::Activated", &__cause);
+                    stage = Stage::Activated
+                }
                 Err(e) => return Err(step("reopen enrollment")(e)),
             }
         }
@@ -963,7 +981,10 @@ where
     } else if stage < Stage::Activated {
         match custody::reopen_device_enrollment(open()?, backend.clone()).await {
             Ok(opened) => enrollment = Some(opened),
-            Err(_) if stage >= Stage::Finished => stage = Stage::Activated,
+            Err(__cause) if stage >= Stage::Finished => {
+                crate::door::cause::print(file!(), line!(), "stage Stage::Activated", &__cause);
+                stage = Stage::Activated
+            }
             Err(e) => return Err(step("reopen enrollment")(e)),
         }
     }
@@ -996,10 +1017,26 @@ where
                     }
                     let (credential, _) = wallet_keys
                         .confirm("join stamp")
-                        .map_err(|_| super::ErrorCode::Refused)?
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "super::ErrorCode::Refused",
+                                super::ErrorCode::Refused,
+                                &__cause,
+                            )
+                        })?
                         .sign_in(options)
                         .await
-                        .map_err(|_| super::ErrorCode::Refused)?
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "super::ErrorCode::Refused",
+                                super::ErrorCode::Refused,
+                                &__cause,
+                            )
+                        })?
                         .into_parts();
                     Ok(Some(credential.as_json().clone()))
                 };
@@ -1222,7 +1259,15 @@ pub(crate) fn session_signer(
             super::device_join::DeviceUse::Sign(ckmg::DeviceFormat::DeviceSession) => opening
                 .sign_device_session(&payload)
                 .map(|signature| signature.to_vec())
-                .map_err(|_| super::ErrorCode::Unauthorized),
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "super::ErrorCode::Unauthorized",
+                        super::ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                }),
             _ => Err(super::ErrorCode::Unauthorized),
         })
     }
@@ -1244,7 +1289,15 @@ fn opening_use(
         }
         super::device_join::DeviceUse::Sign(_) => return Err(super::ErrorCode::Unauthorized),
     }
-    .map_err(|_| super::ErrorCode::Unauthorized)
+    .map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "super::ErrorCode::Unauthorized",
+            super::ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })
 }
 
 /// Sign in once on `companion` with the PRF extension and return the unlock secret of this
@@ -1697,7 +1750,15 @@ where
                 super::device_join::DeviceUse::Sign(ckmg::DeviceFormat::DeviceJoin) => candidate
                     .sign_device_join(&payload)
                     .map(|signature| signature.to_vec())
-                    .map_err(|_| super::ErrorCode::Unauthorized),
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "super::ErrorCode::Unauthorized",
+                            super::ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    }),
                 _ => opening_use(&opening, what, &payload),
             })
         };

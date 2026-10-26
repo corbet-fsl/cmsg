@@ -16,7 +16,15 @@ impl Door {
             .begin_device_session()
             .await?;
         let message = challenge.message(&self.config.community);
-        let started = ckmg::Clock::now(&mut custody::SystemClock).map_err(|_| ErrorCode::Clock)?;
+        let started = ckmg::Clock::now(&mut custody::SystemClock).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Clock",
+                ErrorCode::Clock,
+                &__cause,
+            )
+        })?;
         let (signature, device, _) = self
             .vaults
             .get_mut(origin)
@@ -28,7 +36,15 @@ impl Door {
                 started.saturating_add(SIGN_SECONDS),
             )
             .await?;
-        let device_key: [u8; 32] = device.try_into().map_err(|_| ErrorCode::Unavailable)?;
+        let device_key: [u8; 32] = device.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         self.foyers
             .get_mut(origin)
             .ok_or(ErrorCode::Unavailable)?
@@ -72,7 +88,15 @@ impl Door {
         let foyer = self.foyers.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
         let challenge = foyer.begin_device_session().await?;
         let scope = device_join::stamp_scope(foyer.community_client()?, &community).await?;
-        let started = ckmg::Clock::now(&mut custody::SystemClock).map_err(|_| ErrorCode::Clock)?;
+        let started = ckmg::Clock::now(&mut custody::SystemClock).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Clock",
+                ErrorCode::Clock,
+                &__cause,
+            )
+        })?;
         let (signature, device, _) = self
             .vaults
             .get_mut(origin)
@@ -84,11 +108,26 @@ impl Door {
                 started.saturating_add(SIGN_SECONDS),
             )
             .await?;
-        let device_key: [u8; 32] = device.try_into().map_err(|_| ErrorCode::Unavailable)?;
+        let device_key: [u8; 32] = device.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let salt = garden_salt(&signature);
         let action = StampAction::new(
-            ActionKind::new(cfyr::device_session::GARDEN_ACTION)
-                .map_err(|_| ErrorCode::Unavailable)?,
+            ActionKind::new(cfyr::device_session::GARDEN_ACTION).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?,
             PayloadDigest::from_bytes(cfyr::device_session::garden_payload(
                 &device_key,
                 &challenge.nonce,
@@ -101,10 +140,26 @@ impl Door {
             .live_global_wallet(wallet_origin.into())
             .observe_lease(now)
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?
             .stamp_challenge(now)
             .await
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let mut rng = cwlt::passport::rand::rngs::OsRng;
         // An admin session always confirms by assertion: it is never a registration's birth.
         let assertion = move |options| {
@@ -118,7 +173,15 @@ impl Door {
                 holder
                     .present_stamp(&mut rng, &scope, &action, now())
                     .map(|presented| presented.to_bytes())
-                    .map_err(|_| ErrorCode::Unauthorized)
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unauthorized",
+                            ErrorCode::Unauthorized,
+                            &__cause,
+                        )
+                    })
             })
             .await??;
         self.foyers

@@ -81,11 +81,14 @@ fn encode_operation(id: &OperationId) -> String {
 }
 
 fn decode_operation(value: &str) -> Option<OperationId> {
-    BASE64URL_NOPAD
-        .decode(value.as_bytes())
-        .ok()?
-        .try_into()
-        .ok()
+    let bytes = match BASE64URL_NOPAD.decode(value.as_bytes()) {
+        Ok(bytes) => bytes,
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "BASE64URL_NOPAD.decode", &__cause);
+            return None;
+        }
+    };
+    bytes.try_into().ok()
 }
 
 #[derive(Default)]
@@ -407,11 +410,10 @@ impl Owner {
                                     let _ = ready.send(Err(error));
                                     return Err(error);
                                 }
-                                Err(_) => {
+                                Err(__cause) => { crate::door::cause::print(file!(), line!(), "let _ ready send Err ErrorCode::Unavailable return Err ErrorCode", &__cause); {
                                     let _ = ready.send(Err(ErrorCode::Unavailable));
                                     return Err(ErrorCode::Unavailable);
-                                }
-                            };
+                                } }};
                             let mut retained = Some(retained);
                             owner_grants.refresh(Some(&door));
                             if ready.send(Ok(value)).is_err() {
@@ -441,13 +443,12 @@ impl Owner {
                                                     .map(|_| ())
                                             })) {
                                                 Ok(result) => result,
-                                                Err(_) => {
+                                                Err(__cause) => { crate::door::cause::print(file!(), line!(), "failed true let _ drain_composer mut composer await drop retaine", &__cause); {
                                                     failed = true;
                                                     let _ = drain_composer(&mut composer).await;
                                                     drop(retained.take());
                                                     Err(ErrorCode::Unavailable)
-                                                }
-                                            }
+                                                } }}
                                         };
                                         if failed {
                                             owner_grants.refresh(None);
@@ -520,15 +521,14 @@ impl Owner {
                                             .await
                                             {
                                                 Ok(output) => output,
-                                                Err(_) => {
+                                                Err(__cause) => { crate::door::cause::print(file!(), line!(), "failed true let _ drain_composer mut composer await drop retaine", &__cause); {
                                                     failed = true;
                                                     let _ = drain_composer(&mut composer).await;
                                                     drop(retained.take());
                                                     Output::Error {
                                                         error: ErrorCode::Reconcile,
                                                     }
-                                                }
-                                            }
+                                                } }}
                                         };
                                         if failed {
                                             owner_grants.refresh(None);
@@ -560,7 +560,7 @@ impl Owner {
                     result
                 })
             })
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| crate::door::cause::emit(file!(), line!(), "ErrorCode::Unavailable", ErrorCode::Unavailable, &__cause))?;
         match initialized.await {
             Ok(Ok(value)) => Ok((Self(sender, grants), value, thread)),
             failure => {
@@ -588,8 +588,24 @@ impl Owner {
                 reply,
             })
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
-        receive.await.map_err(|_| ErrorCode::Unavailable)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
+        receive.await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?
     }
 
     async fn invoke(
@@ -876,8 +892,24 @@ impl Embedded {
         }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
-        let address = listener.local_addr().map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
+        let address = listener.local_addr().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let origin = pairing.origin.clone();
         let pairing_clock = clock.clone();
         let (owner, token, thread) = Owner::start_retained(
@@ -960,8 +992,24 @@ impl RuntimeHandle {
         let _ = self.owner.0.send(Command::Stop).await;
         let joined = tokio::task::spawn_blocking(move || self.thread.join()).await;
         joined
-            .map_err(|_| ErrorCode::Reconcile)?
-            .map_err(|_| ErrorCode::Reconcile)??;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })??;
         if !matches!(server, Ok(Ok(()))) {
             return Err(ErrorCode::Unavailable);
         }
@@ -1075,15 +1123,29 @@ async fn envelope(
     .await
     {
         Ok(Ok(bytes)) => bytes,
-        Ok(Err(_)) => {
+        Ok(Err(__cause)) => {
+            crate::door::cause::print(
+                file!(),
+                line!(),
+                "return Err Box::new response Output::Error error: ErrorCode::Capacity",
+                &__cause,
+            );
             return Err(Box::new(response(Output::Error {
                 error: ErrorCode::Capacity,
-            })))
+            })));
         }
-        Err(_) => {
-            return Err(Box::new(response(Output::Error {
-                error: ErrorCode::Unavailable,
-            })))
+        Err(__cause) => {
+            crate::door::cause::print(
+                file!(),
+                line!(),
+                "return Err Box::new response Output::Error error: ErrorCode::Una",
+                &__cause,
+            );
+            {
+                return Err(Box::new(response(Output::Error {
+                    error: ErrorCode::Unavailable,
+                })));
+            }
         }
     };
     // Preserve the exact body bytes for the typed Serde decoder, including its
@@ -1165,10 +1227,21 @@ async fn operate(
     {
         Ok(Ok(outcome)) => outcome.clone(),
         // The action's task ended without an outcome: it may have committed.
-        Ok(Err(_)) => Some(Output::Error {
-            error: ErrorCode::Reconcile,
-        }),
-        Err(_) => None,
+        Ok(Err(__cause)) => {
+            crate::door::cause::print(
+                file!(),
+                line!(),
+                "Some Output::Error error: ErrorCode::Reconcile",
+                &__cause,
+            );
+            Some(Output::Error {
+                error: ErrorCode::Reconcile,
+            })
+        }
+        Err(__cause) => {
+            crate::door::cause::print(file!(), line!(), "None", &__cause);
+            None
+        }
     };
     if check && outcome.is_some() && !grants.valid(&origin, &capability) {
         return refused(&state.operations);
@@ -1255,7 +1328,15 @@ impl Client {
     /// `hop` bounds one request/response exchange, never an action.
     fn with_hop(base: &str, origin: &str, capability: ClientToken, hop: Duration) -> Result<Self> {
         validate_origin(origin)?;
-        let mut endpoint = url::Url::parse(base).map_err(|_| ErrorCode::InvalidRequest)?;
+        let mut endpoint = url::Url::parse(base).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let loopback = match endpoint.host() {
             Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
             Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
@@ -1278,7 +1359,15 @@ impl Client {
             .retry(reqwest::retry::never())
             .timeout(hop)
             .build()
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         Ok(Self {
             http,
             endpoint,
@@ -1369,7 +1458,10 @@ impl Client {
         let mut response = match call.body(request.to_vec()).send().await {
             Ok(response) => response,
             Err(error) if error.is_connect() => return Hop::Gone,
-            Err(_) => return Hop::Lost,
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "return Hop::Lost", &__cause);
+                return Hop::Lost;
+            }
         };
         let status = response.status();
         let id = unique_header(response.headers(), OPERATION)
@@ -1390,7 +1482,10 @@ impl Client {
                     bytes.extend_from_slice(&chunk);
                 }
                 Ok(None) => break,
-                Err(_) => return Hop::Lost,
+                Err(__cause) => {
+                    crate::door::cause::print(file!(), line!(), "return Hop::Lost", &__cause);
+                    return Hop::Lost;
+                }
             }
         }
         if status == StatusCode::ACCEPTED {

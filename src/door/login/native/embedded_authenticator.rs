@@ -153,9 +153,14 @@ impl Door {
             .embedded_authenticators
             .get_mut(origin)
             .ok_or(ErrorCode::Unavailable)?;
-        embedded
-            .assert(context, options)
-            .await
-            .map_err(|_| ErrorCode::Unauthorized)
+        embedded.assert(context, options).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })
     }
 }

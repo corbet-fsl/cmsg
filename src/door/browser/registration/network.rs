@@ -78,8 +78,15 @@ impl<O: Open> Circuits<O> {
         if self.lent.contains(&scope) {
             return Err(refused("a scope is lent once per registration"));
         }
-        let isolation =
-            Isolation(u32::try_from(self.lent.len()).map_err(|_| refused("too many scopes"))?);
+        let isolation = Isolation(u32::try_from(self.lent.len()).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "refused too many scopes",
+                refused("too many scopes"),
+                &__cause,
+            )
+        })?);
         let network = self.open.open(scope, isolation).await?;
         self.lent.push(scope);
         Ok(network)
@@ -99,7 +106,15 @@ impl<O: Open> Circuits<O> {
 
 /// A relay endpoint is accepted only on loopback (the toy stack's helper), over http(s).
 pub fn relay_endpoint(endpoint: &str) -> Result<url::Url, ComposeError> {
-    let url = url::Url::parse(endpoint).map_err(|_| refused("relay endpoint"))?;
+    let url = url::Url::parse(endpoint).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "refused relay endpoint",
+            refused("relay endpoint"),
+            &__cause,
+        )
+    })?;
     let loopback = match url.host() {
         Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
         Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
@@ -143,8 +158,15 @@ pub fn bootstrap_identity(
         }
     };
     engine.update(label.as_bytes());
-    let transport =
-        ckmg::EphemeralTransport::new(label).map_err(|_| refused("bootstrap transport keys"))?;
+    let transport = ckmg::EphemeralTransport::new(label).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "refused bootstrap transport keys",
+            refused("bootstrap transport keys"),
+            &__cause,
+        )
+    })?;
     Ok((transport, engine.finalize().into()))
 }
 
@@ -259,8 +281,15 @@ fn error_from(name: &str) -> cdht::Error {
 /// The answer body of the helper: `{"ok": value}` or `{"err": name}`.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn answer(text: &str) -> Result<serde_json::Value, cdht::Error> {
-    let mut answer: serde_json::Value =
-        serde_json::from_str(text).map_err(|_| cdht::Error::Encoding)?;
+    let mut answer: serde_json::Value = serde_json::from_str(text).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "cdht::Error::Encoding",
+            cdht::Error::Encoding,
+            &__cause,
+        )
+    })?;
     match answer.get("err").and_then(serde_json::Value::as_str) {
         Some(name) => Err(error_from(name)),
         None => Ok(answer["ok"].take()),
@@ -326,7 +355,15 @@ impl cdht::Network for Relay {
         let relay = self;
         let mut call = request("descriptor", node)?;
         call["key"] = serde_json::json!(key.0);
-        serde_json::from_value(relay.call(call).await?).map_err(|_| cdht::Error::Encoding)
+        serde_json::from_value(relay.call(call).await?).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cdht::Error::Encoding",
+                cdht::Error::Encoding,
+                &__cause,
+            )
+        })
     }
     async fn get(
         &self,
@@ -338,7 +375,15 @@ impl cdht::Network for Relay {
         let mut call = request("get", node)?;
         call["key"] = serde_json::json!(key.0);
         call["subkey"] = serde_json::json!(subkey);
-        serde_json::from_value(relay.call(call).await?).map_err(|_| cdht::Error::Encoding)
+        serde_json::from_value(relay.call(call).await?).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cdht::Error::Encoding",
+                cdht::Error::Encoding,
+                &__cause,
+            )
+        })
     }
     async fn set(
         &self,

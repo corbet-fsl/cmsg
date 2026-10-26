@@ -174,7 +174,15 @@ impl<C: ProofCheck> ProductionPorts<C> {
             return Err(ErrorCode::Unavailable);
         }
         let trust = self.trust.current(now)?;
-        trust.wave.validate().map_err(|_| ErrorCode::Unavailable)?;
+        trust.wave.validate().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         (self.verifier)(trust.wave, now, trust.authority_until)
     }
 }
@@ -582,7 +590,15 @@ mod tests {
                         calls: calls.clone(),
                     },
                 )
-                .map_err(|_| ErrorCode::Unavailable)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })
             }),
             Box::new(move || clock),
         )

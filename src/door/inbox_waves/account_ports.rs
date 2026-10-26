@@ -21,7 +21,15 @@ pub trait AccountView {
 }
 
 fn reserve_of(account: &Account, request: &ContactRequest<'_>) -> Result<Reserve> {
-    let peer = cnbx::member_digest_of(request.peer).map_err(|_| ErrorCode::Refused)?;
+    let peer = cnbx::member_digest_of(request.peer).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })?;
     let index = account
         .roster()
         .entries()
@@ -42,10 +50,15 @@ fn reserve_of(account: &Account, request: &ContactRequest<'_>) -> Result<Reserve
 fn resolution_of(request: &ReceiptRequest<'_>) -> Result<Resolution> {
     let mut signature = [0u8; 64];
     if !request.receipt_signature.is_empty() {
-        signature = request
-            .receipt_signature
-            .try_into()
-            .map_err(|_| ErrorCode::Refused)?;
+        signature = request.receipt_signature.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Refused",
+                ErrorCode::Refused,
+                &__cause,
+            )
+        })?;
     }
     Ok(Resolution {
         kind: request.kind,
@@ -57,7 +70,15 @@ fn resolution_of(request: &ReceiptRequest<'_>) -> Result<Resolution> {
 }
 
 fn bytes64(signature: &[u8]) -> Result<[u8; 64]> {
-    signature.try_into().map_err(|_| ErrorCode::Refused)
+    signature.try_into().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })
 }
 
 pub struct AccountContact<V> {
@@ -73,7 +94,15 @@ fn enrolled(rows: &[Enrollment], member: &[u8; 32], now: u64) -> bool {
 
 /// The counterpart's enrollment window in the account's verified roster.
 fn current_member(account: &Account, peer: &Binding, now: u64) -> Result<()> {
-    let digest = cnbx::member_digest_of(peer.member()).map_err(|_| ErrorCode::Refused)?;
+    let digest = cnbx::member_digest_of(peer.member()).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })?;
     enrolled(account.roster().entries(), &digest, now)
         .then_some(())
         .ok_or(ErrorCode::Refused)
@@ -93,7 +122,15 @@ impl<V: AccountView> WaveContact for AccountContact<V> {
             let account = self.view.current().await?;
             let digest = account
                 .contact_digest(&reserve_of(&account, &request)?)
-                .map_err(|_| ErrorCode::Refused)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })?;
             let signature = signer
                 .sign(SigningPhase::Contact, *request.nonce, digest)
                 .await?;
@@ -110,7 +147,15 @@ impl<V: AccountView> WaveContact for AccountContact<V> {
             let account = self.view.current().await?;
             account
                 .verify_contact(&reserve_of(&account, &request)?, &bytes64(signature)?)
-                .map_err(|_| ErrorCode::Refused)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })
         })
     }
     fn sign_resolution<'a>(
@@ -124,7 +169,15 @@ impl<V: AccountView> WaveContact for AccountContact<V> {
             let reserve = reserve_of(&account, &request.contact)?;
             let digest = account
                 .resolution_digest(&reserve, &resolution_of(&request)?)
-                .map_err(|_| ErrorCode::Refused)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })?;
             let signature = signer
                 .sign(SigningPhase::Resolution, *request.contact.nonce, digest)
                 .await?;
@@ -144,7 +197,15 @@ impl<V: AccountView> WaveContact for AccountContact<V> {
             receipt.signature = bytes64(signature)?;
             account
                 .verify_resolution(&reserve, &receipt)
-                .map_err(|_| ErrorCode::Refused)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })
         })
     }
     fn sign_acknowledgment<'a>(
@@ -158,7 +219,15 @@ impl<V: AccountView> WaveContact for AccountContact<V> {
             let reserve = reserve_of(&account, &request.contact)?;
             let digest = account
                 .acknowledgment_digest(&reserve, &resolution_of(&request)?, request.issued_at)
-                .map_err(|_| ErrorCode::Refused)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })?;
             let signature = signer
                 .sign(SigningPhase::Acknowledgment, *request.contact.nonce, digest)
                 .await?;
@@ -180,7 +249,15 @@ impl<V: AccountView> WaveContact for AccountContact<V> {
             };
             account
                 .verify_acknowledgment(&reserve, &resolution_of(&request)?, &ack)
-                .map_err(|_| ErrorCode::Refused)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })
         })
     }
 }

@@ -149,20 +149,68 @@ impl<N: cdht::Network + Clone> HandleOpener for TorHandleOpener<N> {
         handle: &[u8],
     ) -> Result<Vec<cvlt::LineageEvidence>, PeerUnavailable> {
         // Strict: domain, exact length, and the binding must be the asked peer's.
-        let reader = ckmg::LineageReadCustody::from_capability(handle, binding)
-            .map_err(|_| PeerUnavailable)?;
+        let reader =
+            ckmg::LineageReadCustody::from_capability(handle, binding).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "PeerUnavailable",
+                    PeerUnavailable,
+                    &__cause,
+                )
+            })?;
         let backend = cvlt::TorLineageRecord::member_lineage(self.network.clone(), reader)
             .await
-            .map_err(|_| PeerUnavailable)?;
-        let record = cdht::runtime::Record::new(backend).map_err(|_| PeerUnavailable)?;
-        let mut records = cvlt::LineageRecords::new(vec![record]).map_err(|_| PeerUnavailable)?;
-        let read = records.read().await.map_err(|_| PeerUnavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "PeerUnavailable",
+                    PeerUnavailable,
+                    &__cause,
+                )
+            })?;
+        let record = cdht::runtime::Record::new(backend).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "PeerUnavailable",
+                PeerUnavailable,
+                &__cause,
+            )
+        })?;
+        let mut records = cvlt::LineageRecords::new(vec![record]).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "PeerUnavailable",
+                PeerUnavailable,
+                &__cause,
+            )
+        })?;
+        let read = records.read().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "PeerUnavailable",
+                PeerUnavailable,
+                &__cause,
+            )
+        })?;
         read.evidence()
             .iter()
             .map(|item| {
                 item.to_bytes()
                     .and_then(|bytes| cvlt::LineageEvidence::from_bytes(&bytes))
-                    .map_err(|_| PeerUnavailable)
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "PeerUnavailable",
+                            PeerUnavailable,
+                            &__cause,
+                        )
+                    })
             })
             .collect()
     }
@@ -199,11 +247,15 @@ where
 {
     async fn current(&mut self, binding: &Binding) -> Result<Lineage, cnbx::ContactError> {
         let started = (self.clock)().ok_or(cnbx::ContactError::Unavailable)?;
-        let read = self
-            .records
-            .read(binding)
-            .await
-            .map_err(|_| cnbx::ContactError::Unavailable)?;
+        let read = self.records.read(binding).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cnbx::ContactError::Unavailable",
+                cnbx::ContactError::Unavailable,
+                &__cause,
+            )
+        })?;
         // Time is taken again after the await; a clock that went backwards
         // cannot extend any validity.
         let now = (self.clock)().ok_or(cnbx::ContactError::Unavailable)?;
@@ -296,10 +348,15 @@ impl<V: CharterView> CharterView for CellView<'_, V> {
         now: u64,
         inspect: impl FnOnce(&VerifiedCharter) -> Result<T, cnbx::ContactError>,
     ) -> Result<T, cnbx::ContactError> {
-        let mut view = self
-            .0
-            .try_borrow_mut()
-            .map_err(|_| cnbx::ContactError::Unavailable)?;
+        let mut view = self.0.try_borrow_mut().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cnbx::ContactError::Unavailable",
+                cnbx::ContactError::Unavailable,
+                &__cause,
+            )
+        })?;
         view.with_current(community, now, inspect)
     }
 }
@@ -362,7 +419,9 @@ where
         Box::pin(async move {
             let refused = super::ErrorCode::Refused;
             let announcement: cnbx::HandleAnnouncement =
-                serde_json::from_slice(request.announcement).map_err(|_| refused)?;
+                serde_json::from_slice(request.announcement).map_err(|__cause| {
+                    crate::door::cause::emit(file!(), line!(), "refused", refused, &__cause)
+                })?;
             if announcement.binding() != request.peer
                 || announcement.conversation() != request.conversation
                 || ckmg::LineageReadCustody::from_capability(announcement.handle(), request.peer)

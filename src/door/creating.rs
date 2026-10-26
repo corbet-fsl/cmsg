@@ -133,7 +133,15 @@ fn from_hex(text: &str) -> Option<Vec<u8>> {
 /// names, availability).
 fn checked(request: &Create) -> Result<(String, Vec<String>)> {
     let reserved = address::Reserved::new(std::iter::empty::<&str>());
-    address::validate(&request.address, &reserved).map_err(|_| ErrorCode::InvalidRequest)?;
+    address::validate(&request.address, &reserved).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::InvalidRequest",
+            ErrorCode::InvalidRequest,
+            &__cause,
+        )
+    })?;
     let name = request.display_name.trim();
     if name.is_empty() || name.chars().count() > NAME_CHARS || name.chars().any(char::is_control) {
         return Err(ErrorCode::InvalidRequest);
@@ -176,7 +184,15 @@ async fn owner<T: serde::de::DeserializeOwned>(
     } else {
         binding.call(operation, body).await?
     };
-    serde_json::from_value(answer).map_err(|_| ErrorCode::Unavailable)
+    serde_json::from_value(answer).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
 }
 
 /// Where a creation stands, kept in the Vault from the moment the person has made
@@ -281,7 +297,15 @@ async fn activation_step(
             serde_json::json!({ "address": record.address }),
         )
         .await?;
-    let wire: WireTerms = serde_json::from_value(answer).map_err(|_| ErrorCode::Unavailable)?;
+    let wire: WireTerms = serde_json::from_value(answer).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     let Some(terms) = wire.accounting else {
         if record.proving {
             record.proving = false;
@@ -369,17 +393,46 @@ pub(super) async fn community_create(
     if record.token.is_none() {
         let key: WireKey =
             owner(door, &origin, "creation_token_key", serde_json::json!({})).await?;
-        let public =
-            creation_token::public_key(&key.public_key).map_err(|_| ErrorCode::Unavailable)?;
+        let public = creation_token::public_key(&key.public_key).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let pending = match record.pending.clone() {
-            Some(state) => {
-                creation_token::Pending::from_state(state).map_err(|_| ErrorCode::Unavailable)?
-            }
+            Some(state) => creation_token::Pending::from_state(state).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?,
             None => {
                 let mut message = [0u8; MESSAGE];
-                getrandom::fill(&mut message).map_err(|_| ErrorCode::Unavailable)?;
-                let (pending, _) = creation_token::request(&public, message)
-                    .map_err(|_| ErrorCode::Unavailable)?;
+                getrandom::fill(&mut message).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
+                let (pending, _) =
+                    creation_token::request(&public, message).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unavailable",
+                            ErrorCode::Unavailable,
+                            &__cause,
+                        )
+                    })?;
                 // Kept before the request leaves: a lost answer is asked for again.
                 record.pending = Some(pending.to_state());
                 loaded.book.creation = Some(record.clone());
@@ -394,8 +447,17 @@ pub(super) async fn community_create(
             serde_json::json!({ "blinded": pending.blinded() }),
         )
         .await?;
-        let token = creation_token::finish(&public, pending, &signed.blind_signature)
-            .map_err(|_| ErrorCode::Unavailable)?;
+        let token = creation_token::finish(&public, pending, &signed.blind_signature).map_err(
+            |__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            },
+        )?;
         record.token = Some(token);
         record.pending = None;
         loaded.book.creation = Some(record.clone());
@@ -439,7 +501,15 @@ pub(super) async fn community_create(
         }
         Err(error) => return Err(error),
     };
-    let wire: WireCreated = serde_json::from_value(answer).map_err(|_| ErrorCode::Unavailable)?;
+    let wire: WireCreated = serde_json::from_value(answer).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     let created = Created {
         address: record.address.clone(),
         display_name: record.display_name.clone(),

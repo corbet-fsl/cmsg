@@ -91,7 +91,15 @@ where
         if let Some(welcome) = self
             .store
             .read(THREAD_OWNER, &conversation)
-            .map_err(|_| ErrorCode::Reconcile)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?
         {
             return Ok(welcome.to_vec());
         }
@@ -124,7 +132,15 @@ where
             .map_err(inbox_error)?;
         self.store
             .read(THREAD_OWNER, &conversation)
-            .map_err(|_| ErrorCode::Reconcile)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?
             .map(<[u8]>::to_vec)
             .ok_or(ErrorCode::Reconcile)
     }
@@ -178,20 +194,50 @@ where
         match self
             .store
             .read(QUEUE_OWNER, conversation)
-            .map_err(|_| ErrorCode::Reconcile)?
-        {
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })? {
             None => Ok(Vec::new()),
             Some(bytes) => {
-                let stored: Vec<Stored> =
-                    serde_json::from_slice(bytes).map_err(|_| ErrorCode::Reconcile)?;
+                let stored: Vec<Stored> = serde_json::from_slice(bytes).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                })?;
                 stored.into_iter().map(Stored::into_queued).collect()
             }
         }
     }
 
     async fn write_queue(&mut self, conversation: &[u8; 32], queue: &[Queued]) -> Result<()> {
-        let version = self.store.version().map_err(|_| ErrorCode::Reconcile)?;
-        let bytes = serde_json::to_vec(queue).map_err(|_| ErrorCode::Unavailable)?;
+        let version = self.store.version().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
+        let bytes = serde_json::to_vec(queue).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let change = if queue.is_empty() {
             Change::Delete {
                 owner: QUEUE_OWNER,
@@ -208,7 +254,15 @@ where
             .commit(version, operation()?, &[change], &[])
             .await
             .map(|_| ())
-            .map_err(|_| ErrorCode::Reconcile)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })
     }
 
     /// Keep a message for a thread that does not exist yet. It is stored before
@@ -223,7 +277,15 @@ where
             return Err(ErrorCode::Capacity);
         }
         let mut id = [0u8; 32];
-        getrandom::fill(&mut id).map_err(|_| ErrorCode::Unavailable)?;
+        getrandom::fill(&mut id).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         queue.push(Queued { id, text });
         self.write_queue(&conversation, &queue).await?;
         Ok(id)
@@ -290,7 +352,15 @@ impl Release {
         let remaining = if rest.is_empty() {
             Vec::new()
         } else {
-            serde_json::to_vec(rest).map_err(|_| ErrorCode::Unavailable)?
+            serde_json::to_vec(rest).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
         };
         Ok(Self {
             conversation,
@@ -334,7 +404,15 @@ impl Stored {
             Self::Entry(entry) => Ok(entry),
             Self::Bare(text) => {
                 let mut id = [0u8; 32];
-                getrandom::fill(&mut id).map_err(|_| ErrorCode::Unavailable)?;
+                getrandom::fill(&mut id).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
                 Ok(Queued { id, text })
             }
         }

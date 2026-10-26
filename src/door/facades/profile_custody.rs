@@ -167,10 +167,26 @@ where
         let mut store = storage.lock().await;
         self.check_scope(&store).await?;
         let mut operation = [0; 32];
-        getrandom::fill(&mut operation).map_err(|_| ErrorCode::Unavailable)?;
+        getrandom::fill(&mut operation).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         cbrd::commit_profile(authorized, &mut store, operation)
             .await
-            .map_err(|_| ErrorCode::Reconcile)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })
     }
 
     /// Store or replace the member's community credential (compare-and-swap).
@@ -253,7 +269,10 @@ where
                 .await
                 .map(|_| ())
                 .map_err(credential_error),
-            Err(_) => Err(ErrorCode::Refused),
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "Err ErrorCode::Refused", &__cause);
+                Err(ErrorCode::Refused)
+            }
         }
     }
 

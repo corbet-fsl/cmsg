@@ -81,8 +81,15 @@ where
     R: cvlt::Records,
 {
     async fn pseudonym(&mut self, name: &str) -> Result<String> {
-        let id = cwlt::passport::CommunityId::new(name.as_bytes())
-            .map_err(|_| ErrorCode::Unavailable)?;
+        let id = cwlt::passport::CommunityId::new(name.as_bytes()).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         self.passport
             .with_global_passport(|holder| holder.pseudonym(&id).to_hex())
             .await
@@ -114,7 +121,15 @@ where
     async fn stamp_trust(&mut self) -> Result<cvlt::StampTrust> {
         composer_core::stamp_trust(self.api, self.origin)
             .await
-            .map_err(|_| ErrorCode::Unavailable)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })
     }
 }
 
@@ -149,9 +164,25 @@ struct VaultApproval<'a> {
 impl VaultApproval<'_> {
     async fn sign(&mut self, community: &str, digest: &[u8; 32]) -> Result<[u8; 64]> {
         let message = ckmg::PairingApproval::new(community, digest)
-            .map_err(|_| ErrorCode::InvalidRequest)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::InvalidRequest",
+                    ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })?
             .message();
-        let started = ckmg::Clock::now(&mut custody::SystemClock).map_err(|_| ErrorCode::Clock)?;
+        let started = ckmg::Clock::now(&mut custody::SystemClock).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Clock",
+                ErrorCode::Clock,
+                &__cause,
+            )
+        })?;
         let (signature, _, _) = self
             .vault
             .sign_endorsement(
@@ -161,7 +192,15 @@ impl VaultApproval<'_> {
                 started.saturating_add(SIGN_SECONDS),
             )
             .await?;
-        signature.try_into().map_err(|_| ErrorCode::Reconcile)
+        signature.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })
     }
 }
 
@@ -257,9 +296,15 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
         // Nothing is asked of the person for a request that cannot be approved anyway: it
         // must be proven and extend exactly the lineage this device showed.
         let anchor = self.anchor.as_ref().ok_or(ErrorCode::InvalidRequest)?;
-        request
-            .verify(secs())
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        request.verify(secs()).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         if request.binding != anchor.binding
             || request.root != anchor.root
             || request.epoch != anchor.epoch
@@ -283,7 +328,15 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
             .as_ref()
             .ok_or(ErrorCode::Reconcile)?
             .passkey_challenge()
-            .map_err(|_| ErrorCode::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
         let actions = {
             let vault = self
                 .door
@@ -400,7 +453,15 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
                 .as_ref()
                 .ok_or(ErrorCode::Reconcile)?
                 .packed()
-                .map_err(|_| ErrorCode::Reconcile)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Reconcile",
+                        ErrorCode::Reconcile,
+                        &__cause,
+                    )
+                })?;
             let value = vault
                 .revision_record(&receipt, &anchor, &packed, &self.origin)
                 .await?;
@@ -411,7 +472,15 @@ impl<'a, N: cdht::Network + Clone> DoorHost<'a, N> {
             let value = self.approval.value.as_ref().ok_or(ErrorCode::Reconcile)?;
             cvlt::publish_lineage_revision(self.network.clone(), &anchor.root, value)
                 .await
-                .map_err(|_| ErrorCode::Unavailable)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
             self.approval.published = true;
         }
         if !self.approval.acknowledged {

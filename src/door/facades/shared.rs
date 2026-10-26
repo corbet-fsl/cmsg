@@ -256,7 +256,15 @@ where
                 .inbox
                 .contacts(&store)
                 .and_then(|contacts| contacts.blocking_rules())
-                .map_err(|_| ErrorCode::Refused)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })?;
             read(board::CommittedRead {
                 blocked: &blocked,
                 store: &store,
@@ -344,7 +352,15 @@ where
         Box::pin(async move {
             // Untrusted service bytes; the Wallet owner bounds them against the epoch.
             let context: czkp::record::Context = serde_json::from_slice(challenge.record_context())
-                .map_err(|_| ErrorCode::Refused)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })?;
             if self.lifetime.is_closed() {
                 return Err(ErrorCode::Unauthorized);
             }
@@ -357,9 +373,25 @@ where
                 .vault
                 .present_record(epoch, &context, now)
                 .await
-                .map_err(|_| ErrorCode::Unavailable)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
             self.require_open()?;
-            serde_json::to_vec(&presentation).map_err(|_| ErrorCode::Unavailable)
+            serde_json::to_vec(&presentation).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })
         })
     }
 }

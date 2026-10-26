@@ -149,8 +149,24 @@ impl cbrd::Devices for CacheDevices {
     ) -> cgrp::Result<()> {
         let cache = self.0.borrow();
         let (lineage, read_at) = cache.lineages.get(member).ok_or(cgrp::Error::Authority)?;
-        let key: [u8; 32] = authority.try_into().map_err(|_| cgrp::Error::Authority)?;
-        let signature: [u8; 64] = signature.try_into().map_err(|_| cgrp::Error::Authority)?;
+        let key: [u8; 32] = authority.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cgrp::Error::Authority",
+                cgrp::Error::Authority,
+                &__cause,
+            )
+        })?;
+        let signature: [u8; 64] = signature.try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cgrp::Error::Authority",
+                cgrp::Error::Authority,
+                &__cause,
+            )
+        })?;
         if lineage.binding.community() != community
             || lineage.binding.member() != member
             || now.saturating_sub(*read_at) > LINEAGE_FRESH_SECONDS
@@ -158,7 +174,15 @@ impl cbrd::Devices for CacheDevices {
         {
             return Err(cgrp::Error::Authority);
         }
-        ckmg::verify_ed25519(&key, message, &signature).map_err(|_| cgrp::Error::Authority)
+        ckmg::verify_ed25519(&key, message, &signature).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cgrp::Error::Authority",
+                cgrp::Error::Authority,
+                &__cause,
+            )
+        })
     }
 }
 
@@ -199,13 +223,26 @@ impl cgrp::Authority for RoomAuthority {
         {
             return Err(cgrp::Error::Authority);
         }
-        let signature: [u8; 64] = consent
-            .signature
-            .as_slice()
-            .try_into()
-            .map_err(|_| cgrp::Error::Authority)?;
-        ckmg::verify_ed25519(&self.device, &consent.signing_bytes()?, &signature)
-            .map_err(|_| cgrp::Error::Authority)
+        let signature: [u8; 64] = consent.signature.as_slice().try_into().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cgrp::Error::Authority",
+                cgrp::Error::Authority,
+                &__cause,
+            )
+        })?;
+        ckmg::verify_ed25519(&self.device, &consent.signing_bytes()?, &signature).map_err(
+            |__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cgrp::Error::Authority",
+                    cgrp::Error::Authority,
+                    &__cause,
+                )
+            },
+        )
     }
     fn contact(&self, _: &str, _: &str, _: &str, _: u64) -> cgrp::Result<()> {
         Err(cgrp::Error::Authority)
@@ -234,8 +271,15 @@ impl cnbx::DeviceAuthority for GroupDevices {
                 Err(cnbx::ContactError::Authority)
             };
         }
-        let now = ckmg::Clock::now(&mut crate::door::custody::SystemClock)
-            .map_err(|_| cnbx::ContactError::Unavailable)?;
+        let now = ckmg::Clock::now(&mut crate::door::custody::SystemClock).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cnbx::ContactError::Unavailable",
+                cnbx::ContactError::Unavailable,
+                &__cause,
+            )
+        })?;
         if let Some((lineage, read_at)) = self.cache.borrow().lineages.get(binding.member()) {
             if lineage.binding == *binding && now.saturating_sub(*read_at) <= LINEAGE_FRESH_SECONDS
             {
@@ -386,19 +430,35 @@ where
             .keys()
             .key(cnbx::threads_purpose())
             .await
-            .map_err(|_| cgrp::Error::Authority)?;
-        let own = custody
-            .vault
-            .keys()
-            .lineage()
-            .await
-            .map_err(|_| cgrp::Error::Authority)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cgrp::Error::Authority",
+                    cgrp::Error::Authority,
+                    &__cause,
+                )
+            })?;
+        let own = custody.vault.keys().lineage().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cgrp::Error::Authority",
+                cgrp::Error::Authority,
+                &__cause,
+            )
+        })?;
         let storage = custody.vault.storage().clone();
         let mut store = storage.lock().await;
-        custody
-            .check_scope(&store)
-            .await
-            .map_err(|_| cgrp::Error::Authority)?;
+        custody.check_scope(&store).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cgrp::Error::Authority",
+                cgrp::Error::Authority,
+                &__cause,
+            )
+        })?;
         let mut devices = GroupDevices {
             own,
             cache: self.cache.clone(),
@@ -545,12 +605,28 @@ where
         handles: &BTreeMap<String, Vec<u8>>,
     ) -> std::result::Result<cgrp::GroupState, ctnd::Error> {
         use ctnd::Error as Fail;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         // The handles are locators only; every lineage they yield is read and
         // Charter-verified, and must bind to the roster member asked for. The
         // state decoded here only selects whom to read; Threads authenticates it.
         let roster = cgrp::GroupState::decode(&evidence.state)
-            .map_err(|_| Fail::Authority)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?
             .members()
             .clone();
         cbrd::GroupOwner::provide_handles(self, handles.clone());
@@ -561,7 +637,15 @@ where
             return Err(Fail::Authority);
         }
         let mut retained = self.retained.lock().await;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
         let binding = custody.binding.clone();
         let handle = custody
@@ -569,19 +653,35 @@ where
             .keys()
             .key(cnbx::threads_purpose())
             .await
-            .map_err(|_| Fail::Authority)?;
-        let own = custody
-            .vault
-            .keys()
-            .lineage()
-            .await
-            .map_err(|_| Fail::Authority)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?;
+        let own = custody.vault.keys().lineage().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let storage = custody.vault.storage().clone();
         let store = storage.lock().await;
-        custody
-            .check_scope(&store)
-            .await
-            .map_err(|_| Fail::Authority)?;
+        custody.check_scope(&store).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let mut devices = GroupDevices {
             own,
             cache: self.cache.clone(),
@@ -592,13 +692,23 @@ where
             handle: &handle,
             devices: &mut devices,
         };
-        let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
+        let threads = cthr::Threads::load(binding, group, &store).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+        })?;
         let state = threads.verify_room_state(&mut port, evidence).await;
         *self.cache.borrow_mut() = Cache::default();
         if state.is_err() {
             self.roster.borrow_mut().forget();
         }
-        state.map_err(|_| Fail::Authority)
+        state.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })
     }
 
     /// Ordered external commit into a member room. Keys custody, the Store
@@ -617,10 +727,26 @@ where
         L: crate::door::RoomLink,
     {
         use ctnd::Error as Fail;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let operation = {
             let mut bytes = [0; 32];
-            getrandom::fill(&mut bytes).map_err(|_| Fail::Unavailable)?;
+            getrandom::fill(&mut bytes).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Unavailable",
+                    Fail::Unavailable,
+                    &__cause,
+                )
+            })?;
             bytes
         };
         // The roster's lineages are Charter-verified once and kept (row 14.8):
@@ -634,7 +760,15 @@ where
             return Err(Fail::Authority);
         }
         let mut retained = self.retained.lock().await;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
         let binding = custody.binding.clone();
         let handle = custody
@@ -642,19 +776,35 @@ where
             .keys()
             .key(cnbx::threads_purpose())
             .await
-            .map_err(|_| Fail::Authority)?;
-        let own = custody
-            .vault
-            .keys()
-            .lineage()
-            .await
-            .map_err(|_| Fail::Authority)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?;
+        let own = custody.vault.keys().lineage().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let storage = custody.vault.storage().clone();
         let mut store = storage.lock().await;
-        custody
-            .check_scope(&store)
-            .await
-            .map_err(|_| Fail::Authority)?;
+        custody.check_scope(&store).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let mut devices = GroupDevices {
             own,
             cache: self.cache.clone(),
@@ -666,8 +816,9 @@ where
             devices: &mut devices,
         };
         let mut clock = crate::door::custody::SystemClock;
-        let threads =
-            cthr::Threads::load(binding, task.group, &store).map_err(|_| Fail::Storage)?;
+        let threads = cthr::Threads::load(binding, task.group, &store).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+        })?;
         let mut attend = ctnd::Attend::new();
         let source = PolicyRef(task.policy);
         let companion = cbrd::RoomCompanion {
@@ -702,7 +853,15 @@ where
         if joined.is_err() {
             self.roster.borrow_mut().forget();
         }
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let joined = joined?;
         Ok(RoomJoined {
             snapshot: joined.snapshot,
@@ -727,7 +886,15 @@ where
         policy: &dyn cgrp::PolicySource,
     ) -> std::result::Result<cbrd::RoomState, ctnd::Error> {
         use ctnd::Error as Fail;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         // The roster's current lineages are read first (Charter-verified), so
         // Threads can certify every leaf of the room against them.
         let (roster, mut handles) = {
@@ -736,20 +903,46 @@ where
             let storage = custody.vault.storage().clone();
             let store = storage.lock().await;
             let roster = cgrp::Snapshot::load(custody.binding.community(), &store)
-                .map_err(|_| Fail::Storage)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Fail::Storage",
+                        Fail::Storage,
+                        &__cause,
+                    )
+                })?
                 .members(&group)
-                .map_err(|_| Fail::Authority)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Fail::Authority",
+                        Fail::Authority,
+                        &__cause,
+                    )
+                })?
                 .clone();
             // Lineage-read handles of the roster this member holds: a locator
             // for the newcomer, who reads and Charter-verifies each lineage itself.
-            let journal = custody.inbox.contacts(&store).map_err(|_| Fail::Storage)?;
+            let journal = custody.inbox.contacts(&store).map_err(|__cause| {
+                crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+            })?;
             let mut handles = BTreeMap::new();
             for peer in roster.iter().filter(|peer| **peer != self.member) {
                 if let Some(handle) = self.provided.get(peer) {
                     handles.insert(peer.clone(), handle.clone());
                 } else if let Some(handle) = self.roster.borrow().handles.get(peer) {
                     handles.insert(peer.clone(), handle.clone());
-                } else if let Some(handle) = journal.handle(peer).map_err(|_| Fail::Storage)? {
+                } else if let Some(handle) = journal.handle(peer).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Fail::Storage",
+                        Fail::Storage,
+                        &__cause,
+                    )
+                })? {
                     handles.insert(peer.clone(), handle);
                 }
             }
@@ -757,18 +950,40 @@ where
         };
         let own_handle = cbrd::GroupOwner::own_handle(self)
             .await
-            .map_err(|_| Fail::Authority)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?;
         handles.insert(self.member.clone(), own_handle);
         // What the handles above name is kept, so the lineages are read once.
         self.roster
             .borrow_mut()
             .handles
             .extend(handles.iter().map(|(m, h)| (m.clone(), h.clone())));
-        self.ensure_roster(&roster)
-            .await
-            .map_err(|_| Fail::Authority)?;
+        self.ensure_roster(&roster).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let mut retained = self.retained.lock().await;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
         let binding = custody.binding.clone();
         let handle = custody
@@ -776,19 +991,35 @@ where
             .keys()
             .key(cnbx::threads_purpose())
             .await
-            .map_err(|_| Fail::Authority)?;
-        let own = custody
-            .vault
-            .keys()
-            .lineage()
-            .await
-            .map_err(|_| Fail::Authority)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?;
+        let own = custody.vault.keys().lineage().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let storage = custody.vault.storage().clone();
         let store = storage.lock().await;
-        custody
-            .check_scope(&store)
-            .await
-            .map_err(|_| Fail::Authority)?;
+        custody.check_scope(&store).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let mut devices = GroupDevices {
             own,
             cache: self.cache.clone(),
@@ -800,18 +1031,36 @@ where
             devices: &mut devices,
         };
         let mut clock = crate::door::custody::SystemClock;
-        let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
+        let threads = cthr::Threads::load(binding, group, &store).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+        })?;
         let evidence = threads
             .parent_evidence(&mut port, &store, &PolicyRef(policy), &mut clock)
             .await
-            .map_err(|_| Fail::Authority);
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            });
         *self.cache.borrow_mut() = Cache::default();
         if evidence.is_err() {
             self.roster.borrow_mut().forget();
         }
         Ok(cbrd::RoomState {
             evidence: evidence?,
-            transport: threads.transport_keys().map_err(|_| Fail::Authority)?,
+            transport: threads.transport_keys().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?,
             handles,
         })
     }
@@ -823,19 +1072,50 @@ where
         group: cgrp::Id,
     ) -> std::result::Result<cbrd::TransportKey, ctnd::Error> {
         use ctnd::Error as Fail;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let mut retained = self.retained.lock().await;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
         let binding = custody.binding.clone();
         let storage = custody.vault.storage().clone();
         let store = storage.lock().await;
-        custody
-            .check_scope(&store)
-            .await
-            .map_err(|_| Fail::Authority)?;
-        let threads = cthr::Threads::load(binding, group, &store).map_err(|_| Fail::Storage)?;
-        let key = threads.transport_keys().map_err(|_| Fail::Authority)?;
+        custody.check_scope(&store).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
+        let threads = cthr::Threads::load(binding, group, &store).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+        })?;
+        let key = threads.transport_keys().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         Ok(cbrd::TransportKey::from_keys(&key))
     }
 }
@@ -914,9 +1194,25 @@ where
             let storage = custody.vault.storage().clone();
             let store = storage.lock().await;
             Snapshot::load(custody.binding.community(), &store)
-                .map_err(|_| Fail::Storage)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Fail::Storage",
+                        Fail::Storage,
+                        &__cause,
+                    )
+                })?
                 .members(&group)
-                .map_err(|_| Fail::Authority)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Fail::Authority",
+                        Fail::Authority,
+                        &__cause,
+                    )
+                })?
                 .clone()
         };
         if self.ensure_roster(&roster).await.is_err() {
@@ -933,25 +1229,60 @@ where
         group: cgrp::Id,
     ) -> std::result::Result<RoomKeysStanding, ctnd::Error> {
         use ctnd::Error as Fail;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let mut retained = self.retained.lock().await;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
         let binding = custody.binding.clone();
         let storage = custody.vault.storage().clone();
         let store = storage.lock().await;
-        custody
-            .check_scope(&store)
-            .await
-            .map_err(|_| Fail::Authority)?;
+        custody.check_scope(&store).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let epoch = cthr::Threads::load(binding, group, &store)
-            .map_err(|_| Fail::Storage)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+            })?
             .epoch()
-            .map_err(|_| Fail::Unavailable)?;
-        let record = store
-            .read(room_keys::OWNER, &group)
-            .map_err(|_| Fail::Storage)?;
-        let held = Keyring::decode(record).map_err(|_| Fail::Storage)?.owners();
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Unavailable",
+                    Fail::Unavailable,
+                    &__cause,
+                )
+            })?;
+        let record = store.read(room_keys::OWNER, &group).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+        })?;
+        let held = Keyring::decode(record)
+            .map_err(|__cause| {
+                crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+            })?
+            .owners();
         Ok(RoomKeysStanding { epoch, held })
     }
 
@@ -963,15 +1294,39 @@ where
         task: RoomKeyTask<'_>,
     ) -> std::result::Result<RoomKeySealed, ctnd::Error> {
         use ctnd::Error as Fail;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         self.ensure_room_roster(task.group).await?;
         let operation = {
             let mut bytes = [0; 32];
-            getrandom::fill(&mut bytes).map_err(|_| Fail::Unavailable)?;
+            getrandom::fill(&mut bytes).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Unavailable",
+                    Fail::Unavailable,
+                    &__cause,
+                )
+            })?;
             bytes
         };
         let mut retained = self.retained.lock().await;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
         let binding = custody.binding.clone();
         let handle = custody
@@ -979,19 +1334,35 @@ where
             .keys()
             .key(cnbx::threads_purpose())
             .await
-            .map_err(|_| Fail::Authority)?;
-        let own = custody
-            .vault
-            .keys()
-            .lineage()
-            .await
-            .map_err(|_| Fail::Authority)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?;
+        let own = custody.vault.keys().lineage().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let storage = custody.vault.storage().clone();
         let mut store = storage.lock().await;
-        custody
-            .check_scope(&store)
-            .await
-            .map_err(|_| Fail::Authority)?;
+        custody.check_scope(&store).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let mut devices = GroupDevices {
             own,
             cache: self.cache.clone(),
@@ -1004,9 +1375,18 @@ where
         };
         let mut clock = crate::door::custody::SystemClock;
         let source = PolicyRef(task.policy);
-        let threads =
-            cthr::Threads::load(binding, task.group, &store).map_err(|_| Fail::Storage)?;
-        let epoch = threads.epoch().map_err(|_| Fail::Unavailable)?;
+        let threads = cthr::Threads::load(binding, task.group, &store).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+        })?;
+        let epoch = threads.epoch().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Unavailable",
+                Fail::Unavailable,
+                &__cause,
+            )
+        })?;
         let sealed = async {
             threads
                 .seal_room_secret(&mut port, &source, &mut clock, task.payload)
@@ -1017,7 +1397,15 @@ where
         .await
         .map_err(thread_fail);
         *self.cache.borrow_mut() = Cache::default();
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let committed = sealed?;
         let message = committed
             .outgoing()
@@ -1038,12 +1426,28 @@ where
         task: RoomSecretsTask<'_>,
     ) -> std::result::Result<RoomSecretsReceived, ctnd::Error> {
         use ctnd::Error as Fail;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let roster = self.ensure_room_roster(task.group).await?;
         let mut received = RoomSecretsReceived::default();
         let done = self.open_secrets(&task, &roster, &mut received).await;
         *self.cache.borrow_mut() = Cache::default();
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         done.map(|()| received)
     }
 
@@ -1055,7 +1459,15 @@ where
     ) -> std::result::Result<(), ctnd::Error> {
         use ctnd::Error as Fail;
         let mut retained = self.retained.lock().await;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
         let binding = custody.binding.clone();
         let handle = custody
@@ -1063,27 +1475,54 @@ where
             .keys()
             .key(cnbx::threads_purpose())
             .await
-            .map_err(|_| Fail::Authority)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?;
         let storage = custody.vault.storage().clone();
         let mut store = storage.lock().await;
-        custody
-            .check_scope(&store)
-            .await
-            .map_err(|_| Fail::Authority)?;
+        custody.check_scope(&store).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let source = PolicyRef(task.policy);
         let mut clock = crate::door::custody::SystemClock;
-        let mut ring = Keyring::decode(
-            store
-                .read(room_keys::OWNER, &task.group)
-                .map_err(|_| Fail::Storage)?,
-        )
-        .map_err(|_| Fail::Storage)?;
-        let version = store.version().map_err(|_| Fail::Storage)?;
+        let mut ring = Keyring::decode(store.read(room_keys::OWNER, &task.group).map_err(
+            |__cause| {
+                crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+            },
+        )?)
+        .map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+        })?;
+        let version = store.version().map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+        })?;
         // Members who left or were removed take their keys with them.
         if ring.prune(roster) {
             let mut operation = [0; 32];
-            getrandom::fill(&mut operation).map_err(|_| Fail::Unavailable)?;
-            let bytes = ring.encode().map_err(|_| Fail::Storage)?;
+            getrandom::fill(&mut operation).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Unavailable",
+                    Fail::Unavailable,
+                    &__cause,
+                )
+            })?;
+            let bytes = ring.encode().map_err(|__cause| {
+                crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+            })?;
             let change = if ring.is_empty() {
                 cwst::Change::Delete {
                     owner: room_keys::OWNER,
@@ -1099,7 +1538,15 @@ where
             store
                 .commit(version, operation, &[change], &[])
                 .await
-                .map_err(|_| Fail::Reconcile)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Fail::Reconcile",
+                        Fail::Reconcile,
+                        &__cause,
+                    )
+                })?;
         }
         if task.messages.is_empty() {
             return Ok(());
@@ -1108,14 +1555,19 @@ where
             .inbox
             .contacts(&store)
             .and_then(|contacts| contacts.blocking_rules())
-            .map_err(|_| Fail::Storage)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+            })?;
         for wire in task.messages {
-            let own = custody
-                .vault
-                .keys()
-                .lineage()
-                .await
-                .map_err(|_| Fail::Authority)?;
+            let own = custody.vault.keys().lineage().await.map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?;
             let mut devices = GroupDevices {
                 own,
                 cache: self.cache.clone(),
@@ -1127,8 +1579,17 @@ where
                     handle: &handle,
                     devices: &mut devices,
                 };
-                let threads = cthr::Threads::load(binding.clone(), task.group, &store)
-                    .map_err(|_| Fail::Storage)?;
+                let threads = cthr::Threads::load(binding.clone(), task.group, &store).map_err(
+                    |__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Fail::Storage",
+                            Fail::Storage,
+                            &__cause,
+                        )
+                    },
+                )?;
                 threads
                     .open_room_secret(&mut port, &source, &mut clock, wire)
                     .await
@@ -1158,12 +1619,31 @@ where
                             .map(|()| next))
                     })
                     .await
-                    .map_err(|_| Fail::Authority)?
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Fail::Authority",
+                            Fail::Authority,
+                            &__cause,
+                        )
+                    })?
             };
             drop(secret);
             let bytes = match &verdict {
-                Ok(next) => Some(next.encode().map_err(|_| Fail::Storage)?),
-                Err(_) => None,
+                Ok(next) => Some(next.encode().map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Fail::Storage",
+                        Fail::Storage,
+                        &__cause,
+                    )
+                })?),
+                Err(__cause) => {
+                    crate::door::cause::print(file!(), line!(), "None", &__cause);
+                    None
+                }
             };
             let changes: Vec<cwst::Change<'_>> = bytes
                 .iter()
@@ -1174,13 +1654,24 @@ where
                 })
                 .collect();
             let mut operation = [0; 32];
-            getrandom::fill(&mut operation).map_err(|_| Fail::Unavailable)?;
-            let own = custody
-                .vault
-                .keys()
-                .lineage()
-                .await
-                .map_err(|_| Fail::Authority)?;
+            getrandom::fill(&mut operation).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Unavailable",
+                    Fail::Unavailable,
+                    &__cause,
+                )
+            })?;
+            let own = custody.vault.keys().lineage().await.map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?;
             let mut devices = GroupDevices {
                 own,
                 cache: self.cache.clone(),
@@ -1202,7 +1693,10 @@ where
                     ring = next;
                     received.adopted.insert(sender);
                 }
-                Err(_) => received.refused += 1,
+                Err(__cause) => {
+                    crate::door::cause::print(file!(), line!(), "received refused 1", &__cause);
+                    received.refused += 1
+                }
             }
         }
         Ok(())
@@ -1285,7 +1779,15 @@ where
         L: crate::door::RoomLink,
     {
         use ctnd::Error as Fail;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let companion =
             cbrd::RoomCompanion::decode(&task.frame.companion).ok_or(Fail::Authority)?;
         let newcomer = companion.request.actor.clone();
@@ -1301,9 +1803,25 @@ where
             let storage = custody.vault.storage().clone();
             let store = storage.lock().await;
             cgrp::Snapshot::load(custody.binding.community(), &store)
-                .map_err(|_| Fail::Storage)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Fail::Storage",
+                        Fail::Storage,
+                        &__cause,
+                    )
+                })?
                 .members(&task.group)
-                .map_err(|_| Fail::Authority)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Fail::Authority",
+                        Fail::Authority,
+                        &__cause,
+                    )
+                })?
                 .clone()
         };
         if self.ensure_roster(&roster).await.is_err() {
@@ -1337,14 +1855,30 @@ where
         }
         let operation = {
             let mut bytes = [0; 32];
-            getrandom::fill(&mut bytes).map_err(|_| Fail::Unavailable)?;
+            getrandom::fill(&mut bytes).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Unavailable",
+                    Fail::Unavailable,
+                    &__cause,
+                )
+            })?;
             bytes
         };
         let admitted = self
             .admit_verified(board, &task, &companion.request, operation, context)
             .await;
         *self.cache.borrow_mut() = Cache::default();
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         admitted
     }
 
@@ -1362,7 +1896,15 @@ where
     {
         use ctnd::Error as Fail;
         let mut retained = self.retained.lock().await;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
         let binding = custody.binding.clone();
         let handle = custody
@@ -1370,19 +1912,35 @@ where
             .keys()
             .key(cnbx::threads_purpose())
             .await
-            .map_err(|_| Fail::Authority)?;
-        let own = custody
-            .vault
-            .keys()
-            .lineage()
-            .await
-            .map_err(|_| Fail::Authority)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?;
+        let own = custody.vault.keys().lineage().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let storage = custody.vault.storage().clone();
         let mut store = storage.lock().await;
-        custody
-            .check_scope(&store)
-            .await
-            .map_err(|_| Fail::Authority)?;
+        custody.check_scope(&store).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let mut devices = GroupDevices {
             own,
             cache: self.cache.clone(),
@@ -1395,12 +1953,22 @@ where
         };
         let mut clock = crate::door::custody::SystemClock;
         let threads =
-            cthr::Threads::load(binding.clone(), task.group, &store).map_err(|_| Fail::Storage)?;
+            cthr::Threads::load(binding.clone(), task.group, &store).map_err(|__cause| {
+                crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+            })?;
         // The leaf credential first, then the consent: Groups decides only on a
         // newcomer whose certificate this device verified.
         let credential = threads
             .room_join_credential(&task.frame.commit, &task.frame.companion)
-            .map_err(|_| Fail::Authority)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?;
         if credential.binding.community() != binding.community()
             || credential.binding.member() != request.actor
         {
@@ -1408,16 +1976,34 @@ where
         }
         cthr::keys::Custody::verify(&mut port, &credential)
             .await
-            .map_err(|_| Fail::Authority)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Authority",
+                    Fail::Authority,
+                    &__cause,
+                )
+            })?;
         let authority = RoomAuthority {
             member: request.actor.clone(),
             device: *credential.device.value(),
         };
         let source = PolicyRef(task.policy);
-        let now = ckmg::Clock::now(&mut clock).map_err(|_| Fail::Unavailable)?;
+        let now = ckmg::Clock::now(&mut clock).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Unavailable",
+                Fail::Unavailable,
+                &__cause,
+            )
+        })?;
         #[cfg(test)]
         let now = now + TEST_CONSENT_AGE.with(std::cell::Cell::get);
-        let snapshot = Snapshot::load(binding.community(), &store).map_err(|_| Fail::Storage)?;
+        let snapshot = Snapshot::load(binding.community(), &store).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+        })?;
         let groups = cgrp::prepare(
             &snapshot,
             request,
@@ -1426,7 +2012,15 @@ where
             now,
             task.max_groups,
         )
-        .map_err(|_| Fail::Authority)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let admitted = match context {
             // The room already holds the member commit: apply it, order nothing.
             Some(context) => {
@@ -1502,25 +2096,58 @@ where
         task: RoomLeaveTask<'_>,
     ) -> std::result::Result<Option<Snapshot>, ctnd::Error> {
         use ctnd::Error as Fail;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let operation = {
             let mut bytes = [0; 32];
-            getrandom::fill(&mut bytes).map_err(|_| Fail::Unavailable)?;
+            getrandom::fill(&mut bytes).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Fail::Unavailable",
+                    Fail::Unavailable,
+                    &__cause,
+                )
+            })?;
             bytes
         };
         let mut retained = self.retained.lock().await;
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
         let binding = custody.binding.clone();
         let storage = custody.vault.storage().clone();
         let mut store = storage.lock().await;
-        custody
-            .check_scope(&store)
-            .await
-            .map_err(|_| Fail::Authority)?;
-        let threads =
-            cthr::Threads::load(binding, task.group, &store).map_err(|_| Fail::Storage)?;
-        let Some(mut attend) = threads.stored_attend(&store).map_err(|_| Fail::Storage)? else {
+        custody.check_scope(&store).await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
+        let threads = cthr::Threads::load(binding, task.group, &store).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+        })?;
+        let Some(mut attend) = threads.stored_attend(&store).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Fail::Storage", Fail::Storage, &__cause)
+        })?
+        else {
             return Ok(None);
         };
         let mut clock = crate::door::custody::SystemClock;
@@ -1541,7 +2168,15 @@ where
         )
         .await;
         *self.cache.borrow_mut() = Cache::default();
-        self.open().map_err(|_| Fail::Authority)?;
+        self.open().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Fail::Authority",
+                Fail::Authority,
+                &__cause,
+            )
+        })?;
         left.map(Some)
     }
 }
@@ -1567,7 +2202,15 @@ impl<B: cwst::backend::Backend> cgrp::Persistence for StorePersistence<'_, B> {
             }
             let bytes = candidate.checkpoint_bytes()?;
             let mut operation = [0u8; 32];
-            getrandom::fill(&mut operation).map_err(|_| cgrp::Error::Unavailable)?;
+            getrandom::fill(&mut operation).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cgrp::Error::Unavailable",
+                    cgrp::Error::Unavailable,
+                    &__cause,
+                )
+            })?;
             let change = cwst::Change::Put {
                 owner: Snapshot::STORE_OWNER,
                 key: Snapshot::STORE_KEY,
@@ -1580,7 +2223,15 @@ impl<B: cwst::backend::Backend> cgrp::Persistence for StorePersistence<'_, B> {
             {
                 Ok(_) => Ok(cgrp::Commit::Applied),
                 Err(cwst::Error::Conflict) => Ok(cgrp::Commit::Conflict),
-                Err(_) => Ok(cgrp::Commit::Unknown),
+                Err(__cause) => {
+                    crate::door::cause::print(
+                        file!(),
+                        line!(),
+                        "Ok cgrp::Commit::Unknown",
+                        &__cause,
+                    );
+                    Ok(cgrp::Commit::Unknown)
+                }
             }
         })
     }
@@ -1602,11 +2253,27 @@ where
         &self.authority
     }
     fn now(&mut self) -> cgrp::Result<u64> {
-        ckmg::Clock::now(&mut crate::door::custody::SystemClock).map_err(|_| cgrp::Error::Clock)
+        ckmg::Clock::now(&mut crate::door::custody::SystemClock).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cgrp::Error::Clock",
+                cgrp::Error::Clock,
+                &__cause,
+            )
+        })
     }
     fn operation(&mut self) -> cgrp::Result<cgrp::Id> {
         let mut id = [0u8; 32];
-        getrandom::fill(&mut id).map_err(|_| cgrp::Error::Unavailable)?;
+        getrandom::fill(&mut id).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "cgrp::Error::Unavailable",
+                cgrp::Error::Unavailable,
+                &__cause,
+            )
+        })?;
         Ok(id)
     }
     fn snapshot(&mut self) -> cbrd::PortFuture<'_, Snapshot> {
@@ -1617,12 +2284,25 @@ where
             let custody = retained.as_mut().ok_or(cgrp::Error::Unavailable)?;
             let storage = custody.vault.storage().clone();
             let store = storage.lock().await;
-            custody
-                .check_scope(&store)
-                .await
-                .map_err(|_| cgrp::Error::Authority)?;
+            custody.check_scope(&store).await.map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cgrp::Error::Authority",
+                    cgrp::Error::Authority,
+                    &__cause,
+                )
+            })?;
             let snapshot = Snapshot::load(custody.binding.community(), &store)?;
-            self.version = store.version().map_err(|_| cgrp::Error::Reconcile)?;
+            self.version = store.version().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cgrp::Error::Reconcile",
+                    cgrp::Error::Reconcile,
+                    &__cause,
+                )
+            })?;
             Ok(snapshot)
         })
     }
@@ -1637,20 +2317,38 @@ where
             let mut retained = self.retained.lock().await;
             self.open()?;
             let custody = retained.as_mut().ok_or(cgrp::Error::Unavailable)?;
-            let now = ckmg::Clock::now(&mut crate::door::custody::SystemClock)
-                .map_err(|_| cgrp::Error::Clock)?;
+            let now =
+                ckmg::Clock::now(&mut crate::door::custody::SystemClock).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "cgrp::Error::Clock",
+                        cgrp::Error::Clock,
+                        &__cause,
+                    )
+                })?;
             let mut handles = BTreeMap::new();
             {
                 let storage = custody.vault.storage().clone();
                 let store = storage.lock().await;
-                custody
-                    .check_scope(&store)
-                    .await
-                    .map_err(|_| cgrp::Error::Authority)?;
-                let journal = custody
-                    .inbox
-                    .contacts(&store)
-                    .map_err(|_| cgrp::Error::Unavailable)?;
+                custody.check_scope(&store).await.map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "cgrp::Error::Authority",
+                        cgrp::Error::Authority,
+                        &__cause,
+                    )
+                })?;
+                let journal = custody.inbox.contacts(&store).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "cgrp::Error::Unavailable",
+                        cgrp::Error::Unavailable,
+                        &__cause,
+                    )
+                })?;
                 for peer in devices {
                     if peer != &self.member {
                         // The handle the peer attached to its own consent wins
@@ -1660,9 +2358,15 @@ where
                             handles.insert(peer.clone(), handle.clone());
                         } else if let Some(handle) = self.roster.borrow().handles.get(peer) {
                             handles.insert(peer.clone(), handle.clone());
-                        } else if let Some(handle) =
-                            journal.handle(peer).map_err(|_| cgrp::Error::Unavailable)?
-                        {
+                        } else if let Some(handle) = journal.handle(peer).map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "cgrp::Error::Unavailable",
+                                cgrp::Error::Unavailable,
+                                &__cause,
+                            )
+                        })? {
                             handles.insert(peer.clone(), handle);
                         }
                     }
@@ -1673,9 +2377,15 @@ where
                     if peer == &self.member {
                         continue;
                     }
-                    let relation = journal
-                        .relation(peer)
-                        .map_err(|_| cgrp::Error::Unavailable)?;
+                    let relation = journal.relation(peer).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "cgrp::Error::Unavailable",
+                            cgrp::Error::Unavailable,
+                            &__cause,
+                        )
+                    })?;
                     if relation.state == ctcs::State::Established && !relation.conflicted {
                         cache.contacts.insert(peer.clone());
                     }
@@ -1688,17 +2398,25 @@ where
             let community = custody.binding.community().to_owned();
             for member in devices {
                 let lineage = if member == &self.member {
-                    Some(
-                        custody
-                            .vault
-                            .keys()
-                            .lineage()
-                            .await
-                            .map_err(|_| cgrp::Error::Authority)?,
-                    )
+                    Some(custody.vault.keys().lineage().await.map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "cgrp::Error::Authority",
+                            cgrp::Error::Authority,
+                            &__cause,
+                        )
+                    })?)
                 } else if let (Some(peers), Some(handle)) = (&self.peers, handles.get(member)) {
-                    let binding =
-                        ckmg::Binding::new(&community, member).map_err(|_| cgrp::Error::Invalid)?;
+                    let binding = ckmg::Binding::new(&community, member).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "cgrp::Error::Invalid",
+                            cgrp::Error::Invalid,
+                            &__cause,
+                        )
+                    })?;
                     peers.lock().await.lineage(&binding, handle).await
                 } else {
                     None
@@ -1708,7 +2426,15 @@ where
                 let asked = ckmg::Binding::new(&community, member).ok();
                 if let Some(lineage) = lineage.filter(|l| Some(&l.binding) == asked.as_ref()) {
                     let read_at = ckmg::Clock::now(&mut crate::door::custody::SystemClock)
-                        .map_err(|_| cgrp::Error::Clock)?;
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "cgrp::Error::Clock",
+                                cgrp::Error::Clock,
+                                &__cause,
+                            )
+                        })?;
                     let _ = now;
                     // Verified once: the roster keeps it for the leaf
                     // certification of later room operations. Consent
@@ -1743,18 +2469,42 @@ where
             let mut retained = self.retained.lock().await;
             self.open()?;
             let custody = retained.as_mut().ok_or(cgrp::Error::Unavailable)?;
-            let now = ckmg::Clock::now(&mut crate::door::custody::SystemClock)
-                .map_err(|_| cgrp::Error::Clock)?;
+            let now =
+                ckmg::Clock::now(&mut crate::door::custody::SystemClock).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "cgrp::Error::Clock",
+                        cgrp::Error::Clock,
+                        &__cause,
+                    )
+                })?;
             let public = custody
                 .vault
                 .keys()
                 .device_public_key()
                 .await
-                .map_err(|_| cgrp::Error::Authority)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "cgrp::Error::Authority",
+                        cgrp::Error::Authority,
+                        &__cause,
+                    )
+                })?;
             let signed = custody
                 .sign_transcript(statement, &self.origin, now, expires)
                 .await
-                .map_err(|_| cgrp::Error::Authority)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "cgrp::Error::Authority",
+                        cgrp::Error::Authority,
+                        &__cause,
+                    )
+                })?;
             self.open()?;
             drop(signed.admitted);
             Ok(cbrd::Signed {
@@ -1776,7 +2526,15 @@ where
                 .keys()
                 .export_lineage_read_capability()
                 .await
-                .map_err(|_| cgrp::Error::Authority)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "cgrp::Error::Authority",
+                        cgrp::Error::Authority,
+                        &__cause,
+                    )
+                })?
                 .as_bytes()
                 .to_vec();
             self.open()?;
@@ -1808,19 +2566,35 @@ where
                 .keys()
                 .key(cnbx::threads_purpose())
                 .await
-                .map_err(|_| cgrp::Error::Authority)?;
-            let own = custody
-                .vault
-                .keys()
-                .lineage()
-                .await
-                .map_err(|_| cgrp::Error::Authority)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "cgrp::Error::Authority",
+                        cgrp::Error::Authority,
+                        &__cause,
+                    )
+                })?;
+            let own = custody.vault.keys().lineage().await.map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cgrp::Error::Authority",
+                    cgrp::Error::Authority,
+                    &__cause,
+                )
+            })?;
             let storage = custody.vault.storage().clone();
             let mut store = storage.lock().await;
-            custody
-                .check_scope(&store)
-                .await
-                .map_err(|_| cgrp::Error::Authority)?;
+            custody.check_scope(&store).await.map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cgrp::Error::Authority",
+                    cgrp::Error::Authority,
+                    &__cause,
+                )
+            })?;
             let mut devices = GroupDevices {
                 own,
                 cache: self.cache.clone(),
@@ -1926,14 +2700,27 @@ where
             let custody = retained.as_mut().ok_or(cgrp::Error::Unavailable)?;
             let storage = custody.vault.storage().clone();
             let store = storage.lock().await;
-            custody
-                .check_scope(&store)
-                .await
-                .map_err(|_| cgrp::Error::Authority)?;
+            custody.check_scope(&store).await.map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cgrp::Error::Authority",
+                    cgrp::Error::Authority,
+                    &__cause,
+                )
+            })?;
             store
                 .read(DESK_OWNER, DESK_KEY)
                 .map(|bytes| bytes.map(<[u8]>::to_vec))
-                .map_err(|_| cgrp::Error::Reconcile)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "cgrp::Error::Reconcile",
+                        cgrp::Error::Reconcile,
+                        &__cause,
+                    )
+                })
         })
     }
     fn desk_save<'a>(&'a mut self, bytes: &'a [u8]) -> cbrd::PortFuture<'a, ()> {
@@ -1943,13 +2730,34 @@ where
             let custody = retained.as_mut().ok_or(cgrp::Error::Unavailable)?;
             let storage = custody.vault.storage().clone();
             let mut store = storage.lock().await;
-            custody
-                .check_scope(&store)
-                .await
-                .map_err(|_| cgrp::Error::Authority)?;
-            let version = store.version().map_err(|_| cgrp::Error::Reconcile)?;
+            custody.check_scope(&store).await.map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cgrp::Error::Authority",
+                    cgrp::Error::Authority,
+                    &__cause,
+                )
+            })?;
+            let version = store.version().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cgrp::Error::Reconcile",
+                    cgrp::Error::Reconcile,
+                    &__cause,
+                )
+            })?;
             let mut operation = [0u8; 32];
-            getrandom::fill(&mut operation).map_err(|_| cgrp::Error::Unavailable)?;
+            getrandom::fill(&mut operation).map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cgrp::Error::Unavailable",
+                    cgrp::Error::Unavailable,
+                    &__cause,
+                )
+            })?;
             store
                 .commit(
                     version,
@@ -1963,7 +2771,15 @@ where
                 )
                 .await
                 .map(|_| ())
-                .map_err(|_| cgrp::Error::Reconcile)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "cgrp::Error::Reconcile",
+                        cgrp::Error::Reconcile,
+                        &__cause,
+                    )
+                })
         })
     }
     fn publish(
@@ -1978,10 +2794,15 @@ where
             let custody = retained.as_mut().ok_or(cgrp::Error::Unavailable)?;
             let storage = custody.vault.storage().clone();
             let mut store = storage.lock().await;
-            custody
-                .check_scope(&store)
-                .await
-                .map_err(|_| cgrp::Error::Authority)?;
+            custody.check_scope(&store).await.map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "cgrp::Error::Authority",
+                    cgrp::Error::Authority,
+                    &__cause,
+                )
+            })?;
             let outcome = candidate
                 .persist(
                     &mut StorePersistence {

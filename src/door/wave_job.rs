@@ -69,14 +69,30 @@ const ACTIONS: &[&str] = &[
 const LEASE_SECONDS: u64 = 60;
 
 fn now() -> Result<u64> {
-    ckmg::Clock::now(&mut super::custody::SystemClock).map_err(|_| ErrorCode::Clock)
+    ckmg::Clock::now(&mut super::custody::SystemClock).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Clock",
+            ErrorCode::Clock,
+            &__cause,
+        )
+    })
 }
 
 /// One journal call through a short internal grant of `origin`, exactly as a paired
 /// client's call would be authorized (same handler, same origin and expiry checks).
 async fn call(door: &mut Door, origin: &str, action: &str, body: Value) -> Result<Value> {
     let mut key = [0u8; 32];
-    getrandom::fill(&mut key).map_err(|_| ErrorCode::Unavailable)?;
+    getrandom::fill(&mut key).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
     door.grants.insert(
         key,
         Grant {
@@ -118,7 +134,15 @@ impl WaveJobs for LeaseJobs {
             let mut door = self.door.lock().await;
             call(&mut door, &self.origin, "inbox.wave_job_next", json!({})).await?
         };
-        let offer: JobOffer = serde_json::from_value(value).map_err(|_| ErrorCode::Unavailable)?;
+        let offer: JobOffer = serde_json::from_value(value).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         Ok(offer.job)
     }
     async fn finish(&mut self, job: &ProveJob, proved: Option<Proved>) -> Result<()> {
@@ -126,8 +150,15 @@ impl WaveJobs for LeaseJobs {
             Some(proved) => JobResult::Proved { proved },
             None => JobResult::Failed,
         };
-        let body = serde_json::to_value(JobDone { id: job.id, result })
-            .map_err(|_| ErrorCode::InvalidRequest)?;
+        let body = serde_json::to_value(JobDone { id: job.id, result }).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::InvalidRequest",
+                ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let mut door = self.door.lock().await;
         call(&mut door, &self.origin, "inbox.wave_job_done", body)
             .await
@@ -184,10 +215,18 @@ pub async fn run(
                 retry = cadence.retry.max(1);
                 cadence.check.max(1)
             }
-            Err(_) => {
-                let now = retry;
-                retry = (retry * 2).min(cadence.ceiling.max(1));
-                now
+            Err(__cause) => {
+                crate::door::cause::print(
+                    file!(),
+                    line!(),
+                    "let now retry retry retry 2 min cadence ceiling max 1 now",
+                    &__cause,
+                );
+                {
+                    let now = retry;
+                    retry = (retry * 2).min(cadence.ceiling.max(1));
+                    now
+                }
             }
         };
     }

@@ -92,9 +92,15 @@ async fn prepare_recovery<'a, 'p, N: cdht::Network + Clone>(
     network: N,
     stamps: Option<cvlt::StampTrust>,
 ) -> super::super::Result<InitialRecoveryOwners<'a, 'p, N>> {
-    let acknowledged = candidate
-        .acknowledged_initial()
-        .map_err(|_| ErrorCode::Unauthorized)?;
+    let acknowledged = candidate.acknowledged_initial().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })?;
     let mut authority = InitialRecoveryAuthority {
         candidate: acknowledged,
         initial,
@@ -111,17 +117,56 @@ async fn prepare_recovery<'a, 'p, N: cdht::Network + Clone>(
     let reader = candidate
         .read_lineage(&mut SystemClock, &mut authority)
         .await
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     let backend = cvlt::TorLineageRecord::provisional_lineage(network, reader)
         .await
-        .map_err(|_| ErrorCode::Unavailable)?;
-    let record = cdht::runtime::Record::new(backend).map_err(|_| ErrorCode::Unavailable)?;
-    authority.records =
-        Some(cvlt::LineageRecords::new(vec![record]).map_err(|_| ErrorCode::Unavailable)?);
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
+    let record = cdht::runtime::Record::new(backend).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
+    authority.records = Some(cvlt::LineageRecords::new(vec![record]).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?);
     let recovery = candidate
         .authorize(&mut SystemClock, &mut authority)
         .await
-        .map_err(|_| ErrorCode::Unauthorized)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
     Ok(InitialRecoveryOwners {
         recovery,
         authority,
@@ -140,10 +185,15 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
         if self.authority.closed || self.authority.account_intent.is_some() {
             return Err(ErrorCode::Unauthorized);
         }
-        self.authority
-            .initial
-            .origin()
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        self.authority.initial.origin().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let (admission, verifier) = ckmg::intent_channel();
         self.authority.account_intent = Some(verifier);
         Ok((self, admission))
@@ -167,21 +217,30 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
         {
             return Err(ErrorCode::Unauthorized);
         }
-        self.authority
-            .initial
-            .origin()
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        self.authority.initial.origin().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         let (root, root_verifier) = ckmg::intent_channel();
         let (device, device_verifier) = ckmg::intent_channel();
         let (request, request_verifier) = ckmg::intent_channel();
         self.authority.account_intent = Some(root_verifier);
         self.authority.delegation_intent = Some(device_verifier);
         self.authority.request_intent = Some(request_verifier);
-        let expires = self
-            .authority
-            .initial
-            .expires()
-            .map_err(|_| ErrorCode::Unauthorized)?;
+        let expires = self.authority.initial.expires().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
         Ok((
             self,
             super::super::accounting::AccountingIntents {
@@ -226,19 +285,43 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
         let occupied = backend
             .read()
             .await
-            .map_err(|_| ErrorCode::Unavailable)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
             .is_some();
         if occupied {
             self.recovery
                 .load_existing_read_floors(&backend, &mut SystemClock, &mut self.authority)
                 .await
-                .map_err(|_| ErrorCode::Unavailable)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
         }
         let records = self
             .recovery
             .tor_passkey_records(network.clone(), &mut SystemClock, &mut self.authority)
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         let retained = if occupied {
             None
         } else {
@@ -246,7 +329,15 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
                 self.recovery
                     .tor_checkpoint(network, &mut SystemClock, &mut self.authority)
                     .await
-                    .map_err(|_| ErrorCode::Unavailable)?,
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "ErrorCode::Unavailable",
+                            ErrorCode::Unavailable,
+                            &__cause,
+                        )
+                    })?,
             )
         };
         let owners = cvlt::Owners {
@@ -260,7 +351,15 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
             Some(retained) => self.recovery.restore(retained, backend, owners).await,
             None => self.recovery.open_existing(backend, owners).await,
         }
-        .map_err(|_| ErrorCode::Unavailable)?;
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         Ok(vault)
     }
 
@@ -283,14 +382,30 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
             .authority
             .initial
             .origin()
-            .map_err(|_| ErrorCode::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?
             .to_owned();
         let vault = self
             .open_root(network, backend)
             .await?
             .restore_global_passport()
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         super::super::passport::GlobalPassport::recovered(origin, vault).await
     }
 
@@ -314,14 +429,30 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
             .authority
             .initial
             .origin()
-            .map_err(|_| ErrorCode::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?
             .to_owned();
         let vault = self
             .open_root(network, backend)
             .await?
             .restore_account_only_custody()
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         super::super::accounting::CommunityAccount::recovered(
             origin,
             super::super::accounting::AccountVault::Owned(vault),
@@ -350,18 +481,38 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
             .await?
             .restore_account_only_custody()
             .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         let binding = vault
             .keys()
             .lineage()
             .await
-            .map_err(|_| ErrorCode::Unavailable)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?
             .binding;
-        let device = vault
-            .keys()
-            .device_public_key()
-            .await
-            .map_err(|_| ErrorCode::Unavailable)?;
+        let device = vault.keys().device_public_key().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let (intent, _) = ckmg::intent_channel();
         Ok(ComposedMemberVault {
             vault,
@@ -391,6 +542,14 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
             .await?
             .restore_wallet_custody()
             .await
-            .map_err(|_| ErrorCode::Unavailable)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })
     }
 }

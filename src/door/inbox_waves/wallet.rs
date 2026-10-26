@@ -64,7 +64,15 @@ impl ContactAuthority for RosterContactAuthority {
     fn verify(&self, account: &Account, reserve: &Reserve, signature: &[u8; 64]) -> Result<()> {
         account
             .verify_contact(reserve, signature)
-            .map_err(|_| ErrorCode::Refused)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Refused",
+                    ErrorCode::Refused,
+                    &__cause,
+                )
+            })
     }
 }
 
@@ -153,9 +161,18 @@ where
         let event = match account.event_for(&own.nonce) {
             Some(event) => event,
             None => {
-                let candidate = account
-                    .reserve(reserve, at, &mut OsEntropy)
-                    .map_err(|_| ErrorCode::Refused)?;
+                let candidate =
+                    account
+                        .reserve(reserve, at, &mut OsEntropy)
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Refused",
+                                ErrorCode::Refused,
+                                &__cause,
+                            )
+                        })?;
                 let event = candidate.event.ok_or(ErrorCode::Refused)?;
                 account = self.advance(candidate).await?.0;
                 event
@@ -168,7 +185,15 @@ where
         if phase == 1 {
             let candidate = account
                 .activate(&event, at, signature, &mut OsEntropy)
-                .map_err(|_| ErrorCode::Refused)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })?;
             account = self.advance(candidate).await?.0;
         } else if phase != 2 {
             return Err(ErrorCode::Refused);
@@ -184,7 +209,15 @@ where
                 &self.wave.issuer_key,
                 None,
             )
-            .map_err(|_| ErrorCode::Refused)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Refused",
+                    ErrorCode::Refused,
+                    &__cause,
+                )
+            })?;
         let proof = self.prover.prove_evidence(&evidence).await?;
         Ok(Proved {
             blob: Blob {
@@ -198,11 +231,15 @@ where
 }
 
 fn signature_of(receipt: &super::types::Receipt) -> Result<[u8; 64]> {
-    receipt
-        .signature
-        .as_slice()
-        .try_into()
-        .map_err(|_| ErrorCode::Refused)
+    receipt.signature.as_slice().try_into().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })
 }
 
 impl<S, P, U, C, K> AccountWallet<S, P, U, C, K>
@@ -252,7 +289,15 @@ where
                     None,
                     &mut OsEntropy,
                 )
-                .map_err(|_| ErrorCode::Refused)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })?;
             account = self.advance(candidate).await?.0;
         } else if phase != 3 {
             return Err(ErrorCode::Refused);
@@ -277,7 +322,15 @@ where
                 &self.wave.issuer_key,
                 Some(&settled),
             )
-            .map_err(|_| ErrorCode::Refused)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Refused",
+                    ErrorCode::Refused,
+                    &__cause,
+                )
+            })?;
         let proof = self.prover.prove_evidence(&evidence).await?;
         Ok(Proved {
             blob: Blob {
@@ -312,7 +365,15 @@ where
                 .ok_or(ErrorCode::Refused)?;
             let candidate = account
                 .punish(&event, (self.clock)(), signature, &mut OsEntropy)
-                .map_err(|_| ErrorCode::Refused)?;
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Refused",
+                        ErrorCode::Refused,
+                        &__cause,
+                    )
+                })?;
             account = self.advance(candidate).await?.0;
         }
         drop(account);
@@ -323,9 +384,33 @@ where
 /// The public statement of an evidence: the member of the tagged body the verifier reads.
 fn statement_of(evidence: &Evidence, member: &str) -> Result<Vec<u8>> {
     let body: serde_json::Value =
-        serde_json::from_str(&evidence.statement_json().map_err(|_| ErrorCode::Refused)?)
-            .map_err(|_| ErrorCode::Refused)?;
-    serde_json::to_vec(body.get(member).ok_or(ErrorCode::Refused)?).map_err(|_| ErrorCode::Refused)
+        serde_json::from_str(&evidence.statement_json().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Refused",
+                ErrorCode::Refused,
+                &__cause,
+            )
+        })?)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Refused",
+                ErrorCode::Refused,
+                &__cause,
+            )
+        })?;
+    serde_json::to_vec(body.get(member).ok_or(ErrorCode::Refused)?).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Refused",
+            ErrorCode::Refused,
+            &__cause,
+        )
+    })
 }
 
 impl<S, P, U, C, K> WaveWallet for AccountWallet<S, P, U, C, K>

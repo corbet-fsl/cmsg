@@ -82,14 +82,30 @@ impl Door {
         config: network_browser::Configuration,
         window: TimeWindow,
     ) -> crate::door::Result<(TransportClient, TransportOwner)> {
-        let device = prepared.device().map_err(|_| ErrorCode::Unavailable)?;
+        let device = prepared.device().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
         let (authority, lifetime) =
             self.transport_authority(origin, binding.clone(), device, custody::SystemClock)?;
         let mut starting = Starting(Some(lifetime.clone()));
         let member = self.member_authority_builder(origin, &authority)?;
         let session = prepared
             .transport(binding, custody::SystemClock, authority)
-            .map_err(|_| ErrorCode::Unavailable)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
         let transport = Rc::new(Transport::start(session, scope, config).await?);
         starting.0.take();
         Ok((
@@ -123,7 +139,9 @@ impl cdht::Signer for Signer<'_> {
         *self.0.public_key()
     }
     fn sign(&self, data: &[u8]) -> Result<[u8; 64], Error> {
-        self.0.sign(data).map_err(|_| Error::Signer)
+        self.0.sign(data).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Error::Signer", Error::Signer, &__cause)
+        })
     }
 }
 struct Cipher<'a>(ckmg::Vld0NodeCipher<'a>);
@@ -137,7 +155,9 @@ impl EnvelopeCipher for Cipher<'_> {
         nonce: &[u8; 24],
         bytes: &[u8],
     ) -> Result<zeroize::Zeroizing<Vec<u8>>, Error> {
-        self.0.crypt(peer, nonce, bytes).map_err(|_| Error::Crypto)
+        self.0.crypt(peer, nonce, bytes).map_err(|__cause| {
+            crate::door::cause::emit(file!(), line!(), "Error::Crypto", Error::Crypto, &__cause)
+        })
     }
 }
 fn bounded(bytes: &[u8]) -> Result<(), Error> {
@@ -172,7 +192,15 @@ impl Identity for TransportClient {
                     UnverifiedPeerInfoBytes::sign_extension(advertisement, &Signer(signer))
                 })
                 .await
-                .map_err(|_| Error::Unavailable)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Unavailable",
+                        Error::Unavailable,
+                        &__cause,
+                    )
+                })?
         })
     }
 }
@@ -193,7 +221,15 @@ macro_rules! node_identity {
                         SignedOperation::sign(bytes.to_vec(), destination, &Signer(signer))
                     })
                     .await
-                    .map_err(|_| Error::Unavailable)?
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Unavailable",
+                            Error::Unavailable,
+                            &__cause,
+                        )
+                    })?
             }
         }
         impl TorNodeIdentity for $client {
@@ -252,7 +288,15 @@ macro_rules! node_identity {
                             )
                         })
                         .await
-                        .map_err(|_| Error::Unavailable)?
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "Error::Unavailable",
+                                Error::Unavailable,
+                                &__cause,
+                            )
+                        })?
                 })
             }
             fn open<'a>(
@@ -275,7 +319,15 @@ macro_rules! node_identity {
                             envelope.open_operation(&Cipher(cipher), &Verifier)
                         })
                         .await
-                        .map_err(|_| Error::Unavailable)?
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "Error::Unavailable",
+                                Error::Unavailable,
+                                &__cause,
+                            )
+                        })?
                 })
             }
         }

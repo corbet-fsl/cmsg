@@ -50,18 +50,33 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
             ) && request.evidence.is_empty()
                 && request.statement.is_none())
                 && request.evidence
-                    != self
-                        .candidate
-                        .evidence()
-                        .to_bytes()
-                        .map_err(|_| Error::Unauthorized)?)
-            || self.initial.seed().map_err(|_| Error::Unauthorized)?
-                != self.candidate.enrollment_commitment()
-            || self
-                .initial
-                .publication()
-                .map_err(|_| Error::Unauthorized)?
-                != Some(self.candidate.publication_commitment())
+                    != self.candidate.evidence().to_bytes().map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Unauthorized",
+                            Error::Unauthorized,
+                            &__cause,
+                        )
+                    })?)
+            || self.initial.seed().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })? != self.candidate.enrollment_commitment()
+            || self.initial.publication().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })? != Some(self.candidate.publication_commitment())
         {
             return Err(Error::Unauthorized);
         }
@@ -72,10 +87,15 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         if signing.is_some_and(|signing| now >= signing.expires) {
             return Err(Error::Expired);
         }
-        let observation = self
-            .initial
-            .observation()
-            .map_err(|_| Error::Unauthorized)?;
+        let observation = self.initial.observation().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })?;
         if observation.member != request.binding.member()
             || !observation.device_keys.contains(request.device.value())
         {
@@ -83,13 +103,29 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         }
         // A device lease (no passkey certificate) is reauthorized by its stamp genesis with
         // the wallet's stamp trust, and only then; a passkey lease only by its certificate.
-        let device = self.initial.device_key().map_err(|_| Error::Unauthorized)?;
+        let device = self.initial.device_key().map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })?;
         let certificate = match (device, &self.stamps) {
             (Some(_), Some(_)) => Vec::new(),
             (None, None) => self
                 .initial
                 .certificate_bytes()
-                .map_err(|_| Error::Unauthorized)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Unauthorized",
+                        Error::Unauthorized,
+                        &__cause,
+                    )
+                })?
                 .to_vec(),
             _ => return Err(Error::Unauthorized),
         };
@@ -98,7 +134,15 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         let credential = self
             .initial
             .credential_id()
-            .map_err(|_| Error::Unauthorized)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?
             .to_vec();
         if device.is_some_and(|key| credential != key) {
             return Err(Error::Unauthorized);
@@ -143,26 +187,66 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                             now,
                         ),
                     }
-                    .map_err(|_| Error::Unauthorized)?;
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Unauthorized",
+                            Error::Unauthorized,
+                            &__cause,
+                        )
+                    })?;
                     let reference = match stamps {
                         Some(_) => verified
                             .author(now)
-                            .map_err(|_| Error::Unauthorized)?
+                            .map_err(|__cause| {
+                                crate::door::cause::emit(
+                                    file!(),
+                                    line!(),
+                                    "Error::Unauthorized",
+                                    Error::Unauthorized,
+                                    &__cause,
+                                )
+                            })?
                             .value()
                             .to_vec(),
                         None => verified
                             .credential_id(now)
-                            .map_err(|_| Error::Unauthorized)?
+                            .map_err(|__cause| {
+                                crate::door::cause::emit(
+                                    file!(),
+                                    line!(),
+                                    "Error::Unauthorized",
+                                    Error::Unauthorized,
+                                    &__cause,
+                                )
+                            })?
                             .to_vec(),
                     };
                     if signing.is_some_and(|signing| signing.expires > verified.valid_until()) {
                         return Err(Error::Expired);
                     }
-                    let lineage = verified.lineage(now).map_err(|_| Error::Unauthorized)?;
+                    let lineage = verified.lineage(now).map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Unauthorized",
+                            Error::Unauthorized,
+                            &__cause,
+                        )
+                    })?;
                     if &lineage.binding != request.binding
                         || Some(lineage.root) != request.root
                         || lineage.epoch != request.epoch
-                        || verified.author(now).map_err(|_| Error::Unauthorized)? != request.device
+                        || verified.author(now).map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "Error::Unauthorized",
+                                Error::Unauthorized,
+                                &__cause,
+                            )
+                        })? != request.device
                         || reference != credential
                         || request
                             .statement
@@ -174,7 +258,15 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                     Ok(())
                 },
             )
-            .map_err(|_| Error::Unauthorized)??;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })??;
         if failed {
             return Err(Error::Clock);
         }
@@ -184,7 +276,16 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         }
         if let Some(signing) = signing {
             if completed >= signing.expires
-                || signing.expires > self.initial.expires().map_err(|_| Error::Unauthorized)?
+                || signing.expires
+                    > self.initial.expires().map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Unauthorized",
+                            Error::Unauthorized,
+                            &__cause,
+                        )
+                    })?
             {
                 return Err(Error::Expired);
             }
@@ -224,7 +325,15 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
                 })
             })
             .await
-            .map_err(|_| Error::Unauthorized)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?;
         if failed {
             return Err(Error::Clock);
         }
@@ -249,16 +358,33 @@ impl<C: Clock, N: cdht::Network> ckmg::Authority for InitialRecoveryAuthority<'_
                     .ok_or(Error::Unauthorized)?
                     .read()
                     .await
-                    .map_err(|_| Error::Unavailable)?;
+                    .map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Unavailable",
+                            Error::Unavailable,
+                            &__cause,
+                        )
+                    })?;
                 if read.evidence().len() != 1
-                    || read.evidence()[0]
-                        .to_bytes()
-                        .map_err(|_| Error::Unauthorized)?
-                        != self
-                            .candidate
-                            .evidence()
-                            .to_bytes()
-                            .map_err(|_| Error::Unauthorized)?
+                    || read.evidence()[0].to_bytes().map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Unauthorized",
+                            Error::Unauthorized,
+                            &__cause,
+                        )
+                    })? != self.candidate.evidence().to_bytes().map_err(|__cause| {
+                        crate::door::cause::emit(
+                            file!(),
+                            line!(),
+                            "Error::Unauthorized",
+                            Error::Unauthorized,
+                            &__cause,
+                        )
+                    })?
                 {
                     return Err(Error::Unauthorized);
                 }
@@ -277,7 +403,15 @@ impl<C: Clock, N: cdht::Network> ckmg::Authority for InitialRecoveryAuthority<'_
             let origin = self
                 .initial
                 .origin()
-                .map_err(|_| Error::Unauthorized)?
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "Error::Unauthorized",
+                        Error::Unauthorized,
+                        &__cause,
+                    )
+                })?
                 .to_owned();
             let verifier = match super::account_channel(
                 current_request.action == Action::AuthorizeAccountDevice,

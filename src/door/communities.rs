@@ -103,7 +103,10 @@ pub(super) async fn communities(
                 .and_then(Value::as_str)
                 .unwrap_or("unavailable")
                 .to_owned(),
-            Err(_) => "unavailable".into(),
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "unavailable into", &__cause);
+                "unavailable".into()
+            }
         };
         let id = door.config.community.clone();
         let entry = Entry {
@@ -130,5 +133,13 @@ async fn owner<T: serde::de::DeserializeOwned>(
     let operation = foyer::owner_operation(name).ok_or(ErrorCode::Unavailable)?;
     let binding = door.foyers.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
     let answer = binding.call(operation, body).await?;
-    serde_json::from_value(answer).map_err(|_| ErrorCode::Unavailable)
+    serde_json::from_value(answer).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
 }
