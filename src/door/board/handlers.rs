@@ -388,6 +388,18 @@ fn now(expires: u64) -> Result<u64> {
 
 /// No await is permitted inside this function. The actual Foyer weak port refuses
 /// after disposal, while refreshing, and on stale/invalid original trust state.
+/// The clock moved while one current read ran. Forward only means the read straddled
+/// a second boundary (a slow machine): that attempt is undetermined, refused as
+/// unavailable, and the session stays open for a fresh one. A clock that went
+/// backwards is a clock fault.
+pub(super) fn read_moved(started: u64, finished: u64) -> ErrorCode {
+    if finished > started {
+        ErrorCode::Unavailable
+    } else {
+        ErrorCode::Clock
+    }
+}
+
 pub(super) fn with_context<B: cwst::backend::Backend, T>(
     current: &mut cfyr::policy::CurrentPolicy<foyer::Transport>,
     policy: &ReadPolicy,
@@ -416,8 +428,9 @@ pub(super) fn with_context<B: cwst::backend::Backend, T>(
                 contact: read.contact,
             };
             let output = finish(&context, started)?;
-            if now(expires)? != started {
-                return Err(ErrorCode::Clock);
+            let finished = now(expires)?;
+            if finished != started {
+                return Err(read_moved(started, finished));
             }
             Ok(output)
         })
@@ -682,6 +695,14 @@ async fn current_publication<O: CommittedOwner>(
         .await
 }
 
+/// How long the attendance signature may stay valid: it covers one Enter.
+const ATTENDANCE_SIGNATURE_SECONDS: u64 = 120;
+
+/// The validity asked of Keys for one attendance signature: never beyond the grant.
+pub(super) fn attendance_signing_expiry(now: u64, grant_expires: u64) -> u64 {
+    grant_expires.min(now.saturating_add(ATTENDANCE_SIGNATURE_SECONDS))
+}
+
 /// A failed connect precedes Enter, so nothing has been admitted. It leaves the
 /// attendance fence only when the failure surely sent nothing (refused or
 /// unavailable before the send); a failure that may have reached the Forum keeps
@@ -713,7 +734,16 @@ async fn attendance<T: clnk::Transport, R, O: CommittedOwner>(
         .await
         .map_err(|error| connect_refused(pending, error))?;
     // These failures precede Enter, so no attendance effect is uncertain.
-    let signature = match owner.sign_attendance(&challenge, origin, expires).await {
+    // The signature is needed for this one entry, so it asks Keys for a short validity;
+    // the grant's own expiry is far longer than the membership proof it must stay inside.
+    let signing_expires = attendance_signing_expiry(
+        ckmg::Clock::now(&mut crate::door::custody::SystemClock).map_err(|_| ErrorCode::Clock)?,
+        expires,
+    );
+    let signature = match owner
+        .sign_attendance(&challenge, origin, signing_expires)
+        .await
+    {
         Ok(signature) => signature,
         Err(error) => {
             *pending = false;

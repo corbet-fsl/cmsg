@@ -447,6 +447,13 @@ fn pair_base_matches(evidence: &[u8], live: Option<[u8; 32]>) -> bool {
     live.is_some_and(|digest| evidence == digest.as_slice())
 }
 
+/// Whether a refused dispatch ends the session. Only an `Unavailable` refusal of an
+/// application operation (not a login step) is undetermined: it refuses that
+/// operation and leaves the session open for the next, freshly checked one.
+pub(crate) fn refusal_ends_session(action: &str, error: ErrorCode) -> bool {
+    error != ErrorCode::Unavailable || action.starts_with("login.")
+}
+
 #[cfg(test)]
 mod verdict_tests {
     use super::{foyer_refusal, policy_refusal, records_refusal, CheckGuard};
@@ -464,6 +471,29 @@ mod verdict_tests {
         guard.settle(&result);
         drop(guard);
         closed.get()
+    }
+
+    #[test]
+    fn only_an_unavailable_application_operation_leaves_the_session_open() {
+        use super::{refusal_ends_session, ErrorCode};
+        assert!(!refusal_ends_session(
+            "board.attend",
+            ErrorCode::Unavailable
+        ));
+        assert!(!refusal_ends_session("inbox.send", ErrorCode::Unavailable));
+        // A refused login step, and every definite or uncertain refusal, end it.
+        for action in ["login.start", "login.poll", "login.cancel"] {
+            assert!(refusal_ends_session(action, ErrorCode::Unavailable));
+        }
+        for error in [
+            ErrorCode::Unauthorized,
+            ErrorCode::Refused,
+            ErrorCode::Reconcile,
+            ErrorCode::Capacity,
+            ErrorCode::InvalidRequest,
+        ] {
+            assert!(refusal_ends_session("board.attend", error), "{error:?}");
+        }
     }
 
     #[test]

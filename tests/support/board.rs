@@ -215,3 +215,22 @@ fn a_connect_refused_before_the_send_leaves_attendance_retryable_and_an_uncertai
         ErrorCode::Unavailable
     );
 }
+
+/// The attendance signature asks Keys for a short validity (one Enter), never for the
+/// grant's long one, which would outlive the membership proof; a nearer grant wins.
+#[test]
+fn the_attendance_signature_is_short_lived_and_never_outlives_the_grant() {
+    use super::handlers::attendance_signing_expiry;
+    assert_eq!(attendance_signing_expiry(1_000, 1_000 + 86_400), 1_120);
+    assert_eq!(attendance_signing_expiry(1_000, 1_050), 1_050);
+    assert_eq!(attendance_signing_expiry(u64::MAX - 5, u64::MAX), u64::MAX);
+}
+
+/// A read that straddles a second boundary is retryable; a clock that went backwards is not.
+#[test]
+fn a_read_that_straddles_a_second_is_unavailable_and_a_backwards_clock_is_a_fault() {
+    use super::handlers::read_moved;
+    assert_eq!(read_moved(100, 101), ErrorCode::Unavailable);
+    assert_eq!(read_moved(100, 160), ErrorCode::Unavailable);
+    assert_eq!(read_moved(100, 99), ErrorCode::Clock);
+}

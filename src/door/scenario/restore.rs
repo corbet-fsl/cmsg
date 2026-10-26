@@ -1,5 +1,6 @@
 //! One already-enrolled restoration on the native owner's existing LocalSet.
 use super::{mesh, network};
+use crate::door::custody::refusal_ends_session;
 use crate::door::{login, ClientToken, Door, ErrorCode, Event, Output, Result, VaultComposer};
 use cmsh::tor_discovery::TorWatcher;
 use cwst::backend::Backend;
@@ -186,9 +187,17 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> VaultComposer for Composer<W
         now: u64,
     ) -> LocalBoxFuture<'a, Result<()>> {
         async move {
-            let Output::Ok { result, events } = output else {
-                self.close();
-                return Ok(()); // Preserve the original refusal.
+            let (result, events) = match output {
+                Output::Ok { result, events } => (result, events),
+                Output::Error { error } => {
+                    // Preserve the original refusal. An operation refused as unavailable
+                    // (undetermined right now) ends only itself; every other refusal, and
+                    // any refused login step, still ends the session.
+                    if refusal_ends_session(action, *error) {
+                        self.close();
+                    }
+                    return Ok(());
+                }
             };
             let status = if matches!(action, "login.start" | "login.poll" | "login.cancel") {
                 serde_json::from_value::<login::Status>(result.clone()).ok()
