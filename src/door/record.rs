@@ -658,6 +658,61 @@ where
     }))
 }
 
+/// Persist (or keep) the epoch key and build the proof work from the join-time record
+/// leaf the ledger delivered with this account's acceptance (an account that started
+/// after the epoch's freeze has no packet in the common download). `None` when the
+/// vault holds no such leaf for this epoch: the caller then takes the common download.
+/// The leaf is the one retained in the sealed accepted account, so a restart proves
+/// again from it with the same key.
+#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+pub async fn begin_joined_record<B, C, E, A, R>(
+    vault: &mut Vault<B, C, E, A, R, cvlt::WalletCustody>,
+    epoch: &czkp::record::Epoch,
+    prover: &ckmg::wallet_engine::native_prover::NativeProver,
+) -> Result<Option<RecordWork>>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+{
+    let Ok(accepted) = vault.restore_accepted_account().await else {
+        return Ok(None);
+    };
+    let Some(signed) = accepted.delivered_record_leaf(epoch.epoch) else {
+        return Ok(None);
+    };
+    let key = vault
+        .begin_record_epoch(epoch, accepted.owner(), now(), operation()?)
+        .await
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
+    let evidence = accepted
+        .record_epoch_signed(epoch, &signed, key, now())
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
+    Ok(Some(RecordWork {
+        record: evidence.record().clone(),
+        evidence,
+        prover: prover.clone(),
+    }))
+}
+
 /// Commit a verified proof for the begun epoch; presentations become available.
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub async fn finish_record<B, C, E, A, R>(
@@ -714,6 +769,11 @@ where
         )
     })? {
         return Ok((window, None));
+    }
+    // A newcomer accepted after this epoch's freeze holds its record leaf from the
+    // acceptance: no download, no packet decryption.
+    if let Some(work) = begin_joined_record(vault, &epoch, prover).await? {
+        return Ok((window, Some(work)));
     }
     let received = receive_common_record(source, vault, configuration).await?;
     // The packet must be of the epoch just authenticated; its window is the one marked.
