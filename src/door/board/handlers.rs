@@ -609,6 +609,18 @@ async fn current_publication<O: CommittedOwner>(
         .await
 }
 
+/// A failed connect precedes Enter, so nothing has been admitted. It leaves the
+/// attendance fence only when the failure surely sent nothing (refused or
+/// unavailable before the send); a failure that may have reached the Forum keeps
+/// the fence and asks for reconciliation.
+pub(super) fn connect_refused(pending: &mut bool, error: clnk::ErrorCode) -> ErrorCode {
+    let code = after_send(error);
+    if code != ErrorCode::Reconcile {
+        *pending = false;
+    }
+    code
+}
+
 async fn attendance<T: clnk::Transport, R, O: CommittedOwner>(
     board: &mut cbrd::Board<T, R>,
     owner: &mut O,
@@ -626,7 +638,7 @@ async fn attendance<T: clnk::Transport, R, O: CommittedOwner>(
             publication: publication.clone(),
         })
         .await
-        .map_err(after_send)?;
+        .map_err(|error| connect_refused(pending, error))?;
     // These failures precede Enter, so no attendance effect is uncertain.
     let signature = match owner.sign_attendance(&challenge, origin, expires).await {
         Ok(signature) => signature,

@@ -171,3 +171,47 @@ fn registry_uses_concrete_owner_operations_and_rejects_generic_dispatch() {
         registry::schema::<cbrd::DiscoveryPage>()
     );
 }
+
+/// A connect refused before anything was sent clears the fence, so a member can attend
+/// again once the Forum is up; a failure that may have reached the Forum keeps it and
+/// asks for reconciliation.
+#[test]
+fn a_connect_refused_before_the_send_leaves_attendance_retryable_and_an_uncertain_one_does_not() {
+    use super::handlers::connect_refused;
+    use cbrd::clnk::ErrorCode as Wire;
+    for definite in [
+        Wire::AuthorityUnavailable,
+        Wire::Origin,
+        Wire::Host,
+        Wire::Capacity,
+        Wire::Rejected,
+        Wire::UnsupportedVersion,
+        Wire::InvalidRequest,
+        Wire::MediaType,
+    ] {
+        let mut pending = true;
+        let code = connect_refused(&mut pending, definite);
+        assert!(!pending, "{definite:?}");
+        assert_ne!(code, ErrorCode::Reconcile, "{definite:?}");
+    }
+    for uncertain in [
+        Wire::Transport,
+        Wire::Timeout,
+        Wire::ResetRequired,
+        Wire::TooLarge,
+        Wire::Reconcile,
+    ] {
+        let mut pending = true;
+        assert_eq!(
+            connect_refused(&mut pending, uncertain),
+            ErrorCode::Reconcile,
+            "{uncertain:?}"
+        );
+        assert!(pending, "{uncertain:?}");
+    }
+    let mut pending = true;
+    assert_eq!(
+        connect_refused(&mut pending, Wire::AuthorityUnavailable),
+        ErrorCode::Unavailable
+    );
+}
