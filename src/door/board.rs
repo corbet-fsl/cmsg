@@ -11,6 +11,7 @@ use clnk::BrowserTransport as Transport;
 use clnk::HttpTransport as Transport;
 
 mod group_act;
+mod group_visit;
 mod groups;
 mod handlers;
 mod profile;
@@ -20,6 +21,9 @@ pub(super) use group_act::{group_act, group_answer, group_message, group_propose
 pub use group_act::{
     GroupAct, GroupAnswer, GroupAnswered, GroupInbound, GroupInvite, GroupMessageIn, GroupPropose,
     GroupProposed, GroupWelcome, GroupWelcomes,
+};
+pub use group_visit::{
+    due_for_exchange, mark_exchanged, note_group_opened, GroupOpened, GroupOpenedAck,
 };
 pub(super) use groups::groups;
 pub(super) use handlers::{attend, discovery, search, watch};
