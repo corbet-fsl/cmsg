@@ -91,7 +91,7 @@ impl Room {
     }
 
     /// One board whose reads go through a relay that changes what they return;
-    /// `Mode` switches how (the room admits only a few connections).
+    /// `Mode` switches how (the test relay admits 32 connections).
     async fn through(&self) -> (RoomBoard, Mode) {
         let mode: Mode = Rc::new(RefCell::new(Box::new(|_: &mut cmbl::Outcome| {})));
         let seen = mode.clone();

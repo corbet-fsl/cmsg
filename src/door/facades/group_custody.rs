@@ -2401,8 +2401,15 @@ where
         #[cfg(test)]
         let now = now + TEST_CONSENT_AGE.with(std::cell::Cell::get);
         let snapshot = Snapshot::load(binding.community(), &store).map_err(|_| Fail::Storage)?;
-        let groups = cgrp::prepare(&snapshot, request, &source, &authority, now, task.max_groups)
-            .map_err(|_| Fail::Authority)?;
+        let groups = cgrp::prepare(
+            &snapshot,
+            request,
+            &source,
+            &authority,
+            now,
+            task.max_groups,
+        )
+        .map_err(|_| Fail::Authority)?;
         let removed = match &task.step {
             RemoveStep::Apply { commit } => {
                 cbrd::apply_room_removal(cbrd::RoomApplyRemovalInput {
@@ -2507,10 +2514,7 @@ where
         let Some(record) = self.read_leaving(group).await? else {
             return Ok(None);
         };
-        Ok(self
-            .room_lists_me(group)
-            .await?
-            .then_some(record.attempts))
+        Ok(self.room_lists_me(group).await?.then_some(record.attempts))
     }
 
     /// Whether the group snapshot this device holds still lists its own member.

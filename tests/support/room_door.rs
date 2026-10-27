@@ -151,8 +151,8 @@ fn router() -> Arc<Router> {
             COMMUNITY.into(),
             "boot".into(),
             cmbl::Limits {
-                connections: 8,
-                relay_messages: 64,
+                connections: 32,
+                relay_messages: 512,
                 message_bytes: 200_000,
                 lifetime_ms: 5_000_000,
                 proof_bytes: 8192,

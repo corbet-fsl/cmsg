@@ -11,9 +11,9 @@ mod room_sync;
 mod shared;
 use cbrd::clnk;
 pub use group_custody::{
-    GroupPeers, LeaveProgress, MAX_LEAVE_NOTICES, RemoveStep, RoomLeaveSyncTask, RoomAdmitTask, RoomJoinTask, RoomJoined, RoomKeySealed, RoomKeyTask,
-    RoomKeysStanding, RoomLeaveTask, RoomRemoveTask, RoomSecretsReceived, RoomSecretsTask,
-    VaultGroupOwner, VerifiedPeers,
+    GroupPeers, LeaveProgress, RemoveStep, RoomAdmitTask, RoomJoinTask, RoomJoined, RoomKeySealed,
+    RoomKeyTask, RoomKeysStanding, RoomLeaveSyncTask, RoomLeaveTask, RoomRemoveTask,
+    RoomSecretsReceived, RoomSecretsTask, VaultGroupOwner, VerifiedPeers, MAX_LEAVE_NOTICES,
 };
 pub use room_sync::{RefusedJoins, ResyncReason, RoomSync, RoomSyncTask, RoomSynced};
 pub(crate) use shared::StartOwner;

@@ -245,7 +245,10 @@ async fn a_forged_notice_or_a_removal_asked_by_another_member_is_refused_untouch
 
     let mut refused = RefusedJoins::new();
     let synced = sync_with(&mut room.a, &room.a_board, &mut refused).await;
-    assert_eq!((synced.admitted, synced.caught_up, synced.refused), (0, 0, 4));
+    assert_eq!(
+        (synced.admitted, synced.caught_up, synced.refused),
+        (0, 0, 4)
+    );
     assert!(synced.left.is_empty());
     assert!(!synced.advanced);
     assert_eq!(standing(&room.a).await, before);
@@ -343,21 +346,30 @@ async fn advance(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_leave_whose_notice_went_stale_is_reissued_until_a_member_removes_it_and_leaves_no_ghost() {
+async fn a_leave_whose_notice_went_stale_is_reissued_until_a_member_removes_it_and_leaves_no_ghost()
+{
     use crate::door::facades::LeaveProgress;
     let mut room = Room::found().await;
     let mut b = room.admit("b", 32).await;
     let (_, request) = leave_request(&mut b.owner).await;
-    assert!(
+    assert!(b
+        .owner
+        .groups
+        .as_mut()
+        .unwrap()
+        .begin_room_leave(&b.board, ROOM, &request)
+        .await
+        .unwrap());
+    assert_eq!(
         b.owner
             .groups
             .as_mut()
             .unwrap()
-            .begin_room_leave(&b.board, ROOM, &request)
+            .room_leaving(GROUP)
             .await
-            .unwrap()
+            .unwrap(),
+        Some(1)
     );
-    assert_eq!(b.owner.groups.as_mut().unwrap().room_leaving(GROUP).await.unwrap(), Some(1));
     // Before any member acted, another newcomer is admitted: b's notice is now
     // sealed under an epoch the room has left.
     let c = room.admit("c", 33).await;
@@ -379,25 +391,38 @@ async fn a_leave_whose_notice_went_stale_is_reissued_until_a_member_removes_it_a
         advance(&mut b.owner, &b.board, &mut refused).await,
         LeaveProgress::Left
     );
-    assert_eq!(b.owner.groups.as_mut().unwrap().room_leaving(GROUP).await.unwrap(), None);
+    assert_eq!(
+        b.owner
+            .groups
+            .as_mut()
+            .unwrap()
+            .room_leaving(GROUP)
+            .await
+            .unwrap(),
+        None
+    );
     assert_eq!(standing(&room.a).await.0, members(&["a", "x", "y", "c"]));
 }
 
 async fn leaving(owner: &mut ProfileOwner) -> Option<u8> {
-    owner.groups.as_mut().unwrap().room_leaving(GROUP).await.unwrap()
+    owner
+        .groups
+        .as_mut()
+        .unwrap()
+        .room_leaving(GROUP)
+        .await
+        .unwrap()
 }
 
 async fn begin(owner: &mut ProfileOwner, board: &RoomBoard) {
     let (_, request) = leave_request(owner).await;
-    assert!(
-        owner
-            .groups
-            .as_mut()
-            .unwrap()
-            .begin_room_leave(board, ROOM, &request)
-            .await
-            .unwrap()
-    );
+    assert!(owner
+        .groups
+        .as_mut()
+        .unwrap()
+        .begin_room_leave(board, ROOM, &request)
+        .await
+        .unwrap());
 }
 
 /// How many frames the room holds (every notice is one frame).
@@ -406,7 +431,8 @@ async fn frames_in(board: &RoomBoard) -> usize {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_pending_leave_is_derived_from_the_signed_leave_and_the_listing_and_ends_with_the_remove() {
+async fn a_pending_leave_is_derived_from_the_signed_leave_and_the_listing_and_ends_with_the_remove()
+{
     use crate::door::facades::LeaveProgress;
     let mut room = Room::found().await;
     let mut b = room.admit("b", 32).await;
@@ -478,25 +504,69 @@ async fn a_leave_issues_at_most_the_bounded_notices_and_stays_pending_after() {
     let mut b = room.admit("b", 32).await;
     begin(&mut b.owner, &b.board).await;
     let mut refused = RefusedJoins::new();
-    let mut newcomers = vec![];
-    let mut frames = 0;
-    for step in 0..(MAX_LEAVE_NOTICES as usize + 2) {
-        let letter = ((b'c' + step as u8) as char).to_string();
-        newcomers.push(room.admit(&letter, 40 + step as u8).await);
+    // One small room that keeps listing b (a room admits a bounded number of
+    // joins in all, so visitors come and go). Each round moves the room's epoch
+    // by commits other members made and b exchanges with the room once. Rounds
+    // 0..=5 admit a visitor who leaves again; round 6 admits one who stays; round
+    // 7 lets that visitor leave: its removal moves the epoch, but the bound of
+    // notices is spent by then.
+    let rounds = MAX_LEAVE_NOTICES as usize;
+    let mut staying = None;
+    for step in 0..rounds {
+        let reissue = step + 2 <= MAX_LEAVE_NOTICES as usize;
+        let mut visitor = match staying.take() {
+            Some(kept) => kept,
+            None => {
+                let letter = ((b'c' + step as u8) as char).to_string();
+                room.admit(&letter, 40 + step as u8).await
+            }
+        };
+        let letter = ((b'c' + step.min(rounds - 2) as u8) as char).to_string();
+        if step == rounds - 2 {
+            staying = Some(visitor);
+        } else {
+            // b's own notice of the current epoch is in the room by now and a
+            // member would act on it first; the relay shows `a` only the visitor's
+            // notice, so that the removal that moves the epoch is the visitor's.
+            let old: Vec<u64> = room
+                .a_board
+                .room_frames(ROOM)
+                .await
+                .unwrap()
+                .frames
+                .iter()
+                .map(|frame| frame.sequence)
+                .collect();
+            let (_, request) = leave_request(&mut visitor.owner).await;
+            relay_notice(&mut visitor.owner, &visitor.board, request).await;
+            let (hostile, mode) = room.through().await;
+            if !reissue {
+                *mode.borrow_mut() = Box::new(rewrite(old, vec![], false));
+            }
+            let synced = sync_with(&mut room.a, &hostile, &mut RefusedJoins::new()).await;
+            assert_eq!(synced.left, vec![member_id(&letter)]);
+        }
+        assert!(standing(&room.a).await.0.contains(&member_id("b")));
         let before = frames_in(&room.a_board).await;
         let expected = (step as u8 + 2).min(MAX_LEAVE_NOTICES);
         assert_eq!(
             advance(&mut b.owner, &b.board, &mut refused).await,
             LeaveProgress::Pending { attempts: expected }
         );
-        // One more notice while the bound is not reached, none after it.
-        frames = frames_in(&room.a_board).await;
-        assert_eq!(frames, before + usize::from(expected > step as u8 + 1));
+        // One notice per exchange while the bound is not reached, none after it.
+        let issued = frames_in(&room.a_board).await - before;
+        assert_eq!(issued, usize::from(reissue));
         assert_eq!(leaving(&mut b.owner).await, Some(expected));
     }
-    // Pending stays observable, and further exchanges send nothing.
-    let _ = advance(&mut b.owner, &b.board, &mut refused).await;
-    assert_eq!(frames_in(&room.a_board).await, frames);
+    // Pending stays observable and further exchanges send nothing.
+    let sent = frames_in(&room.a_board).await;
+    assert_eq!(
+        advance(&mut b.owner, &b.board, &mut refused).await,
+        LeaveProgress::Pending {
+            attempts: MAX_LEAVE_NOTICES
+        }
+    );
+    assert_eq!(frames_in(&room.a_board).await, sent);
     assert_eq!(leaving(&mut b.owner).await, Some(MAX_LEAVE_NOTICES));
 }
 
@@ -513,9 +583,8 @@ async fn a_leave_frees_the_warm_seat_at_once() {
             bucket_start: 0,
         })
         .collect();
-    let warm = |eligible: &BTreeSet<String>| {
-        cgrp::warm_ends(&facts, &GROUP, eligible, 0).unwrap().len()
-    };
+    let warm =
+        |eligible: &BTreeSet<String>| cgrp::warm_ends(&facts, &GROUP, eligible, 0).unwrap().len();
     // Before the leave both seats are warm.
     let seated = b
         .owner

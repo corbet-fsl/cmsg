@@ -320,7 +320,10 @@ const MAX_ROOM_APPLY: usize = 64;
 /// What the room asks of this device at the epoch it holds.
 enum Next {
     /// A newcomer's external commit made for exactly this epoch.
-    Join { position: usize, join: cbrd::OrderedCommit },
+    Join {
+        position: usize,
+        join: cbrd::OrderedCommit,
+    },
     /// A member commit made for exactly this epoch that removes a leaver (its
     /// companion is the leaver's signed Groups `Leave`).
     Removal {
@@ -399,8 +402,12 @@ fn next_step(
                 }
                 cbrd::FrameContent::Notice(companion) => {
                     let leaver = leaver_of(&companion)?;
-                    (notices && leaver != me && !removed_later(position, &leaver))
-                        .then_some(Next::Notice { position, companion })
+                    (notices && leaver != me && !removed_later(position, &leaver)).then_some(
+                        Next::Notice {
+                            position,
+                            companion,
+                        },
+                    )
                 }
                 _ => None,
             }
