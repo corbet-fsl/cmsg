@@ -171,6 +171,7 @@ impl DeviceSettings {
 
 /// Where the encrypted checkpoints live. Both backends are `Clone` handles to
 /// one durable checkpoint each.
+#[derive(Clone)]
 pub struct DeviceStorage<B> {
     pub global: B,
     pub community: B,
@@ -533,7 +534,7 @@ where
     check_open(settings, &mut deployment, registered(&progress)?)?;
     let settings = settings.clone();
     let OpenParts {
-        mut services,
+        services,
         authenticator,
         storage,
         records,
@@ -541,63 +542,111 @@ where
     } = parts;
     // The Door is built here, from the same services as a registration: its community Foyer has
     // the founding-fingerprint-anchored, started trust that `restore_device_login` reads (a Foyer
-    // built from the deployment's key-ring trust configuration cannot be anchored).
+    // built from the deployment's key-ring trust configuration cannot be anchored). The builder
+    // is repeatable from these sources: the start's Door is its first build, a device restart
+    // (session renewal) builds a fresh one through the same unchanged path.
     let build: super::native::DoorBuilder = Box::new(move || {
-        Box::pin(async move {
-            let origin = settings.community.origin.clone();
-            let community = services.foyer(Service::Community).await.map_err(|e| {
-                eprintln!("device setup: {e}");
-                super::ErrorCode::Unavailable
-            })?;
-            let mut door = Door::new(super::Configuration::new(
-                settings.community_name.clone(),
-                std::collections::BTreeMap::from([(
-                    Role::Member,
-                    std::collections::BTreeSet::from([origin.clone()]),
-                )]),
-            )?);
-            door.bind_foyer(
-                &origin,
-                Role::Member,
-                super::foyer::Sessions::new(Scope::Community, community),
-            )?;
-            let context =
-                cpky::Context::new(&settings.global.passkey_origin, &settings.global.rp_id)
-                    .map_err(|__cause| {
-                        crate::door::cause::emit(
-                            file!(),
-                            line!(),
-                            "super::ErrorCode::InvalidRequest",
-                            super::ErrorCode::InvalidRequest,
-                            &__cause,
-                        )
-                    })?;
-            let mut keys = DeviceKeys::new(
-                Client::new(context, authenticator()),
-                &settings.global.passkey_origin,
-            );
-            restore_device_login(
-                &mut door,
-                &settings,
-                &mut services,
-                &mut keys,
-                storage,
-                records(),
-            )
-            .await
-            .map_err(|e| {
-                eprintln!("device setup: {e}");
-                super::ErrorCode::Unavailable
-            })?;
-            if let Some(finish) = finish {
-                finish(&mut door).await?;
-            }
-            Ok(door)
+        let sources = std::rc::Rc::new(DoorSources {
+            settings,
+            services: tokio::sync::Mutex::new(services),
+            authenticator,
+            storage,
+            network: records(),
+            finish,
+        });
+        std::rc::Rc::new(move || {
+            let sources = sources.clone();
+            Box::pin(async move { sources.build().await })
         })
     });
     super::native::Embedded::configured_restore_built(deployment, lifetime_seconds, clock, build)
         .await
         .map_err(step("open"))
+}
+
+/// What a registered device's Door is built from, on the Door's thread (see
+/// [`open_native_device_with`]); every build uses the same sources.
+#[cfg(all(
+    feature = "native-tor",
+    feature = "native-prover",
+    feature = "embedded-authenticator",
+    not(target_arch = "wasm32")
+))]
+struct DoorSources<S, F, B, N> {
+    settings: DeviceSettings,
+    services: tokio::sync::Mutex<S>,
+    authenticator: F,
+    storage: DeviceStorage<B>,
+    network: N,
+    finish: Option<super::native::DeviceSetup>,
+}
+
+#[cfg(all(
+    feature = "native-tor",
+    feature = "native-prover",
+    feature = "embedded-authenticator",
+    not(target_arch = "wasm32")
+))]
+impl<A, S, F, B, N> DoorSources<S, F, B, N>
+where
+    A: cfyr::passkeys::Authenticator + cpky::Authenticator + 'static,
+    S: Services,
+    F: Fn() -> A,
+    B: cwst::backend::Backend + Clone + 'static,
+    N: cdht::Network + Clone + 'static,
+{
+    async fn build(&self) -> super::Result<Door> {
+        let settings = &self.settings;
+        let mut services = self.services.lock().await;
+        let origin = settings.community.origin.clone();
+        let community = services.foyer(Service::Community).await.map_err(|e| {
+            eprintln!("device setup: {e}");
+            super::ErrorCode::Unavailable
+        })?;
+        let mut door = Door::new(super::Configuration::new(
+            settings.community_name.clone(),
+            std::collections::BTreeMap::from([(
+                Role::Member,
+                std::collections::BTreeSet::from([origin.clone()]),
+            )]),
+        )?);
+        door.bind_foyer(
+            &origin,
+            Role::Member,
+            super::foyer::Sessions::new(Scope::Community, community),
+        )?;
+        let context = cpky::Context::new(&settings.global.passkey_origin, &settings.global.rp_id)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "super::ErrorCode::InvalidRequest",
+                    super::ErrorCode::InvalidRequest,
+                    &__cause,
+                )
+            })?;
+        let mut keys = DeviceKeys::new(
+            Client::new(context, (self.authenticator)()),
+            &settings.global.passkey_origin,
+        );
+        restore_device_login(
+            &mut door,
+            settings,
+            &mut *services,
+            &mut keys,
+            self.storage.clone(),
+            self.network.clone(),
+        )
+        .await
+        .map_err(|e| {
+            eprintln!("device setup: {e}");
+            super::ErrorCode::Unavailable
+        })?;
+        if let Some(finish) = &self.finish {
+            finish(&mut door).await?;
+        }
+        Ok(door)
+    }
 }
 
 /// The Door's verified community identity must be the founding fingerprint the device settings
@@ -613,6 +662,35 @@ fn ensure_founding_identity(
         ));
     }
     Ok(())
+}
+
+type GlobalSessions = std::collections::BTreeMap<(String, String), Foyer<Transport>>;
+
+thread_local! {
+    /// The member's global session S1 per device identity (global origin, member id), kept on
+    /// the Door's thread. The first start keeps S1 for the device's life, as before; a restart
+    /// of the same device (a session renewal) REPLACES it, so the replaced S1 is dropped (its
+    /// family closes and is never used again) and a device retains at most one S1 however often
+    /// it renews. The map itself is never dropped, so the last S1 lives as long as the process.
+    static GLOBAL_SESSIONS: std::cell::RefCell<std::mem::ManuallyDrop<GlobalSessions>> =
+        const { std::cell::RefCell::new(std::mem::ManuallyDrop::new(GlobalSessions::new())) };
+}
+
+/// Retain `session` as the device's S1; the device's previous S1, if any, is dropped here.
+fn retain_global_session(origin: &str, member: &str, session: Foyer<Transport>) {
+    let replaced = GLOBAL_SESSIONS.with(|sessions| {
+        sessions
+            .borrow_mut()
+            .insert((origin.to_owned(), member.to_owned()), session)
+    });
+    drop(replaced);
+}
+
+/// How many global sessions this thread retains (one per started device identity). For the
+/// tests that count retained sessions across renewals.
+#[doc(hidden)]
+pub fn retained_global_sessions() -> usize {
+    GLOBAL_SESSIONS.with(|sessions| sessions.borrow().len())
 }
 
 /// Every start of a registered device-key member, on its freshly constructed Door (C8 A): ONE
@@ -663,11 +741,10 @@ where
     let stamps = stamp_trust(&api, global_origin).await?;
     let sibling = wallet_sibling(services, &mut api).await?;
     let mut wallet_door = bound("wallet", global_origin, Scope::Global, api)?;
-    let policy: &'static mut Policy = Box::leak(Box::new(
-        wallet_door
-            .wallet_current_policy(global_origin)
-            .map_err(step("policy"))?,
-    ));
+    // The lease owns the policy: it lives as long as the global passport and drops with it.
+    let policy: Policy = wallet_door
+        .wallet_current_policy(global_origin)
+        .map_err(step("policy"))?;
     let (_, recovered) =
         recover(unlock.wallet_opening().map_err(step("restore"))?, &network).await?;
     let held = lease(&wallet_door, global_origin, true, policy).await?;
@@ -677,12 +754,15 @@ where
         .open_global_passport(network.clone(), storage.global.clone())
         .await
         .map_err(step("global passport"))?;
-    // The recovery lease holds S1 for the device's life.
-    Box::leak(Box::new(
+    // The recovery lease holds S1 for the device's life: one slot per device identity, so a
+    // renewal replaces (and closes) the previous S1 instead of keeping it forever.
+    retain_global_session(
+        global_origin,
+        &user,
         wallet_door
             .take_global(global_origin)
             .map_err(step("global session"))?,
-    ));
+    );
     let public = services.public(Service::Global).await?;
     door.lend_global(community_origin, sibling, public)
         .map_err(step("global session"))?;

@@ -370,7 +370,7 @@ pub(crate) async fn lease<'p>(
     door: &Door,
     origin: &str,
     wallet: bool,
-    policy: &'p mut Policy,
+    policy: impl Into<cfyr::membership::HeldPolicy<'p, Transport>>,
 ) -> Result<Lease<'p>, ComposeError> {
     let mut membership = if wallet {
         door.live_wallet_membership(origin)

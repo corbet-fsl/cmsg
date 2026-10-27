@@ -32,13 +32,19 @@ pub struct NativeDeployment {
 /// Trusted composition that runs on the Door's own thread right after the Door is
 /// built and before the first action: authenticator, global session, prover and ports
 /// that only the embedder can lend. It grants no custody; that still begins at login.
-pub type DeviceSetup =
-    Box<dyn for<'a> FnOnce(&'a mut Door) -> LocalBoxFuture<'a, Result<()>> + Send>;
+/// It is repeatable: a device restart (a session renewal) runs it again on the fresh Door.
+pub type DeviceSetup = Box<dyn for<'a> Fn(&'a mut Door) -> LocalBoxFuture<'a, Result<()>> + Send>;
 
 /// Builds the whole Door on the Door's own thread: for a registered device whose community
 /// Foyer (fingerprint-anchored, started trust) only the embedder's services can build. It grants
 /// no custody; that still begins at login.
-pub type DoorBuilder = Box<dyn FnOnce() -> LocalBoxFuture<'static, Result<Door>> + Send>;
+/// It runs ONCE, on the Door's thread, and returns the repeatable builder there: the start's
+/// Door is its first build, and every device restart (a session renewal) builds a fresh Door
+/// through the same unchanged path.
+pub type DoorBuilder = Box<dyn FnOnce() -> RepeatableBuilder + Send>;
+
+/// The repeatable Door builder on the Door's thread (see [`DoorBuilder`]).
+pub type RepeatableBuilder = std::rc::Rc<dyn Fn() -> LocalBoxFuture<'static, Result<Door>>>;
 
 /// Where the Door of a native start comes from.
 pub(super) enum DoorSource {
@@ -187,7 +193,7 @@ impl NativeDeployment {
             actions: catalog().into_iter().map(|action| action.action).collect(),
             lifetime_seconds,
         };
-        Embedded::start_composed(
+        Embedded::start_restartable(
             move || async move {
                 let community = self.runtime.community.clone();
                 let mut roots = Vec::new();
@@ -206,23 +212,40 @@ impl NativeDeployment {
                 if runtime.role != Role::Member {
                     return Err(ErrorCode::Unauthorized);
                 }
-                let board = runtime
-                    .forum
-                    .take()
-                    .map(|forum| forum.prepare(&community, &runtime.origin))
-                    .transpose()?;
-                let door = match source {
+                let forum = runtime.forum.take();
+                let origin = runtime.origin.clone();
+                match source {
                     DoorSource::Runtime(setup) => {
+                        let board = forum
+                            .map(|forum| forum.prepare(&community, &origin))
+                            .transpose()?;
                         let mut door = runtime.construct_with_roots(&roots)?;
                         if let Some(setup) = setup {
                             setup(&mut door).await?;
                         }
-                        door
+                        let composer = tor.composer(&community, board)?;
+                        Ok((door, composer, None))
                     }
-                    DoorSource::Built(build) => build().await?,
-                };
-                let composer = tor.composer(&community, board)?;
-                Ok((door, composer))
+                    DoorSource::Built(build) => {
+                        // Every build (the start's and each device restart's) prepares the
+                        // Board, builds the Door and its composer from the same sources.
+                        let build = build();
+                        let rebuild: super::Rebuild = std::rc::Rc::new(move || {
+                            let (build, tor, forum) = (build.clone(), tor.clone(), forum.clone());
+                            let (community, origin) = (community.clone(), origin.clone());
+                            Box::pin(async move {
+                                let board = forum
+                                    .map(|forum| forum.prepare(&community, &origin))
+                                    .transpose()?;
+                                let door = build().await?;
+                                let composer = tor.composer(&community, board)?;
+                                Ok((door, composer))
+                            })
+                        });
+                        let (door, composer) = rebuild().await?;
+                        Ok((door, composer, Some(rebuild)))
+                    }
+                }
             },
             pairing,
             clock,

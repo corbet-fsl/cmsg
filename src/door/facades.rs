@@ -824,7 +824,14 @@ impl Door {
     /// lock revokes the original checkpoint even if another owner still holds a
     /// SharedStore clone; merely dropping this Door cannot provide that guarantee.
     pub(super) async fn close_owned(mut self) {
-        super::login::session::drain(&mut self).await;
+        self.close_in_place().await;
+    }
+
+    /// [`Self::close_owned`] for a Door that is still shared (a device restart closes the old
+    /// Door before it builds the fresh one): logins drained, grants cleared, Meshes closed,
+    /// Vaults locked. Nothing it held is usable afterwards.
+    pub(super) async fn close_in_place(&mut self) {
+        super::login::session::drain(self).await;
         self.grants.clear();
         for (_, mesh) in std::mem::take(&mut self.meshes) {
             mesh.close();

@@ -367,6 +367,17 @@ async fn a_restarted_device_key_member_binds_at_start_and_logs_in_without_a_cere
             3,
             "one registration, one confirmation per start"
         );
+        // A third start of the same device (as a session renewal restarts it): the device
+        // still retains exactly ONE global session; every replaced one was dropped, not leaked.
+        drop(door);
+        let (mut door, token) = restart(&settings, &mut keys, storage(), network.clone()).await;
+        start_login(&mut door, origin, &token).await;
+        assert_eq!(keys.ceremonies(), 4, "one confirmation per start");
+        assert_eq!(
+            composer::retained_global_sessions(),
+            1,
+            "three starts of one device retain one global session"
+        );
     })
     .await
     .expect("bounded device-key restarts");

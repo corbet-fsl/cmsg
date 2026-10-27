@@ -289,16 +289,20 @@ pub(super) fn needs_fresh_session(remaining: u64, lifetime: u64) -> bool {
 
 /// Precondition of a long operation: when the bound session's remaining lifetime
 /// is too short, open a FRESH global session (the embedder's passkey path) first.
-/// Without an actor or a renewal port nothing changes: a deadline that then
-/// passes mid-operation is exposed as `SessionExpired`.
+/// Without a renewal port the state is `SessionExpired` BEFORE the operation starts:
+/// the native embedder then restarts the device (a fresh Door, see
+/// `native::Client::invoke_bytes`) and repeats it there. Without an actor nothing
+/// changes.
 pub(super) async fn ensure_session_runway(door: &mut Door, origin: &str) -> Result<()> {
     let Some(actor) = door.accounts.get(origin) else {
         return Ok(());
     };
     let (remaining, lifetime) = actor.lifetime();
-    if actor.ended() || door.session_renewal.is_none() || !needs_fresh_session(remaining, lifetime)
-    {
+    if actor.ended() || !needs_fresh_session(remaining, lifetime) {
         return Ok(());
+    }
+    if door.session_renewal.is_none() {
+        return Err(ErrorCode::SessionExpired);
     }
     renew_session(door, origin).await
 }
@@ -812,6 +816,21 @@ mod session_tests {
         assert_eq!(s.renewals.load(Ordering::SeqCst), 1);
         assert_eq!(s.old.load(Ordering::SeqCst), 0);
         assert_eq!(s.fresh.load(Ordering::SeqCst), 4);
+    }
+
+    #[test]
+    fn a_short_runway_without_a_renewal_port_is_session_expired_before_the_join_starts() {
+        // The native embedder restarts the device on this state; nothing runs on the short one.
+        let ok: fn(&Command, &AtomicU64) -> Reply = |command, _| answer(command);
+        let mut s = setup(ok, None);
+        s.now.store(1_121, Ordering::SeqCst);
+        assert_eq!(join(&mut s.door).err(), Some(ErrorCode::SessionExpired));
+        assert_eq!(s.old.load(Ordering::SeqCst), 0);
+        // A fresh session (within the grace) starts the join directly.
+        let mut s = setup(ok, None);
+        s.now.store(1_100, Ordering::SeqCst);
+        assert!(matches!(join(&mut s.door), Ok(Joined::Active { .. })));
+        assert_eq!(s.old.load(Ordering::SeqCst), 4);
     }
 
     #[test]

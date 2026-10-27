@@ -17,7 +17,25 @@ use tokio::sync::{mpsc, oneshot, watch, OwnedSemaphorePermit};
 #[cfg(feature = "native-tor")]
 pub mod deployment;
 #[cfg(feature = "native-tor")]
-pub use deployment::{DeviceSetup, DoorBuilder, NativeDeployment};
+pub use deployment::{DeviceSetup, DoorBuilder, NativeDeployment, RepeatableBuilder};
+
+/// Rebuilds the Door and its composer on the Door's thread through the start's unchanged path
+/// (a device restart, see [`Client::invoke_bytes`]).
+pub(super) type Rebuild = std::rc::Rc<
+    dyn Fn()
+        -> futures_util::future::LocalBoxFuture<'static, Result<(Door, Box<dyn VaultComposer>)>>,
+>;
+
+/// A device restart on the Door's thread: the rebuilt Door, paired again for the same client.
+type Restart = std::rc::Rc<
+    dyn Fn() -> futures_util::future::LocalBoxFuture<
+        'static,
+        Result<(Door, ClientToken, Option<Box<dyn VaultComposer>>)>,
+    >,
+>;
+
+/// The one action a device restart repeats (once) after the fresh login.
+const REPEATED_AFTER_RESTART: &str = "community_join";
 
 /// Injected trusted clock. Member-controlled request data never supplies time.
 pub trait Clock: Send + Sync {
@@ -268,7 +286,40 @@ enum Command {
         reply: oneshot::Sender<Output>,
         permit: OwnedSemaphorePermit,
     },
+    /// The paired client's device restart (its global session expired): close the old Door,
+    /// build a fresh one through the start's path and pair the client again.
+    Restart {
+        origin: String,
+        token: Zeroizing<String>,
+        reply: oneshot::Sender<Result<ClientToken>>,
+    },
     Stop,
+}
+
+/// A device restart: rebuild the Door through the start's path and pair the same client
+/// again (a fresh capability; nothing of the old Door is carried over).
+fn restart_paired(rebuild: Rebuild, pairing: Pairing, clock: Arc<dyn Clock>) -> Restart {
+    std::rc::Rc::new(move || {
+        let (rebuild, pairing, clock) = (rebuild.clone(), pairing.clone(), clock.clone());
+        Box::pin(async move {
+            let (mut door, composer) = rebuild().await?;
+            let now = clock.now();
+            let paired = now
+                .checked_add(pairing.lifetime_seconds)
+                .ok_or(ErrorCode::Clock)
+                .and_then(|expires| {
+                    door.pair_client(&pairing.origin, pairing.role, pairing.actions, now, expires)
+                });
+            match paired {
+                Ok(token) => Ok((door, token, Some(composer))),
+                Err(error) => {
+                    let _ = drain_composer(&mut Some(composer)).await;
+                    door.close_owned().await;
+                    Err(error)
+                }
+            }
+        })
+    })
 }
 
 /// Drain once, even after a dispatcher panic. A failed cleanup is never success;
@@ -361,7 +412,7 @@ impl Owner {
         Self::start_retained(
             move || async move {
                 let (door, value) = initialize().await?;
-                Ok((door, value, (), None))
+                Ok((door, value, (), None, None))
             },
             clock,
         )
@@ -374,7 +425,8 @@ impl Owner {
     ) -> Result<(Self, T, std::thread::JoinHandle<Result<()>>)>
     where
         F: FnOnce() -> Fut + Send + 'static,
-        Fut: Future<Output = Result<(Door, T, G, Option<Box<dyn VaultComposer>>)>> + 'static,
+        Fut: Future<Output = Result<(Door, T, G, Option<Box<dyn VaultComposer>>, Option<Restart>)>>
+            + 'static,
         T: Send + 'static,
         G: 'static,
     {
@@ -404,7 +456,7 @@ impl Owner {
                             let initialized = AssertUnwindSafe(async { initialize().await })
                                 .catch_unwind()
                                 .await;
-                            let (door, value, retained, mut composer) = match initialized {
+                            let (door, value, retained, mut composer, restart) = match initialized {
                                 Ok(Ok(value)) => value,
                                 Ok(Err(error)) => {
                                     let _ = ready.send(Err(error));
@@ -428,6 +480,61 @@ impl Owner {
                             while let Some(command) = receiver.recv().await {
                                 match command {
                                     Command::Stop => receiver.close(),
+                                    Command::Restart {
+                                        origin,
+                                        token,
+                                        reply,
+                                    } => {
+                                        let restarted = match &restart {
+                                            Some(restart) if !failed => {
+                                                // Only the paired client restarts its device.
+                                                let paired = door
+                                                    .lock()
+                                                    .await
+                                                    .authenticate(&origin, &token, clock.now())
+                                                    .map(|_| ());
+                                                match paired {
+                                                    Err(error) => Err(error),
+                                                    Ok(()) => {
+                                                        // The old Door closes first; its authority
+                                                        // is never used again.
+                                                        let _ = drain_composer(&mut composer).await;
+                                                        couriers.stop(&door).await;
+                                                        door.lock().await.close_in_place().await;
+                                                        match AssertUnwindSafe(restart())
+                                                            .catch_unwind()
+                                                            .await
+                                                        {
+                                                            Ok(Ok((
+                                                                fresh,
+                                                                token,
+                                                                fresh_composer,
+                                                            ))) => {
+                                                                *door.lock().await = fresh;
+                                                                composer = fresh_composer;
+                                                                Ok(token)
+                                                            }
+                                                            Ok(Err(_)) => {
+                                                                Err(ErrorCode::SessionExpired)
+                                                            }
+                                                            Err(_) => {
+                                                                failed = true;
+                                                                drop(retained.take());
+                                                                Err(ErrorCode::Unavailable)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            _ => Err(ErrorCode::SessionExpired),
+                                        };
+                                        if failed {
+                                            owner_grants.refresh(None);
+                                        } else {
+                                            owner_grants.refresh(Some(&*door.lock().await));
+                                        }
+                                        let _ = reply.send(restarted);
+                                    }
                                     Command::Authenticate {
                                         origin,
                                         token,
@@ -608,6 +715,19 @@ impl Owner {
         })?
     }
 
+    async fn restart(&self, origin: &str, token: &str) -> Result<ClientToken> {
+        let (reply, receive) = oneshot::channel();
+        self.0
+            .send(Command::Restart {
+                origin: origin.into(),
+                token: Zeroizing::new(token.into()),
+                reply,
+            })
+            .await
+            .map_err(|_| ErrorCode::Unavailable)?;
+        receive.await.map_err(|_| ErrorCode::Unavailable)?
+    }
+
     async fn invoke(
         &self,
         origin: String,
@@ -710,6 +830,7 @@ fn routes(state: HttpState) -> Router {
 
 /// Trusted native pairing configuration. This is not an API request and grants
 /// only local access; configured Foyer sessions supply remote authority.
+#[derive(Clone)]
 pub struct Pairing {
     pub origin: String,
     pub role: Role,
@@ -845,7 +966,7 @@ impl Embedded {
         Self::start_owned(
             move || async move {
                 let (door, guard) = initialize().await?;
-                Ok((door, guard, None))
+                Ok((door, guard, None, None))
             },
             pairing,
             clock,
@@ -868,7 +989,30 @@ impl Embedded {
         Self::start_owned(
             move || async move {
                 let (door, composer) = initialize().await?;
-                Ok((door, (), Some(composer)))
+                Ok((door, (), Some(composer), None))
+            },
+            pairing,
+            clock,
+        )
+        .await
+    }
+
+    /// [`Self::start_composed`] whose Door can be rebuilt on its thread: a device restart
+    /// (the client's expired global session) closes the old Door and swaps in a fresh one.
+    #[cfg(feature = "native-tor")]
+    pub(super) async fn start_restartable<F, Fut>(
+        initialize: F,
+        pairing: Pairing,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(Door, Box<dyn VaultComposer>, Option<Rebuild>)>> + 'static,
+    {
+        Self::start_owned(
+            move || async move {
+                let (door, composer, rebuild) = initialize().await?;
+                Ok((door, (), Some(composer), rebuild))
             },
             pairing,
             clock,
@@ -883,7 +1027,8 @@ impl Embedded {
     ) -> Result<Self>
     where
         F: FnOnce() -> Fut + Send + 'static,
-        Fut: Future<Output = Result<(Door, G, Option<Box<dyn VaultComposer>>)>> + 'static,
+        Fut: Future<Output = Result<(Door, G, Option<Box<dyn VaultComposer>>, Option<Rebuild>)>>
+            + 'static,
         G: 'static,
     {
         validate_origin(&pairing.origin)?;
@@ -914,7 +1059,9 @@ impl Embedded {
         let pairing_clock = clock.clone();
         let (owner, token, thread) = Owner::start_retained(
             move || async move {
-                let (mut door, retained, mut composer) = initialize().await?;
+                let (mut door, retained, mut composer, rebuild) = initialize().await?;
+                let restart = rebuild
+                    .map(|rebuild| restart_paired(rebuild, pairing.clone(), pairing_clock.clone()));
                 let paired = std::panic::catch_unwind(AssertUnwindSafe(|| {
                     let now = pairing_clock.now();
                     let expires = now
@@ -923,7 +1070,7 @@ impl Embedded {
                     door.pair_client(&pairing.origin, pairing.role, pairing.actions, now, expires)
                 }));
                 match paired {
-                    Ok(Ok(token)) => Ok((door, token, retained, composer)),
+                    Ok(Ok(token)) => Ok((door, token, retained, composer, restart)),
                     failure => {
                         let _ = drain_composer(&mut composer).await;
                         match failure {
@@ -939,7 +1086,8 @@ impl Embedded {
             clock,
         )
         .await?;
-        let client = Client::new(&format!("http://{address}"), &origin, token)?;
+        let mut client = Client::new(&format!("http://{address}"), &origin, token)?;
+        client.restart = Some(owner.clone());
         let app = routes(HttpState::new(
             owner.clone(),
             BTreeSet::from([address.to_string()]),
@@ -1300,7 +1448,10 @@ pub struct Client {
     http: reqwest::Client,
     endpoint: url::Url,
     origin: String,
-    capability: ClientToken,
+    /// Replaced only by a device restart (a fresh pairing on the fresh Door).
+    capability: std::sync::Mutex<ClientToken>,
+    /// The embedded owner, for a device restart when the global session expired.
+    restart: Option<Owner>,
     /// Outcomes this client has read, acknowledged on its next request.
     acknowledged: std::sync::Mutex<Vec<String>>,
 }
@@ -1372,7 +1523,8 @@ impl Client {
             http,
             endpoint,
             origin: origin.into(),
-            capability,
+            capability: std::sync::Mutex::new(capability),
+            restart: None,
             acknowledged: std::sync::Mutex::default(),
         })
     }
@@ -1386,10 +1538,66 @@ impl Client {
     /// device stops listening or answers outside the protocol. Valid owner
     /// refusals stay unchanged in Output. No redirect is ever followed.
     pub async fn invoke_bytes(&self, request: &[u8]) -> Result<Output> {
+        let output = self.invoke_once(request).await?;
+        let (
+            Some(owner),
+            Output::Error {
+                error: ErrorCode::SessionExpired,
+            },
+        ) = (&self.restart, &output)
+        else {
+            return Ok(output);
+        };
+        // The device's global session expired: restart the device (a fresh Door through the
+        // start's unchanged path), pair again and log in by the retained device login (no
+        // ceremony). A join then repeats ONCE (each of its steps is an idempotent state); any
+        // other operation reports `session_expired` and the app's next call succeeds.
+        if self.restart_device(owner).await.is_err() {
+            return Ok(output);
+        }
+        let repeat = serde_json::from_slice::<Invocation>(request)
+            .is_ok_and(|invocation| invocation.action == REPEATED_AFTER_RESTART);
+        if !repeat {
+            return Ok(output);
+        }
+        self.invoke_once(request).await
+    }
+
+    async fn restart_device(&self, owner: &Owner) -> Result<()> {
+        let current = self.bearer_token();
+        let fresh = owner.restart(&self.origin, &current).await?;
+        *self
+            .capability
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = fresh;
+        let login = serde_json::to_vec(&Invocation {
+            action: "login.start".into(),
+            version: 1,
+            body: serde_json::json!({}),
+        })
+        .map_err(|_| ErrorCode::InvalidRequest)?;
+        match self.invoke_once(&login).await? {
+            Output::Ok { result, .. } if result["state"] == "complete" => Ok(()),
+            Output::Ok { .. } => Err(ErrorCode::SessionExpired),
+            Output::Error { error } => Err(error),
+        }
+    }
+
+    fn bearer_token(&self) -> Zeroizing<String> {
+        Zeroizing::new(
+            self.capability
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .expose_for_transport()
+                .to_owned(),
+        )
+    }
+
+    async fn invoke_once(&self, request: &[u8]) -> Result<Output> {
         if request.len() > MAX_BODY_BYTES {
             return Err(ErrorCode::Capacity);
         }
-        let bearer = Zeroizing::new(format!("Bearer {}", self.capability.expose_for_transport()));
+        let bearer = Zeroizing::new(format!("Bearer {}", self.bearer_token().as_str()));
         // Capability encoding is fixed ASCII base64url from the owner constructor.
         let mut authorization =
             HeaderValue::from_str(&bearer).expect("paired capability is fixed ASCII base64url");
