@@ -290,6 +290,7 @@ const ACTIONS: &[&str] = &[
     "inbox.wave_receive",
     "inbox.wave_jobs_recover",
     "inbox.snapshot",
+    "inbox.thread",
     "inbox.delivery_status",
     "inbox.send",
     "inbox.receive",

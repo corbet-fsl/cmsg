@@ -437,3 +437,27 @@ mod offline {
         assert!(stub.collect().await.is_empty());
     }
 }
+
+/// Every action the courier calls through its own lease is one the lease grants: a
+/// missing one is refused in a release build and panics the owner thread in a debug
+/// build (journey row 19: `inbox.thread` of the re-send scan, 2026-10-27).
+#[test]
+fn the_lease_grants_every_action_the_courier_calls() {
+    let source = include_str!("../../src/door/courier.rs");
+    let mut called = Vec::new();
+    for (at, _) in source.match_indices(".call(") {
+        let rest = source[at + ".call(".len()..].trim_start();
+        let Some(rest) = rest.strip_prefix("door,") else {
+            continue;
+        };
+        let Some(rest) = rest.trim_start().strip_prefix('"') else {
+            continue;
+        };
+        let name = &rest[..rest.find('"').unwrap()];
+        called.push(name);
+    }
+    assert!(called.len() >= 10, "found {called:?}");
+    for name in called {
+        assert!(ACTIONS.contains(&name), "the lease does not grant {name}");
+    }
+}
