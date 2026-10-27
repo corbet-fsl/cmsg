@@ -1622,7 +1622,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#162b133bb8a038b07e9435a929ca0b92eebe3eb5"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#489684e4cb541dead03dcf27de85f40aa45b3998"
 dependencies = [
  "blake3",
  "cchr",
@@ -1742,7 +1742,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cfrm"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=main#8f1b4f742048a1f8b0406ff0a146211eb1e530c6"
+source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=main#3b908b3675036c836d1752bbcbe0e850b0baf3ca"
 dependencies = [
  "cblv",
  "crbk",
@@ -1813,7 +1813,7 @@ dependencies = [
 [[package]]
 name = "cgrp"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=main#bcfd4941b760d24315093cb43957578c34bab775"
+source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=main#0285d8e5f1c1c4e3b7b73c07d80d9a923dbf4e83"
 dependencies = [
  "ckmg",
  "cmbl",
@@ -2757,7 +2757,7 @@ dependencies = [
 [[package]]
 name = "cswb"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cswb.git?branch=main#04a8afaf0239c16020ddb37a2f7830c59657edaf"
+source = "git+https://git.corbet.ch/corbet-foss/cswb.git?branch=main#c3aa3be510409344ff108ac5a61985ec6d4b8f7f"
 dependencies = [
  "cchr",
  "cmmr",
@@ -2793,7 +2793,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#9d58e85e519efeeb93ccafd4ce4b3e438db2de14"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#5960c59d2d89a38d4de85a9a26e7d5403b1d7ec4"
 dependencies = [
  "cchr",
  "cgrp",
@@ -3437,7 +3437,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98e02cd118058400797c74550dca132b57cf2e6af0e9ea0672a83eb186fd655e"
 dependencies = [
  "derive-deftly-macros",
- "heck 0.4.1",
+ "heck 0.5.0",
 ]
 
 [[package]]
@@ -3446,14 +3446,14 @@ version = "1.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba91f619216e76a5eb2515783f7ec2e271938b51aadac592f4930517f4626863"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "indexmap 2.14.2",
  "itertools 0.15.0",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
  "sha3 0.12.0",
- "strum 0.25.0",
+ "strum 0.28.0",
  "syn 3.0.6",
  "unicode-ident",
  "void",
