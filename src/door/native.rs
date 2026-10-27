@@ -22,8 +22,10 @@ pub use deployment::{DeviceSetup, DoorBuilder, NativeDeployment, RepeatableBuild
 /// Rebuilds the Door and its composer on the Door's thread through the start's unchanged path
 /// (a device restart, see [`Client::invoke_bytes`]).
 pub(super) type Rebuild = std::rc::Rc<
-    dyn Fn()
-        -> futures_util::future::LocalBoxFuture<'static, Result<(Door, Box<dyn VaultComposer>)>>,
+    dyn Fn() -> futures_util::future::LocalBoxFuture<
+        'static,
+        Result<(Door, Option<Box<dyn VaultComposer>>)>,
+    >,
 >;
 
 /// A device restart on the Door's thread: the rebuilt Door, paired again for the same client.
@@ -302,7 +304,7 @@ fn restart_paired(rebuild: Rebuild, pairing: Pairing, clock: Arc<dyn Clock>) -> 
     std::rc::Rc::new(move || {
         let (rebuild, pairing, clock) = (rebuild.clone(), pairing.clone(), clock.clone());
         Box::pin(async move {
-            let (mut door, composer) = rebuild().await?;
+            let (mut door, mut composer) = rebuild().await?;
             let now = clock.now();
             let paired = now
                 .checked_add(pairing.lifetime_seconds)
@@ -311,9 +313,9 @@ fn restart_paired(rebuild: Rebuild, pairing: Pairing, clock: Arc<dyn Clock>) -> 
                     door.pair_client(&pairing.origin, pairing.role, pairing.actions, now, expires)
                 });
             match paired {
-                Ok(token) => Ok((door, token, Some(composer))),
+                Ok(token) => Ok((door, token, composer)),
                 Err(error) => {
-                    let _ = drain_composer(&mut Some(composer)).await;
+                    let _ = drain_composer(&mut composer).await;
                     door.close_owned().await;
                     Err(error)
                 }
@@ -923,8 +925,11 @@ impl Embedded {
             actions: catalog().into_iter().map(|action| action.action).collect(),
             lifetime_seconds,
         };
-        Self::start(
-            move || async move { configuration.construct() },
+        Self::start_repeatable(
+            move || {
+                let configuration = configuration.clone();
+                async move { configuration.construct() }
+            },
             pairing,
             clock,
         )
@@ -997,9 +1002,38 @@ impl Embedded {
         .await
     }
 
-    /// [`Self::start_composed`] whose Door can be rebuilt on its thread: a device restart
-    /// (the client's expired global session) closes the old Door and swaps in a fresh one.
-    #[cfg(feature = "native-tor")]
+    /// [`Self::start`] whose Door can be rebuilt: `build` runs on the Door's thread once for
+    /// the start and once more for each device restart (the client's expired global session,
+    /// see [`Client::invoke_bytes`]), which closes the old Door and swaps in the fresh one.
+    /// The same restart as a native deployment's start ([`Self::start_restartable`]).
+    pub async fn start_repeatable<F, Fut>(
+        build: F,
+        pairing: Pairing,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self>
+    where
+        F: Fn() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<Door>> + 'static,
+    {
+        Self::start_restartable(
+            move || async move {
+                let build = std::rc::Rc::new(build);
+                let rebuild: Rebuild = std::rc::Rc::new(move || {
+                    let build = build.clone();
+                    Box::pin(async move { Ok((build().await?, None)) })
+                });
+                let (door, composer) = rebuild().await?;
+                Ok((door, composer, Some(rebuild)))
+            },
+            pairing,
+            clock,
+        )
+        .await
+    }
+
+    /// The one restartable start (a native deployment's and [`Self::start_repeatable`]'s): a
+    /// device restart (the client's expired global session) closes the old Door and swaps in
+    /// the one `Rebuild` makes.
     pub(super) async fn start_restartable<F, Fut>(
         initialize: F,
         pairing: Pairing,
@@ -1007,12 +1041,13 @@ impl Embedded {
     ) -> Result<Self>
     where
         F: FnOnce() -> Fut + Send + 'static,
-        Fut: Future<Output = Result<(Door, Box<dyn VaultComposer>, Option<Rebuild>)>> + 'static,
+        Fut: Future<Output = Result<(Door, Option<Box<dyn VaultComposer>>, Option<Rebuild>)>>
+            + 'static,
     {
         Self::start_owned(
             move || async move {
                 let (door, composer, rebuild) = initialize().await?;
-                Ok((door, (), Some(composer), rebuild))
+                Ok((door, (), composer, rebuild))
             },
             pairing,
             clock,

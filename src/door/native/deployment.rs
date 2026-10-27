@@ -214,38 +214,41 @@ impl NativeDeployment {
                 }
                 let forum = runtime.forum.take();
                 let origin = runtime.origin.clone();
-                match source {
+                // ONE repeatable builder for both sources: the start's Door is its first build
+                // and every device restart (a session renewal) builds a fresh one the same way.
+                let build: RepeatableBuilder = match source {
                     DoorSource::Runtime(setup) => {
+                        let setup = setup.map(std::rc::Rc::new);
+                        std::rc::Rc::new(move || {
+                            let (runtime, roots) = (runtime.clone(), roots.clone());
+                            let setup = setup.clone();
+                            Box::pin(async move {
+                                let mut door = runtime.construct_with_roots(&roots)?;
+                                if let Some(setup) = setup {
+                                    (*setup)(&mut door).await?;
+                                }
+                                Ok(door)
+                            })
+                        })
+                    }
+                    DoorSource::Built(build) => build(),
+                };
+                // Every build prepares the Board, builds the Door and its composer from the
+                // same sources.
+                let rebuild: super::Rebuild = std::rc::Rc::new(move || {
+                    let (build, tor, forum) = (build.clone(), tor.clone(), forum.clone());
+                    let (community, origin) = (community.clone(), origin.clone());
+                    Box::pin(async move {
                         let board = forum
                             .map(|forum| forum.prepare(&community, &origin))
                             .transpose()?;
-                        let mut door = runtime.construct_with_roots(&roots)?;
-                        if let Some(setup) = setup {
-                            setup(&mut door).await?;
-                        }
+                        let door = build().await?;
                         let composer = tor.composer(&community, board)?;
-                        Ok((door, composer, None))
-                    }
-                    DoorSource::Built(build) => {
-                        // Every build (the start's and each device restart's) prepares the
-                        // Board, builds the Door and its composer from the same sources.
-                        let build = build();
-                        let rebuild: super::Rebuild = std::rc::Rc::new(move || {
-                            let (build, tor, forum) = (build.clone(), tor.clone(), forum.clone());
-                            let (community, origin) = (community.clone(), origin.clone());
-                            Box::pin(async move {
-                                let board = forum
-                                    .map(|forum| forum.prepare(&community, &origin))
-                                    .transpose()?;
-                                let door = build().await?;
-                                let composer = tor.composer(&community, board)?;
-                                Ok((door, composer))
-                            })
-                        });
-                        let (door, composer) = rebuild().await?;
-                        Ok((door, composer, Some(rebuild)))
-                    }
-                }
+                        Ok((door, Some(composer)))
+                    })
+                });
+                let (door, composer) = rebuild().await?;
+                Ok((door, composer, Some(rebuild)))
             },
             pairing,
             clock,

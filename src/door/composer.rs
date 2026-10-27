@@ -1017,12 +1017,23 @@ where
     // channel to the global service; both are lent to this Door for that use only.
     // The wallet Door's own session is locked by the global passport's recovery
     // lease for the device's life (it must outlive this call), so creation gets the
-    // wallet companion, its sibling of the same family (no further ceremony).
-    Box::leak(Box::new(
+    // wallet companion, its sibling of the same family (no further ceremony). The same
+    // per-device slot as a registered start: a restart of this composition replaces (and
+    // closes) the previous S1 instead of keeping it forever.
+    let user = progress
+        .value
+        .community_user
+        .clone()
+        .ok_or(ComposeError::Inconsistent(
+            "a device-key member without its member id",
+        ))?;
+    retain_global_session(
+        global_origin,
+        &user,
         wallet_door
             .take_global(global_origin)
             .map_err(step("global session"))?,
-    ));
+    );
     let public = services.public(Service::Global).await?;
     door.lend_global(community_origin, global_companion, public)
         .map_err(step("global session"))?;
