@@ -1489,6 +1489,10 @@ pub struct Client {
     restart: Option<Owner>,
     /// Outcomes this client has read, acknowledged on its next request.
     acknowledged: std::sync::Mutex<Vec<String>>,
+    /// This client's token completed a login (`login.start`/`login.poll` answered
+    /// `complete`). A device restart logs in again only then, so the fresh Door stands where
+    /// the replaced one stood: a registered device that never logged in is not logged in.
+    logged_in: std::sync::atomic::AtomicBool,
 }
 
 /// What one hop of the operation protocol learned.
@@ -1561,6 +1565,7 @@ impl Client {
             capability: std::sync::Mutex::new(capability),
             restart: None,
             acknowledged: std::sync::Mutex::default(),
+            logged_in: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -1574,6 +1579,14 @@ impl Client {
     /// refusals stay unchanged in Output. No redirect is ever followed.
     pub async fn invoke_bytes(&self, request: &[u8]) -> Result<Output> {
         let output = self.invoke_once(request).await?;
+        if matches!(&output, Output::Ok { result, .. } if result["state"] == "complete")
+            && serde_json::from_slice::<Invocation>(request).is_ok_and(|invocation| {
+                matches!(invocation.action.as_str(), "login.start" | "login.poll")
+            })
+        {
+            self.logged_in
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         let (
             Some(owner),
             Output::Error {
@@ -1605,6 +1618,11 @@ impl Client {
             .capability
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = fresh;
+        // The replaced token never logged in (a registered device's Door serves without one):
+        // neither does the fresh one. Otherwise the retained device login signs in again.
+        if !self.logged_in.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(());
+        }
         let login = serde_json::to_vec(&Invocation {
             action: "login.start".into(),
             version: 1,

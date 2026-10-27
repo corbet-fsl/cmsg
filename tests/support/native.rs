@@ -630,3 +630,91 @@ async fn client_acknowledgements_are_bounded_and_pending_needs_an_operation() {
     ));
     server.abort();
 }
+
+/// The registered device's start (`Embedded::start_repeatable`, no login): its global session
+/// expires in the middle of a join, the client restarts the device (the Door built again), the
+/// join completes on the fresh Door, and the app's next call succeeds there.
+#[tokio::test]
+async fn a_session_expiring_mid_join_restarts_the_device_and_the_join_completes() {
+    use super::super::account::{
+        self, Activation, Answer, Checkpoint, Command, Enrolled, Gate, Opened,
+    };
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    type Reply = Result<Answer>;
+    fn answer(command: &Command, _: &AtomicU64) -> Reply {
+        Ok(match command {
+            Command::Join(_) => Answer::Gate(Gate {
+                ready: true,
+                steps: vec![],
+            }),
+            Command::Enroll => Answer::Enrolled(Enrolled {
+                checkpoint: Checkpoint::Ready,
+            }),
+            Command::Open => Answer::Opened(Opened { accepted_at: 1 }),
+            Command::Activate => Answer::Activated(Activation {
+                version: 1,
+                accepted_at: 1,
+                outbox_settled: true,
+            }),
+            _ => return Err(ErrorCode::Unavailable),
+        })
+    }
+    /// The gate step takes 700 s: past the 600 s session, so the join's next step expires.
+    fn slow_gate(command: &Command, now: &AtomicU64) -> Reply {
+        if matches!(command, Command::Join(_)) {
+            now.fetch_add(700, Ordering::SeqCst);
+        }
+        answer(command, now)
+    }
+    const JOIN: &[u8] = br#"{"action":"community_join","version":1,"body":{}}"#;
+    let now = Arc::new(AtomicU64::new(1_000));
+    let (builds, old, fresh): (Arc<AtomicUsize>, Arc<AtomicUsize>, Arc<AtomicUsize>) =
+        Default::default();
+    let build = {
+        let (now, builds, old, fresh) = (now.clone(), builds.clone(), old.clone(), fresh.clone());
+        move || {
+            let first = builds.fetch_add(1, Ordering::SeqCst) == 0;
+            let now = now.clone();
+            let (executed, answers): (_, fn(&Command, &AtomicU64) -> Reply) = if first {
+                (old.clone(), slow_gate)
+            } else {
+                (fresh.clone(), answer)
+            };
+            async move {
+                let mut door = Door::new(configuration());
+                door.bind_account(ORIGIN, account::timed_actor(now, executed, answers))?;
+                Ok(door)
+            }
+        }
+    };
+    let embedded = Embedded::start_repeatable(
+        build,
+        Pairing {
+            origin: ORIGIN.into(),
+            role: Role::Member,
+            actions: BTreeSet::from(["community_join".into(), "runtime.status".into()]),
+            lifetime_seconds: 60,
+        },
+        Arc::new(FixedClock),
+    )
+    .await
+    .unwrap();
+    let client = embedded.client();
+    let joined = client.invoke_bytes(JOIN).await.unwrap();
+    assert!(
+        matches!(&joined, Output::Ok { result, .. } if result["stage"] == "active"),
+        "{}",
+        serde_json::to_string(&joined).unwrap_or_default()
+    );
+    // The old Door ran the gate only; the fresh one the whole join, once.
+    assert_eq!(builds.load(Ordering::SeqCst), 2);
+    assert_eq!(old.load(Ordering::SeqCst), 1);
+    assert_eq!(fresh.load(Ordering::SeqCst), 4);
+    assert!(matches!(
+        client.invoke_bytes(STATUS).await.unwrap(),
+        Output::Ok { .. }
+    ));
+    assert_eq!(builds.load(Ordering::SeqCst), 2);
+    let (_, runtime) = embedded.into_parts();
+    runtime.shutdown().await.unwrap();
+}
