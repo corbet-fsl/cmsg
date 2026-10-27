@@ -257,6 +257,19 @@ where
             groups.room_visits(group).await.map_err(room_error)
         })
     }
+    fn room_seat_members<'a>(
+        &'a mut self,
+        group: cbrd::cgrp::Id,
+        members: &'a std::collections::BTreeSet<String>,
+    ) -> board::OwnerFuture<'a, std::collections::BTreeSet<String>> {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            groups
+                .room_seat_members(group, members)
+                .await
+                .map_err(room_error)
+        })
+    }
     fn seal_room_key<'a>(
         &'a mut self,
         task: super::RoomKeyTask<'a>,

@@ -225,6 +225,16 @@ pub trait CommittedOwner {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
 
+    /// The listed `members` whose seats count in the warm derivation: without
+    /// this device's own member while its leave of the room is pending.
+    fn room_seat_members<'a>(
+        &'a mut self,
+        _group: cbrd::cgrp::Id,
+        members: &'a std::collections::BTreeSet<String>,
+    ) -> OwnerFuture<'a, std::collections::BTreeSet<String>> {
+        Box::pin(async { Ok(members.clone()) })
+    }
+
     /// Seal this member's own profile key to a room in its current epoch.
     fn seal_room_key<'a>(
         &'a mut self,

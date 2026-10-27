@@ -2451,13 +2451,16 @@ where
 /// group id, dropped in the same commit that finishes the leave).
 const LEAVING_OWNER: &str = "room.leaving";
 
-/// How many notices a leaver issues, each bound to a newer state, before it
-/// gives up waiting for a remaining member to commit its removal and leaves
-/// locally anyway (the leaf may then stay listed until it resyncs).
+/// How many notices one signed leave of a room may issue in all (the first plus
+/// its re-issues, each bound to a newer state): a mechanics constant. After
+/// that the leave stays pending and observable, but sends nothing more.
 pub const MAX_LEAVE_NOTICES: u8 = 8;
 
-/// The minimal record of a leave in progress: no content keys, nothing the
-/// room sent. It only remembers which notice was issued at which epoch.
+/// The base fact of a leave in progress: this member signed a Leave for the
+/// room. No content keys, nothing the room sent, no flag: only the count of
+/// notices issued for that Leave and the epoch the last one was bound to. Whether
+/// the leave is still PENDING is derived (`room_leaving`): the record exists and
+/// the room's group still lists this member.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Leaving {
     room: [u8; 16],
@@ -2474,9 +2477,6 @@ pub enum LeaveProgress {
     /// A remaining member committed the removal and this device dropped its room
     /// records in one commit.
     Left,
-    /// No member removed this device within [`MAX_LEAVE_NOTICES`] notices: it
-    /// dropped its room records anyway.
-    Abandoned,
 }
 
 /// What advancing a leave in progress takes.
@@ -2496,12 +2496,51 @@ where
     A: ckmg::Authority,
     R: cvlt::Records,
 {
-    /// The notices issued so far when a leave of `group` is in progress.
+    /// The notices issued so far when a leave of `group` is PENDING. Derived, not
+    /// stored: this member signed a Leave for the room (the record) and the
+    /// room's group still lists this member. It ends by itself once the group no
+    /// longer lists this member.
     pub async fn room_leaving(
         &mut self,
         group: cgrp::Id,
     ) -> std::result::Result<Option<u8>, ctnd::Error> {
-        Ok(self.read_leaving(group).await?.map(|record| record.attempts))
+        let Some(record) = self.read_leaving(group).await? else {
+            return Ok(None);
+        };
+        Ok(self
+            .room_lists_me(group)
+            .await?
+            .then_some(record.attempts))
+    }
+
+    /// Whether the group snapshot this device holds still lists its own member.
+    async fn room_lists_me(&mut self, group: cgrp::Id) -> std::result::Result<bool, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let mut retained = self.retained.lock().await;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let storage = custody.vault.storage().clone();
+        let store = storage.lock().await;
+        let snapshot =
+            cgrp::Snapshot::load(custody.binding.community(), &store).map_err(|_| Fail::Storage)?;
+        Ok(snapshot
+            .members(&group)
+            .is_ok_and(|members| members.contains(&self.member)))
+    }
+
+    /// The members whose seats count for `group`'s warm derivation: the listed
+    /// `members` without this device's own member while its leave is pending (a
+    /// leave frees the seat at once, not when the Remove arrives).
+    pub async fn room_seat_members(
+        &mut self,
+        group: cgrp::Id,
+        members: &std::collections::BTreeSet<String>,
+    ) -> std::result::Result<std::collections::BTreeSet<String>, ctnd::Error> {
+        let mut seated = members.clone();
+        if self.room_leaving(group).await?.is_some() {
+            seated.remove(&self.member);
+        }
+        Ok(seated)
     }
 
     async fn read_leaving(
@@ -2662,9 +2701,10 @@ where
     /// Advance a leave in progress: follow the room's commits like any member
     /// (but adopt no content key and send nothing), finish as soon as a remaining
     /// member committed the removal, and otherwise re-issue the notice bound to
-    /// the state this device holds now whenever its epoch moved on (a notice
-    /// bound to an older state is refused). After [`MAX_LEAVE_NOTICES`] notices
-    /// it leaves locally anyway.
+    /// the state this device holds now whenever an exchange with the room moved
+    /// its epoch on (a notice bound to an older state is refused). Nothing is
+    /// issued without that exchange, and never more than [`MAX_LEAVE_NOTICES`]
+    /// notices for one leave; after that the leave stays pending, sends nothing.
     pub async fn advance_room_leave<T, L>(
         &mut self,
         board: &cbrd::Board<T, L>,
@@ -2698,8 +2738,7 @@ where
             )
             .await?;
         let epoch = self.room_keys_standing(group).await?.epoch;
-        let abandoned = !synced.removed && epoch != record.epoch && record.attempts >= MAX_LEAVE_NOTICES;
-        if synced.removed || abandoned {
+        if synced.removed {
             let (candidate, _, _, _) = cbrd::prepare_group_intent(
                 self,
                 policy,
@@ -2714,13 +2753,9 @@ where
                 policy,
             })
             .await?;
-            return Ok(if synced.removed {
-                LeaveProgress::Left
-            } else {
-                LeaveProgress::Abandoned
-            });
+            return Ok(LeaveProgress::Left);
         }
-        if epoch != record.epoch {
+        if epoch != record.epoch && record.attempts < MAX_LEAVE_NOTICES {
             let (_, _, _, request) = cbrd::prepare_group_intent(
                 self,
                 policy,

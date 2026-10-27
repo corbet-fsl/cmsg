@@ -674,9 +674,11 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         now: u64,
     ) -> Option<Vec<u64>> {
         use cbrd::cgrp::TICK_SECONDS;
-        let eligible = snapshot.members(group).ok()?;
+        let listed = snapshot.members(group).ok()?;
+        // A leave frees the leaver's seat at once: its pending leave unseats it.
+        let eligible = self.owner.room_seat_members(*group, listed).await.ok()?;
         let facts = self.owner.room_visits(*group).await.ok()?;
-        let ends = cbrd::cgrp::warm_ends(&facts, group, eligible, now / TICK_SECONDS).ok()?;
+        let ends = cbrd::cgrp::warm_ends(&facts, group, &eligible, now / TICK_SECONDS).ok()?;
         Some(ends.into_iter().map(|end| end * TICK_SECONDS).collect())
     }
 
