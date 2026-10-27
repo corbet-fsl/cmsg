@@ -318,10 +318,14 @@ async fn established(bond: [u8; 32]) -> Chatters {
     let sponsor_ports = Ports {
         lineage: lineage_of(&newcomer).await,
         lifetime: 3600,
+        member: true,
+        readable: true,
     };
     let newcomer_ports = Ports {
         lineage: lineage_of(&sponsor).await,
         lifetime: 3600,
+        member: true,
+        readable: true,
     };
     let conversation = sponsor.contact_by_voucher(&newcomer_id, bond).await.unwrap();
     newcomer.contact_by_voucher(&sponsor_id, bond).await.unwrap();
