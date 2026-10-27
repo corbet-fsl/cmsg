@@ -64,6 +64,7 @@ pub mod record;
 pub mod record_job;
 mod registry;
 pub(crate) mod rooms;
+mod transient;
 mod voucher_thread;
 mod vouching;
 #[cfg(not(target_arch = "wasm32"))]

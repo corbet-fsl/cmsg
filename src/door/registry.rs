@@ -398,10 +398,19 @@ async fn community_join(
     // A deadline that still passes mid-join restarts the join ONCE under a fresh
     // session: authority, intents and actor are rebuilt from that session and
     // the server state (every step is an idempotent state), never carried over.
-    match join_once(door, key, request.clone()).await {
+    // A transient refusal (Unavailable, Reconcile) repeats the join inside the
+    // session's own deadline: every step is idempotent on the server.
+    let joined = transient::absorb(door, &origin, async |door: &mut Door| {
+        join_once(door, key, request.clone()).await
+    })
+    .await;
+    match joined {
         Err(ErrorCode::SessionExpired) if door.session_renewal.is_some() => {
             renew_session(door, &origin).await?;
-            join_once(door, key, request).await
+            transient::absorb(door, &origin, async |door: &mut Door| {
+                join_once(door, key, request.clone()).await
+            })
+            .await
         }
         joined => joined,
     }
@@ -860,6 +869,95 @@ mod session_tests {
         assert_eq!(s.old.load(Ordering::SeqCst), 0);
         assert_eq!(s.fresh.load(Ordering::SeqCst), 0);
         assert!(!s.door.accounts.contains_key(ORIGIN));
+    }
+
+    /// The first Open answers Reconcile (a lost answer under load), every later one succeeds.
+    fn reconcile_once(command: &Command, now: &AtomicU64) -> Reply {
+        if matches!(command, Command::Open) && now.load(Ordering::SeqCst) == 1_000 {
+            now.fetch_add(1, Ordering::SeqCst);
+            return Err(ErrorCode::Reconcile);
+        }
+        answer(command)
+    }
+
+    /// Every Open answers Reconcile and takes no time.
+    fn reconcile_always(command: &Command, now: &AtomicU64) -> Reply {
+        if matches!(command, Command::Open) {
+            return Err(ErrorCode::Reconcile);
+        }
+        answer(command)
+    }
+
+    /// Open answers Reconcile and uses the session's runway up to its last second.
+    fn reconcile_at_the_deadline(command: &Command, now: &AtomicU64) -> Reply {
+        if matches!(command, Command::Open) {
+            now.fetch_add(599, Ordering::SeqCst);
+            return Err(ErrorCode::Reconcile);
+        }
+        answer(command)
+    }
+
+    /// Open answers a deterministic refusal.
+    fn unauthorized_open(command: &Command, _: &AtomicU64) -> Reply {
+        if matches!(command, Command::Open) {
+            return Err(ErrorCode::Unauthorized);
+        }
+        answer(command)
+    }
+
+    async fn join_waiting(door: &mut Door) -> Result<Joined> {
+        community_join(door, &KEY, Default::default())
+            .await
+            .map(|(joined, _)| joined)
+    }
+
+    /// Commands one join attempt executes up to its failing Open (Join, Enroll, Open).
+    const UP_TO_OPEN: usize = 3;
+
+    #[tokio::test(start_paused = true)]
+    async fn a_transient_reconcile_is_absorbed_and_the_join_resumes() {
+        let mut s = setup(reconcile_once, None);
+        assert!(matches!(
+            join_waiting(&mut s.door).await,
+            Ok(Joined::Active { .. })
+        ));
+        // The failed attempt, then one full join (Join, Enroll, Open, Activate).
+        assert_eq!(s.old.load(Ordering::SeqCst), UP_TO_OPEN + 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_persistent_transient_ends_in_the_typed_error_after_the_bounded_attempts() {
+        let mut s = setup(reconcile_always, None);
+        assert_eq!(
+            join_waiting(&mut s.door).await.err(),
+            Some(ErrorCode::Reconcile)
+        );
+        assert!(transient::ATTEMPTS > 1);
+        assert_eq!(
+            s.old.load(Ordering::SeqCst),
+            UP_TO_OPEN * transient::ATTEMPTS as usize
+        );
+        assert!(s.now.load(Ordering::SeqCst) < 1_600, "before the deadline");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_repeat_starts_when_its_pause_would_not_end_before_the_deadline() {
+        let mut s = setup(reconcile_at_the_deadline, None);
+        assert_eq!(
+            join_waiting(&mut s.door).await.err(),
+            Some(ErrorCode::Reconcile)
+        );
+        assert_eq!(s.old.load(Ordering::SeqCst), UP_TO_OPEN);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_deterministic_refusal_is_never_repeated() {
+        let mut s = setup(unauthorized_open, None);
+        assert_eq!(
+            join_waiting(&mut s.door).await.err(),
+            Some(ErrorCode::Unauthorized)
+        );
+        assert_eq!(s.old.load(Ordering::SeqCst), UP_TO_OPEN);
     }
 
     #[test]
