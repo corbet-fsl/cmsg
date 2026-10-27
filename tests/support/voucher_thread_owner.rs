@@ -327,8 +327,14 @@ async fn established(bond: [u8; 32]) -> Chatters {
         member: true,
         readable: true,
     };
-    let conversation = sponsor.contact_by_voucher(&newcomer_id, bond).await.unwrap();
-    newcomer.contact_by_voucher(&sponsor_id, bond).await.unwrap();
+    let conversation = sponsor
+        .contact_by_voucher(&newcomer_id, bond)
+        .await
+        .unwrap();
+    newcomer
+        .contact_by_voucher(&sponsor_id, bond)
+        .await
+        .unwrap();
     let package = newcomer
         .voucher_key_package(conversation, &newcomer_ports)
         .await
@@ -405,7 +411,14 @@ async fn the_thread_lists_every_message_with_its_delivery_state() {
 
     // A sent message waits for the receipt: Pending on the sender, absent for
     // the recipient.
-    let one = say(&mut c.sponsor, &c.sponsor_ports, &newcomer_id, c.conversation, "one").await;
+    let one = say(
+        &mut c.sponsor,
+        &c.sponsor_ports,
+        &newcomer_id,
+        c.conversation,
+        "one",
+    )
+    .await;
     assert_eq!(
         rows(&mut c.sponsor, c.conversation).await,
         vec![(sponsor_id.clone(), b"one".to_vec(), Some(Pending))]
@@ -428,7 +441,14 @@ async fn the_thread_lists_every_message_with_its_delivery_state() {
 
     // A reply in flight appears after the first message, only on its sender, and
     // the thread keeps the order of the history.
-    let two = say(&mut c.newcomer, &c.newcomer_ports, &sponsor_id, c.conversation, "two").await;
+    let two = say(
+        &mut c.newcomer,
+        &c.newcomer_ports,
+        &sponsor_id,
+        c.conversation,
+        "two",
+    )
+    .await;
     assert_eq!(
         rows(&mut c.newcomer, c.conversation).await,
         vec![
@@ -456,7 +476,14 @@ async fn the_thread_lists_every_message_with_its_delivery_state() {
 async fn the_thread_of_another_conversation_stays_empty() {
     let mut c = established([6; 32]).await;
     let newcomer_id = c.newcomer_id.clone();
-    say(&mut c.sponsor, &c.sponsor_ports, &newcomer_id, c.conversation, "private").await;
+    say(
+        &mut c.sponsor,
+        &c.sponsor_ports,
+        &newcomer_id,
+        c.conversation,
+        "private",
+    )
+    .await;
     assert_eq!(rows(&mut c.sponsor, c.conversation).await.len(), 1);
     assert!(rows(&mut c.sponsor, [9; 32]).await.is_empty());
 }

@@ -73,9 +73,14 @@ fn only_the_own_sends_waiting_for_a_receipt_are_scanned_and_newest_first() {
     assert_eq!(pending_ids(&thread), vec![[5; 32], [2; 32]]);
     // Anything that is not a thread, or an entry without an id, yields nothing.
     assert!(pending_ids(&json!({"history": []})).is_empty());
-    assert!(pending_ids(&json!([{"status": "Pending"}, {"message": {"id": "x"}, "status": "Pending"}])).is_empty());
+    assert!(pending_ids(
+        &json!([{"status": "Pending"}, {"message": {"id": "x"}, "status": "Pending"}])
+    )
+    .is_empty());
     // The scan is bounded to the newest sends.
-    let many: Vec<Value> = (0..=u8::MAX).map(|id| entry(id, json!("Pending"))).collect();
+    let many: Vec<Value> = (0..=u8::MAX)
+        .map(|id| entry(id, json!("Pending")))
+        .collect();
     let found = pending_ids(&Value::Array(many));
     assert_eq!(found.len(), MAX_SCAN_MESSAGES);
     assert_eq!(found[0], [u8::MAX; 32]);
@@ -244,9 +249,15 @@ mod isolation {
         let shared = door.courier_shared(&a).unwrap();
         let mut left = BTreeSet::new();
         // Nothing bound yet: no route and no mailbox is a failure to retry.
-        assert_eq!(deliver(&shared, &offline::chat("bob"), &mut left).await, None);
+        assert_eq!(
+            deliver(&shared, &offline::chat("bob"), &mut left).await,
+            None
+        );
         door.bind_mailbox(&a, mailbox.clone()).unwrap();
-        assert_eq!(deliver(&shared, &offline::chat("bob"), &mut left).await, Some(false));
+        assert_eq!(
+            deliver(&shared, &offline::chat("bob"), &mut left).await,
+            Some(false)
+        );
         {
             let held = mailbox.left.borrow();
             assert_eq!(held.len(), 1);
@@ -258,11 +269,17 @@ mod isolation {
             assert!(accept_left(&held[0].1));
         }
         // The frames of one session leave once; a wave never waits.
-        assert_eq!(deliver(&shared, &offline::chat("bob"), &mut left).await, Some(false));
+        assert_eq!(
+            deliver(&shared, &offline::chat("bob"), &mut left).await,
+            Some(false)
+        );
         assert_eq!(mailbox.left.borrow().len(), 1);
         let wave = Outgoing {
             peer: "bob".into(),
-            body: Body::WaveAck { nonce: [7; 32], kind: "hello".into() },
+            body: Body::WaveAck {
+                nonce: [7; 32],
+                kind: "hello".into(),
+            },
         };
         assert_eq!(deliver(&shared, &wave, &mut left).await, None);
         assert_eq!(mailbox.left.borrow().len(), 1);
@@ -315,7 +332,9 @@ mod offline {
                 if self.full.get() {
                     return false;
                 }
-                self.left.borrow_mut().push((peer.to_owned(), frame.to_vec()));
+                self.left
+                    .borrow_mut()
+                    .push((peer.to_owned(), frame.to_vec()));
                 true
             })
         }
@@ -327,32 +346,55 @@ mod offline {
     pub(super) fn chat(peer: &str) -> Outgoing {
         Outgoing {
             peer: peer.into(),
-            body: Body::Chat { conversation: [1; 32], wire: vec![9] },
+            body: Body::Chat {
+                conversation: [1; 32],
+                wire: vec![9],
+            },
         }
     }
 
     #[test]
     fn only_chat_wires_and_receipts_may_wait() {
         assert!(offline_body(&chat("p").body));
-        assert!(offline_body(&Body::Receipt { conversation: [1; 32], wire: vec![] }));
-        assert!(!offline_body(&Body::WaveAck { nonce: [0; 32], kind: "x".into() }));
+        assert!(offline_body(&Body::Receipt {
+            conversation: [1; 32],
+            wire: vec![]
+        }));
+        assert!(!offline_body(&Body::WaveAck {
+            nonce: [0; 32],
+            kind: "x".into()
+        }));
     }
 
     #[test]
     fn only_current_chat_and_receipt_frames_are_taken_from_the_mailbox() {
         let frame = |version: u8, body: Body| {
-            serde_json::to_vec(&Frame { version, reach: vec![], body }).unwrap()
+            serde_json::to_vec(&Frame {
+                version,
+                reach: vec![],
+                body,
+            })
+            .unwrap()
         };
-        let chat_body = || Body::Chat { conversation: [1; 32], wire: vec![1] };
+        let chat_body = || Body::Chat {
+            conversation: [1; 32],
+            wire: vec![1],
+        };
         assert!(accept_left(&frame(FRAME_VERSION, chat_body())));
         assert!(accept_left(&frame(
             FRAME_VERSION,
-            Body::Receipt { conversation: [1; 32], wire: vec![1] }
+            Body::Receipt {
+                conversation: [1; 32],
+                wire: vec![1]
+            }
         )));
         // A wave is first contact: a mailbox cannot carry one into the Door.
         assert!(!accept_left(&frame(
             FRAME_VERSION,
-            Body::WaveAck { nonce: [0; 32], kind: "x".into() }
+            Body::WaveAck {
+                nonce: [0; 32],
+                kind: "x".into()
+            }
         )));
         assert!(!accept_left(&frame(FRAME_VERSION + 1, chat_body())));
         assert!(!accept_left(b"not a frame"));

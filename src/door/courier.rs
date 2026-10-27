@@ -1071,7 +1071,12 @@ async fn leave_offline(
     if !offline_body(&item.body) {
         return false;
     }
-    let key = [item.peer.as_bytes(), &[0], &serde_json::to_vec(&item.body).unwrap_or_default()].concat();
+    let key = [
+        item.peer.as_bytes(),
+        &[0],
+        &serde_json::to_vec(&item.body).unwrap_or_default(),
+    ]
+    .concat();
     if left.contains(&key) {
         return true;
     }
@@ -1100,7 +1105,9 @@ async fn deliver(shared: &Shared, item: &Outgoing, left: &mut BTreeSet<Vec<u8>>)
         return Some(true);
     }
     let mailbox = shared.mailbox.borrow().clone();
-    leave_offline(mailbox, left, item, &bytes).await.then_some(false)
+    leave_offline(mailbox, left, item, &bytes)
+        .await
+        .then_some(false)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
