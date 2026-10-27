@@ -453,6 +453,9 @@ pub(super) async fn heartbeat(
         cfrm::Request::Heartbeat(cfrm::HeartbeatInput {
             possession: possession(),
             expected_revision: vec![],
+            // TODO(P8b budget port): the live union Wave budget from the account
+            // engine; until it is read, unknown (None) keeps the member visible.
+            accepting_waves: None,
         }),
     )
     .await?;
