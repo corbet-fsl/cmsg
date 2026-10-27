@@ -617,14 +617,14 @@ where
         )?;
         let context = cpky::Context::new(&settings.global.passkey_origin, &settings.global.rp_id)
             .map_err(|__cause| {
-                crate::door::cause::emit(
-                    file!(),
-                    line!(),
-                    "super::ErrorCode::InvalidRequest",
-                    super::ErrorCode::InvalidRequest,
-                    &__cause,
-                )
-            })?;
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "super::ErrorCode::InvalidRequest",
+                super::ErrorCode::InvalidRequest,
+                &__cause,
+            )
+        })?;
         let mut keys = DeviceKeys::new(
             Client::new(context, (self.authenticator)()),
             &settings.global.passkey_origin,
