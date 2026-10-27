@@ -1813,7 +1813,7 @@ dependencies = [
 [[package]]
 name = "cgrp"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=main#c383eeb892112500000912a17c687a46f749f63c"
+source = "git+https://git.corbet.ch/corbet-foss/cgrp.git?branch=main#f26826eb3a9cf36f916d594d345f26e9cd452321"
 dependencies = [
  "ckmg",
  "cmbl",
@@ -1945,7 +1945,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=main#befe18c13499b4f6da3eed9a7b5e449452812921"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=main#d7a21fede659607c69bd9a36a3a3297e919717de"
 dependencies = [
  "arti-client",
  "blake3",
@@ -2076,7 +2076,7 @@ dependencies = [
 [[package]]
 name = "cmbl"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=main#ec7a9f0a2684d4d9a9ccff178c506db209eaa3e1"
+source = "git+https://git.corbet.ch/corbet-foss/cmbl.git?branch=main#aca0f1fe38acf24fa1350cdfd730d1aa91faea60"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
@@ -2095,7 +2095,7 @@ dependencies = [
 [[package]]
 name = "cmmr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cmmr.git?branch=main#9e5b6b05077b66865ad5aff8c369bf32127d068d"
+source = "git+https://git.corbet.ch/corbet-foss/cmmr.git?branch=main#87a8db3a48ec37440344aa6c810f9ca02cdb3958"
 dependencies = [
  "serde",
 ]
@@ -2433,7 +2433,7 @@ dependencies = [
 [[package]]
 name = "cpfl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cpfl.git?branch=main#0e61663ff68e7f561b44ab813e01c103a6065f98"
+source = "git+https://git.corbet.ch/corbet-foss/cpfl.git?branch=main#9e950450349e29e2f73010839493a5ba2b60eed0"
 dependencies = [
  "blake3",
  "cgrd",
@@ -2501,7 +2501,7 @@ dependencies = [
 [[package]]
 name = "cprz"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#aaf54c7c9681c236c97068648fce3ddc02bcc990"
+source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#c8d4d04f2af0d7019b4236d38077ece0d4e82691"
 dependencies = [
  "cprz-blob",
 ]
@@ -2509,7 +2509,7 @@ dependencies = [
 [[package]]
 name = "cprz-blob"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#aaf54c7c9681c236c97068648fce3ddc02bcc990"
+source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#c8d4d04f2af0d7019b4236d38077ece0d4e82691"
 dependencies = [
  "brotli",
 ]
@@ -2517,7 +2517,7 @@ dependencies = [
 [[package]]
 name = "cprz-pad"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#aaf54c7c9681c236c97068648fce3ddc02bcc990"
+source = "git+https://git.corbet.ch/corbet-foss/cprz.git?branch=main#c8d4d04f2af0d7019b4236d38077ece0d4e82691"
 
 [[package]]
 name = "cpsd"
@@ -2781,7 +2781,7 @@ checksum = "8fd9f3db6f2cfef61c10613071955154ffdc9e515daebff26de4b54e35038fdd"
 [[package]]
 name = "ctcs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=main#47e4b5549e121e88e9510707ed91cd6065b53242"
+source = "git+https://git.corbet.ch/corbet-foss/ctcs.git?branch=main#a702fcac671ba7072958b3a1f93257a02b01f7ff"
 dependencies = [
  "ckmg",
  "cwst",
@@ -2793,7 +2793,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#f098caf647e5cb1181001009f6492dba970db812"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#318f22882696320b68336d92f6faab2c78991c4f"
 dependencies = [
  "cchr",
  "cgrp",
@@ -3041,7 +3041,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#75bbdd1183abb8fb92e1d313fe4155a7f8b6a7c3"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#c795c5c8bd302d60762d4884daa15d376163612f"
 dependencies = [
  "acvm",
  "barretenberg-rs",
