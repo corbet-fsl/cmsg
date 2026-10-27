@@ -1622,7 +1622,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#489684e4cb541dead03dcf27de85f40aa45b3998"
+source = "git+https://git.corbet.ch/corbet-libs/cbrd.git?branch=main#7230db75a6d07a25f757c692e10f222146ba4bf9"
 dependencies = [
  "blake3",
  "cchr",
@@ -1742,7 +1742,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cfrm"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=main#3b908b3675036c836d1752bbcbe0e850b0baf3ca"
+source = "git+https://git.corbet.ch/corbet-libs/cfrm.git?branch=main#6609f944ced1f2eb74f903002f40f01cafe96d27"
 dependencies = [
  "cblv",
  "crbk",
@@ -2745,7 +2745,7 @@ dependencies = [
 [[package]]
 name = "csrh"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/csrh.git?branch=main#b3f258408a5e671b3f998c5cd7f3cd583f9de4ac"
+source = "git+https://git.corbet.ch/corbet-foss/csrh.git?branch=main#cf97e56c80ccde6617937de9c1066892befc7ddd"
 dependencies = [
  "cgrd",
  "cpfl",
@@ -2757,7 +2757,7 @@ dependencies = [
 [[package]]
 name = "cswb"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cswb.git?branch=main#c3aa3be510409344ff108ac5a61985ec6d4b8f7f"
+source = "git+https://git.corbet.ch/corbet-foss/cswb.git?branch=main#2b688bef9744f0d02bbca6461a8d521c93bcdff8"
 dependencies = [
  "cchr",
  "cmmr",
