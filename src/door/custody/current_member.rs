@@ -31,6 +31,12 @@ fn shape(request: &Authorization<'_>, purpose: Purpose) -> Result<(), Error> {
         || (request.statement.is_some() != (purpose == Purpose::AccountSigning))
         || !request.evidence.is_empty()
     {
+        crate::door::cause::print(
+            file!(),
+            line!(),
+            "current_member refusal",
+            &Error::Unauthorized,
+        );
         return Err(Error::Unauthorized);
     }
     match purpose {
@@ -69,7 +75,9 @@ fn verify_read(
     stamps: Option<&cvlt::StampTrust>,
     now: u64,
 ) -> Result<u64, Error> {
-    lifetime.check(request)?;
+    lifetime
+        .check(request)
+        .inspect_err(|__e| crate::door::cause::print(file!(), line!(), "current_member", __e))?;
     if charter.community() != request.binding.community()
         || observed.member != request.binding.member()
         || !observed.device_keys.contains(request.device.value())
@@ -85,8 +93,10 @@ fn verify_read(
                     Error::Unauthorized,
                     &__cause,
                 )
-            })?
+            })
+            .inspect_err(|__e| crate::door::cause::print(file!(), line!(), "current_member", __e))?
     {
+        crate::door::cause::print(file!(), line!(), "current_member refusal", &Error::Revoked);
         return Err(Error::Revoked);
     }
     let mut selected: Option<cvlt::VerifiedLineageObservation<'_>> = None;
@@ -101,6 +111,9 @@ fn verify_read(
                     Error::Unauthorized,
                     &__cause,
                 )
+            })
+            .inspect_err(|__e| {
+                crate::door::cause::print(file!(), line!(), "current_member", __e)
             })?;
         let wins = match &selected {
             None => true,
@@ -114,6 +127,9 @@ fn verify_read(
                         Error::Unauthorized,
                         &__cause,
                     )
+                })
+                .inspect_err(|__e| {
+                    crate::door::cause::print(file!(), line!(), "current_member", __e)
                 })?
                 .is_gt(),
         };
@@ -121,21 +137,34 @@ fn verify_read(
             selected = Some(candidate);
         }
     }
-    let selected = selected.ok_or(Error::Unavailable)?;
-    lifetime.observe_lineage(&selected, now)?;
-    let lineage = selected.lineage(now).map_err(|__cause| {
-        crate::door::cause::emit(
-            file!(),
-            line!(),
-            "Error::Unauthorized",
-            Error::Unauthorized,
-            &__cause,
-        )
-    })?;
+    let selected = selected
+        .ok_or(Error::Unavailable)
+        .inspect_err(|__e| crate::door::cause::print(file!(), line!(), "current_member", __e))?;
+    lifetime
+        .observe_lineage(&selected, now)
+        .inspect_err(|__e| crate::door::cause::print(file!(), line!(), "current_member", __e))?;
+    let lineage = selected
+        .lineage(now)
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "Error::Unauthorized",
+                Error::Unauthorized,
+                &__cause,
+            )
+        })
+        .inspect_err(|__e| crate::door::cause::print(file!(), line!(), "current_member", __e))?;
     if &lineage.binding != request.binding
         || request.root != Some(lineage.root)
         || request.epoch != lineage.epoch
     {
+        crate::door::cause::print(
+            file!(),
+            line!(),
+            "current_member refusal",
+            &Error::Unauthorized,
+        );
         return Err(Error::Unauthorized);
     }
     let mut until = selected
@@ -147,6 +176,7 @@ fn verify_read(
             .signing
             .is_some_and(|signing| signing.expires > until || now >= signing.expires)
     {
+        crate::door::cause::print(file!(), line!(), "current_member refusal", &Error::Expired);
         return Err(Error::Expired);
     }
     if let Some(signing) = request.signing {
@@ -170,7 +200,9 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         purpose: Purpose,
     ) -> Result<(), Error> {
         self.discard_pending_current();
-        self.live.lifetime.check(&request)?;
+        self.live.lifetime.check(&request).inspect_err(|__e| {
+            crate::door::cause::print(file!(), line!(), "current_member", __e)
+        })?;
         let mut guard = CheckGuard::new(&self.live.lifetime);
         let result = self.scoped_current(request, purpose).await;
         guard.settle(&result);
@@ -184,11 +216,19 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         mut request: Authorization<'_>,
         purpose: Purpose,
     ) -> Result<(), Error> {
-        shape(&request, purpose)?;
+        shape(&request, purpose).inspect_err(|__e| {
+            crate::door::cause::print(file!(), line!(), "current_member", __e)
+        })?;
         let account_armed = self.account.as_ref().is_some_and(|a| a.armed.get());
         match purpose {
             Purpose::DeviceSigning if self.intent.is_none() && !account_armed => {
-                return Err(Error::Unauthorized)
+                crate::door::cause::print(
+                    file!(),
+                    line!(),
+                    "current_member refusal",
+                    &Error::Unauthorized,
+                );
+                return Err(Error::Unauthorized);
             }
             Purpose::AccountSigning if self.intent.is_none() => return Err(Error::Unauthorized),
             Purpose::AccountDevice if !account_armed => return Err(Error::Unauthorized),
@@ -197,9 +237,19 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         self.live.observe(&request).await?;
         // The node transport can check its own owner while this forced read
         // awaits: no source session guard is retained until after the read.
-        let read = self.records.read().await.map_err(records_refusal)?;
-        let started = self.live.clock.now()?;
+        let read = self
+            .records
+            .read()
+            .await
+            .map_err(records_refusal)
+            .inspect_err(|__e| {
+                crate::door::cause::print(file!(), line!(), "current_member", __e)
+            })?;
+        let started = self.live.clock.now().inspect_err(|__e| {
+            crate::door::cause::print(file!(), line!(), "current_member", __e)
+        })?;
         if started < request.now || started < self.live.last_time {
+            crate::door::cause::print(file!(), line!(), "current_member refusal", &Error::Clock);
             return Err(Error::Clock);
         }
         self.live.last_time = started;
@@ -222,9 +272,12 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
             .await;
         self.live.last_time = floor;
         if failed {
+            crate::door::cause::print(file!(), line!(), "current_member refusal", &Error::Clock);
             return Err(Error::Clock);
         }
-        let mut lease = observed.map_err(foyer_refusal)?;
+        let mut lease = observed.map_err(foyer_refusal).inspect_err(|__e| {
+            crate::door::cause::print(file!(), line!(), "current_member", __e)
+        })?;
         let lifetime = &self.live.lifetime;
         let expected_origin = &self.live.origin;
         let clock = &mut self.live.clock;
@@ -243,6 +296,12 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
             },
             |charter, observed, credential, origin, now| {
                 if origin != expected_origin {
+                    crate::door::cause::print(
+                        file!(),
+                        line!(),
+                        "current_member refusal",
+                        &Error::Unauthorized,
+                    );
                     return Err(Error::Unauthorized);
                 }
                 verify_read(
@@ -252,10 +311,14 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         );
         self.live.last_time = floor;
         if failed {
+            crate::door::cause::print(file!(), line!(), "current_member refusal", &Error::Clock);
             return Err(Error::Clock);
         }
-        let (until, completed) = checked.map_err(foyer_refusal)?;
+        let (until, completed) = checked.map_err(foyer_refusal).inspect_err(|__e| {
+            crate::door::cause::print(file!(), line!(), "current_member", __e)
+        })?;
         if completed >= until? {
+            crate::door::cause::print(file!(), line!(), "current_member refusal", &Error::Expired);
             return Err(Error::Expired);
         }
         request.now = completed;
@@ -273,22 +336,41 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
                         super::AccountChannel::Delegation => &mut account.delegation,
                         super::AccountChannel::Request => &mut account.request,
                     };
-                    verifier.consume(&request, &origin)?;
+                    verifier.consume(&request, &origin).inspect_err(|__e| {
+                        crate::door::cause::print(file!(), line!(), "current_member", __e)
+                    })?;
                 }
                 _ => self
                     .intent
                     .as_mut()
-                    .ok_or(Error::Unauthorized)?
-                    .consume(&request, &origin)?,
+                    .ok_or(Error::Unauthorized)
+                    .inspect_err(|__e| {
+                        crate::door::cause::print(file!(), line!(), "current_member", __e)
+                    })?
+                    .consume(&request, &origin)
+                    .inspect_err(|__e| {
+                        crate::door::cause::print(file!(), line!(), "current_member", __e)
+                    })?,
             }
-            let signing = request.signing.ok_or(Error::Unauthorized)?;
+            let signing = request
+                .signing
+                .ok_or(Error::Unauthorized)
+                .inspect_err(|__e| {
+                    crate::door::cause::print(file!(), line!(), "current_member", __e)
+                })?;
             Some((signing.transcript.to_vec(), signing.expires))
         } else {
             if purpose == Purpose::AccountSigning {
                 self.intent
                     .as_mut()
-                    .ok_or(Error::Unauthorized)?
-                    .consume(&request, &self.live.origin)?;
+                    .ok_or(Error::Unauthorized)
+                    .inspect_err(|__e| {
+                        crate::door::cause::print(file!(), line!(), "current_member", __e)
+                    })?
+                    .consume(&request, &self.live.origin)
+                    .inspect_err(|__e| {
+                        crate::door::cause::print(file!(), line!(), "current_member", __e)
+                    })?;
             }
             None
         };
@@ -296,7 +378,9 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
             lease,
             read,
             binding: request.binding.clone(),
-            root: request.root.ok_or(Error::Unauthorized)?,
+            root: request.root.ok_or(Error::Unauthorized).inspect_err(|__e| {
+                crate::door::cause::print(file!(), line!(), "current_member", __e)
+            })?,
             device: request.device,
             epoch: request.epoch,
             purpose,
@@ -317,7 +401,13 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         request: Authorization<'_>,
         purpose: Purpose,
     ) -> Result<u64, Error> {
-        let pending = self.pending_current.take().ok_or(Error::Unauthorized)?;
+        let pending = self
+            .pending_current
+            .take()
+            .ok_or(Error::Unauthorized)
+            .inspect_err(|__e| {
+                crate::door::cause::print(file!(), line!(), "current_member", __e)
+            })?;
         let mut guard = CheckGuard::new(&self.live.lifetime);
         let result = self.finish_pending(pending, request, purpose);
         guard.settle(&result);
@@ -330,7 +420,9 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         request: Authorization<'_>,
         purpose: Purpose,
     ) -> Result<u64, Error> {
-        shape(&request, purpose)?;
+        shape(&request, purpose).inspect_err(|__e| {
+            crate::door::cause::print(file!(), line!(), "current_member", __e)
+        })?;
         if pending.purpose != purpose
             || pending.statement != request.statement
             || &pending.binding != request.binding
@@ -345,6 +437,12 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
                     .signing
                     .map(|signing| (signing.transcript, signing.expires))
         {
+            crate::door::cause::print(
+                file!(),
+                line!(),
+                "current_member refusal",
+                &Error::Unauthorized,
+            );
             return Err(Error::Unauthorized);
         }
         let mut floor = self.live.last_time.max(request.now);
@@ -367,6 +465,12 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
             },
             |charter, observed, credential, actual_origin, now| {
                 if actual_origin != origin {
+                    crate::door::cause::print(
+                        file!(),
+                        line!(),
+                        "current_member refusal",
+                        &Error::Unauthorized,
+                    );
                     return Err(Error::Unauthorized);
                 }
                 verify_read(
@@ -383,13 +487,19 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         );
         self.live.last_time = floor;
         if failed {
+            crate::door::cause::print(file!(), line!(), "current_member refusal", &Error::Clock);
             return Err(Error::Clock);
         }
-        let (until, completed) = checked.map_err(foyer_refusal)?;
+        let (until, completed) = checked.map_err(foyer_refusal).inspect_err(|__e| {
+            crate::door::cause::print(file!(), line!(), "current_member", __e)
+        })?;
         if completed >= until? {
+            crate::door::cause::print(file!(), line!(), "current_member refusal", &Error::Expired);
             return Err(Error::Expired);
         }
-        self.live.lifetime.check(&request)?;
+        self.live.lifetime.check(&request).inspect_err(|__e| {
+            crate::door::cause::print(file!(), line!(), "current_member", __e)
+        })?;
         // Taking the attempt releases the held original session on every exit.
         Ok(completed)
     }
