@@ -21,9 +21,22 @@ pub struct DeviceUnlock {
 enum Held {
     /// The wallet passkey's PRF output: every vault, and new communities.
     Ceremony(cvlt::WalletUnlock),
-    /// The persisted unlock (DESIGN-secure-convenience M6): only the communities this
-    /// device had already joined; the wallet vault and a new community need the passkey.
+    /// The persisted unlock v2 (U2b): one `ckmg::DeviceDelegation` per community this
+    /// device had already joined. It opens community sessions as the delegate only; the
+    /// wallet, account actions and a new community need the passkey (D1).
     Resumed(cvlt::ResumeBundle),
+}
+
+/// The typed refusal of a resumed start (no ceremony this run): the action needs the
+/// wallet passkey (D1: wallet, account signing, stamps, new communities, restore).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NeedsPasskey;
+
+impl NeedsPasskey {
+    /// Its wire code where an `ErrorCode` is expected (no `From`: keeps `?` inference).
+    pub const fn code(self) -> ErrorCode {
+        ErrorCode::Unauthorized
+    }
 }
 
 impl DeviceUnlock {
@@ -78,24 +91,22 @@ impl DeviceUnlock {
                     &__cause,
                 )
             }),
-            Held::Resumed(_) => Err(ErrorCode::Unauthorized),
+            Held::Resumed(_) => Err(NeedsPasskey.code()),
         }
     }
 
     /// One community vault's opening, without any ceremony. `fingerprint` is the
     /// community's identity (founding-key fingerprint, as the vault pins it), never
     /// its address; `scope` is the address the vault's Store is named by. A resumed
-    /// start opens only the communities it had joined.
+    /// start holds no opening (no PRF material): it signs sessions through
+    /// [`Self::resumed_session`], anything else needs the passkey.
     pub fn community_opening(
         &self,
         fingerprint: &[u8; 32],
         scope: &str,
     ) -> Result<cvlt::PreparedOpen> {
-        match &self.held {
-            Held::Ceremony(wallet) => wallet.community(fingerprint, scope),
-            Held::Resumed(bundle) => bundle.community(fingerprint, scope),
-        }
-        .map_err(|__cause| {
+        let wallet = self.wallet().map_err(NeedsPasskey::code)?;
+        wallet.community(fingerprint, scope).map_err(|__cause| {
             crate::door::cause::emit(
                 file!(),
                 line!(),
@@ -106,12 +117,31 @@ impl DeviceUnlock {
         })
     }
 
-    /// The wallet passkey's unlock. A resumed start does not hold it: the wallet vault
-    /// and its records (membership index) need the passkey (`Unauthorized`).
-    fn wallet_unlock(&self) -> Result<&cvlt::WalletUnlock> {
+    /// The wallet passkey's unlock. A resumed start does not hold it: the wallet vault,
+    /// its records (membership index) and every account action need the passkey.
+    pub fn wallet(&self) -> std::result::Result<&cvlt::WalletUnlock, NeedsPasskey> {
         match &self.held {
             Held::Ceremony(wallet) => Ok(wallet),
-            Held::Resumed(_) => Err(ErrorCode::Unauthorized),
+            Held::Resumed(_) => Err(NeedsPasskey),
+        }
+    }
+
+    fn wallet_unlock(&self) -> Result<&cvlt::WalletUnlock> {
+        self.wallet().map_err(NeedsPasskey::code)
+    }
+
+    /// A resumed start's custody in one joined community: this device's delegation,
+    /// which signs the community device session (class `Delegate`) and nothing that
+    /// needs the root, identity or passkey. A ceremony start, or a community not in the
+    /// bundle, has none (`NeedsPasskey`: open it through the passkey ceremony).
+    pub fn resumed_session(
+        &self,
+        fingerprint: &[u8; 32],
+        scope: &str,
+    ) -> std::result::Result<&ckmg::DeviceDelegation, NeedsPasskey> {
+        match &self.held {
+            Held::Resumed(bundle) => bundle.delegation(fingerprint, scope).ok_or(NeedsPasskey),
+            Held::Ceremony(_) => Err(NeedsPasskey),
         }
     }
 
@@ -193,6 +223,12 @@ impl DeviceUnlock {
     /// The community device key (lineage device) this device presents in `scope`:
     /// what the community's device-key registry binds at join.
     pub fn community_device(&self, fingerprint: &[u8; 32], scope: &str) -> Result<ckmg::PublicKey> {
+        if let Held::Resumed(bundle) = &self.held {
+            return bundle
+                .delegation(fingerprint, scope)
+                .map(ckmg::DeviceDelegation::device_public_key)
+                .ok_or(ErrorCode::InvalidRequest);
+        }
         self.community_opening(fingerprint, scope)?
             .device()
             .map_err(|__cause| {
@@ -212,8 +248,8 @@ impl DeviceUnlock {
 pub const KEYRING_SERVICE: &str = "cmeet";
 
 /// Persistent unlock (DESIGN-secure-convenience part 4): a device stays unlocked across
-/// restarts. The persisted bundle holds only the openings of the communities this
-/// device has joined, never the wallet PRF output. There is no automatic lock; the
+/// restarts. The persisted bundle (v2) holds one delegation per community this device
+/// has joined, never `U_c` or the wallet PRF output. There is no automatic lock; the
 /// user locks explicitly, or opts into "ask for my passkey at every start".
 pub trait UnlockStore {
     /// Seal the bundle, replacing any earlier one.
@@ -334,12 +370,14 @@ pub async fn resume<S: UnlockStore>(store: &S, policy: UnlockPolicy) -> Option<D
     })
 }
 
-/// After a passkey ceremony: persist the openings of the communities this device has
-/// joined (fingerprint, scope), or wipe the persisted unlock if the user opted out.
+/// After a passkey ceremony: persist the delegations enrolled while it was open (one per
+/// joined community, `ckmg::Keys::delegate_device` riding on that ceremony: no extra
+/// prompt), or wipe the persisted unlock if the user opted out. A resumed start enrols
+/// nothing: its bundle stays until the next natural ceremony.
 pub async fn persist<S: UnlockStore>(
     store: &S,
     unlock: &DeviceUnlock,
-    joined: &[([u8; 32], &str)],
+    enrolled: &cvlt::ResumeBundle,
     policy: UnlockPolicy,
 ) -> Result<()> {
     if policy.ask_every_start {
@@ -353,20 +391,10 @@ pub async fn persist<S: UnlockStore>(
             )
         });
     }
-    let bundle = match &unlock.held {
-        Held::Ceremony(wallet) => wallet.resume_bundle(joined).map_err(|__cause| {
-            crate::door::cause::emit(
-                file!(),
-                line!(),
-                "ErrorCode::InvalidRequest",
-                ErrorCode::InvalidRequest,
-                &__cause,
-            )
-        })?,
-        // A resumed start already persisted its bundle; it cannot add communities.
-        Held::Resumed(_) => return Ok(()),
-    };
-    store.save(&bundle).await.map_err(|__cause| {
+    if unlock.is_resumed() {
+        return Ok(());
+    }
+    store.save(enrolled).await.map_err(|__cause| {
         crate::door::cause::emit(
             file!(),
             line!(),
@@ -513,8 +541,79 @@ mod tests {
         }
         *ceremonies += 1;
         let (_, unlock) = DeviceUnlock::sign_in(client, options()).await.unwrap();
-        persist(store, &unlock, &JOINED, policy).await.unwrap();
+        persist(store, &unlock, &enrolled(&JOINED).await, policy)
+            .await
+            .unwrap();
         unlock
+    }
+
+    /// Test-only key store of the community custody a ceremony opens.
+    #[derive(Clone, Default)]
+    struct Memory(
+        std::rc::Rc<std::cell::RefCell<std::collections::HashMap<ckmg::Locator, Vec<u8>>>>,
+    );
+    impl ckmg::SecureStore for Memory {
+        async fn load(
+            &mut self,
+            location: &ckmg::Locator,
+        ) -> std::result::Result<Option<Vec<u8>>, ckmg::Error> {
+            Ok(self.0.borrow().get(location).cloned())
+        }
+        async fn compare_exchange(
+            &mut self,
+            location: &ckmg::Locator,
+            expected: Option<[u8; 32]>,
+            next: &[u8],
+        ) -> std::result::Result<ckmg::Commit, ckmg::Error> {
+            let mut data = self.0.borrow_mut();
+            if data.get(location).map(|v| *ckmg::hash(v).value()) != expected {
+                return Ok(ckmg::Commit::Conflict);
+            }
+            data.insert(*location, next.to_vec());
+            Ok(ckmg::Commit::Committed)
+        }
+    }
+    #[derive(Clone)]
+    struct Time;
+    impl ckmg::Clock for Time {
+        fn now(&mut self) -> std::result::Result<u64, ckmg::Error> {
+            Ok(1000)
+        }
+    }
+    /// Permissive test authority; not production membership.
+    struct Live;
+    impl ckmg::Authority for Live {
+        async fn check(
+            &mut self,
+            _: ckmg::Authorization<'_>,
+        ) -> std::result::Result<(), ckmg::Error> {
+            Ok(())
+        }
+    }
+
+    /// The delegations a ceremony enrols while its community custody is open (the
+    /// ceremony happens anyway; `Action::DelegateDevice` rides on its evidence).
+    async fn enrolled(joined: &[([u8; 32], &str)]) -> cvlt::ResumeBundle {
+        let mut bundle = cvlt::ResumeBundle::new();
+        for (fingerprint, scope) in joined {
+            let prf = ckmg::passkey::PrfOutput::from_bytes(&[fingerprint[0] ^ 0x40; 32]).unwrap();
+            let mut keys = ckmg::Keys::new(Memory::default(), Time, ckmg::SystemEntropy, Live);
+            let receipt = keys
+                .create_scope(
+                    &prf,
+                    ckmg::Binding::new(scope, "member").unwrap(),
+                    ckmg::DeviceInfo::new("device", b"credential").unwrap(),
+                    b"registration",
+                )
+                .await
+                .unwrap();
+            keys.acknowledge(receipt.operation).await.unwrap();
+            let purposes = [ckmg::Purpose::new(ckmg::Scope::Member, "board", 1).unwrap()];
+            let (receipt, delegation) = keys.delegate_device(&purposes, b"ceremony").await.unwrap();
+            keys.acknowledge(receipt.operation).await.unwrap();
+            bundle.insert(*fingerprint, scope, delegation).unwrap();
+        }
+        bundle
     }
 
     const JOINED: [([u8; 32], &str); 2] = [([1; 32], "garden"), ([2; 32], "orchard")];
@@ -546,7 +645,10 @@ mod tests {
             .await;
             assert_eq!(ceremonies, 1);
             assert!(!first.is_resumed());
-            let garden = first.community_device(&[1; 32], "garden").unwrap();
+            assert_eq!(
+                first.resumed_session(&[1; 32], "garden").err(),
+                Some(NeedsPasskey)
+            );
             drop(first);
             // Restart: ceremony count 0 for the resumed start.
             let resumed = start(
@@ -558,29 +660,66 @@ mod tests {
             .await;
             assert_eq!(ceremonies, 1);
             assert!(resumed.is_resumed());
-            assert_eq!(
-                resumed
-                    .community_device(&[1; 32], "garden")
-                    .unwrap()
-                    .value(),
-                garden.value()
-            );
-            assert!(resumed.community_device(&[2; 32], "orchard").is_ok());
-            // Narrower bundle: no wallet vault, no new community without the passkey.
+            // Community session with 0 prompts: the delegate signs it (class Delegate).
+            let delegate = resumed.resumed_session(&[1; 32], "garden").unwrap();
+            let key = delegate.device_public_key();
+            assert_eq!(resumed.community_device(&[1; 32], "garden").unwrap(), key);
+            let payload = b"session challenge";
+            let signature = delegate.sign_device_session(payload).unwrap();
+            let message = [ckmg::DeviceFormat::DeviceSession.tag(), payload].concat();
+            let public: [u8; 32] = key.value()[..].try_into().unwrap();
+            ckmg::verify_ed25519(&public, &message, &signature).unwrap();
+            assert!(resumed.resumed_session(&[2; 32], "orchard").is_ok());
+            // v2 holds no opening and no PRF: the wallet and account actions, community
+            // openings and new communities answer "needs the passkey" (D1).
+            assert_eq!(resumed.wallet().err(), Some(NeedsPasskey));
             assert_eq!(
                 resumed.wallet_opening().err(),
                 Some(ErrorCode::Unauthorized)
             );
             assert_eq!(resumed.wallet_unlock().err(), Some(ErrorCode::Unauthorized));
             assert_eq!(
+                resumed.community_opening(&[1; 32], "garden").err(),
+                Some(ErrorCode::Unauthorized)
+            );
+            assert_eq!(
+                resumed.resumed_session(&[3; 32], "meadow").err(),
+                Some(NeedsPasskey)
+            );
+            assert_eq!(
                 resumed.community_device(&[3; 32], "meadow").err(),
                 Some(ErrorCode::InvalidRequest)
             );
             // Persisting from a resumed start keeps the bundle as it is.
-            persist(&store(dir.path()), &resumed, &[], UnlockPolicy::default())
-                .await
-                .unwrap();
+            persist(
+                &store(dir.path()),
+                &resumed,
+                &cvlt::ResumeBundle::new(),
+                UnlockPolicy::default(),
+            )
+            .await
+            .unwrap();
             assert!(store(dir.path()).load().is_some());
+            // A tampered bundle opens nothing: the next start costs one ceremony.
+            let path = dir.path().join("resume.v2");
+            let mut record = std::fs::read(&path).unwrap();
+            let last = record.len() - 1;
+            record[last] ^= 1;
+            std::fs::write(&path, record).unwrap();
+            assert!(
+                resume(&store(dir.path()), UnlockPolicy::default())
+                    .await
+                    .is_none()
+            );
+            let again = start(
+                &store(dir.path()),
+                &mut client,
+                UnlockPolicy::default(),
+                &mut ceremonies,
+            )
+            .await;
+            assert_eq!(ceremonies, 2);
+            assert!(!again.is_resumed());
         });
     }
 
