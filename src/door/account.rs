@@ -563,27 +563,97 @@ pub(super) fn lobby_steps(lobby: &Value) -> Vec<GateStep> {
 
 type Reply = Result<Answer>;
 
-/// The bound actor of one origin and the instant its authority ends.
+/// The clock the actor orders against its session deadline (Unix seconds).
+pub(super) type ActorClock = std::sync::Arc<dyn Fn() -> u64 + Send + Sync>;
+
+/// The bound actor of one origin and the instant its authority ends: the
+/// exclusive deadline of the original global session its intents belong to.
 pub struct AccountActor {
     actor: Actor<Command, Reply>,
+    /// When this actor (and so its session) was bound; `expires - opened` is
+    /// the whole lifetime one session of this device has.
+    opened: u64,
     expires: u64,
+    clock: ActorClock,
 }
 
 impl AccountActor {
-    pub(super) fn expired(&self, now: u64) -> bool {
-        now >= self.expires || !self.actor.is_live()
+    pub(super) fn now(&self) -> u64 {
+        (self.clock)()
     }
 
+    /// The actor finished or was fenced: nothing to do with any deadline.
+    pub(super) fn ended(&self) -> bool {
+        !self.actor.is_live()
+    }
+
+    /// The original session's exclusive deadline has passed at `floor` or now.
+    pub(super) fn deadline_passed(&self, floor: u64) -> bool {
+        floor.max(self.now()) >= self.expires
+    }
+
+    #[cfg(test)]
+    pub(super) fn expired(&self, now: u64) -> bool {
+        self.deadline_passed(now) || self.ended()
+    }
+
+    /// (remaining lifetime of the original session now, its whole lifetime).
+    pub(super) fn lifetime(&self) -> (u64, u64) {
+        (
+            self.expires.saturating_sub(self.now()),
+            self.expires.saturating_sub(self.opened),
+        )
+    }
+
+    /// A refusal that comes back once the session deadline has passed is the
+    /// deadline, whichever check noticed it first (custody refuses with
+    /// Unauthorized, the actor's channels with Unavailable, a lost answer with
+    /// Reconcile): it becomes the distinct `SessionExpired`, never retried here.
     pub(super) async fn call(&mut self, command: Command) -> Result<Answer> {
-        self.actor.call(command).await.map_err(|__cause| {
-            crate::door::cause::emit(
+        let answer = match self.actor.call(command).await {
+            Ok(answer) => answer,
+            Err(__cause) => Err(crate::door::cause::emit(
                 file!(),
                 line!(),
                 "ErrorCode::Unavailable",
                 ErrorCode::Unavailable,
                 &__cause,
-            )
-        })?
+            )),
+        };
+        match answer {
+            Err(ErrorCode::Unauthorized | ErrorCode::Unavailable | ErrorCode::Reconcile)
+                if self.deadline_passed(0) =>
+            {
+                Err(ErrorCode::SessionExpired)
+            }
+            answer => answer,
+        }
+    }
+}
+
+#[cfg(test)]
+/// An actor whose session deadline is 600 and whose clock the test advances.
+/// It answers each command with `answer`, counting what it executed.
+pub(super) fn timed_actor(
+    now: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    executed: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    answer: fn(&Command, &std::sync::atomic::AtomicU64) -> Reply,
+) -> AccountActor {
+    let clock = now.clone();
+    let time = now.clone();
+    AccountActor {
+        actor: Actor::new(
+            move |mailbox: super::actor::Mailbox<Command, Reply>| async move {
+                loop {
+                    let command = mailbox.next().await;
+                    executed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    mailbox.reply(answer(&command, &time));
+                }
+            },
+        ),
+        opened: now.load(std::sync::atomic::Ordering::SeqCst),
+        expires: now.load(std::sync::atomic::Ordering::SeqCst) + 600,
+        clock: std::sync::Arc::new(move || clock.load(std::sync::atomic::Ordering::SeqCst)),
     }
 }
 
@@ -1003,9 +1073,12 @@ mod run {
             GR: Records + 'static,
             G: cwlt::passport::rand::RngCore + cwlt::passport::rand::CryptoRng + 'static,
         {
+            let clock: super::ActorClock = std::sync::Arc::new(clock);
             Self {
                 actor: Actor::new(|mailbox| run(mailbox, parts)),
+                opened: clock(),
                 expires,
+                clock,
             }
         }
     }
@@ -1999,13 +2072,17 @@ mod tests {
                     let _ = mailbox.next().await;
                 }
             }),
+            opened: 0,
             expires: 100,
+            clock: std::sync::Arc::new(|| 0),
         };
         assert!(!live.expired(99));
         assert!(live.expired(100));
         let mut ended = AccountActor {
             actor: Actor::new(|_: Mailbox<Command, Reply>| async {}),
+            opened: 0,
             expires: u64::MAX,
+            clock: std::sync::Arc::new(|| 0),
         };
         let waker = futures_util::task::noop_waker();
         let mut cx = std::task::Context::from_waker(&waker);
@@ -2016,6 +2093,34 @@ mod tests {
         );
         drop(call);
         assert!(ended.expired(0));
+    }
+
+    #[test]
+    fn a_refusal_after_the_session_deadline_is_session_expired_not_unauthorized() {
+        use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+        let now = std::sync::Arc::new(AtomicU64::new(1_000));
+        let executed = std::sync::Arc::new(AtomicUsize::new(0));
+        let mut actor = timed_actor(now.clone(), executed.clone(), |_, _| {
+            Err(ErrorCode::Unauthorized)
+        });
+        let run = |actor: &mut AccountActor| {
+            futures_util::FutureExt::now_or_never(actor.call(Command::Open)).unwrap()
+        };
+        // Before the deadline a refusal stays what it is.
+        assert_eq!(run(&mut actor), Err(ErrorCode::Unauthorized));
+        assert_eq!(actor.lifetime(), (600, 600));
+        assert!(!actor.deadline_passed(0));
+        // The clock advances past the original deadline (exclusive): the same
+        // refusal is the distinct Expired state, and the deadline is unchanged.
+        now.store(1_600, Ordering::SeqCst);
+        assert!(actor.deadline_passed(0));
+        assert_eq!(run(&mut actor), Err(ErrorCode::SessionExpired));
+        assert_eq!(actor.lifetime(), (0, 600));
+        assert_eq!(ErrorCode::SessionExpired.exit_code(), 75);
+        // A definite server answer is never relabelled.
+        let mut lobby = timed_actor(now.clone(), executed, |_, _| Err(ErrorCode::HeldInLobby));
+        now.store(2_600, Ordering::SeqCst);
+        assert_eq!(run(&mut lobby), Err(ErrorCode::HeldInLobby));
     }
 
     /// A standing double that counts every probe; it has no write at all, so a

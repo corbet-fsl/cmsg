@@ -112,6 +112,11 @@ pub enum ErrorCode {
     /// on the operator's own signed proof that it could no longer commit. The
     /// discard guard failed; the account is not usable from this device.
     DiscardedRequestAccepted,
+    /// The original global session this operation ran under passed its exclusive
+    /// deadline (or a fresh one could not be opened). Its authority is never
+    /// extended or re-bound: the device needs a fresh global session (a passkey
+    /// assertion), and the operation starts again under it. Clients prompt for it.
+    SessionExpired,
 }
 
 impl ErrorCode {
@@ -123,12 +128,29 @@ impl ErrorCode {
             Self::InvalidRequest | Self::UnsupportedAction | Self::UnsupportedVersion => 64,
             Self::Unauthorized | Self::Refused | Self::HeldInLobby => 77,
             Self::Unavailable | Self::DiscardedRequestAccepted => 69,
-            Self::Capacity | Self::Clock | Self::Reconcile | Self::ProofWindowElapsed => 75,
+            Self::Capacity
+            | Self::Clock
+            | Self::Reconcile
+            | Self::ProofWindowElapsed
+            | Self::SessionExpired => 75,
         }
     }
 }
 
 pub type Result<T> = std::result::Result<T, ErrorCode>;
+
+/// The embedder's port to a FRESH global session (custody decision 2026-10-27).
+/// `renew` opens a new global session through the normal passkey path (silent in
+/// the toy) and binds a new account actor for `origin`, rebuilt from that session
+/// and the server state. The old session is never extended and its in-flight
+/// intents are never re-bound: the Door drops the old actor before calling this.
+pub trait SessionRenewal {
+    fn renew<'a>(
+        &'a mut self,
+        door: &'a mut Door,
+        origin: &'a str,
+    ) -> futures_util::future::LocalBoxFuture<'a, Result<()>>;
+}
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
@@ -310,6 +332,9 @@ pub struct Door {
     meshes: BTreeMap<String, facades::BoundMesh>,
     vaults: BTreeMap<String, Box<dyn facades::BoundVault>>,
     accounts: BTreeMap<String, account::AccountActor>,
+    /// Lent by the trusted embedder: opens a FRESH global session and binds a new
+    /// account actor rebuilt from it (see `registry::with_fresh_session`).
+    session_renewal: Option<Box<dyn SessionRenewal>>,
     /// Lent by the trusted embedder: proves a new community's accounting genesis
     /// on this device (see `creating`). Absent in a frontend that cannot prove.
     activation_prover: Option<std::sync::Arc<dyn accounting::ActivationProver>>,
@@ -349,6 +374,7 @@ impl Door {
             meshes: BTreeMap::new(),
             vaults: BTreeMap::new(),
             accounts: BTreeMap::new(),
+            session_renewal: None,
             activation_prover: None,
             #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
             record_jobs: BTreeMap::new(),
@@ -496,6 +522,11 @@ impl Door {
         }
         self.accounts.insert(origin.into(), actor);
         Ok(())
+    }
+
+    /// Lend the session renewal of this device (trusted embedding only).
+    pub fn set_session_renewal(&mut self, renewal: Box<dyn SessionRenewal>) {
+        self.session_renewal = Some(renewal);
     }
 
     fn observe(&mut self, now: u64) -> Result<()> {

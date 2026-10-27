@@ -249,19 +249,84 @@ pub(super) async fn account_call_at(
         .accounts
         .get_mut(origin)
         .ok_or(ErrorCode::Unavailable)?;
-    if actor.expired(door.clock_floor) {
+    if actor.ended() {
         door.accounts.remove(origin);
         return Err(ErrorCode::Unavailable);
     }
+    // An actor past its original session deadline never executes another
+    // command: its intents belong to that session alone.
+    if actor.deadline_passed(door.clock_floor) {
+        door.accounts.remove(origin);
+        return Err(ErrorCode::SessionExpired);
+    }
     let answer = actor.call(command).await;
-    if door
-        .accounts
-        .get(origin)
-        .is_some_and(|actor| actor.expired(0))
-    {
+    // A finished actor goes now; one past its deadline stays until the next
+    // call, which answers `SessionExpired` instead of an unbound `Unavailable`.
+    if door.accounts.get(origin).is_some_and(|actor| actor.ended()) {
         door.accounts.remove(origin);
     }
     answer
+}
+
+/// Mechanics constant: the lifetime a global session must still have before a
+/// long operation (community join, with the creator's genesis) starts under it.
+/// Worst join observed under load 480 s (journey board 2026-10-27; all passes
+/// <= 482 s) plus the 190 s genesis proof window is 670 s; 900 s keeps about a
+/// third above that, so a join started inside the runway ends inside the session.
+pub(super) const SESSION_RUNWAY_SECONDS: u64 = 900;
+/// Mechanics constant: a session younger than this counts as fresh even when its
+/// whole lifetime is shorter than the runway (toy sessions are 600 s). Opening
+/// another one cannot give more, and asking again would only make the member
+/// wait (stay in flow); a device start or renewal takes far less than 120 s.
+pub(super) const SESSION_FRESH_GRACE_SECONDS: u64 = 120;
+
+/// The ONE precondition test of every long operation: is the remaining lifetime
+/// of the session (`remaining`, of a session lasting `lifetime` in all) too short
+/// to start it? Never asks for more than a just-opened session offers.
+pub(super) fn needs_fresh_session(remaining: u64, lifetime: u64) -> bool {
+    remaining < SESSION_RUNWAY_SECONDS.min(lifetime.saturating_sub(SESSION_FRESH_GRACE_SECONDS))
+}
+
+/// Precondition of a long operation: when the bound session's remaining lifetime
+/// is too short, open a FRESH global session (the embedder's passkey path) first.
+/// Without an actor or a renewal port nothing changes: a deadline that then
+/// passes mid-operation is exposed as `SessionExpired`.
+pub(super) async fn ensure_session_runway(door: &mut Door, origin: &str) -> Result<()> {
+    let Some(actor) = door.accounts.get(origin) else {
+        return Ok(());
+    };
+    let (remaining, lifetime) = actor.lifetime();
+    if actor.ended() || door.session_renewal.is_none() || !needs_fresh_session(remaining, lifetime)
+    {
+        return Ok(());
+    }
+    renew_session(door, origin).await
+}
+
+/// Replace the origin's actor by one rebuilt from a FRESH global session. The
+/// old actor, its authority and its one-use intents are dropped first and never
+/// reused or re-bound; the old deadline is never extended. A renewal that cannot
+/// complete (no port, passkey declined, no new actor) leaves the state
+/// "needs a fresh session" (`SessionExpired`) for the frontend to prompt.
+async fn renew_session(door: &mut Door, origin: &str) -> Result<()> {
+    door.accounts.remove(origin);
+    let mut renewal = door
+        .session_renewal
+        .take()
+        .ok_or(ErrorCode::SessionExpired)?;
+    let renewed = renewal.renew(door, origin).await;
+    door.session_renewal = Some(renewal);
+    let fresh = door
+        .accounts
+        .get(origin)
+        .is_some_and(|actor| !actor.ended() && !actor.deadline_passed(door.clock_floor));
+    match renewed {
+        Ok(()) if fresh => Ok(()),
+        _ => {
+            door.accounts.remove(origin);
+            Err(ErrorCode::SessionExpired)
+        }
+    }
 }
 async fn account_enroll(
     door: &mut Door,
@@ -316,6 +381,25 @@ async fn community_join(
     {
         return Err(ErrorCode::InvalidRequest);
     }
+    let origin = origin(door, key)?.to_owned();
+    ensure_session_runway(door, &origin).await?;
+    // A deadline that still passes mid-join restarts the join ONCE under a fresh
+    // session: authority, intents and actor are rebuilt from that session and
+    // the server state (every step is an idempotent state), never carried over.
+    match join_once(door, key, request.clone()).await {
+        Err(ErrorCode::SessionExpired) if door.session_renewal.is_some() => {
+            renew_session(door, &origin).await?;
+            join_once(door, key, request).await
+        }
+        joined => joined,
+    }
+}
+
+async fn join_once(
+    door: &mut Door,
+    key: &[u8; 32],
+    request: account::JoinRequest,
+) -> Result<(account::Joined, Vec<Event>)> {
     // A restarted device presents the creation id it kept for this community.
     creating::rearm(door, key).await?;
     if let Some(code) = request.voucher.as_deref() {
@@ -559,5 +643,206 @@ impl Door {
         account_call_at(self, origin, account::Command::Settle(request_id))
             .await
             .map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    use account::{Activation, Answer, Checkpoint, Command, Enrolled, Gate, Joined, Opened};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    const ORIGIN: &str = "https://member.example";
+    const KEY: [u8; 32] = [7; 32];
+
+    fn door() -> Door {
+        let mut door = Door::new(
+            Configuration::new(
+                "alpha".into(),
+                BTreeMap::from([(Role::Member, BTreeSet::from([ORIGIN.to_owned()]))]),
+            )
+            .unwrap(),
+        );
+        door.grants.insert(
+            KEY,
+            super::super::Grant {
+                origin: ORIGIN.into(),
+                actions: BTreeSet::new(),
+                expires: u64::MAX,
+            },
+        );
+        door
+    }
+
+    fn answer(command: &Command) -> Reply {
+        Ok(match command {
+            Command::Join(_) => Answer::Gate(Gate {
+                ready: true,
+                steps: vec![],
+            }),
+            Command::Enroll => Answer::Enrolled(Enrolled {
+                checkpoint: Checkpoint::Ready,
+            }),
+            Command::Open => Answer::Opened(Opened { accepted_at: 1 }),
+            Command::Activate => Answer::Activated(Activation {
+                version: 1,
+                accepted_at: 1,
+                outbox_settled: true,
+            }),
+            _ => return Err(ErrorCode::Unavailable),
+        })
+    }
+    type Reply = Result<Answer>;
+
+    /// Every join step answers; the gate step alone takes 700 s (past a 600 s session).
+    fn slow_gate(command: &Command, now: &AtomicU64) -> Reply {
+        if matches!(command, Command::Join(_)) {
+            now.fetch_add(700, Ordering::SeqCst);
+        }
+        answer(command)
+    }
+
+    /// The toy's silent passkey: a fresh session and a new actor rebuilt from it.
+    struct Renewal {
+        now: Arc<AtomicU64>,
+        executed: Arc<AtomicUsize>,
+        renewals: Arc<AtomicUsize>,
+        fresh: fn(&Command, &AtomicU64) -> Reply,
+        binds: bool,
+    }
+    impl SessionRenewal for Renewal {
+        fn renew<'a>(
+            &'a mut self,
+            door: &'a mut Door,
+            origin: &'a str,
+        ) -> futures_util::future::LocalBoxFuture<'a, Result<()>> {
+            Box::pin(async move {
+                self.renewals.fetch_add(1, Ordering::SeqCst);
+                if !self.binds {
+                    return Err(ErrorCode::Unauthorized);
+                }
+                let actor =
+                    account::timed_actor(self.now.clone(), self.executed.clone(), self.fresh);
+                door.bind_account(origin, actor)
+            })
+        }
+    }
+
+    struct Setup {
+        door: Door,
+        now: Arc<AtomicU64>,
+        old: Arc<AtomicUsize>,
+        fresh: Arc<AtomicUsize>,
+        renewals: Arc<AtomicUsize>,
+    }
+
+    fn setup(
+        old: fn(&Command, &AtomicU64) -> Reply,
+        renewal: Option<(fn(&Command, &AtomicU64) -> Reply, bool)>,
+    ) -> Setup {
+        let now = Arc::new(AtomicU64::new(1_000));
+        let (old_count, fresh, renewals) = Default::default();
+        let mut door = door();
+        door.bind_account(
+            ORIGIN,
+            account::timed_actor(now.clone(), Arc::clone(&old_count), old),
+        )
+        .unwrap();
+        if let Some((answers, binds)) = renewal {
+            door.set_session_renewal(Box::new(Renewal {
+                now: now.clone(),
+                executed: Arc::clone(&fresh),
+                renewals: Arc::clone(&renewals),
+                fresh: answers,
+                binds,
+            }));
+        }
+        Setup {
+            door,
+            now,
+            old: old_count,
+            fresh,
+            renewals,
+        }
+    }
+
+    fn join(door: &mut Door) -> Result<Joined> {
+        futures_util::FutureExt::now_or_never(community_join(door, &KEY, Default::default()))
+            .expect("the doubles never wait")
+            .map(|(joined, _)| joined)
+    }
+
+    #[test]
+    fn the_runway_never_asks_for_more_than_a_fresh_session_offers() {
+        // Toy 600 s sessions: fresh enough for 120 s, then renewed before a join.
+        assert!(!needs_fresh_session(600, 600));
+        assert!(!needs_fresh_session(480, 600));
+        assert!(needs_fresh_session(479, 600));
+        // Long sessions: the 900 s runway itself.
+        assert!(!needs_fresh_session(900, 3_600));
+        assert!(needs_fresh_session(899, 3_600));
+    }
+
+    #[test]
+    fn a_deadline_passing_mid_join_restarts_the_join_once_under_a_fresh_session() {
+        let mut s = setup(slow_gate, Some((|command, _| answer(command), true)));
+        assert!(matches!(join(&mut s.door), Ok(Joined::Active { .. })));
+        assert_eq!(s.renewals.load(Ordering::SeqCst), 1);
+        // The old session's actor ran only the gate; its later intents never ran.
+        assert_eq!(s.old.load(Ordering::SeqCst), 1);
+        // The restart ran every step again under the fresh session.
+        assert_eq!(s.fresh.load(Ordering::SeqCst), 4);
+        assert_eq!(s.now.load(Ordering::SeqCst), 1_700);
+    }
+
+    #[test]
+    fn a_short_runway_opens_a_fresh_session_before_the_join_starts() {
+        let ok: fn(&Command, &AtomicU64) -> Reply = |command, _| answer(command);
+        // 100 s into a 600 s session it is still fresh: no prompt.
+        let mut s = setup(ok, Some((ok, true)));
+        s.now.store(1_100, Ordering::SeqCst);
+        assert!(matches!(join(&mut s.door), Ok(Joined::Active { .. })));
+        assert_eq!(s.renewals.load(Ordering::SeqCst), 0);
+        assert_eq!(s.old.load(Ordering::SeqCst), 4);
+        // 479 s left (< 480): a fresh session first, nothing runs on the short one.
+        let mut s = setup(ok, Some((ok, true)));
+        s.now.store(1_121, Ordering::SeqCst);
+        assert!(matches!(join(&mut s.door), Ok(Joined::Active { .. })));
+        assert_eq!(s.renewals.load(Ordering::SeqCst), 1);
+        assert_eq!(s.old.load(Ordering::SeqCst), 0);
+        assert_eq!(s.fresh.load(Ordering::SeqCst), 4);
+    }
+
+    #[test]
+    fn an_expired_sessions_intents_are_never_executed() {
+        // No renewal port: the state "needs a fresh session" is exposed.
+        let mut s = setup(|command, _| answer(command), None);
+        s.now.store(1_600, Ordering::SeqCst);
+        assert_eq!(join(&mut s.door).err(), Some(ErrorCode::SessionExpired));
+        assert_eq!(s.old.load(Ordering::SeqCst), 0);
+        assert!(!s.door.accounts.contains_key(ORIGIN));
+        // A renewal that cannot open a fresh session (passkey declined) is the same state.
+        let mut s = setup(
+            |command, _| answer(command),
+            Some((|command, _| answer(command), false)),
+        );
+        s.now.store(1_600, Ordering::SeqCst);
+        assert_eq!(join(&mut s.door).err(), Some(ErrorCode::SessionExpired));
+        assert_eq!(s.old.load(Ordering::SeqCst), 0);
+        assert_eq!(s.fresh.load(Ordering::SeqCst), 0);
+        assert!(!s.door.accounts.contains_key(ORIGIN));
+    }
+
+    #[test]
+    fn the_restart_is_bounded_to_once() {
+        // The fresh session also passes its deadline mid-join: exposed, not renewed again.
+        let mut s = setup(slow_gate, Some((slow_gate, true)));
+        assert_eq!(join(&mut s.door).err(), Some(ErrorCode::SessionExpired));
+        assert_eq!(s.renewals.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            (s.old.load(Ordering::SeqCst), s.fresh.load(Ordering::SeqCst)),
+            (1, 1)
+        );
     }
 }
