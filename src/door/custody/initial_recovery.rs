@@ -26,6 +26,10 @@ pub struct InitialRecoveryAuthority<'a, 'p, C, N: cdht::Network> {
     /// and whose lease holds its device key instead of a passkey certificate. Present exactly
     /// when the lease is a device lease (`lease.device_key()`); the passkey path keeps None.
     pub(super) stamps: Option<cvlt::StampTrust>,
+    /// The held session's owner reads, reused inside one Door operation only.
+    pub(super) refreshed: super::operation_scope::Reused,
+    /// The exact-ACK lineage match over Tor, reused inside one Door operation only.
+    pub(super) lineage: super::operation_scope::Reused,
 }
 impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
     fn current(&mut self, request: &Authorization<'_>) -> Result<u64, Error> {
@@ -314,7 +318,17 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         self.closed = false;
         Ok(now)
     }
+    /// The owner reads once per Door operation; `current` still checks every request
+    /// against the clock. A failed read records nothing.
     async fn refresh(&mut self) -> Result<(), Error> {
+        if !self.refreshed.needed() {
+            return Ok(());
+        }
+        self.read_owner().await?;
+        self.refreshed.record();
+        Ok(())
+    }
+    async fn read_owner(&mut self) -> Result<(), Error> {
         let mut failed = false;
         let clock = &mut self.clock;
         self.initial
@@ -334,60 +348,48 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         }
         Ok(())
     }
-}
-impl<C: Clock, N: cdht::Network> ckmg::Authority for InitialRecoveryAuthority<'_, '_, C, N> {
-    async fn check(&mut self, request: Authorization<'_>) -> Result<(), Error> {
-        if self.closed {
+    /// The exact-ACK lineage over Tor: exactly the candidate's one evidence.
+    async fn read_lineage(&mut self) -> Result<(), Error> {
+        let read = self
+            .records
+            .as_mut()
+            .ok_or(Error::Unauthorized)?
+            .read()
+            .await
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unavailable",
+                    Error::Unavailable,
+                    &__cause,
+                )
+            })?;
+        if read.evidence().len() != 1
+            || read.evidence()[0].to_bytes().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })? != self.candidate.evidence().to_bytes().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?
+        {
             return Err(Error::Unauthorized);
         }
-        self.closed = true;
-        self.account_signing = None;
-        self.refresh().await?;
-        self.current(&request)?;
-        match request.action {
-            Action::ReadLineage if self.records.is_none() => {}
-            Action::Use | Action::AuthorizeAccountDevice | Action::SignDeviceEd25519 => {
-                let read = self
-                    .records
-                    .as_mut()
-                    .ok_or(Error::Unauthorized)?
-                    .read()
-                    .await
-                    .map_err(|__cause| {
-                        crate::door::cause::emit(
-                            file!(),
-                            line!(),
-                            "Error::Unavailable",
-                            Error::Unavailable,
-                            &__cause,
-                        )
-                    })?;
-                if read.evidence().len() != 1
-                    || read.evidence()[0].to_bytes().map_err(|__cause| {
-                        crate::door::cause::emit(
-                            file!(),
-                            line!(),
-                            "Error::Unauthorized",
-                            Error::Unauthorized,
-                            &__cause,
-                        )
-                    })? != self.candidate.evidence().to_bytes().map_err(|__cause| {
-                        crate::door::cause::emit(
-                            file!(),
-                            line!(),
-                            "Error::Unauthorized",
-                            Error::Unauthorized,
-                            &__cause,
-                        )
-                    })?
-                {
-                    return Err(Error::Unauthorized);
-                }
-                self.refresh().await?;
-                self.current(&request)?;
-            }
-            _ => return Err(Error::Unauthorized),
-        }
+        Ok(())
+    }
+    /// The single-use signing channels of a device signature, after the checks.
+    fn admit_signing(&mut self, request: Authorization<'_>) -> Result<(), Error> {
         if matches!(
             request.action,
             Action::AuthorizeAccountDevice | Action::SignDeviceEd25519
@@ -428,6 +430,30 @@ impl<C: Clock, N: cdht::Network> ckmg::Authority for InitialRecoveryAuthority<'_
         }
         self.closed = false;
         Ok(())
+    }
+}
+impl<C: Clock, N: cdht::Network> ckmg::Authority for InitialRecoveryAuthority<'_, '_, C, N> {
+    async fn check(&mut self, request: Authorization<'_>) -> Result<(), Error> {
+        if self.closed {
+            return Err(Error::Unauthorized);
+        }
+        self.closed = true;
+        self.account_signing = None;
+        self.refresh().await?;
+        self.current(&request)?;
+        match request.action {
+            Action::ReadLineage if self.records.is_none() => {}
+            Action::Use | Action::AuthorizeAccountDevice | Action::SignDeviceEd25519 => {
+                if self.lineage.needed() {
+                    self.read_lineage().await?;
+                    self.lineage.record();
+                }
+                self.refresh().await?;
+                self.current(&request)?;
+            }
+            _ => return Err(Error::Unauthorized),
+        }
+        self.admit_signing(request)
     }
     fn check_account_device_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
         self.current_signing(request, Action::AuthorizeAccountDevice)
@@ -535,6 +561,8 @@ async fn complete_recovery<B: cwst::backend::Backend, N: cdht::Network + Clone>(
         delegation_spent: false,
         account_signing: None,
         stamps,
+        refreshed: super::operation_scope::Reused::new(&super::operation_scope::DISPATCH),
+        lineage: super::operation_scope::Reused::new(&super::operation_scope::DISPATCH),
     };
     let reader = candidate.read_lineage(&mut clock, &mut authority).await?;
     let backend = cvlt::TorLineageRecord::provisional_lineage(network.clone(), reader)

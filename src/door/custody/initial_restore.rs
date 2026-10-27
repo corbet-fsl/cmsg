@@ -113,6 +113,8 @@ async fn prepare_recovery<'a, 'p, N: cdht::Network + Clone>(
         delegation_spent: false,
         account_signing: None,
         stamps,
+        refreshed: super::operation_scope::Reused::new(&super::operation_scope::DISPATCH),
+        lineage: super::operation_scope::Reused::new(&super::operation_scope::DISPATCH),
     };
     let reader = candidate
         .read_lineage(&mut SystemClock, &mut authority)

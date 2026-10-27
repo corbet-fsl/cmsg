@@ -319,6 +319,8 @@ pub(super) async fn ensure_session_runway(door: &mut Door, origin: &str) -> Resu
 /// complete (no port, passkey declined, no new actor) leaves the state
 /// "needs a fresh session" (`SessionExpired`) for the frontend to prompt.
 async fn renew_session(door: &mut Door, origin: &str) -> Result<()> {
+    // Nothing the expired session read is reused under the fresh one.
+    super::custody::operation_scope::DISPATCH.renew();
     door.accounts.remove(origin);
     let mut renewal = door
         .session_renewal

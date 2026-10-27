@@ -620,7 +620,10 @@ impl Door {
     }
 
     pub async fn dispatch(&mut self, origin: &str, token: &str, bytes: &[u8], now: u64) -> Output {
+        // One action is one operation: authority reads are reused inside it only.
+        let operation = custody::operation_scope::DISPATCH.begin();
         let result = self.invoke(origin, token, bytes, now).await;
+        drop(operation);
         match result {
             Ok((result, events)) => Output::Ok { result, events },
             Err(error) => Output::Error { error },

@@ -25,6 +25,7 @@ pub use genesis::{
     retain_initial_publication, InitialPublicationError, Opening,
 };
 mod current_member;
+pub(crate) mod operation_scope;
 
 /// Which single-use account channel one account Keys call consumes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
