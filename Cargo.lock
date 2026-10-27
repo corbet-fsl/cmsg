@@ -1588,7 +1588,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#a7f9f1fa9a222d43e7777ee3412bc38954a2b4ce"
+source = "git+https://git.corbet.ch/corbet-libs/cblc?branch=main#33201a2448f115ba7011dfbabec60f96352cd48d"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1777,7 +1777,7 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=main#6e44a4c4ef6f8ba266111156bcd484ca424c191b"
+source = "git+https://git.corbet.ch/corbet-libs/cfyr.git?branch=main#9873f27dcc2c2da135f5c90fe3af92d54cd41f48"
 dependencies = [
  "cnvy",
  "cpky",
@@ -1945,7 +1945,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=main#d7a21fede659607c69bd9a36a3a3297e919717de"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=main#faf375ed5057d21de1880b7f17b1cc82ebbffbdd"
 dependencies = [
  "arti-client",
  "blake3",
@@ -2966,7 +2966,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#6cdc26b19a663ca0c370055f56f8af5fb73f6d26"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#dfbde79f0376965b03e4ce9c4d93c1402849b9d0"
 dependencies = [
  "any_ascii",
  "blind-rsa-signatures",
@@ -3020,7 +3020,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#3be3b8eeecaaf0a419a05216b2c5c86f36db3c29"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#2ab7ab18caf0cf80c0bceac4c2847b008616b9e7"
 dependencies = [
  "blake3",
  "ckmg",
@@ -3041,7 +3041,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#c795c5c8bd302d60762d4884daa15d376163612f"
+source = "git+https://git.corbet.ch/corbet-foss/cwlt?branch=main#2ab7ab18caf0cf80c0bceac4c2847b008616b9e7"
 dependencies = [
  "acvm",
  "barretenberg-rs",
