@@ -785,6 +785,9 @@ pub(super) fn map_error(error: cfyr::Error) -> ErrorCode {
         cfyr::Error::Reconcile => ErrorCode::Reconcile,
         // A certain refusal: the request window elapsed before the owner's commit.
         cfyr::Error::Expired => ErrorCode::ProofWindowElapsed,
+        // A delegated device key asked for a passkey action (D1). A certain refusal; the
+        // delegated Door's own typed state arrives with A10a.
+        cfyr::Error::NeedsPasskey => ErrorCode::Refused,
     }
 }
 
@@ -795,6 +798,7 @@ mod held_tests {
     #[test]
     fn the_servers_lobby_hold_reaches_the_client_as_its_own_code() {
         assert_eq!(map_error(cfyr::Error::HeldInLobby), ErrorCode::HeldInLobby);
+        assert_eq!(map_error(cfyr::Error::NeedsPasskey), ErrorCode::Refused);
         assert_eq!(ErrorCode::HeldInLobby.exit_code(), 77);
     }
 }
