@@ -964,13 +964,8 @@ impl<C: Clock, R: cdht::runtime::Backend> ckmg::Authority for AcknowledgmentAuth
             })
             .await
             .map_err(|__cause| {
-                crate::door::cause::emit(
-                    file!(),
-                    line!(),
-                    "Error::Unauthorized",
-                    Error::Unauthorized,
-                    &__cause,
-                )
+                let mapped = super::initial_recovery::lease_refresh_error(&__cause);
+                crate::door::cause::emit(file!(), line!(), "lease_refresh_error", mapped, &__cause)
             })?;
         if failed {
             return Err(Error::Clock);
@@ -993,13 +988,8 @@ impl<C: Clock, R: cdht::runtime::Backend> ckmg::Authority for AcknowledgmentAuth
             })
             .await
             .map_err(|__cause| {
-                crate::door::cause::emit(
-                    file!(),
-                    line!(),
-                    "Error::Unauthorized",
-                    Error::Unauthorized,
-                    &__cause,
-                )
+                let mapped = super::initial_recovery::lease_refresh_error(&__cause);
+                crate::door::cause::emit(file!(), line!(), "lease_refresh_error", mapped, &__cause)
             })?;
         if failed {
             return Err(Error::Clock);

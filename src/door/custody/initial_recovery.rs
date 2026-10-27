@@ -326,13 +326,8 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
             })
             .await
             .map_err(|__cause| {
-                crate::door::cause::emit(
-                    file!(),
-                    line!(),
-                    "Error::Unauthorized",
-                    Error::Unauthorized,
-                    &__cause,
-                )
+                let mapped = lease_refresh_error(&__cause);
+                crate::door::cause::emit(file!(), line!(), "lease_refresh_error", mapped, &__cause)
             })?;
         if failed {
             return Err(Error::Clock);
@@ -570,4 +565,36 @@ async fn complete_recovery<B: cwst::backend::Backend, N: cdht::Network + Clone>(
     creation
         .retire_recovery(network, &mut clock, &mut authority)
         .await
+}
+
+/// Decided 2026-10-27 (custody review): a lease refresh that could not check
+/// (`Unavailable`, `Reconcile`) refuses this one call as ckmg `Unavailable`, which
+/// leaves the keys usable for a later call; every other outcome is a genuine denial
+/// (`Unauthorized`), which locks them.
+pub(super) fn lease_refresh_error(error: &cfyr::Error) -> Error {
+    match error {
+        cfyr::Error::Unavailable | cfyr::Error::Reconcile => Error::Unavailable,
+        _ => Error::Unauthorized,
+    }
+}
+
+#[cfg(test)]
+mod lease_refresh_tests {
+    use super::*;
+
+    #[test]
+    fn transient_lease_refresh_outcomes_never_lock_genuine_denials_do() {
+        assert_eq!(
+            lease_refresh_error(&cfyr::Error::Unavailable),
+            Error::Unavailable
+        );
+        assert_eq!(
+            lease_refresh_error(&cfyr::Error::Reconcile),
+            Error::Unavailable
+        );
+        assert_eq!(
+            lease_refresh_error(&cfyr::Error::Unauthorized),
+            Error::Unauthorized
+        );
+    }
 }
