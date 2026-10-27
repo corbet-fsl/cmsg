@@ -514,6 +514,11 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
             )
         })?;
         let (intent, _) = ckmg::intent_channel();
+        // The late member authority reports its bound here; this Vault's grants clamp to it.
+        let slot_bound = member
+            .as_ref()
+            .map(MemberSlot::signing_bound)
+            .unwrap_or_default();
         Ok(ComposedMemberVault {
             vault,
             intent,
@@ -527,6 +532,7 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
                 binding,
                 device,
                 closed: std::rc::Rc::new(std::cell::Cell::new(false)),
+                bound: slot_bound,
             },
         })
     }

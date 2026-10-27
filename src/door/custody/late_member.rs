@@ -40,9 +40,14 @@ impl<A: ckmg::Authority> BoardSigning for A {
 pub struct MemberSlot {
     slot: Rc<RefCell<Option<(Binding, Box<dyn BoardSigning>)>>>,
     used: Rc<Cell<bool>>,
+    bound: SigningBound,
 }
 
 impl MemberSlot {
+    /// The signing bound the installed member authority reports into.
+    pub fn signing_bound(&self) -> SigningBound {
+        self.bound.clone()
+    }
     /// Install the member authority of exactly this community member's `binding`.
     /// Refused a second time.
     pub fn install<A: ckmg::Authority + 'static>(

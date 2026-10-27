@@ -65,6 +65,39 @@ pub use recovery::{
     AccountWiring, RecoveredVault, RecoveryAuthority, RecoveryOwners, RestoredVault,
 };
 
+/// The member authority's own validity bound, as its latest live membership observation
+/// reported it. A caller requesting a device-signed grant clamps the grant's expiry to it,
+/// so the grant never outlives its authority (the authority's strict check stays the
+/// judge: this value can only SHORTEN a request, never admit one). A renewed observation
+/// replaces it, so the next grant re-binds to the renewed bound.
+#[derive(Clone, Default)]
+pub struct SigningBound(Rc<Cell<Option<u64>>>);
+impl SigningBound {
+    /// Record the bound of a live membership observation (the latest one replaces).
+    pub(crate) fn note(&self, until: u64) {
+        self.0.set(Some(until));
+    }
+    /// The shared clamp of every device-signed grant: `min(wanted, until)`. With no
+    /// observation yet, `wanted` unchanged (the strict check decides). A bound already
+    /// passed refuses as `Unavailable` (undetermined until the authority renews), before
+    /// the authority sees the request, so it ends only this operation.
+    pub(crate) fn clamp(&self, wanted: u64, now: u64) -> super::Result<u64> {
+        match self.0.get() {
+            None => Ok(wanted),
+            Some(until) if until <= now => {
+                crate::door::cause::print(
+                    file!(),
+                    line!(),
+                    "signing bound passed; waits for renewal",
+                    &ErrorCode::Unavailable,
+                );
+                Err(ErrorCode::Unavailable)
+            }
+            Some(until) => Ok(wanted.min(until)),
+        }
+    }
+}
+
 /// Shared negative state for one unlocked custody session. Observed removal,
 /// explicit lock or a cancelled check invalidates both authority paths. There is
 /// deliberately no method to restore acceptance; a new login needs new owners.
@@ -73,8 +106,17 @@ pub struct CustodyLifetime {
     binding: Binding,
     device: PublicKey,
     closed: Rc<Cell<bool>>,
+    bound: SigningBound,
 }
 impl CustodyLifetime {
+    /// This session's signing bound (shared with every clone of this lifetime).
+    pub fn signing_bound(&self) -> SigningBound {
+        self.bound.clone()
+    }
+    /// Report observations into `bound` (the bound a late-bound Vault's grants clamp to).
+    pub(crate) fn share_signing_bound(&mut self, bound: SigningBound) {
+        self.bound = bound;
+    }
     /// Close this exact session after an original verified removal or local lock.
     pub fn close(&self) {
         self.closed.set(true);
@@ -292,6 +334,7 @@ impl<C: Clock> TransportAuthority<C> {
         {
             return Err(Error::Revoked);
         }
+        self.lifetime.bound.note(observed.expires);
         Ok((after, observed.expires))
     }
 }
@@ -893,6 +936,7 @@ impl Door {
             binding,
             device,
             closed: Rc::new(Cell::new(false)),
+            bound: SigningBound::default(),
         };
         let authority = TransportAuthority {
             lifetime: lifetime.clone(),
@@ -925,5 +969,47 @@ mod account_channel_tests {
             seen,
             [Root, Delegation, Request, Root, Delegation, Request, Root, Delegation]
         );
+    }
+}
+
+#[cfg(test)]
+mod signing_bound_tests {
+    use super::*;
+
+    #[test]
+    fn a_short_membership_lease_clamps_the_grant_to_the_authority_bound() {
+        let bound = SigningBound::default();
+        // A newcomer's lease runs out long before the session grant.
+        bound.note(100);
+        assert_eq!(bound.clamp(1_000, 50), Ok(100));
+        // A grant already inside the bound stays as wanted.
+        assert_eq!(bound.clamp(80, 50), Ok(80));
+    }
+
+    #[test]
+    fn the_grant_re_binds_to_the_renewed_bound() {
+        let bound = SigningBound::default();
+        bound.note(100);
+        assert_eq!(bound.clamp(1_000, 50), Ok(100));
+        // The authority renews: the next grant follows the renewed bound.
+        bound.note(400);
+        assert_eq!(bound.clamp(1_000, 150), Ok(400));
+    }
+
+    #[test]
+    fn a_passed_bound_refuses_and_no_observation_leaves_the_strict_check_to_decide() {
+        let bound = SigningBound::default();
+        assert_eq!(bound.clamp(1_000, 50), Ok(1_000));
+        bound.note(100);
+        assert_eq!(bound.clamp(1_000, 100), Err(ErrorCode::Unavailable));
+        assert_eq!(bound.clamp(1_000, 150), Err(ErrorCode::Unavailable));
+    }
+
+    #[test]
+    fn every_clone_of_a_lifetime_and_its_slot_share_one_bound() {
+        let slot = MemberSlot::default();
+        let shared = slot.signing_bound();
+        shared.note(70);
+        assert_eq!(slot.signing_bound().clamp(1_000, 10), Ok(70));
     }
 }

@@ -74,6 +74,7 @@ async fn close_waits_for_original_store_then_revokes_retained_checkpoint_reads()
             inbox: cnbx::Inbox::new(binding.clone()),
             binding,
             intent: None,
+            bound: Default::default(),
         }),
     );
     let guard = storage.lock().await;

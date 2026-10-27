@@ -657,6 +657,8 @@ impl Door {
         let candidate = self
             .login_recovery_candidate(origin, prepared, binding, stamps.as_ref(), &network, now)
             .await?;
+        let mut member = member;
+        member.lifetime.share_signing_bound(slot.signing_bound());
         let RecoveryOwners {
             authority, intent, ..
         } = member.bind_recovery(stamps, &candidate, network).await?;

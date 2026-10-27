@@ -167,6 +167,7 @@ fn verify_read(
         );
         return Err(Error::Unauthorized);
     }
+    lifetime.bound.note(observed.expires);
     let mut until = selected
         .valid_until()
         .min(charter.valid_until())

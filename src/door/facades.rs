@@ -520,6 +520,8 @@ struct Custody<B: cwst::backend::Backend, C, E, A, R, W> {
     binding: ckmg::Binding,
     inbox: cnbx::Inbox,
     intent: Option<ckmg::IntentAdmission>,
+    /// The member authority's bound every device-signed grant clamps to.
+    bound: super::custody::SigningBound,
 }
 impl<B, C, E, A, R, W> Custody<B, C, E, A, R, W>
 where
@@ -559,6 +561,7 @@ where
         now: u64,
         expires: u64,
     ) -> Result<SignedBoard> {
+        let expires = self.bound.clamp(expires, now)?;
         let intent = self.intent.as_mut().ok_or(ErrorCode::Unavailable)?;
         let storage = self.vault.storage().clone();
         let store = storage.lock().await;
@@ -1016,6 +1019,7 @@ impl Door {
                 binding,
                 inbox,
                 intent,
+                bound: Default::default(),
             }),
         );
         Ok(())

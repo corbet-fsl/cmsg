@@ -897,6 +897,7 @@ impl Door {
                 binding,
                 inbox,
                 intent: Some(intent),
+                bound: lifetime.signing_bound(),
             }))),
             lifetime,
             origin: origin.into(),

@@ -189,6 +189,7 @@ pub(super) async fn open_with(
             binding: binding.clone(),
             inbox: cnbx::Inbox::new(binding),
             intent: with_intent.then_some(admission),
+            bound: Default::default(),
         }))),
         lifetime,
         origin: ORIGIN.into(),
