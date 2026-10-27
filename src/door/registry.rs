@@ -301,9 +301,8 @@ pub(super) async fn ensure_session_runway(door: &mut Door, origin: &str) -> Resu
     if actor.ended() || !needs_fresh_session(remaining, lifetime) {
         return Ok(());
     }
-    if door.session_renewal.is_none() {
-        return Err(ErrorCode::SessionExpired);
-    }
+    // Without a renewal port (a native device restarts on this state) the old actor and its
+    // intents are dropped as well: nothing ever runs on the short or passed session.
     renew_session(door, origin).await
 }
 
