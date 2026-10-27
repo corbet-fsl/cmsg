@@ -388,6 +388,7 @@ mod lower {
                 .map(|epoch| engine::Frontier {
                     epoch: epoch.epoch,
                     root: epoch.root,
+                    issuer_key: epoch.issuer_key,
                 }),
         })
     }

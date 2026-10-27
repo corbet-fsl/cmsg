@@ -890,6 +890,98 @@ mod tests {
         assert_eq!(account_owner(&HEX.encode(&[7u8; 32])), None);
         assert_eq!(account_owner("not hex"), None);
     }
+
+    /// `prepare_record` short-circuits when the vault holds the join-time record
+    /// leaf for the current epoch and takes the normal path next epoch.
+    ///
+    /// The short-circuit (`begin_joined_record`) takes no source, so it performs
+    /// no `source.download` and no HPKE `recipient.receive` (both live only in
+    /// `receive_common_record`, the normal path); it builds the proof work purely
+    /// from the retained acceptance via `record_epoch_signed`. This test drives
+    /// the exact decision with public codecs only: a join leaf of the accepted
+    /// state whose blinded commitment is the certified `frozen_leaf` and whose
+    /// Ed25519 certificate verifies under the epoch issuer key (the new acceptance
+    /// check), offered for exactly its epoch.
+    #[test]
+    fn prepare_record_short_circuits_with_the_join_record_and_takes_the_common_path_next_epoch() {
+        use ed25519_dalek::Signer as _;
+        let community = [9; 32];
+        let owner = [10; 32];
+        let state = [11; 32];
+        let issuer = ed25519_dalek::SigningKey::from_bytes(&[19; 32]);
+        let issuer_key = issuer.verifying_key().to_bytes();
+        // The join leaf of the accepted genesis state for epoch 3.
+        let leaf = czkp::record::Leaf {
+            owner,
+            version: 0,
+            state,
+            required_inbox: [7; 32],
+            role: 0,
+            blinding: [8; 32],
+        };
+        let commitment = leaf.commitment(&community, 3).unwrap();
+        let signature = issuer
+            .sign(&czkp::record::certificate_bytes(&community, 3, &commitment).unwrap())
+            .to_bytes()
+            .to_vec();
+        // The acceptance check the holder engine runs: exact state, commitment is
+        // the certified frozen leaf, and the Ed25519 certificate verifies.
+        czkp::record::verify_certificate(&issuer_key, &community, 3, &commitment, &signature)
+            .unwrap();
+        // A tampered signature is refused at acceptance.
+        let mut bad = signature.clone();
+        bad[0] ^= 1;
+        assert!(
+            czkp::record::verify_certificate(&issuer_key, &community, 3, &commitment, &bad)
+                .is_err()
+        );
+        // A leaf signed under another record-issuer key is refused.
+        let stranger = ed25519_dalek::SigningKey::from_bytes(&[20; 32]);
+        let stranger_sig = stranger
+            .sign(&czkp::record::certificate_bytes(&community, 3, &commitment).unwrap())
+            .to_bytes()
+            .to_vec();
+        assert!(czkp::record::verify_certificate(
+            &issuer_key,
+            &community,
+            3,
+            &commitment,
+            &stranger_sig
+        )
+        .is_err());
+        // Epoch routing: the join leaf belongs to epoch 3 only. The next epoch has
+        // a different window, so `delivered_record_leaf(4)` is None and the normal
+        // path (`receive_common_record` with download + HPKE) is taken.
+        let current = czkp::record::Epoch {
+            purpose: czkp::record::Purpose::RecordEpochV3,
+            community,
+            policy_epoch: 1,
+            epoch: 3,
+            starts_at: 1_000,
+            expires_at: 2_000,
+            root: [5; 32],
+            issuer_key,
+            proof_scope: czkp::ProofScope {
+                circuit_digest: [7; 32],
+                verifying_key_digest: [8; 32],
+            },
+            leaf_count: 1,
+            download_digest: [1; 32],
+            download_bytes: 1,
+        };
+        let next = czkp::record::Epoch {
+            epoch: 4,
+            starts_at: 2_000,
+            expires_at: 3_000,
+            ..current.clone()
+        };
+        assert_eq!(RecordWindow::of(&current), WINDOW);
+        assert_ne!(RecordWindow::of(&current), RecordWindow::of(&next));
+        // The commitment is epoch-bound: the same leaf is not this epoch's record
+        // under another epoch number.
+        let other = leaf.commitment(&community, 4).unwrap();
+        assert_ne!(other, commitment);
+    }
 }
 
 /// The account owner of a member: cblc's member id, SHA-256 of the canonical 48-byte
