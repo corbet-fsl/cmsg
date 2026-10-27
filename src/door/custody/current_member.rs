@@ -176,7 +176,26 @@ fn verify_read(
             .signing
             .is_some_and(|signing| signing.expires > until || now >= signing.expires)
     {
-        crate::door::cause::print(file!(), line!(), "current_member refusal", &Error::Expired);
+        // Which bound refused (names only, never values).
+        let bound = if until == observed.expires {
+            "verify_read Expired bound: membership"
+        } else if until == charter.valid_until() {
+            "verify_read Expired bound: charter"
+        } else {
+            "verify_read Expired bound: lineage"
+        };
+        let reason = if now >= until {
+            "verify_read Expired reason: now past bound"
+        } else if request
+            .signing
+            .is_some_and(|signing| signing.expires > until)
+        {
+            "verify_read Expired reason: signing expires past bound"
+        } else {
+            "verify_read Expired reason: signing expired"
+        };
+        crate::door::cause::print(file!(), line!(), bound, &Error::Expired);
+        crate::door::cause::print(file!(), line!(), reason, &Error::Expired);
         return Err(Error::Expired);
     }
     if let Some(signing) = request.signing {
