@@ -1286,6 +1286,30 @@ where
         Ok(RoomKeysStanding { epoch, held })
     }
 
+    /// The room's accepted WasHere facts (P6c): own and those received over
+    /// its MLS application messages, each stated by its authenticated member.
+    pub async fn room_visits(
+        &mut self,
+        group: cgrp::Id,
+    ) -> std::result::Result<Vec<cgrp::WasHere>, ctnd::Error> {
+        use ctnd::Error as Fail;
+        self.open().map_err(|_| Fail::Authority)?;
+        let mut retained = self.retained.lock().await;
+        self.open().map_err(|_| Fail::Authority)?;
+        let custody = retained.as_mut().ok_or(Fail::Unavailable)?;
+        let binding = custody.binding.clone();
+        let storage = custody.vault.storage().clone();
+        let store = storage.lock().await;
+        custody
+            .check_scope(&store)
+            .await
+            .map_err(|_| Fail::Authority)?;
+        Ok(cthr::Threads::load(binding, group, &store)
+            .map_err(|_| Fail::Storage)?
+            .visits()
+            .to_vec())
+    }
+
     /// Seal this member's own profile key to the room in the current epoch: one
     /// MLS application message, committed with the Threads state it advances.
     /// The message never enters the room's accepted history.

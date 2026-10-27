@@ -204,6 +204,15 @@ where
             groups.room_keys_standing(group).await.map_err(room_error)
         })
     }
+    fn room_visits<'a>(
+        &'a mut self,
+        group: cbrd::cgrp::Id,
+    ) -> board::OwnerFuture<'a, Vec<cbrd::cgrp::WasHere>> {
+        Box::pin(async move {
+            let groups = self.groups.as_mut().ok_or(ErrorCode::Unavailable)?;
+            groups.room_visits(group).await.map_err(room_error)
+        })
+    }
     fn seal_room_key<'a>(
         &'a mut self,
         task: super::RoomKeyTask<'a>,

@@ -187,6 +187,15 @@ pub trait CommittedOwner {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
 
+    /// The room's accepted WasHere facts (own and received over its MLS
+    /// application messages, P6c): the inputs of the warm derivation.
+    fn room_visits<'a>(
+        &'a mut self,
+        _group: cbrd::cgrp::Id,
+    ) -> OwnerFuture<'a, Vec<cbrd::cgrp::WasHere>> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+
     /// Seal this member's own profile key to a room in its current epoch.
     fn seal_room_key<'a>(
         &'a mut self,

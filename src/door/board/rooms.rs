@@ -616,6 +616,22 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             .collect())
     }
 
+    /// Warm ends of `group` at `now` (seconds), derived from the room's
+    /// accepted WasHere facts of its current members; `None` when the visit
+    /// state cannot be read or holds a malformed fact.
+    async fn room_warm_ends(
+        &mut self,
+        snapshot: &cbrd::cgrp::Snapshot,
+        group: &cbrd::cgrp::Id,
+        now: u64,
+    ) -> Option<Vec<u64>> {
+        use cbrd::cgrp::TICK_SECONDS;
+        let eligible = snapshot.members(group).ok()?;
+        let facts = self.owner.room_visits(*group).await.ok()?;
+        let ends = cbrd::cgrp::warm_ends(&facts, group, eligible, now / TICK_SECONDS).ok()?;
+        Some(ends.into_iter().map(|end| end * TICK_SECONDS).collect())
+    }
+
     /// Keep the listing keys of the public rooms this member belongs to: create
     /// the key of a room without one, rotate a due one (tombstone for the old
     /// entry), sign the current entry, and name the fellow members the key must
@@ -645,7 +661,7 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
         let mut shares = vec![];
         for group in listings.public_groups(&snapshot) {
             let mut originated = false;
-            if listings.holds(&group) && listings.rotation_due(&snapshot, &group, now) {
+            if listings.holds(&group) && listings.rotation_due(&snapshot, &group) {
                 if let Ok(rotation) = listings.rotate(&snapshot, &group, now) {
                     work.push(ListingWork {
                         room: rotation.tombstone.room(),
@@ -668,7 +684,15 @@ impl<T: clnk::Transport, R: RoomLink, O: CommittedOwner> OwnedBoard<T, R, O> {
             if originated {
                 self.desk.listing_sent.insert(group, BTreeSet::new());
             }
-            if let Ok(entry) = listings.sign_listing(&snapshot, &group, now, false) {
+            // The entry follows the derived warm ends (P6c/P7). A room with
+            // too few warm seats, or whose visit state cannot be read, has no
+            // live entry: that is its state, not an error.
+            let warm_ends = self.room_warm_ends(&snapshot, &group, now).await;
+            if let Some(entry) = warm_ends.and_then(|ends| {
+                listings
+                    .sign_listing(&snapshot, &group, now, &ends, false)
+                    .ok()
+            }) {
                 work.push(ListingWork {
                     room: entry.room(),
                     entry,
