@@ -1702,7 +1702,7 @@ dependencies = [
 [[package]]
 name = "cdlv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=main#8e7a01bf4446aa43f43ea59c1c3762afc4f2018e"
+source = "git+https://git.corbet.ch/corbet-foss/cdlv.git?branch=main#872877a076560fd1a4471e2050ea3ed71d5e7867"
 dependencies = [
  "ckmg",
  "ctcs",
@@ -1945,7 +1945,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=main#faf375ed5057d21de1880b7f17b1cc82ebbffbdd"
+source = "git+https://git.corbet.ch/corbet-foss/ckmg.git?branch=main#68ae79631ab884cee0542dbc8732ee9f3ab383e9"
 dependencies = [
  "arti-client",
  "blake3",
@@ -2196,7 +2196,7 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=main#ed3b0e5b9b509226e6dbaf465764448fe889b6d3"
+source = "git+https://git.corbet.ch/corbet-libs/cnbx.git?branch=main#5a443791d13bf77236698f8aab2581eb6f9ecfce"
 dependencies = [
  "cdlv",
  "cgrp",
@@ -2793,7 +2793,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#318f22882696320b68336d92f6faab2c78991c4f"
+source = "git+https://git.corbet.ch/corbet-foss/cthr.git?branch=main#9d58e85e519efeeb93ccafd4ce4b3e438db2de14"
 dependencies = [
  "cchr",
  "cgrp",
@@ -3090,7 +3090,7 @@ dependencies = [
 [[package]]
 name = "cwvs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwvs.git?branch=main#69b939ef1098b555ece3cd7861bc41e8f4844b45"
+source = "git+https://git.corbet.ch/corbet-foss/cwvs.git?branch=main#57b98f91dccc2056bbbca9bb3540921aaf4a7e57"
 dependencies = [
  "cdlv",
  "ckmg",
@@ -3121,7 +3121,7 @@ dependencies = [
 [[package]]
 name = "czkp"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#e354c91c11f7b55f847447014a8fc20ac05e9c18"
+source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#d84bc7ca22e46b062745c389b91f1454b0628a44"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
@@ -3437,7 +3437,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98e02cd118058400797c74550dca132b57cf2e6af0e9ea0672a83eb186fd655e"
 dependencies = [
  "derive-deftly-macros",
- "heck 0.4.1",
+ "heck 0.5.0",
 ]
 
 [[package]]
@@ -3446,14 +3446,14 @@ version = "1.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba91f619216e76a5eb2515783f7ec2e271938b51aadac592f4930517f4626863"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "indexmap 2.14.2",
  "itertools 0.15.0",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
  "sha3 0.12.0",
- "strum 0.25.0",
+ "strum 0.28.0",
  "syn 3.0.6",
  "unicode-ident",
  "void",
