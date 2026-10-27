@@ -51,6 +51,12 @@ impl MemberSlot {
         authority: A,
     ) -> super::super::Result<()> {
         if self.used.replace(true) {
+            crate::door::cause::print(
+                file!(),
+                line!(),
+                "member slot: already installed once",
+                &ErrorCode::Unauthorized,
+            );
             return Err(ErrorCode::Unauthorized);
         }
         *self.slot.borrow_mut() = Some((binding, Box::new(authority)));
@@ -160,7 +166,25 @@ impl<A> LateMemberAuthority<A> {
         }
         match self.member.as_mut() {
             Some((own, member)) if own == request.binding => Some(member),
-            _ => None,
+            // A Board action falls through to the initial authority, which refuses it.
+            Some(_) => {
+                crate::door::cause::print(
+                    file!(),
+                    line!(),
+                    "board action: member authority of another binding",
+                    &request.action,
+                );
+                None
+            }
+            None => {
+                crate::door::cause::print(
+                    file!(),
+                    line!(),
+                    "board action: no member authority installed",
+                    &request.action,
+                );
+                None
+            }
         }
     }
 }

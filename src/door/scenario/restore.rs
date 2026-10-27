@@ -122,7 +122,12 @@ impl<W: TorWatcher + 'static, B: Backend + 'static> Composer<W, B> {
                 .await
             {
                 Ok(intent) => owner.set_board_intent(intent)?,
-                Err(ErrorCode::Unauthorized) => {}
+                Err(ErrorCode::Unauthorized) => crate::door::cause::print(
+                    file!(),
+                    line!(),
+                    "eager member bind refused; Board signing stays refused",
+                    &ErrorCode::Unauthorized,
+                ),
                 Err(error) => return Err(error),
             }
             owner.enable_groups(Some(crate::door::facades::verified_peers(

@@ -324,6 +324,12 @@ impl MemberAuthorityBuilder {
         clock: C,
     ) -> super::super::Result<RecoveryAuthority<'_, C>> {
         if self.lifetime.is_closed() {
+            crate::door::cause::print(
+                file!(),
+                line!(),
+                "recovery authority: custody lifetime closed",
+                &ErrorCode::Unauthorized,
+            );
             return Err(ErrorCode::Unauthorized);
         }
         Ok(RecoveryAuthority {

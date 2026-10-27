@@ -562,8 +562,22 @@ where
         let intent = self.intent.as_mut().ok_or(ErrorCode::Unavailable)?;
         let storage = self.vault.storage().clone();
         let store = storage.lock().await;
-        let lineage = self.vault.keys().lineage().await.map_err(keys_error)?;
+        let lineage = self.vault.keys().lineage().await.map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "keys_error",
+                keys_error(__cause),
+                &__cause,
+            )
+        })?;
         if lineage.binding != self.binding || !store.is_scope(self.binding.community()) {
+            crate::door::cause::print(
+                file!(),
+                line!(),
+                "sign_transcript: another binding or scope",
+                &ErrorCode::Unauthorized,
+            );
             return Err(ErrorCode::Unauthorized);
         }
         let public = self
@@ -571,12 +585,34 @@ where
             .keys()
             .device_public_key()
             .await
-            .map_err(keys_error)?;
-        let after = ckmg::Clock::now(&mut super::custody::SystemClock).map_err(keys_error)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "keys_error",
+                    keys_error(__cause),
+                    &__cause,
+                )
+            })?;
+        let after = ckmg::Clock::now(&mut super::custody::SystemClock).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "keys_error",
+                keys_error(__cause),
+                &__cause,
+            )
+        })?;
         if after < now {
             return Err(ErrorCode::Clock);
         }
         if after >= expires {
+            crate::door::cause::print(
+                file!(),
+                line!(),
+                "sign_transcript: grant expired",
+                &ErrorCode::Unauthorized,
+            );
             return Err(ErrorCode::Unauthorized);
         }
         // The format is the one whose fixed tag leads the message; ckmg refuses every other
@@ -599,7 +635,15 @@ where
                 },
                 after,
             )
-            .map_err(keys_error)?;
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "keys_error",
+                    keys_error(__cause),
+                    &__cause,
+                )
+            })?;
         // Keys authorizes and signs only these same immutable owner bytes, in this format,
         // after the final current-owner recheck. Metadata access cannot consume this
         // distinct exact signing intent, and no signer callback can change the transcript.
@@ -608,7 +652,15 @@ where
             .keys()
             .sign_device_ed25519_current(format, message, expires)
             .await
-            .map_err(keys_error)?
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "keys_error",
+                    keys_error(__cause),
+                    &__cause,
+                )
+            })?
             .to_vec();
         Ok(SignedBoard {
             signature,

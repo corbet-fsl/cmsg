@@ -1484,7 +1484,10 @@ async fn page(
     request: cfrm::Request,
 ) -> Result<(cbrd::DiscoveryPage, Vec<Event>)> {
     let watch = matches!(request, cfrm::Request::Watch(_));
-    let grant = door.grants.get(key).ok_or(ErrorCode::Unauthorized)?;
+    let grant = door.grants.get(key).ok_or_else(|| {
+        crate::door::cause::print(file!(), line!(), "page: no grant", &ErrorCode::Unauthorized);
+        ErrorCode::Unauthorized
+    })?;
     let origin = grant.origin.clone();
     let expires = grant.expires;
     let board = door.boards.get_mut(&origin).ok_or(ErrorCode::Unavailable)?;

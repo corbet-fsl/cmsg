@@ -820,6 +820,12 @@ where
     ) -> OwnedFuture<'a, SignedBoard> {
         Box::pin(async move {
             if self.lifetime.is_closed() || origin != self.origin {
+                crate::door::cause::print(
+                    file!(),
+                    line!(),
+                    "sign_board: custody closed or another origin",
+                    &ErrorCode::Unauthorized,
+                );
                 return Err(ErrorCode::Unauthorized);
             }
             let mut retained = self.retained.lock().await;
