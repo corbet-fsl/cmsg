@@ -23,9 +23,10 @@ pub(crate) fn emit<T: std::fmt::Debug, U>(
 ) -> U {
     #[cfg(feature = "private-tor-fixture")]
     eprintln!(
-        "cause: {} {file}:{line} {what} -> {}",
+        "cause: {} {file}:{line} {what} -> {} {}",
         stamp(),
-        kind_of(source)
+        kind_of(source),
+        path_of(source)
     );
     target
 }
@@ -41,10 +42,19 @@ pub(crate) fn print<T: std::fmt::Debug>(
 ) {
     #[cfg(feature = "private-tor-fixture")]
     eprintln!(
-        "cause: {} {file}:{line} {what} -> {}",
+        "cause: {} {file}:{line} {what} -> {} {}",
         stamp(),
-        kind_of(source)
+        kind_of(source),
+        path_of(source)
     );
+}
+
+/// A caller-composed detail line: presence flags, small counters and times only, never a
+/// key, signature, root, payload or identifier. Follows the same development gate as `emit`.
+#[allow(unused_variables)]
+pub(crate) fn detail(what: &str, text: &str) {
+    #[cfg(feature = "private-tor-fixture")]
+    eprintln!("detail: {} {what} {text}", stamp());
 }
 
 /// Wall-clock seconds.millis, so cause lines of one run can be ordered against each other.
@@ -61,6 +71,43 @@ pub(crate) fn stamp() -> String {
 pub(crate) fn mark(what: &str, phase: &str) {
     #[cfg(feature = "private-tor-fixture")]
     eprintln!("timing: {} {what} {phase}", stamp());
+}
+
+/// The nested type and variant names of a `Debug` (capitalised identifiers only, outside any
+/// quoted text), so a wrapped error shows which inner variant it carries (`Account Invalid`).
+/// Field names, numbers, bytes and string contents are never part of it.
+#[cfg(feature = "private-tor-fixture")]
+fn path_of<T: std::fmt::Debug>(source: &T) -> String {
+    let text = format!("{source:?}");
+    let mut names: Vec<String> = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    for c in text.chars().chain(std::iter::once(' ')) {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        if c.is_alphanumeric() || c == '_' || c == ':' {
+            word.push(c);
+            continue;
+        }
+        if word.chars().next().is_some_and(char::is_uppercase)
+            && word.chars().all(|w| w.is_alphabetic() || w == ':')
+        {
+            names.push(std::mem::take(&mut word));
+        }
+        word.clear();
+        quoted = c == '"';
+    }
+    names.truncate(6);
+    format!("[{}]", names.join(" "))
 }
 
 /// A value's variant name only (never a field value).
@@ -88,6 +135,29 @@ mod tests {
     #[allow(dead_code)]
     struct Secret {
         token: String,
+    }
+
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    enum Outer {
+        Account(Inner),
+    }
+
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    enum Inner {
+        Invalid { detail: String, bytes: Vec<u8> },
+    }
+
+    /// A wrapped error shows its nested type and variant names and nothing else.
+    #[cfg(feature = "private-tor-fixture")]
+    #[test]
+    fn path_names_variants_never_values() {
+        let path = super::path_of(&Outer::Account(Inner::Invalid {
+            detail: "hunter2 \"quoted\" Secret".into(),
+            bytes: vec![7, 8, 9],
+        }));
+        assert_eq!(path, "[Account Invalid]");
     }
 
     /// The child half of `cause_print_only_with_the_fixture_feature`.
@@ -133,12 +203,12 @@ mod tests {
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(!err.contains("hunter2"), "a field value was printed: {err}");
         assert_eq!(
-            err.contains("cause: probe.rs:7 ProbeTarget -> Secret"),
+            err.contains("probe.rs:7 ProbeTarget -> Secret [Secret]"),
             cfg!(feature = "private-tor-fixture"),
             "the emit print must exist exactly in a private-tor-fixture build: {err}"
         );
         assert_eq!(
-            err.contains("cause: probe.rs:9 NoneTarget -> Secret"),
+            err.contains("probe.rs:9 NoneTarget -> Secret [Secret]"),
             cfg!(feature = "private-tor-fixture"),
             "the print must exist exactly in a private-tor-fixture build: {err}"
         );

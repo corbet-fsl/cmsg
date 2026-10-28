@@ -39,6 +39,26 @@ pub(super) fn proof_window(policy: &cblc::accounting::AccountPolicy, now: u64) -
         .min(cblc::accounting::GENESIS_PROOF_WINDOW_SECONDS))
 }
 
+/// Non-secret structure of a response that could not advance the companion: which half
+/// of the relation evidence the operator attached, and the two times the engine compares.
+/// Epochs are published numbers; no root, key, signature or packet is printed.
+pub(super) fn advance_detail(
+    response: &AcceptedResponse,
+    trust: &ckmg::wallet_engine::account::ResponseTrust,
+    now: u64,
+) -> String {
+    let ancestry = response.ancestry();
+    let frontier = trust.frontier.as_ref();
+    format!(
+        "ancestry_epoch={:?} frontier_epoch={:?} root_eq={} accepted_at={} now={}",
+        ancestry.map(|a| a.epoch),
+        frontier.map(|f| f.epoch),
+        matches!((ancestry, frontier), (Some(a), Some(f)) if a.root == f.root),
+        response.acceptance().accepted_at,
+        now,
+    )
+}
+
 fn hex<const N: usize>(value: &str) -> Result<[u8; N]> {
     HEX.decode(value.as_bytes())
         .map_err(|__cause| {
@@ -706,6 +726,10 @@ mod proven {
                 .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
                 .await
                 .map_err(|__cause| {
+                    crate::door::cause::detail(
+                        "genesis advance",
+                        &advance_detail(&response, &trust, now()),
+                    );
                     crate::door::cause::emit(
                         file!(),
                         line!(),

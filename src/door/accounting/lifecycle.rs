@@ -3,7 +3,7 @@
 //! These run on a fresh admission: nothing in RAM survives a restart except what
 //! the Store committed. Reopening re-sends the byte-identical stored outbox, never
 //! a rebuilt or re-signed request. Activation is the gate before custody.
-use super::genesis::operation;
+use super::genesis::{advance_detail, operation};
 use super::*;
 use cblc::accounting::{self as acct, AccountStatusRequest, AccountStatusResponse};
 use cblc::contracts::{AccountServiceRequest, AccountServiceResponse};
@@ -210,6 +210,10 @@ impl AccountAdmission<'_> {
             .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
             .await
             .map_err(|__cause| {
+                crate::door::cause::detail(
+                    "genesis advance (reopen)",
+                    &advance_detail(&response, &trust, now()),
+                );
                 crate::door::cause::emit(
                     file!(),
                     line!(),
@@ -303,6 +307,10 @@ impl AccountAdmission<'_> {
                     .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
                     .await
                     .map_err(|__cause| {
+                        crate::door::cause::detail(
+                            "genesis advance (adopt)",
+                            &advance_detail(&response, &trust, now()),
+                        );
                         crate::door::cause::emit(
                             file!(),
                             line!(),
