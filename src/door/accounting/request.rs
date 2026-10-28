@@ -109,6 +109,11 @@ pub struct AcceptedResponse {
     acceptance: AccountAcceptance,
     certificate: StateCertificate,
     ancestry: Option<Box<EpochAncestryCertificate>>,
+    /// Community-signed publication the operator carried on the response, when
+    /// its descriptor names the ancestry's epoch and root. Opaque until the
+    /// holder authenticates it with the community ring (never trusted for being
+    /// present).
+    join_publication: Option<cblc::contracts::JoinPublication>,
     digest: [u8; 32],
 }
 
@@ -298,6 +303,12 @@ impl AcceptedResponse {
         self.ancestry.as_deref()
     }
 
+    /// The community-signed publication the response carried, if any: the join
+    /// descriptor's only source for a newcomer with no frozen frontier.
+    pub fn join_publication(&self) -> Option<&cblc::contracts::JoinPublication> {
+        self.join_publication.as_ref()
+    }
+
     /// DISTINCT digest of the signed acceptance for the pending state B.
     pub fn extended_acceptance_digest(&self) -> [u8; 32] {
         self.digest
@@ -370,6 +381,9 @@ mod lower {
                 },
                 certificate: signature(&self.certificate.signature)?,
                 ancestry,
+                // The join descriptor exists only after the holder verified the
+                // response's publication; the engine stores it at the advance.
+                join: None,
             })
         }
     }
@@ -390,14 +404,102 @@ mod lower {
                     root: epoch.root,
                     issuer_key: epoch.issuer_key,
                 }),
+            join: None,
         })
+    }
+
+    /// The same trust, plus the join descriptor the response's own community
+    /// publication names. A first genesis accepted after the record freeze has no
+    /// frozen frontier, so its join-time ancestry may only sit under this
+    /// descriptor. The publication is data on the response: it is authenticated
+    /// with the community ring this admission already holds, validated like the
+    /// current material and time-checked at the admission's own sample, and it
+    /// names a descriptor or the response carries no ancestry at all.
+    pub fn response_trust_with_join(
+        current: &CurrentAdmission,
+        publication: Option<&cblc::contracts::JoinPublication>,
+    ) -> Result<engine::ResponseTrust> {
+        let mut trust = response_trust(&current.material)?;
+        let Some(publication) = publication else {
+            return Ok(trust);
+        };
+        let now = current.now;
+        let material =
+            cblc::publication::verify_publication(&current.trust.policy_keys, &publication.0, now)
+                .map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unauthorized",
+                        ErrorCode::Unauthorized,
+                        &__cause,
+                    )
+                })?;
+        material
+            .validate_at(&current.trust.community_id, now)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
+        let descriptor = material
+            .record_epoch
+            .ok_or(ErrorCode::Unauthorized)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
+        let community: [u8; 32] = Sha256::digest(current.trust.community_id.as_bytes()).into();
+        // The device holds no rulebook key for the record period here: the
+        // descriptor's own arithmetic supplies it, and `validate` still checks the
+        // whole window shape (root, issuer key, community, bounds) with it.
+        let period = descriptor.starts_at / descriptor.epoch;
+        descriptor
+            .validate(&community, period)
+            .and_then(|()| descriptor.check_time(now))
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
+        trust.join = Some(engine::JoinEpoch {
+            epoch: descriptor.epoch,
+            root: descriptor.root,
+            issuer_key: descriptor.issuer_key,
+        });
+        Ok(trust)
+    }
+
+    /// The trust a STORED state-B response is re-checked under: the descriptor it
+    /// was accepted under travels inside the device-secret-sealed row, so it is
+    /// read back, never re-derived and never taken from the response again.
+    pub fn response_trust_for_stored(
+        current: &CurrentAdmission,
+        join: Option<engine::JoinEpoch>,
+    ) -> Result<engine::ResponseTrust> {
+        let mut trust = response_trust(&current.material)?;
+        trust.join = join;
+        Ok(trust)
     }
 }
 #[cfg(any(
     all(feature = "native-prover", not(target_arch = "wasm32")),
     feature = "browser-prover"
 ))]
-pub use lower::response_trust;
+pub use lower::{response_trust, response_trust_for_stored, response_trust_with_join};
 
 /// Digest of the signed acceptance, the same convention the Balance status
 /// response uses for an embedded acceptance (message bytes then signature).
@@ -485,6 +587,9 @@ impl AcceptedResponse {
             acceptance,
             certificate: evidence.certificate,
             ancestry: evidence.ancestry,
+            // A status lookup carries no publication: the join descriptor can only
+            // come from the actual response (see `send_signed`).
+            join_publication: None,
             digest,
         })
     }
@@ -969,6 +1074,7 @@ impl AccountAdmission<'_> {
             acceptance,
             certificate,
             ancestry,
+            join_publication,
         } = response
         else {
             return Err(ErrorCode::Reconcile);
@@ -1007,6 +1113,7 @@ impl AccountAdmission<'_> {
             acceptance,
             certificate,
             ancestry,
+            join_publication,
             digest,
         })
     }
@@ -1424,6 +1531,7 @@ pub(in crate::door) mod fixtures {
             },
             acceptance,
             ancestry: None,
+            join_publication: None,
         }
     }
 }

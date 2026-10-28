@@ -44,7 +44,7 @@ pub use request::outbox_request_id;
     all(feature = "native-prover", not(target_arch = "wasm32")),
     feature = "browser-prover"
 ))]
-pub use request::response_trust;
+pub use request::{response_trust, response_trust_for_stored, response_trust_with_join};
 pub use request::{AcceptedResponse, ProvenGenesis, ProvenUpdate, SignedApplyExtended};
 
 /// Distinct local intentions reserved by the trusted recovery composer. No

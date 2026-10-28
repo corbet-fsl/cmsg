@@ -50,9 +50,10 @@ pub(super) fn advance_detail(
     let ancestry = response.ancestry();
     let frontier = trust.frontier.as_ref();
     format!(
-        "ancestry_epoch={:?} frontier_epoch={:?} root_eq={} accepted_at={} now={}",
+        "ancestry_epoch={:?} frontier_epoch={:?} join_epoch={:?} root_eq={} accepted_at={} now={}",
         ancestry.map(|a| a.epoch),
         frontier.map(|f| f.epoch),
+        trust.join.as_ref().map(|j| j.epoch),
         matches!((ancestry, frontier), (Some(a), Some(f)) if a.root == f.root),
         response.acceptance().accepted_at,
         now,
@@ -701,7 +702,9 @@ mod proven {
             let response = response?;
             let trust = self
                 .enrollment
-                .with_verified(|_, _, _, current| response_trust(&current.material))
+                .with_verified(|_, _, _, current| {
+                    response_trust_with_join(current, response.join_publication())
+                })
                 .map_err(|__cause| {
                     crate::door::cause::emit(
                         file!(),

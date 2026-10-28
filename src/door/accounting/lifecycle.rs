@@ -181,19 +181,17 @@ impl AccountAdmission<'_> {
             return Err(ErrorCode::ProofWindowElapsed);
         }
         let response = self.send_signed(&signed).await?;
-        let trust = response_trust(
-            &self
-                .current()
-                .map_err(|__cause| {
-                    crate::door::cause::emit(
-                        file!(),
-                        line!(),
-                        "ErrorCode::Reconcile",
-                        ErrorCode::Reconcile,
-                        &__cause,
-                    )
-                })?
-                .material,
+        let trust = response_trust_with_join(
+            &self.current().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?,
+            response.join_publication(),
         )
         .map_err(|__cause| {
             crate::door::cause::emit(
@@ -300,7 +298,7 @@ impl AccountAdmission<'_> {
                     &current.material.extension_policy,
                     &current.material.account_response_key,
                 )?;
-                let trust = response_trust(&current.material)?;
+                let trust = response_trust_with_join(&current, response.join_publication())?;
                 account
                     .vault()
                     .await?
@@ -601,6 +599,7 @@ impl AccountAdmission<'_> {
         let (current, opened) = match self.reopen_checked(account).await {
             Ok(value) => value,
             Err(refusal) => {
+                crate::door::cause::detail("account activate", &format!("{refusal:?}"));
                 return Self::already_active(account).await.map_err(|__cause| {
                     crate::door::cause::emit(file!(), line!(), "refusal", refusal, &__cause)
                 });
@@ -609,7 +608,14 @@ impl AccountAdmission<'_> {
         if !opened.accepted() {
             return Err(ErrorCode::Unavailable);
         }
-        let trust = response_trust(&current.material)?;
+        let trust = response_trust_for_stored(
+            &current,
+            opened
+                .binding
+                .response
+                .as_ref()
+                .and_then(|response| response.join.clone()),
+        )?;
         let activation = account
             .vault()
             .await?
