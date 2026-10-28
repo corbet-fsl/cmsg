@@ -453,7 +453,8 @@ where
             )?,
         )
         .await?;
-    community
+    crate::door::cause::mark("device_join request", "start");
+    let sent = community
         .device_join(json!({
             "passport": {"challenge": challenge, "proof": proof},
             "stamp": stamp,
@@ -462,16 +463,20 @@ where
             "seed": seed,
             "signature": signature,
         }))
-        .await
-        .map_err(|__cause| {
-            crate::door::cause::emit(
-                file!(),
-                line!(),
-                "ErrorCode::Reconcile",
-                ErrorCode::Reconcile,
-                &__cause,
-            )
-        })
+        .await;
+    crate::door::cause::mark(
+        "device_join request",
+        &format!("end {:?}", sent.as_ref().err()),
+    );
+    sent.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Reconcile",
+            ErrorCode::Reconcile,
+            &__cause,
+        )
+    })
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

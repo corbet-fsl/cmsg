@@ -672,7 +672,13 @@ mod proven {
             if observed >= staged.signed.expires_at() {
                 return Err(ErrorCode::ProofWindowElapsed);
             }
-            let response = self.enrollment.send_genesis_request(&staged.signed).await?;
+            crate::door::cause::mark("genesis request", "start");
+            let response = self.enrollment.send_genesis_request(&staged.signed).await;
+            crate::door::cause::mark(
+                "genesis request",
+                &format!("end {:?}", response.as_ref().err().map(|_| "err")),
+            );
+            let response = response?;
             let trust = self
                 .enrollment
                 .with_verified(|_, _, _, current| response_trust(&current.material))

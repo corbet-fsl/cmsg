@@ -323,7 +323,10 @@ pub(super) async fn account_call_at(
         door.accounts.remove(origin);
         return Err(ErrorCode::SessionExpired);
     }
+    let name = cause::kind(&command);
+    cause::mark(&name, "start");
     let answer = actor.call(command).await;
+    cause::mark(&name, &format!("end {:?}", answer.as_ref().err()));
     // A finished actor goes now; one past its deadline stays until the next
     // call, which answers `SessionExpired` instead of an unbound `Unavailable`.
     if door.accounts.get(origin).is_some_and(|actor| actor.ended()) {

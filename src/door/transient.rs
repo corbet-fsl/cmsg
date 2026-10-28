@@ -31,7 +31,13 @@ pub(super) async fn absorb<T>(
     let mut pause = FIRST_PAUSE_SECONDS;
     let mut attempts = 1;
     loop {
-        let error = match attempt(door).await {
+        super::cause::mark("absorb attempt", &format!("start {attempts}"));
+        let result = attempt(door).await;
+        super::cause::mark(
+            "absorb attempt",
+            &format!("end {attempts} {:?}", result.as_ref().err()),
+        );
+        let error = match result {
             Err(error @ (ErrorCode::Unavailable | ErrorCode::Reconcile)) => error,
             done => return done,
         };

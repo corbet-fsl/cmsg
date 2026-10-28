@@ -22,7 +22,11 @@ pub(crate) fn emit<T: std::fmt::Debug, U>(
     source: &T,
 ) -> U {
     #[cfg(feature = "private-tor-fixture")]
-    eprintln!("cause: {file}:{line} {what} -> {}", kind_of(source));
+    eprintln!(
+        "cause: {} {file}:{line} {what} -> {}",
+        stamp(),
+        kind_of(source)
+    );
     target
 }
 
@@ -36,7 +40,35 @@ pub(crate) fn print<T: std::fmt::Debug>(
     source: &T,
 ) {
     #[cfg(feature = "private-tor-fixture")]
-    eprintln!("cause: {file}:{line} {what} -> {}", kind_of(source));
+    eprintln!(
+        "cause: {} {file}:{line} {what} -> {}",
+        stamp(),
+        kind_of(source)
+    );
+}
+
+/// Wall-clock seconds.millis, so cause lines of one run can be ordered against each other.
+#[cfg(feature = "private-tor-fixture")]
+pub(crate) fn stamp() -> String {
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("t={}.{:03}", at.as_secs() % 100_000, at.subsec_millis())
+}
+
+/// A timing line: which operation, and whether it started, ended well or ended with an error.
+#[allow(unused_variables)]
+pub(crate) fn mark(what: &str, phase: &str) {
+    #[cfg(feature = "private-tor-fixture")]
+    eprintln!("timing: {} {what} {phase}", stamp());
+}
+
+/// A value's variant name only (never a field value).
+pub(crate) fn kind<T: std::fmt::Debug>(value: &T) -> String {
+    format!("{value:?}")
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
+        .collect()
 }
 
 /// The source error's type or variant name only: the leading alphanumeric run of its
