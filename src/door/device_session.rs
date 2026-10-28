@@ -53,6 +53,49 @@ impl Door {
     }
 }
 
+impl Door {
+    /// Open or renew the community session of `origin` as a delegate: K_d signs the
+    /// server's nonce (`DeviceFormat::DeviceSession`, class `Delegate`); no ceremony, no
+    /// vault. The server accepts it only for a community session (A9). The
+    /// server's typed `delegate_revoked` reason is `DelegateRevoked`; nothing else is.
+    pub async fn open_delegated_session(
+        &mut self,
+        origin: &str,
+        user: &str,
+        delegation: &ckmg::DeviceDelegation,
+    ) -> Result<u64> {
+        if !self.delegated {
+            return Err(ErrorCode::NeedsPasskey);
+        }
+        let challenge = self
+            .foyers
+            .get_mut(origin)
+            .ok_or(ErrorCode::Unavailable)?
+            .begin_device_session()
+            .await?;
+        let message = challenge.message(&self.config.community);
+        let signature = delegation
+            .sign_device_session(&message)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
+        let device_key: [u8; 32] = delegation.device_public_key().value().to_owned();
+        // The server's distinct `delegate_revoked` reason arrives as `DelegateRevoked`, its
+        // `needs_passkey` as `NeedsPasskey`; every other refusal keeps its own code.
+        self.foyers
+            .get_mut(origin)
+            .ok_or(ErrorCode::Unavailable)?
+            .finish_device_session(challenge.nonce, user, device_key, signature.to_vec())
+            .await
+    }
+}
+
 /// Stamp salt of an admin session: SHA-256 of the device key's signature over the garden
 /// message. The wallet cannot guess it and each one-use nonce yields a different one.
 pub(crate) fn garden_salt(signature: &[u8]) -> [u8; 32] {

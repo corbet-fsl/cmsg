@@ -118,6 +118,13 @@ pub enum ErrorCode {
     /// extended or re-bound: the device needs a fresh global session (a passkey
     /// assertion), and the operation starts again under it. Clients prompt for it.
     SessionExpired,
+    /// This Door was opened from a device delegation (community sessions and member
+    /// purposes only, D1): the action needs the member's wallet passkey. Refused at the
+    /// client before any request is made; the caller asks the member for the passkey.
+    NeedsPasskey,
+    /// The server no longer accepts this delegate's key (its registry row was revoked or
+    /// the member left). The delegation is dead: drop it and ask for the passkey.
+    DelegateRevoked,
 }
 
 impl ErrorCode {
@@ -127,7 +134,11 @@ impl ErrorCode {
     pub const fn exit_code(self) -> u8 {
         match self {
             Self::InvalidRequest | Self::UnsupportedAction | Self::UnsupportedVersion => 64,
-            Self::Unauthorized | Self::Refused | Self::HeldInLobby => 77,
+            Self::Unauthorized
+            | Self::Refused
+            | Self::HeldInLobby
+            | Self::NeedsPasskey
+            | Self::DelegateRevoked => 77,
             Self::Unavailable | Self::DiscardedRequestAccepted => 69,
             Self::Capacity
             | Self::Clock
@@ -357,6 +368,8 @@ pub struct Door {
     device_logins: BTreeMap<String, login::session::DeviceLogin>,
     /// Community custody bound at app start (C8 A), taken once by the start restore.
     eager_bindings: BTreeMap<String, facades::EagerBinding>,
+    /// Opened from a device delegation (D1): only community-session work is admitted.
+    delegated: bool,
     #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
     embedded_authenticators: BTreeMap<String, login::native::Embedded>,
     #[cfg(target_arch = "wasm32")]
@@ -389,11 +402,23 @@ impl Door {
             #[cfg(not(target_arch = "wasm32"))]
             device_logins: BTreeMap::new(),
             eager_bindings: BTreeMap::new(),
+            delegated: false,
             #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
             embedded_authenticators: BTreeMap::new(),
             #[cfg(target_arch = "wasm32")]
             browser_gesture: None,
         }
+    }
+
+    /// Trusted embedding: mark this Door as opened from a `ckmg::DeviceDelegation`. It
+    /// admits community-session work only (D1); there is no way back to a full Door.
+    pub fn restrict_to_delegation(&mut self) {
+        self.delegated = true;
+    }
+
+    /// Whether this Door is restricted to a delegation's authority.
+    pub fn is_delegated(&self) -> bool {
+        self.delegated
     }
 
     /// Trusted embedding control: run the background record job for `origin`
@@ -681,6 +706,13 @@ impl Door {
             .map(|action| action.version)
             .or_else(|| remote.map(|action| action.description.version))
             .ok_or(ErrorCode::UnsupportedAction)?;
+        // A delegated Door (D1): after the protocol version, this is the FIRST decision,
+        // before any grant, size-dependent or handler work. Every action outside the
+        // explicit lists answers the typed state, so a delegated CLI can tell "needs the
+        // passkey" from "not authorized". Nothing is sent to any server for it.
+        if self.delegated && request.version == version && !delegate_admits(local, remote) {
+            return Err(ErrorCode::NeedsPasskey);
+        }
         if !grant.actions.contains(&request.action) {
             return Err(ErrorCode::Unauthorized);
         }
@@ -732,6 +764,18 @@ impl Door {
             .map(|owner| (owner, self.readiness(owner)))
             .collect(),
         }
+    }
+}
+
+/// What a Door opened from a `DeviceDelegation` may do (D1): the local status and
+/// member-purpose actions of `DELEGATE_ACTIONS` and the community-scope read-only checks. Everything else
+/// (wallet, account signing, stamps, genesis, voucher gates, new communities, waves
+/// needing account proofs) is refused. Deny by default.
+fn delegate_admits(local: Option<&registry::Action>, remote: Option<&foyer::Operation>) -> bool {
+    match (local, remote) {
+        (Some(action), _) => action.is_delegate_safe(),
+        (None, Some(operation)) => operation.is_delegate_safe(),
+        (None, None) => false,
     }
 }
 

@@ -176,6 +176,18 @@ const DEVICE_CREATION: [&str; 3] = [
     "community_terms",
 ];
 
+/// The read-only community checks a delegated Door forwards (D1). An explicit list, so a
+/// new owner operation is refused for delegates until someone decides it belongs here.
+const DELEGATE_CHECKS: [&str; 7] = [
+    "trust_feed",
+    "trust_changes",
+    "handle_available",
+    "member_role",
+    "lobby",
+    "device_keys",
+    "pin_get",
+];
+
 static OPERATIONS: LazyLock<Vec<Operation>> = LazyLock::new(|| operations(cfyr::contract()));
 
 fn operations(document: &Value) -> Vec<Operation> {
@@ -304,6 +316,16 @@ pub(super) fn owner_operation(name: &str) -> Option<&'static Operation> {
 }
 
 impl Operation {
+    /// Whether a Door opened from a device delegation may forward this operation: a
+    /// community-scope check by an ordinary member or the public (no record, no proof, no
+    /// admin or root role).
+    pub(super) fn is_delegate_safe(&self) -> bool {
+        DELEGATE_CHECKS.contains(&self.name.as_str())
+            && matches!(self.scope, ServiceScope::Exact(Scope::Community))
+            && matches!(self.access, Access::Any | Access::Member)
+            && matches!(self.description.effect, Effect::FoyerCheck)
+    }
+
     pub(super) fn scope_is_global(&self) -> bool {
         matches!(self.scope, ServiceScope::Exact(Scope::Global))
     }
@@ -785,9 +807,10 @@ pub(super) fn map_error(error: cfyr::Error) -> ErrorCode {
         cfyr::Error::Reconcile => ErrorCode::Reconcile,
         // A certain refusal: the request window elapsed before the owner's commit.
         cfyr::Error::Expired => ErrorCode::ProofWindowElapsed,
-        // A delegated device key asked for a passkey action (D1). A certain refusal; the
-        // delegated Door's own typed state arrives with A10a.
-        cfyr::Error::NeedsPasskey => ErrorCode::Refused,
+        // A delegated device key asked for a passkey action (D1): the typed state.
+        cfyr::Error::NeedsPasskey => ErrorCode::NeedsPasskey,
+        // The server revoked this delegate's registry row (its distinct reason).
+        cfyr::Error::DelegateRevoked => ErrorCode::DelegateRevoked,
     }
 }
 
@@ -798,7 +821,19 @@ mod held_tests {
     #[test]
     fn the_servers_lobby_hold_reaches_the_client_as_its_own_code() {
         assert_eq!(map_error(cfyr::Error::HeldInLobby), ErrorCode::HeldInLobby);
-        assert_eq!(map_error(cfyr::Error::NeedsPasskey), ErrorCode::Refused);
+        assert_eq!(
+            map_error(cfyr::Error::NeedsPasskey),
+            ErrorCode::NeedsPasskey
+        );
+        assert_eq!(
+            map_error(cfyr::Error::DelegateRevoked),
+            ErrorCode::DelegateRevoked
+        );
+        // A plain unauthorized never reads as a revocation.
+        assert_eq!(
+            map_error(cfyr::Error::Unauthorized),
+            ErrorCode::Unauthorized
+        );
         assert_eq!(ErrorCode::HeldInLobby.exit_code(), 77);
     }
 }

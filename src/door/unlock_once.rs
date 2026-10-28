@@ -35,7 +35,7 @@ pub struct NeedsPasskey;
 impl NeedsPasskey {
     /// Its wire code where an `ErrorCode` is expected (no `From`: keeps `?` inference).
     pub const fn code(self) -> ErrorCode {
-        ErrorCode::Unauthorized
+        ErrorCode::NeedsPasskey
     }
 }
 
@@ -79,7 +79,7 @@ impl DeviceUnlock {
     }
 
     /// The wallet vault's opening (unchanged derivation). A resumed start does not
-    /// hold it: the wallet vault needs the passkey (`Unauthorized`).
+    /// hold it: the wallet vault needs the passkey (`NeedsPasskey`).
     pub fn wallet_opening(&self) -> Result<cvlt::PreparedOpen> {
         match &self.held {
             Held::Ceremony(wallet) => wallet.wallet().map_err(|__cause| {
@@ -670,17 +670,42 @@ mod tests {
             let public: [u8; 32] = key.value()[..].try_into().unwrap();
             ckmg::verify_ed25519(&public, &message, &signature).unwrap();
             assert!(resumed.resumed_session(&[2; 32], "orchard").is_ok());
+            // The delegated Door, opened from this resume with 0 prompts: it reaches the
+            // foyer step (no owner is bound here, so `Unavailable`), where a full Door
+            // that was not restricted refuses to sign as a delegate at all.
+            let mut full = crate::door::Door::new(
+                crate::door::Configuration::new(
+                    "garden".into(),
+                    std::collections::BTreeMap::from([(
+                        crate::door::Role::Member,
+                        std::collections::BTreeSet::from(["https://m.example".to_string()]),
+                    )]),
+                )
+                .unwrap(),
+            );
+            assert_eq!(
+                full.open_delegated_session("https://m.example", "u", delegate)
+                    .await,
+                Err(ErrorCode::NeedsPasskey)
+            );
+            full.restrict_to_delegation();
+            assert_eq!(
+                full.open_delegated_session("https://m.example", "u", delegate)
+                    .await,
+                Err(ErrorCode::Unavailable)
+            );
+            assert_eq!(ceremonies, 1, "no ceremony for the delegated session");
             // v2 holds no opening and no PRF: the wallet and account actions, community
             // openings and new communities answer "needs the passkey" (D1).
             assert_eq!(resumed.wallet().err(), Some(NeedsPasskey));
             assert_eq!(
                 resumed.wallet_opening().err(),
-                Some(ErrorCode::Unauthorized)
+                Some(ErrorCode::NeedsPasskey)
             );
-            assert_eq!(resumed.wallet_unlock().err(), Some(ErrorCode::Unauthorized));
+            assert_eq!(resumed.wallet_unlock().err(), Some(ErrorCode::NeedsPasskey));
             assert_eq!(
                 resumed.community_opening(&[1; 32], "garden").err(),
-                Some(ErrorCode::Unauthorized)
+                Some(ErrorCode::NeedsPasskey)
             );
             assert_eq!(
                 resumed.resumed_session(&[3; 32], "meadow").err(),

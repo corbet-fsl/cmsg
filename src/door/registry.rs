@@ -95,6 +95,63 @@ type Handler = for<'a> fn(
     Box<dyn std::future::Future<Output = Result<(Value, Vec<Event>)>> + 'a>,
 >;
 
+impl Action {
+    /// Whether a Door opened from a device delegation admits this action (D1): status and
+    /// lifecycle, and the member purposes a delegate exists for (board, rooms, groups,
+    /// inbox conversations). Wallet, account, stamps, genesis, community creation, voucher
+    /// gates, waves and record writes are not in the list: deny by default.
+    pub(super) fn is_delegate_safe(&self) -> bool {
+        DELEGATE_ACTIONS.contains(&self.name)
+    }
+}
+
+/// The local actions a delegated Door admits. An explicit list: a new action is refused
+/// for delegates until someone decides it belongs here.
+pub(super) const DELEGATE_ACTIONS: [&str; 40] = [
+    "runtime.status",
+    "runtime.describe",
+    "client.revoke",
+    "vault.lock",
+    "mesh.status",
+    "mesh.disconnect",
+    // Refreshes the community's public trust feed (no session, no wallet): a delegate
+    // needs it to keep verifying the community it is a member of.
+    "foyer.refresh",
+    "board.status",
+    "board.disconnect",
+    "board.attend",
+    "board.depart",
+    "board.heartbeat",
+    "board.discovery",
+    "board.groups",
+    "board.group_act",
+    "board.group_answer",
+    "board.group_message",
+    "board.group_propose",
+    "board.group_welcome",
+    "board.room_admit",
+    "board.room_connect",
+    "board.room_join",
+    "board.room_leave",
+    "board.room_list",
+    "board.room_listing",
+    "board.room_refs",
+    "board.room_serve",
+    "board.search",
+    "board.watch",
+    "inbox.snapshot",
+    "inbox.history",
+    "inbox.thread",
+    "inbox.relation",
+    "inbox.delivery_status",
+    "inbox.blocking_rules",
+    "inbox.send",
+    "inbox.receive",
+    "inbox.ack",
+    "inbox.retry",
+    "inbox.contact_act",
+];
+
 pub(super) struct Action {
     name: &'static str,
     pub version: u16,
