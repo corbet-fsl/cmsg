@@ -584,10 +584,14 @@ impl AccountAdmission<'_> {
                 &__cause,
             )
         })?;
-        // A read: a failure changes nothing and the next join asks again.
+        // A read: a failure changes nothing and the next join asks again. It goes
+        // through the same held owner and the same authorization as the stored
+        // write, and it must leave that write sendable: a device that lost the
+        // answer reads the acceptance back, and the exact retry of the same bytes
+        // follows on this very lease when the operator holds none.
         let response = self
             .lease
-            .apply_account(wire, now)
+            .read_account(wire, now)
             .await
             .map_err(|__cause| {
                 crate::door::cause::emit(
