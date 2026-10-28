@@ -706,11 +706,9 @@ mod tests {
             let last = record.len() - 1;
             record[last] ^= 1;
             std::fs::write(&path, record).unwrap();
-            assert!(
-                resume(&store(dir.path()), UnlockPolicy::default())
-                    .await
-                    .is_none()
-            );
+            assert!(resume(&store(dir.path()), UnlockPolicy::default())
+                .await
+                .is_none());
             let again = start(
                 &store(dir.path()),
                 &mut client,
