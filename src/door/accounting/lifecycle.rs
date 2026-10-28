@@ -5,7 +5,9 @@
 //! a rebuilt or re-signed request. Activation is the gate before custody.
 use super::genesis::{advance_detail, operation};
 use super::*;
-use cblc::accounting::{self as acct, AccountStatusRequest, AccountStatusResponse};
+use cblc::accounting::{
+    self as acct, AccountAcceptance, AccountStatusRequest, AccountStatusResponse,
+};
 use cblc::contracts::{AccountServiceRequest, AccountServiceResponse};
 use ckmg::wallet_engine::account::{OwnerAbsence, GENESIS_DISCARD_COMMIT_MARGIN_SECONDS};
 use cwlt::account_owner::ReopenedPending;
@@ -149,13 +151,17 @@ impl AccountAdmission<'_> {
         Ok((current, opened))
     }
 
-    /// Recover a pending request: when still in state A, re-send the identical
-    /// stored outbox (the server answers an exact retry with the stored
-    /// acceptance), verify the response and advance to state B. Returns the
-    /// operator's acceptance time.
+    /// Recover a pending request: when still in state A, ask the operator what it
+    /// already holds and, when that is exactly this request's acceptance (the
+    /// answer was lost after it was accepted), adopt it through the same
+    /// verification a delivered answer gets. Only when the operator holds no
+    /// acceptance is the identical stored outbox re-sent (the server answers an
+    /// exact retry with the stored acceptance). Returns the operator's acceptance
+    /// time.
     pub async fn reopen<B, C, E, A, R>(
         &mut self,
         account: &mut CommunityAccount<B, C, E, A, R>,
+        intents: &mut AccountingIntents,
     ) -> Result<u64>
     where
         B: cwst::backend::Backend,
@@ -179,6 +185,12 @@ impl AccountAdmission<'_> {
         // An elapsed request is never re-sent; the guarded discard decides.
         if current.now >= signed.expires_at() {
             return Err(ErrorCode::ProofWindowElapsed);
+        }
+        // ONE authenticated status read tells what the operator already holds. Its
+        // acceptance of exactly this request is adopted; nothing held (or a read
+        // that failed, which changes nothing) falls through to the exact retry.
+        if let Some(at) = self.held_acceptance(account, intents, &signed).await? {
+            return Ok(at);
         }
         let response = self.send_signed(&signed).await?;
         let trust = response_trust_with_join(
@@ -223,6 +235,113 @@ impl AccountAdmission<'_> {
         Ok(response.acceptance().accepted_at)
     }
 
+    /// The acceptance an authenticated status already holds for exactly this
+    /// stored request, adopted and advanced, or `None` when it holds none of this
+    /// owner's. The decision is the same operator-data-only `verdict` the elapsed
+    /// path uses, and the adoption is `adopt_held`: one verification, one engine
+    /// path, whichever way the answer arrives. A status read that fails changes
+    /// nothing and leaves the caller its exact retry.
+    async fn held_acceptance<B, C, E, A, R>(
+        &mut self,
+        account: &mut CommunityAccount<B, C, E, A, R>,
+        intents: &mut AccountingIntents,
+        signed: &SignedApplyExtended,
+    ) -> Result<Option<u64>>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
+        let statement = signed.statement();
+        let (_, status) = match self
+            .owner_status(account, intents, statement.community, statement.owner)
+            .await
+        {
+            Ok(value) => value,
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "account status", &__cause);
+                return Ok(None);
+            }
+        };
+        let discarded = account
+            .vault()
+            .await?
+            .discarded_genesis()
+            .await
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })?;
+        match verdict(
+            &status,
+            signed.request_id(),
+            signed.expires_at(),
+            &discarded,
+        )? {
+            Verdict::Adopt => Ok(Some(self.adopt_held(account, &status, signed).await?)),
+            // No acceptance of this request (yet, or at all): the exact retry is
+            // the ordinary answer, and the operator decides it again.
+            Verdict::Wait(_) | Verdict::Discard => Ok(None),
+        }
+    }
+
+    /// Turn the acceptance an authenticated status holds into state B, verified
+    /// exactly as a delivered answer is: the acceptance under the pinned operator
+    /// key and the extended verifier, the same `response_trust_with_join` (so a
+    /// status whose publication or ancestry does not verify is refused, never
+    /// adopted), and the same `advance_pending_genesis` engine path. Nothing is
+    /// trusted for being present; nothing is written when any step refuses.
+    async fn adopt_held<B, C, E, A, R>(
+        &mut self,
+        account: &mut CommunityAccount<B, C, E, A, R>,
+        status: &AccountStatusResponse,
+        signed: &SignedApplyExtended,
+    ) -> Result<u64>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
+        let (acceptance, evidence) = adoptable(status)?;
+        let current = self.current()?;
+        let response = AcceptedResponse::from_status(
+            acceptance,
+            evidence,
+            signed,
+            &current.material.extension_policy,
+            &current.material.account_response_key,
+        )?;
+        let trust = response_trust_with_join(&current, response.join_publication())?;
+        account
+            .vault()
+            .await?
+            .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
+            .await
+            .map_err(|__cause| {
+                crate::door::cause::detail(
+                    "genesis advance (status)",
+                    &advance_detail(&response, &trust, now()),
+                );
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &__cause,
+                )
+            })?;
+        Ok(response.acceptance().accepted_at)
+    }
+
     /// Settle a state A whose request window elapsed: one authenticated status
     /// (verified under the CURRENT operator key, which must be the sealed one)
     /// decides. An acceptance of exactly this request is adopted; an acceptance
@@ -234,7 +353,6 @@ impl AccountAdmission<'_> {
         &mut self,
         account: &mut CommunityAccount<B, C, E, A, R>,
         intents: &mut AccountingIntents,
-        intent: &mut ckmg::IntentAdmission,
     ) -> Result<Elapsed>
     where
         B: cwst::backend::Backend,
@@ -257,13 +375,7 @@ impl AccountAdmission<'_> {
         signed.check_binding_digest(opened.binding.acceptance.request_digest)?;
         let statement = signed.statement();
         let (request, status) = self
-            .owner_status(
-                account,
-                intents,
-                intent,
-                statement.community,
-                statement.owner,
-            )
+            .owner_status(account, intents, statement.community, statement.owner)
             .await?;
         let discarded = account
             .vault()
@@ -288,36 +400,9 @@ impl AccountAdmission<'_> {
             Verdict::Wait(eligible_at) => return Ok(Elapsed::Wait(eligible_at)),
             Verdict::Discard => {}
             Verdict::Adopt => {
-                let acceptance = status.acceptance.ok_or(ErrorCode::Reconcile)?;
-                let evidence = status.extended.ok_or(ErrorCode::Reconcile)?;
-                let current = self.current()?;
-                let response = AcceptedResponse::from_status(
-                    acceptance,
-                    evidence,
-                    &signed,
-                    &current.material.extension_policy,
-                    &current.material.account_response_key,
-                )?;
-                let trust = response_trust_with_join(&current, response.join_publication())?;
-                account
-                    .vault()
-                    .await?
-                    .advance_pending_genesis(&response.to_engine()?, &trust, operation()?, now())
-                    .await
-                    .map_err(|__cause| {
-                        crate::door::cause::detail(
-                            "genesis advance (adopt)",
-                            &advance_detail(&response, &trust, now()),
-                        );
-                        crate::door::cause::emit(
-                            file!(),
-                            line!(),
-                            "ErrorCode::Reconcile",
-                            ErrorCode::Reconcile,
-                            &__cause,
-                        )
-                    })?;
-                return Ok(Elapsed::Adopted(response.acceptance().accepted_at));
+                return Ok(Elapsed::Adopted(
+                    self.adopt_held(account, &status, &signed).await?,
+                ))
             }
         }
         let absence = owner_absence(&request, &status)?;
@@ -351,7 +436,6 @@ impl AccountAdmission<'_> {
         &mut self,
         account: &mut CommunityAccount<B, C, E, A, R>,
         intents: &mut AccountingIntents,
-        intent: &mut ckmg::IntentAdmission,
         community: [u8; 32],
         owner: [u8; 32],
     ) -> Result<(AccountStatusRequest, AccountStatusResponse)>
@@ -437,8 +521,14 @@ impl AccountAdmission<'_> {
         {
             return Err(ErrorCode::Unauthorized);
         }
+        // The fresh root authorization above starts a new delegation round, so the
+        // first device signature after it IS the delegation: it is admitted and
+        // signed on the delegation channel (`intents.device`), exactly as a later
+        // update's own fresh authorization signs. Admitting it on the request
+        // channel would leave the delegation verifier empty and lock the Keys.
         // Held until the signature exists; dropping it cancels unused intent.
-        let _admitted = intent
+        let _admitted = intents
+            .device
             .admit(
                 ckmg::AdmittedCommand {
                     binding: lineage.binding,
@@ -685,6 +775,19 @@ impl AccountAdmission<'_> {
     }
 }
 
+/// The acceptance and the issuer evidence an authenticated status must carry
+/// together before anything is verified. A status that claims an acceptance
+/// without the evidence for it is refused, never adopted blind; the evidence is
+/// then checked against the stored request exactly as a delivered answer is.
+fn adoptable(
+    status: &AccountStatusResponse,
+) -> Result<(AccountAcceptance, cblc::extensions::ExtendedEvidence)> {
+    match (&status.acceptance, &status.extended) {
+        (Some(acceptance), Some(evidence)) => Ok((acceptance.clone(), evidence.clone())),
+        _ => Err(ErrorCode::Reconcile),
+    }
+}
+
 /// What one verified owner-lookup status means for the elapsed state A of
 /// `request_id`, from operator data alone: no device time is an input.
 #[derive(Debug, PartialEq, Eq)]
@@ -828,6 +931,31 @@ mod tests {
             verdict(&status(expires + margin, Some(earlier)), id, expires, &[]),
             Err(ErrorCode::Reconcile)
         );
+    }
+
+    #[test]
+    fn a_claimed_acceptance_is_never_adopted_without_its_issuer_evidence() {
+        let own = fixtures::signed(1);
+        let accepted = fixtures::accepted(&own, 150);
+        // The pair the adoption verifies: the acceptance and the certificate plus
+        // ancestry it is checked with. One without the other is a refusal, never a
+        // blind adoption of a status that only says "accepted".
+        let mut status = status(u64::MAX, Some(accepted.acceptance().clone()));
+        assert!(adoptable(&status).is_err());
+        status.acceptance = None;
+        status.extended = Some(cblc::extensions::ExtendedEvidence {
+            certificate: cblc::extensions::StateCertificate {
+                accepted_at: 150,
+                signature: vec![0; 64],
+            },
+            ancestry: None,
+            join_publication: None,
+        });
+        assert!(adoptable(&status).is_err());
+        status.acceptance = Some(accepted.acceptance().clone());
+        let (acceptance, evidence) = adoptable(&status).unwrap();
+        assert_eq!(&acceptance, accepted.acceptance());
+        assert_eq!(evidence.certificate.accepted_at, 150);
     }
 
     #[test]

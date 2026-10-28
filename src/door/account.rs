@@ -1697,14 +1697,11 @@ mod run {
                 let Some(admission) = stage.admission() else {
                     return (Err(ErrorCode::Unavailable), Next::Carry);
                 };
-                match admission.reopen(account).await {
+                match admission.reopen(account, intents).await {
                     Ok(at) => (Ok(Answer::Reopened(Opened { accepted_at: at })), Next::Stay),
                     // Elapsed state A: only the operator's signed status settles it.
                     Err(ErrorCode::ProofWindowElapsed) => {
-                        match admission
-                            .settle_elapsed(account, intents, request_intent)
-                            .await
-                        {
+                        match admission.settle_elapsed(account, intents).await {
                             Ok(Elapsed::Adopted(at)) => (
                                 Ok(Answer::Reopened(Opened { accepted_at: at })),
                                 Next::Restart,

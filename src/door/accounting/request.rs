@@ -587,9 +587,11 @@ impl AcceptedResponse {
             acceptance,
             certificate: evidence.certificate,
             ancestry: evidence.ancestry,
-            // A status lookup carries no publication: the join descriptor can only
-            // come from the actual response (see `send_signed`).
-            join_publication: None,
+            // A status read now carries the community publication the accepting
+            // operator attached for this ancestry; the caller authenticates it
+            // with the same `response_trust_with_join` a delivered answer uses and
+            // never trusts it for being present.
+            join_publication: evidence.join_publication,
             digest,
         })
     }
@@ -1057,8 +1059,22 @@ impl AccountAdmission<'_> {
             .map_err(|error| match error {
                 // Refused before commitment (409, reason expired): certain, and the
                 // only answer that lets the device prepare a fresh request.
-                cfyr::Error::Expired => ErrorCode::ProofWindowElapsed,
-                _ => ErrorCode::Reconcile,
+                cfyr::Error::Expired => crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::ProofWindowElapsed",
+                    ErrorCode::ProofWindowElapsed,
+                    &error,
+                ),
+                // Anything else after dispatch is uncertain: the operator may have
+                // accepted. The cause tells which transport failure lost the answer.
+                error => crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Reconcile",
+                    ErrorCode::Reconcile,
+                    &error,
+                ),
             })?;
         let response: AccountServiceResponse =
             serde_json::from_value(response).map_err(|__cause| {
@@ -1409,6 +1425,70 @@ mod tests {
         ] {
             assert!(SignedApplyExtended::from_update_outbox(bytes, &policy()).is_err());
         }
+    }
+
+    #[test]
+    fn a_status_acceptance_carries_the_publication_the_operator_attached() {
+        // The operator attaches the community publication that names a join-time
+        // ancestry's epoch on the answer and on the authenticated status alike. A
+        // device that lost the answer reads it back and must hand the same
+        // publication to `response_trust_with_join`; dropping it would leave the
+        // strict arm without its only descriptor.
+        let request = signed();
+        let accepted = accept(&request, 150);
+        let evidence = |publication: Option<Vec<u8>>| extensions::ExtendedEvidence {
+            certificate: StateCertificate {
+                accepted_at: 150,
+                signature: vec![0; 64],
+            },
+            ancestry: None,
+            join_publication: publication.map(cblc::contracts::JoinPublication),
+        };
+        let response = AcceptedResponse::from_status(
+            accepted.clone(),
+            evidence(Some(vec![9, 8, 7])),
+            &request,
+            &policy(),
+            &key(),
+        )
+        .unwrap();
+        assert_eq!(
+            response
+                .join_publication()
+                .map(|publication| publication.0.clone()),
+            Some(vec![9, 8, 7])
+        );
+        // A status that carries none says so: no descriptor is invented.
+        let bare = AcceptedResponse::from_status(
+            accepted.clone(),
+            evidence(None),
+            &request,
+            &policy(),
+            &key(),
+        )
+        .unwrap();
+        assert!(bare.join_publication().is_none());
+        // Another request's acceptance is never this request's, whatever evidence
+        // rides along, and an operator key that did not accept refuses too.
+        let other = super::fixtures::signed(1);
+        assert!(AcceptedResponse::from_status(
+            accepted.clone(),
+            evidence(Some(vec![9, 8, 7])),
+            &other,
+            &policy(),
+            &key(),
+        )
+        .is_err());
+        let mut wrong = key();
+        wrong[0] ^= 1;
+        assert!(AcceptedResponse::from_status(
+            accepted,
+            evidence(Some(vec![9, 8, 7])),
+            &request,
+            &policy(),
+            &wrong,
+        )
+        .is_err());
     }
 
     #[test]
