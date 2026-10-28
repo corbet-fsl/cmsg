@@ -8,7 +8,8 @@ use std::{
 };
 use wasm_bindgen::prelude::*;
 fn json(status: CallbackStatus) -> String {
-    serde_json::to_string(&status).expect("fixed callback status")
+    serde_json::to_string(&status)
+        .expect("CallbackStatus is a fieldless enum and always serializes")
 }
 fn refused(_: impl Sized) -> JsValue {
     JsValue::from_str("unavailable")

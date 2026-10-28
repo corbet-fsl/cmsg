@@ -193,7 +193,7 @@ static OPERATIONS: LazyLock<Vec<Operation>> = LazyLock::new(|| operations(cfyr::
 fn operations(document: &Value) -> Vec<Operation> {
     document["paths"]
         .as_object()
-        .expect("the owner contract has paths")
+        .expect("the checked generated owner contract always declares paths")
         .values()
         .filter_map(|item| {
             let operation = &item["post"];

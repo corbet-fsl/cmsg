@@ -1000,12 +1000,20 @@ impl<B: cwst::backend::Backend, C, E, A, R> std::ops::Deref for PortVault<'_, B,
     type Target = cvlt::Vault<B, C, E, A, R, cvlt::WalletCustody>;
     fn deref(&self) -> &Self::Target {
         // Presence is checked when the port hands this out and the lock is held since.
-        &self.guard.as_ref().expect("checked at open").vault
+        &self
+            .guard
+            .as_ref()
+            .expect("vault presence is checked at open and the lock is held since")
+            .vault
     }
 }
 impl<B: cwst::backend::Backend, C, E, A, R> std::ops::DerefMut for PortVault<'_, B, C, E, A, R> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.guard.as_mut().expect("checked at open").vault
+        &mut self
+            .guard
+            .as_mut()
+            .expect("vault presence is checked at open and the lock is held since")
+            .vault
     }
 }
 

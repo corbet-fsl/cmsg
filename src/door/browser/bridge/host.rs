@@ -460,7 +460,8 @@ impl VaultHost {
 impl VaultHost {
     /// Redacted presentation for the actual frame's Continue control.
     pub fn login_status(&self) -> String {
-        serde_json::to_string(&self.state.gesture.status()).expect("fixed callback status")
+        serde_json::to_string(&self.state.gesture.status())
+            .expect("the gesture status is a fixed local enum and always serializes")
     }
     /// Synchronous trusted-frame activation, never dispatched through the UI port.
     pub fn continue_login(&self) -> std::result::Result<(), JsValue> {

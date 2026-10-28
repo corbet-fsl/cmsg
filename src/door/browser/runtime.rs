@@ -40,7 +40,7 @@ fn now() -> Result<u64> {
 fn output(value: Output) -> JsValue {
     // Output contains only JSON-compatible primitives and the owner's Value.
     serde_json::to_string(&value)
-        .expect("Output is JSON-compatible")
+        .expect("Output holds only Value and ErrorCode, which always serialize")
         .into()
 }
 fn refusal(error: ErrorCode) -> js_sys::Promise {

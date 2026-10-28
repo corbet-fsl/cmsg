@@ -240,7 +240,12 @@ impl TransportOwner {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
-        match self.task.take().expect("owned transport task").await {
+        match self
+            .task
+            .take()
+            .expect("the constructor stores the task and only shutdown takes it")
+            .await
+        {
             Ok(()) => Ok(()),
             Err(error) if error.is_cancelled() => Ok(()),
             Err(__cause) => {

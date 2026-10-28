@@ -87,7 +87,7 @@ fn post<T: Serialize>(port: &MessagePort, message: &T) -> Result<()> {
 }
 fn output(output: Output) -> JsValue {
     serde_json::to_string(&output)
-        .expect("registry output is JSON")
+        .expect("Output holds only Value and ErrorCode, which always serialize")
         .into()
 }
 fn error(error: ErrorCode) -> JsValue {
