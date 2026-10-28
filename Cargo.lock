@@ -1662,7 +1662,7 @@ dependencies = [
 [[package]]
 name = "cchr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=main#2ba075762c5230dd9bdf1d39ffc2ffe8a603be90"
+source = "git+https://git.corbet.ch/corbet-foss/cchr.git?branch=main#5bd6ed6cd6bbc8733bdb9e978cd2a2ab24553da3"
 dependencies = [
  "blake3",
  "cbcn",
@@ -2991,7 +2991,7 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=main#f00186f8ca9b257d1d35cdee44090309974e7f6a"
+source = "git+https://git.corbet.ch/corbet-libs/cvlt.git?branch=main#1598aed984e0a40b02052126f069b2fa6637ab5f"
 dependencies = [
  "aes-gcm 0.10.3",
  "blake3",
@@ -3121,7 +3121,7 @@ dependencies = [
 [[package]]
 name = "czkp"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#cf964a9144ddae0f7d3ee645bbeffce92fa4e550"
+source = "git+https://git.corbet.ch/corbet-foss/czkp?branch=main#9509135cd79f4044f92844eadbd5145eb476c467"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
