@@ -1,6 +1,6 @@
 // CI artifact assembly only. Does not serve pages, start owners or select a Tor
 // implementation. The generated API and maintained CTRN modules remain intact.
-import { readFile, writeFile, cp, readdir, lstat, realpath, rename } from 'node:fs/promises';
+import { readFile, writeFile, cp, readdir, lstat, realpath, rename, mkdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { resolve, dirname, join } from 'node:path';
@@ -129,7 +129,15 @@ if (command === 'select') {
   // wasm as plain files, so the wallet origin's worker policy needs no data: or blob: source.
   const proverDist = join(out, 'prover-dist');
   execFileSync('node', [join(process.cwd(), 'prover/build.mjs'), '--out', proverDist], { stdio: 'inherit' });
-  await cp(proverDist, join(target, 'wasm'), { recursive: true, errorOnExist: true, force: false });
+  // MERGE into the existing wasm directory (the wasm-bindgen output is already there): a name that exists on both sides is a real collision and fails,
+  // nothing is ever overwritten.
+  for (const entry of await readdir(proverDist, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const relative = join(entry.parentPath, entry.name).slice(proverDist.length + 1);
+    const destination = join(target, 'wasm', relative);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(join(proverDist, relative), destination, { errorOnExist: true, force: false });
+  }
   for (const name of ['registry', 'openapi', 'mcp', 'cli']) {
     await cp(join(out, `generated/${name}.json`), join(target, `${name}.json`),
       { errorOnExist: true, force: false });
