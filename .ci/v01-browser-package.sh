@@ -57,7 +57,7 @@ node "$helper" select "$out" "$PWD"
 node "$helper" bindgen "$out" "$(wasm-bindgen --version)"
 
 cargo build --release $locked --target wasm32-unknown-unknown --lib \
-  --features cmsg/browser-tor,cmsg/browser-prover -p cmsg -p ctrn -p cfry \
+  --features browser-tor,browser-prover -p cmsg -p ctrn -p cfry \
   --message-format=json > "$out/wasm-build.jsonl"
 for port in cmsg ctrn cfry; do
   wasm=$(node "$helper" artifact "$out" "$port")
