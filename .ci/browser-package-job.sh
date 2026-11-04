@@ -36,6 +36,8 @@ dir=$(mktemp -d "$base/$CI_COMMIT_SHA.XXXXXXXX")
 export CMSG_BROWSER_OUT="$dir/build"
 # The milestone script needs the locked generator dependencies; install exactly the lockfile.
 (cd tools && npm ci --no-audit --no-fund)
+# The browser prover worker (prover/build.mjs) needs its own locked dependencies; v01-browser-package.sh checks for them.
+(cd prover && npm ci --no-audit --no-fund)
 # The Tor service stage needs the pinned TorJS and Arti sources (prepared here from their
 # pinned revisions); set CMSG_SKIP_TOR=1 to package the ports only.
 modes=(ports)
