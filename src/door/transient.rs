@@ -38,6 +38,8 @@ pub(super) async fn absorb<T>(
         if attempts >= ATTEMPTS || !runway(door, origin, pause) || !wait(pause).await {
             return Err(error);
         }
+        // Development gate only: name the absorbed kind, never a value.
+        super::cause::print(file!(), line!(), "transient repeated", &error);
         attempts += 1;
         pause = pause.saturating_mul(2);
     }
