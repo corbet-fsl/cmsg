@@ -30,7 +30,7 @@ export interface Harness {
   hits: Map<string, number>;
   /** Every request in arrival order (the server-side half of the request recorder). */
   seen: Seen[];
-  control: { tamperG1: boolean; tamperG2: boolean; tamperCircuit: boolean };
+  control: { tamperG1: boolean; tamperG2: boolean; tamperCircuit: boolean; tamperWaveKeys: boolean };
   close(): Promise<void>;
 }
 
@@ -51,7 +51,7 @@ function readRange(path: string, length: number): Buffer {
 export async function startHarness(options: { dist: string; setupDir?: string; artifacts?: string; page?: string; port?: number; isolated?: boolean }): Promise<Harness> {
   const hits = new Map<string, number>();
   const seen: Seen[] = [];
-  const control = { tamperG1: false, tamperG2: false, tamperCircuit: false };
+  const control = { tamperG1: false, tamperG2: false, tamperCircuit: false, tamperWaveKeys: false };
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>wallet</title></head><body><script type="module" src="/${options.page ?? 'page.js'}"></script></body></html>`;
   const server: Server = createServer((req, res) => {
     const path = new URL(req.url ?? '/', 'http://x').pathname;
@@ -74,6 +74,13 @@ export async function startHarness(options: { dist: string; setupDir?: string; a
     };
     if (path === '/favicon.ico') return send(204, 'image/x-icon', '');
     if (path === '/') return send(200, 'text/html', html, { 'content-security-policy': PAGE_POLICY });
+    // The peer-release group (wave/circuit.json, wave/keys.json, wave/manifest.json) of the deployment.
+    const wave = /^\/prover\/wave\/(circuit|keys|manifest)\.json$/.exec(path);
+    if (wave && options.artifacts) {
+      const bytes = Buffer.from(readFileSync(join(options.artifacts, 'wave', `${wave[1]}.json`)));
+      if (control.tamperWaveKeys && wave[1] === 'keys') bytes[bytes.length >> 1] ^= 1;
+      return send(200, 'application/json', bytes);
+    }
     const material = /^\/prover\/(circuit|keys|calibration)\.json$/.exec(path);
     if (material && options.artifacts) {
       const bytes = Buffer.from(readFileSync(join(options.artifacts, `${material[1]}.json`)));

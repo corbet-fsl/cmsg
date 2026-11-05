@@ -54,19 +54,8 @@ function parseSetup(text: string): Setup {
   return setup;
 }
 
-async function run(setupText: string, buffer: ArrayBuffer): Promise<string> {
-  const setup = parseSetup(setupText);
-  report({ stage: 'start' });
-  const view = new Uint8Array(buffer);
-  let input: unknown;
-  try {
-    input = JSON.parse(new TextDecoder().decode(view));
-  } catch {
-    throw new Failure('witness');
-  } finally {
-    view.fill(0); // the received private bytes; the parsed copy dies with this worker
-  }
-
+// The pinned setup in the proof system: from the verified cache or this origin, expanded and cached.
+async function open(setup: Setup): Promise<{ api: Barretenberg; threads: number }> {
   const srs = await loadSrs(setup.srs, report);
   report({ stage: 'srs-load', cached: srs.expanded });
   await Promise.all([
@@ -82,7 +71,65 @@ async function run(setupText: string, buffer: ArrayBuffer): Promise<string> {
   try {
     const initialised = await api.srsInitSrs({ pointsBuf: srs.g1, numPoints: setup.srs.points, g2Point: srs.g2 });
     if (!srs.expanded) await cacheExpanded(setup.srs, initialised.pointsBuf);
+  } catch (error) {
+    await api.destroy().catch(() => {});
+    throw error;
+  }
+  return { api, threads };
+}
 
+/** Split whole 32-byte fields; anything else is not a proof or a public input. */
+function fieldsOf(bytes: Uint8Array): Uint8Array[] {
+  if (bytes.length === 0 || bytes.length % 32 !== 0) throw new Failure('verify');
+  return Array.from({ length: bytes.length / 32 }, (_, index) => bytes.slice(index * 32, index * 32 + 32));
+}
+
+// The counterpart's proof under the setup's verification key, for exactly these public fields.
+async function verify(setupText: string, fields: ArrayBuffer, proof: ArrayBuffer): Promise<string> {
+  const setup = parseSetup(setupText);
+  report({ stage: 'start' });
+  const publicInputs = fieldsOf(new Uint8Array(fields));
+  const proofFields = fieldsOf(new Uint8Array(proof));
+  const verificationKey = unhex(setup.verification_key);
+  const { api } = await open(setup);
+  try {
+    report({ stage: 'verify' });
+    let verified: boolean;
+    try {
+      verified = (await api.circuitVerify({ verificationKey, publicInputs, proof: proofFields, settings: SETTINGS })).verified;
+    } catch {
+      verified = false; // a malformed proof is a refusal, never an answer
+    }
+    return JSON.stringify({ verified: verified === true });
+  } finally {
+    await api.destroy().catch(() => {});
+  }
+}
+
+// Only the setup: loaded, expanded and cached; the proof system started and ended.
+async function warm(setupText: string): Promise<string> {
+  const setup = parseSetup(setupText);
+  report({ stage: 'start' });
+  const { api } = await open(setup);
+  await api.destroy().catch(() => {});
+  return JSON.stringify({ warm: true });
+}
+
+async function run(setupText: string, buffer: ArrayBuffer): Promise<string> {
+  const setup = parseSetup(setupText);
+  report({ stage: 'start' });
+  const view = new Uint8Array(buffer);
+  let input: unknown;
+  try {
+    input = JSON.parse(new TextDecoder().decode(view));
+  } catch {
+    throw new Failure('witness');
+  } finally {
+    view.fill(0); // the received private bytes; the parsed copy dies with this worker
+  }
+
+  const { api, threads } = await open(setup);
+  try {
     report({ stage: 'witness' });
     let witness: Uint8Array;
     try {
@@ -122,8 +169,14 @@ async function run(setupText: string, buffer: ArrayBuffer): Promise<string> {
 }
 
 self.onmessage = (event: MessageEvent<ToWorker>) => {
-  const { setup, input } = event.data;
-  run(setup, input).then(
+  const message = event.data;
+  const job =
+    'verify' in message
+      ? verify(message.setup, message.verify.fields, message.verify.proof)
+      : 'warm' in message
+        ? warm(message.setup)
+        : run(message.setup, message.input);
+  job.then(
     (reply) => post({ type: 'done', reply }),
     (error: unknown) => {
       if (__PROVER_DEBUG__) console.error('prover worker failed:', error);

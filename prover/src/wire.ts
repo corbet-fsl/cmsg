@@ -61,7 +61,11 @@ export interface Setup {
   max_threads: number;
 }
 
-export type ToWorker = { setup: string; input: ArrayBuffer };
+/** A proof of the private input, a counterpart verification of public fields and a proof, or a warm-up. */
+export type ToWorker =
+  | { setup: string; input: ArrayBuffer }
+  | { setup: string; verify: { fields: ArrayBuffer; proof: ArrayBuffer } }
+  | { setup: string; warm: true };
 export type FromWorker =
   | { type: 'progress'; progress: Progress }
   | { type: 'done'; reply: string }

@@ -78,6 +78,55 @@ impl Door {
         self.wave_ports.insert(origin.into(), ports);
         Ok(())
     }
+
+    /// Trusted embedding control, absent from every callable projection: install what a
+    /// compose may warm on this device for an already configured member origin (see
+    /// [`WavePrewarm`]).
+    pub fn bind_wave_prewarm(
+        &mut self,
+        origin: &str,
+        prewarm: std::rc::Rc<dyn WavePrewarm>,
+    ) -> Result<()> {
+        if !self
+            .config
+            .origins
+            .get(&Role::Member)
+            .is_some_and(|set| set.contains(origin))
+            || self.wave_prewarm.contains_key(origin)
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        self.wave_prewarm.insert(origin.into(), prewarm);
+        Ok(())
+    }
+}
+
+/// Speculative sender reservation, option (b) (decided 2026-11-05): while the member composes,
+/// the device warms only what the send will need locally (witness load, prover, setup). It sends
+/// nothing: no Hello, no reserve, no request to the counterpart, the Mesh, the forum or the issuer.
+/// The reserve still follows the counterpart's Terms after the member sends.
+pub trait WavePrewarm {
+    /// Warm, best effort; a failed warm-up only means the send loads everything itself.
+    fn prewarm(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
+}
+
+/// `inbox.wave_prewarm`: the member started composing. Starts the origin's warm-up in the
+/// background and answers at once; without a bound warm-up it does nothing. It reads and
+/// records nothing in the vault and reveals nothing beyond this device.
+pub(super) async fn wave_prewarm(
+    door: &mut Door,
+    key: &[u8; 32],
+    _: Empty,
+) -> Result<(Empty, Vec<Event>)> {
+    let origin = &door.grants.get(key).ok_or(ErrorCode::Unauthorized)?.origin;
+    if let Some(prewarm) = door.wave_prewarm.get(origin) {
+        let warm = prewarm.prewarm();
+        #[cfg(target_arch = "wasm32")]
+        wasm_bindgen_futures::spawn_local(warm);
+        #[cfg(not(target_arch = "wasm32"))]
+        warm.await;
+    }
+    Ok((Empty {}, vec![]))
 }
 
 /// One request to the bound Vault, wave or conversation, with its reply.
@@ -343,5 +392,88 @@ pub(super) async fn wave_jobs_recover(
     match run(door, key, Command::Recover).await? {
         (Answer::Done, events) => Ok((Empty {}, events)),
         _ => Err(ErrorCode::Unavailable),
+    }
+}
+
+#[cfg(test)]
+mod prewarm_tests {
+    use super::*;
+    use std::{cell::Cell, collections::BTreeSet, rc::Rc};
+
+    const ORIGIN: &str = "https://omega.example.test";
+
+    fn door() -> Door {
+        let configuration = Configuration::new(
+            "omega".into(),
+            BTreeMap::from([(Role::Member, BTreeSet::from([ORIGIN.to_owned()]))]),
+        )
+        .unwrap();
+        Door::new(configuration)
+    }
+
+    struct Counting(Rc<Cell<u32>>);
+    impl WavePrewarm for Counting {
+        fn prewarm(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>> {
+            self.0.set(self.0.get() + 1);
+            Box::pin(async {})
+        }
+    }
+
+    async fn compose(door: &mut Door, origin: &str) -> Result<serde_json::Value> {
+        let key = [7u8; 32];
+        door.grants.insert(
+            key,
+            Grant {
+                origin: origin.to_owned(),
+                actions: BTreeSet::from(["inbox.wave_prewarm".to_owned()]),
+                expires: u64::MAX,
+            },
+        );
+        let action = super::super::registry::action("inbox.wave_prewarm").unwrap();
+        let outcome = (action.handler)(door, &key, "{}").await.map(|(v, _)| v);
+        door.grants.remove(&key);
+        outcome
+    }
+
+    #[tokio::test]
+    async fn a_compose_warms_only_the_bound_origin_and_answers_empty() {
+        let mut door = door();
+        // Nothing bound: nothing happens, and the member is not refused for it.
+        assert_eq!(compose(&mut door, ORIGIN).await, Ok(serde_json::json!({})));
+        let warmed = Rc::new(Cell::new(0));
+        door.bind_wave_prewarm(ORIGIN, Rc::new(Counting(warmed.clone())))
+            .unwrap();
+        assert_eq!(compose(&mut door, ORIGIN).await, Ok(serde_json::json!({})));
+        assert_eq!(warmed.get(), 1);
+        // A grant of another origin warms nothing of this one.
+        assert_eq!(
+            compose(&mut door, "https://other.example.test").await,
+            Ok(serde_json::json!({}))
+        );
+        assert_eq!(warmed.get(), 1);
+        // The action reads nothing and records nothing: it is a Read of the Inbox family.
+        let described = super::super::registry::catalog()
+            .into_iter()
+            .find(|action| action.action == "inbox.wave_prewarm")
+            .unwrap();
+        assert!(matches!(
+            described.effect,
+            super::super::registry::Effect::Read
+        ));
+    }
+
+    #[test]
+    fn only_a_member_origin_gets_one_warm_up() {
+        let mut door = door();
+        let warm = || Rc::new(Counting(Rc::new(Cell::new(0))));
+        assert_eq!(
+            door.bind_wave_prewarm("https://other.example.test", warm()),
+            Err(ErrorCode::Unauthorized)
+        );
+        assert_eq!(door.bind_wave_prewarm(ORIGIN, warm()), Ok(()));
+        assert_eq!(
+            door.bind_wave_prewarm(ORIGIN, warm()),
+            Err(ErrorCode::Unauthorized)
+        );
     }
 }

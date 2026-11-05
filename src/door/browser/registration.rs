@@ -52,6 +52,14 @@ pub const PROVER_CIRCUIT_PATH: &str = "/prover/circuit.json";
 pub const PROVER_KEYS_PATH: &str = "/prover/keys.json";
 /// Where the wallet origin serves the dummy input of the calibration proof (public test data).
 pub const PROVER_CALIBRATION_PATH: &str = "/prover/calibration.json";
+/// Where the wallet origin serves the peer-release circuit group (`wave` and `outcome`), a
+/// separate published group (never part of the update group).
+pub const WAVE_CIRCUIT_PATH: &str = "/prover/wave/circuit.json";
+/// Where the wallet origin serves the peer-release verification-key group.
+pub const WAVE_KEYS_PATH: &str = "/prover/wave/keys.json";
+/// Where the wallet origin serves the release manifest of the peer-release group: the community's
+/// wave policy pins its digest, and it names the digests of the two files above.
+pub const WAVE_MANIFEST_PATH: &str = "/prover/wave/manifest.json";
 
 /// Public data of the browser prover this deployment ships. The files sit at fixed paths of the
 /// wallet origin; the deployment pins their digests, so a file the origin serves differently is
@@ -68,6 +76,24 @@ pub struct ProverDeployment {
     pub calibration_sha256: String,
     /// The dyadic number of setup points the circuit needs (the engine pins 2^19 and 2^20).
     pub points: u32,
+    /// The peer-release group (`wave` and `outcome`) this deployment ships, or none. It proves
+    /// and verifies on the same pinned setup as the update circuit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wave: Option<WaveDeployment>,
+}
+
+/// Public data of the peer-release group a deployment ships: the digests of its three files at
+/// fixed paths of the wallet origin, exactly like the update circuit's. The verification keys the
+/// counterpart verifier trusts are the `wave` and `outcome` members of the pinned key group.
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WaveDeployment {
+    /// SHA-256 of `/prover/wave/circuit.json`.
+    pub circuit_sha256: String,
+    /// SHA-256 of `/prover/wave/keys.json`.
+    pub keys_sha256: String,
+    /// SHA-256 of `/prover/wave/manifest.json`.
+    pub manifest_sha256: String,
 }
 
 impl Configuration {
@@ -391,6 +417,46 @@ mod tests {
         assert_eq!(super::PROVER_CIRCUIT_PATH, "/prover/circuit.json");
         assert_eq!(super::PROVER_KEYS_PATH, "/prover/keys.json");
         assert_eq!(super::PROVER_CALIBRATION_PATH, "/prover/calibration.json");
+        assert!(prover.wave.is_none(), "a deployment without the wave group");
+    }
+
+    #[test]
+    fn a_deployment_names_its_wave_group_by_digests_only() {
+        let mut value = configuration();
+        value["prover"] = serde_json::json!({
+            "circuit_sha256": "ab".repeat(32), "keys_sha256": "cd".repeat(32),
+            "calibration_sha256": "ef".repeat(32), "points": 524_288,
+            "wave": {"circuit_sha256": "01".repeat(32), "keys_sha256": "02".repeat(32),
+                "manifest_sha256": "03".repeat(32)},
+        });
+        let parsed: Configuration = serde_json::from_value(value.clone()).expect("configuration");
+        let wave = parsed
+            .prover
+            .as_ref()
+            .and_then(|prover| prover.wave.as_ref())
+            .expect("wave");
+        assert_eq!(wave.keys_sha256, "02".repeat(32));
+        assert_eq!(wave.manifest_sha256, "03".repeat(32));
+        // No path, key, setup size or second trust root can be chosen by the deployment.
+        for field in ["circuit_path", "verification_key", "points", "issuer_key"] {
+            value["prover"]["wave"][field] = serde_json::json!("x");
+            assert!(
+                serde_json::from_value::<Configuration>(value.clone()).is_err(),
+                "{field}"
+            );
+            value["prover"]["wave"]
+                .as_object_mut()
+                .expect("object")
+                .remove(field);
+        }
+        value["prover"]["wave"]
+            .as_object_mut()
+            .expect("object")
+            .remove("manifest_sha256");
+        assert!(serde_json::from_value::<Configuration>(value).is_err());
+        assert_eq!(super::WAVE_CIRCUIT_PATH, "/prover/wave/circuit.json");
+        assert_eq!(super::WAVE_KEYS_PATH, "/prover/wave/keys.json");
+        assert_eq!(super::WAVE_MANIFEST_PATH, "/prover/wave/manifest.json");
     }
 
     #[test]

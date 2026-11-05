@@ -24,8 +24,9 @@ use inbox_waves::{
     wave_decide as inbox_wave_decide, wave_delivered as inbox_wave_delivered,
     wave_job_done as inbox_wave_job_done, wave_job_next as inbox_wave_job_next,
     wave_job_retry as inbox_wave_job_retry, wave_jobs_recover as inbox_wave_jobs_recover,
-    wave_outbox as inbox_wave_outbox, wave_punish as inbox_wave_punish,
-    wave_receive as inbox_wave_receive, wave_send as inbox_wave_send, waves as inbox_waves_list,
+    wave_outbox as inbox_wave_outbox, wave_prewarm as inbox_wave_prewarm,
+    wave_punish as inbox_wave_punish, wave_receive as inbox_wave_receive,
+    wave_send as inbox_wave_send, waves as inbox_waves_list,
 };
 use login::{cancel as login_cancel, poll as login_poll, start as login_start};
 use runner::{status as runner_status, take as runner_take};
@@ -628,6 +629,7 @@ actions! {
     "inbox.ack" => inbox_ack(inbox_conversation::Wired) -> inbox_conversation::Acked, InboxRecord, Inbox;
     "inbox.retry" => courier_chat_retry(inbox_conversation::ConversationRetry) -> inbox_conversation::Retried, VaultAccess, Inbox;
     "inbox.waves" => inbox_waves_list(Empty) -> inbox_waves::WaveList, VaultAccess, Inbox;
+    "inbox.wave_prewarm" => inbox_wave_prewarm(Empty) -> Empty, Read, Inbox;
     "inbox.wave_send" => inbox_wave_send(inbox_waves::WaveSend) -> inbox_waves::WaveStatus, InboxRecord, Inbox;
     "inbox.wave_decide" => inbox_wave_decide(inbox_waves::WaveDecide) -> inbox_waves::WaveStatus, InboxRecord, Inbox;
     "inbox.wave_punish" => inbox_wave_punish(inbox_waves::WavePunish) -> cnbx::Relation, InboxRecord, Inbox;

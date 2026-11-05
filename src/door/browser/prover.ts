@@ -157,10 +157,18 @@ export async function storeMillis(circuitId: string, millis: number): Promise<vo
   }
 }
 
-// --- the one worker of a proof (or of a calibration)
+// --- the one worker of a proof (or of a calibration, a counterpart verification or a warm-up)
 
-type Running = { cancel: () => void; calibration: boolean };
+/** `preemptible`: a real proof ends it (calibration, warm-up); `quiet`: no progress reaches the frame. */
+type Running = { cancel: () => void; preemptible: boolean };
 let running: Running | null = null;
+/** Verifications waiting for the device: a counterpart's proof is never refused for a busy device. */
+const waiting: (() => void)[] = [];
+
+function release(): void {
+  running = null;
+  waiting.shift()?.();
+}
 
 function timeoutOf(setup: string): number | null {
   try {
@@ -178,9 +186,16 @@ function transferable(input: Uint8Array): ArrayBuffer {
     : (input.slice().buffer as ArrayBuffer);
 }
 
+type Job = { input: ArrayBuffer } | { verify: { fields: ArrayBuffer; proof: ArrayBuffer } } | { warm: true };
+
 /** Run one worker; resolves to the reply and the milliseconds from "setup ready" to "done". */
-function runWorker(setup: string, input: Uint8Array, timeoutMs: number, calibration: boolean): Promise<{ reply: string; millis: number }> {
-  const buffer = transferable(input);
+function runWorker(
+  setup: string,
+  job: Job,
+  transfer: ArrayBuffer[],
+  timeoutMs: number,
+  mode: { quiet: boolean; preemptible: boolean },
+): Promise<{ reply: string; millis: number }> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./prover.worker.js', import.meta.url), { type: 'module', name: 'cmsg-prover' });
     let settled = false;
@@ -190,29 +205,29 @@ function runWorker(setup: string, input: Uint8Array, timeoutMs: number, calibrat
       settled = true;
       clearTimeout(timer);
       worker.terminate(); // frees every byte the worker held, including the witness
-      running = null;
+      release();
       if (error === null) {
-        if (!calibration) emit({ stage: 'done' });
+        if (!mode.quiet) emit({ stage: 'done' });
         resolve({ reply: reply as string, millis: Math.max(1, Math.round(performance.now() - computeStart)) });
       } else {
-        if (!calibration) emit({ stage: 'failed', code: code ?? 'internal' });
+        if (!mode.quiet) emit({ stage: 'failed', code: code ?? 'internal' });
         reject(error);
       }
     };
     const timer = setTimeout(() => finish(unavailable(), undefined, 'timeout'), timeoutMs);
-    running = { cancel: () => finish(unavailable(), undefined, 'cancelled'), calibration };
+    running = { cancel: () => finish(unavailable(), undefined, 'cancelled'), preemptible: mode.preemptible };
     worker.onmessage = (event: MessageEvent<FromWorker>) => {
       const message = event.data;
       if (message.type === 'progress') {
         // The measurement starts when the setup is in the worker's hands: the network is not the device's speed.
         if (message.progress.stage === 'srs-load') computeStart = performance.now();
-        if (!calibration) emit(message.progress);
+        if (!mode.quiet) emit(message.progress);
       } else if (message.type === 'done') finish(null, message.reply);
       else finish(unavailable(), undefined, message.code);
     };
     worker.onerror = () => finish(unavailable(), undefined, 'internal');
     worker.onmessageerror = () => finish(unavailable(), undefined, 'internal');
-    worker.postMessage({ setup, input: buffer }, [buffer]);
+    worker.postMessage({ setup, ...job }, transfer);
   });
 }
 
@@ -223,11 +238,49 @@ export function proveInWorker(setup: string, input: Uint8Array): Promise<string>
 
 /** Milliseconds a real proof took, from the setup being in the worker's hands to its reply. */
 export function provedMillis(setup: string, input: Uint8Array): Promise<{ reply: string; millis: number }> {
-  if (running?.calibration) running.cancel();
+  if (running?.preemptible) running.cancel();
   if (running !== null) return Promise.reject(unavailable());
   const timeoutMs = timeoutOf(setup);
   if (timeoutMs === null) return Promise.reject(unavailable());
-  return runWorker(setup, input, timeoutMs, false);
+  const buffer = transferable(input);
+  return runWorker(setup, { input: buffer }, [buffer], timeoutMs, { quiet: false, preemptible: false });
+}
+
+/**
+ * The counterpart verifier's proof check (cwlt `ProofCheck`): bb.js verifies `proof` for exactly the
+ * concatenated 32-byte public `fields` under the verification key of `setup` (the engine took it from
+ * the pinned key group). Waits for a running proof instead of refusing; resolves to the verdict.
+ */
+export async function verifyInWorker(setup: string, fields: Uint8Array, proof: Uint8Array): Promise<boolean> {
+  const timeoutMs = timeoutOf(setup);
+  if (timeoutMs === null || fields.byteLength % 32 !== 0) return false;
+  if (running?.preemptible) running.cancel();
+  while (running !== null) await new Promise<void>((resolve) => waiting.push(resolve));
+  const fieldBuffer = fields.slice().buffer as ArrayBuffer;
+  const proofBuffer = proof.slice().buffer as ArrayBuffer;
+  try {
+    const { reply } = await runWorker(setup, { verify: { fields: fieldBuffer, proof: proofBuffer } }, [fieldBuffer, proofBuffer], timeoutMs, { quiet: true, preemptible: false });
+    return (JSON.parse(reply) as { verified?: unknown }).verified === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Warm the device for a coming proof (speculative reservation option (b)): the pinned setup of `setup`
+ * is loaded from this origin's verified cache (or fetched from this origin once and cached) and the
+ * proof system started, then the worker ends. No witness, no proof, no request beyond this origin.
+ * A real proof ends a warm-up at once. False when the device is busy or the warm-up failed.
+ */
+export async function warmInWorker(setup: string): Promise<boolean> {
+  const timeoutMs = timeoutOf(setup);
+  if (timeoutMs === null || running !== null) return false;
+  try {
+    const { reply } = await runWorker(setup, { warm: true }, [], timeoutMs, { quiet: true, preemptible: true });
+    return (JSON.parse(reply) as { warm?: unknown }).warm === true;
+  } catch {
+    return false;
+  }
 }
 
 /** Withdraw: end the running worker at once. */
@@ -259,7 +312,8 @@ export function calibrateInWorker(setup: string, circuitId: string, input: Uint8
       await idle();
       const timeoutMs = timeoutOf(setup);
       if (running !== null || timeoutMs === null) return null;
-      const { reply, millis } = await runWorker(setup, input, timeoutMs, true);
+      const buffer = transferable(input);
+      const { reply, millis } = await runWorker(setup, { input: buffer }, [buffer], timeoutMs, { quiet: true, preemptible: true });
       // A calibration whose proof does not verify measures nothing.
       if ((JSON.parse(reply) as { verified?: boolean }).verified !== true) return null;
       await storeMillis(circuitId, millis);

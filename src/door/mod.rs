@@ -379,6 +379,8 @@ pub struct Door {
     /// on this device (see `creating`). Absent in a frontend that cannot prove.
     activation_prover: Option<std::sync::Arc<dyn accounting::ActivationProver>>,
     wave_ports: BTreeMap<String, Box<dyn inbox_waves::WavePorts>>,
+    /// What a compose may warm per member origin (trusted embedding only).
+    wave_prewarm: BTreeMap<String, std::rc::Rc<dyn inbox_waves::WavePrewarm>>,
     /// The background record job per community origin (trusted embedding only).
     #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
     record_jobs: BTreeMap<String, account::Shared<record::RecordJob>>,
@@ -432,6 +434,7 @@ impl Door {
             #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
             wave_devices: BTreeMap::new(),
             wave_ports: BTreeMap::new(),
+            wave_prewarm: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
             logins: BTreeMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
