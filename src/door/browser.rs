@@ -292,17 +292,36 @@ impl Configuration {
     /// Build only actual configured service clients. A native owner thread or
     /// the verified browser origin retains them; this does not create custody.
     pub fn construct(self) -> Result<Door> {
-        self.construct_inner(&[])
+        self.construct_inner(&[], None)
     }
 
     /// Trusted native deployment roots for the original HTTPS service and public
     /// policy follower. No JSON or Wasm constructor can select certificate trust.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn construct_with_roots(self, roots: &[Vec<u8>]) -> Result<Door> {
-        self.construct_inner(roots)
+        self.construct_inner(roots, None)
     }
 
-    fn construct_inner(mut self, roots: &[Vec<u8>]) -> Result<Door> {
+    /// The same services and owners, for a DELEGATED device (A11): the Door comes from
+    /// [`Door::from_delegation`] (L9), so it admits community-session work only. The wallet
+    /// and the root board are never delegated (D1).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn construct_delegated_with_roots(
+        self,
+        roots: &[Vec<u8>],
+        delegation: &ckmg::DeviceDelegation,
+    ) -> Result<Door> {
+        if self.community == "wallet" || self.root_board {
+            return Err(ErrorCode::NeedsPasskey);
+        }
+        self.construct_inner(roots, Some(delegation))
+    }
+
+    fn construct_inner(
+        mut self,
+        roots: &[Vec<u8>],
+        delegation: Option<&ckmg::DeviceDelegation>,
+    ) -> Result<Door> {
         #[cfg(target_arch = "wasm32")]
         if !roots.is_empty() {
             return Err(ErrorCode::Unauthorized);
@@ -335,7 +354,10 @@ impl Configuration {
                 BTreeMap::from([(self.role, BTreeSet::from([self.origin.clone()]))]),
             )?
         };
-        let mut door = Door::new(configuration);
+        let mut door = match delegation {
+            Some(delegation) => Door::from_delegation(configuration, delegation)?,
+            None => Door::new(configuration),
+        };
         if !(1..=2).contains(&self.services.len()) {
             return Err(ErrorCode::InvalidRequest);
         }

@@ -459,3 +459,87 @@ async fn the_cli_refuses_the_wallet_scope_and_unordered_or_oversized_targets() {
         );
     }
 }
+
+/// One community's device configuration as a deployment file names it.
+fn configuration(community: &str) -> crate::door::browser::Configuration {
+    serde_json::from_value(serde_json::json!({
+        "community": community, "origin": format!("https://{community}.example.test"),
+        "role": "member", "primary": "community",
+        "services": [{"scope": "community", "base": format!("https://api.{community}.example.test"),
+            "host": format!("api.{community}.example.test")}],
+    }))
+    .unwrap()
+}
+
+/// L9: the delegated CLI's start finds exactly its community's delegation in the resume bundle
+/// and the member's user in the users file, and every Door it builds comes from
+/// `Door::from_delegation`: delegated, of the delegation's own community, never the wallet.
+#[tokio::test]
+async fn the_delegated_start_builds_its_door_from_the_delegation_and_the_users_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = cvlt::NativeResume::new(dir.path(), b"wallet.example.test\0delegated", None);
+    // No bundle yet: this is no delegated device.
+    assert!(delegated_start(&store, dir.path(), "garden")
+        .await
+        .unwrap()
+        .is_none());
+    let wallet = Rc::new(RefCell::new(Wallet::new(&["garden", "orchard"]).await));
+    let (delegate, link, kept) = cli(BTreeMap::new());
+    Delegator::new(wallet, Wire(delegate))
+        .run(&link, vec![target("garden"), target("orchard")])
+        .await
+        .unwrap();
+    let delegated: Vec<Delegated> = kept.borrow_mut().drain(..).collect();
+    let users: BTreeMap<String, String> = delegated
+        .iter()
+        .map(|entry| (entry.target.community.clone(), entry.user.clone()))
+        .collect();
+    merge_into(&store, delegated).await.unwrap();
+    // A delegation without its user is refused, not guessed.
+    assert_eq!(
+        delegated_start(&store, dir.path(), "garden").await.err(),
+        Some(ErrorCode::Unavailable)
+    );
+    write_private(&dir.path().join(USERS_FILE), &encode(&users).unwrap()).unwrap();
+    let start = delegated_start(&store, dir.path(), "garden")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(start.user(), "user-of-garden");
+    assert!(delegated_start(&store, dir.path(), "meadow")
+        .await
+        .unwrap()
+        .is_none());
+    // The Door of the start: delegated (L9); another community's or the wallet's refused.
+    let bundle = cvlt::NativeResume::load(&store).unwrap();
+    let garden = bundle
+        .delegation(&target("garden").fingerprint, "garden")
+        .unwrap();
+    let door = configuration("garden")
+        .construct_delegated_with_roots(&[], garden)
+        .unwrap();
+    assert!(door.is_delegated());
+    assert_eq!(
+        configuration("orchard")
+            .construct_delegated_with_roots(&[], garden)
+            .err(),
+        Some(ErrorCode::Unauthorized)
+    );
+    assert_eq!(
+        configuration("wallet")
+            .construct_delegated_with_roots(&[], garden)
+            .err(),
+        Some(ErrorCode::NeedsPasskey)
+    );
+    assert!(!configuration("garden").construct().unwrap().is_delegated());
+    // The users file is the CLI's own: user-only.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(dir.path().join(USERS_FILE))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o077, 0);
+    }
+}

@@ -611,10 +611,7 @@ pub async fn login_delegated(
         .iter()
         .map(|entry| entry.target.community.clone())
         .collect();
-    let mut users: BTreeMap<String, String> = std::fs::read(vault.join(USERS_FILE))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default();
+    let mut users = read_users(&vault);
     for entry in &delegated {
         users.insert(entry.target.community.clone(), entry.user.clone());
     }
@@ -623,8 +620,119 @@ pub async fn login_delegated(
     Ok(communities)
 }
 
+/// The resume binding of a delegated CLI: the wallet-origin login page's origin, apart from
+/// any passkey device of the same deployment. `None` without a login page.
+pub fn cli_binding(runtime: &super::browser::Configuration) -> Option<Vec<u8>> {
+    let page = runtime.login.as_ref()?;
+    Some([page.origin.as_bytes(), b"\0delegated"].concat())
+}
+
+/// The users file of `vault` (empty when absent or unreadable).
+#[cfg(not(target_arch = "wasm32"))]
+fn read_users(vault: &std::path::Path) -> BTreeMap<String, String> {
+    std::fs::read(vault.join(USERS_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// What a delegated CLI holds for one community: its delegation (sealed form, for every
+/// rebuild of the Door) and the member's user there (from [`USERS_FILE`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub struct DelegatedStart {
+    sealed: Zeroizing<Vec<u8>>,
+    user: String,
+}
+
+/// The delegated CLI's start (L9) for `community`: its delegation from the resume bundle in
+/// `store` and its user from `vault`'s users file. `None` when this device holds no
+/// delegation there (it is no delegated device of that community); a delegation without a
+/// user, or two of the same community, is refused.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn delegated_start<S: super::unlock_once::UnlockStore>(
+    store: &S,
+    vault: &std::path::Path,
+    community: &str,
+) -> Result<Option<DelegatedStart>> {
+    let Some(bundle) = store.load().await else {
+        return Ok(None);
+    };
+    let held: Vec<&DeviceDelegation> = bundle
+        .memberships()
+        .filter(|(_, scope)| *scope == community)
+        .filter_map(|(fingerprint, scope)| bundle.delegation(fingerprint, scope))
+        .collect();
+    let delegation = match held.as_slice() {
+        [] => return Ok(None),
+        [delegation] => *delegation,
+        _ => return Err(ErrorCode::InvalidRequest),
+    };
+    let user = read_users(vault)
+        .remove(community)
+        .ok_or(ErrorCode::Unavailable)?;
+    let sealed = delegation.to_sealed_bytes().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
+    Ok(Some(DelegatedStart { sealed, user }))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl DelegatedStart {
+    /// The member's user the CLI opens its sessions as.
+    pub fn user(&self) -> &str {
+        &self.user
+    }
+
+    /// One delegated Door: the deployment's services and owners through
+    /// [`Door::from_delegation`] (L9), with the community session opened by `K_d` (0 prompts;
+    /// a revoked delegate answers `DelegateRevoked`).
+    pub async fn door(
+        &self,
+        runtime: super::browser::Configuration,
+        roots: &[Vec<u8>],
+    ) -> Result<Door> {
+        let delegation = DeviceDelegation::from_sealed_bytes(&self.sealed).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::NeedsPasskey",
+                ErrorCode::NeedsPasskey,
+                &__cause,
+            )
+        })?;
+        let origin = runtime.origin.clone();
+        let mut door = runtime.construct_delegated_with_roots(roots, &delegation)?;
+        door.open_delegated_session(&origin, &self.user, &delegation)
+            .await?;
+        Ok(door)
+    }
+
+    /// The native start's Door builder (`Embedded::configured_restore_built`): every build,
+    /// the first and each device restart, is [`Self::door`].
+    #[cfg(feature = "native-tor")]
+    pub fn builder(
+        self,
+        runtime: super::browser::Configuration,
+        roots: Vec<Vec<u8>>,
+    ) -> super::native::DoorBuilder {
+        Box::new(move || {
+            let start = std::rc::Rc::new(self);
+            std::rc::Rc::new(move || {
+                let (start, runtime, roots) = (start.clone(), runtime.clone(), roots.clone());
+                Box::pin(async move { start.door(runtime, &roots).await })
+            })
+        })
+    }
+}
+
 /// A user-only file (mode 0600 on unix), replaced atomically.
-#[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write as _;
     let unavailable = |__cause: std::io::Error| {
