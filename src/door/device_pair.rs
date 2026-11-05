@@ -413,6 +413,97 @@ where
     Au: ckmg::Authority,
     R: Records,
 {
+    send_step(community, wallet, actions, step, challenge, signature, None).await
+}
+
+/// A host device's approval of a DELEGATED key (A11, option B): the member's ACTIVE full
+/// device key in this community and its signature over `ckmg::PairingApproval::message` of
+/// exactly this pairing's digest ([`PairingActions::digest`], the digest the stamp slot
+/// covers). Sent with `device_add`, it makes the community register the key in class
+/// `Delegated` (community sessions only, D1); a delegated, pending or revoked host is refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DelegateApproval {
+    /// The approving device's key.
+    pub host_key: [u8; 32],
+    /// Its PairingApproval signature over the pairing digest.
+    pub host_signature: [u8; 64],
+}
+
+/// The add step of a DELEGATED key: [`send`]'s `device_add` with the host's approval. The
+/// community registers the key PENDING as `Delegated`; `device_activate` ([`send`] with
+/// [`Step::Activate`]) makes it ACTIVE as for any other device.
+pub async fn send_delegated<B, C, E, Au, R>(
+    community: &mut Foyer<Transport>,
+    wallet: &mut GlobalPassport<B, C, E, Au, R>,
+    actions: &PairingActions,
+    challenge: &StepChallenge,
+    signature: Vec<u8>,
+    approval: &DelegateApproval,
+) -> Result<PresentedStamp>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    Au: ckmg::Authority,
+    R: Records,
+{
+    send_step(
+        community,
+        wallet,
+        actions,
+        Step::Add,
+        challenge,
+        signature,
+        Some(approval),
+    )
+    .await?
+    .ok_or(ErrorCode::Reconcile)
+}
+
+/// The `device_add` body of one pairing: the passport, the stamp presentation of the
+/// community's one slot and the new key's possession signature, plus the host's approval
+/// when the key is delegated.
+fn add_body(
+    passport: Value,
+    stamp: &[u8],
+    actions: &PairingActions,
+    signature: Vec<u8>,
+    delegate: Option<&DelegateApproval>,
+) -> Value {
+    let mut body = json!({
+        "passport": passport,
+        "stamp": stamp,
+        "salt": actions.action().salt().to_bytes(),
+        "device_key": actions.key(),
+        "session": actions.session(),
+        "revision": actions.revision(),
+        "signature": signature,
+    });
+    if let Some(approval) = delegate {
+        body["delegate"] = json!({
+            "host_key": approval.host_key,
+            "host_signature": approval.host_signature.to_vec(),
+        });
+    }
+    body
+}
+
+async fn send_step<B, C, E, Au, R>(
+    community: &mut Foyer<Transport>,
+    wallet: &mut GlobalPassport<B, C, E, Au, R>,
+    actions: &PairingActions,
+    step: Step,
+    challenge: &StepChallenge,
+    signature: Vec<u8>,
+    delegate: Option<&DelegateApproval>,
+) -> Result<Option<PresentedStamp>>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    Au: ckmg::Authority,
+    R: Records,
+{
     let action = actions.action();
     let at = now();
     let mut policy = community.current_policy();
@@ -471,15 +562,7 @@ where
         Step::Add => {
             let stamp = stamp.ok_or(ErrorCode::Unauthorized)?;
             community
-                .device_add(json!({
-                    "passport": passport,
-                    "stamp": &stamp,
-                    "salt": action.salt().to_bytes(),
-                    "device_key": actions.key(),
-                    "session": actions.session(),
-                    "revision": actions.revision(),
-                    "signature": signature,
-                }))
+                .device_add(add_body(passport, &stamp, actions, signature, delegate))
                 .await
                 .map_err(|__cause| {
                     crate::door::cause::emit(
@@ -554,6 +637,50 @@ mod tests {
 
     fn scope() -> StampScope {
         StampScope::of_community(passport::CommunityId::new(b"alpha").unwrap(), None)
+    }
+
+    /// The delegated add (A11) is the server's `device_add` shape (cvld `api::DeviceAdd`, which
+    /// refuses unknown fields) with its `delegate` member (`DelegateApproval`: `host_key`,
+    /// `host_signature`), and a plain add has none.
+    #[test]
+    fn a_delegated_add_carries_the_host_approval_in_the_servers_shape() {
+        let actions =
+            PairingActions::new(scope(), "alpha", "m1", [7; 32], [3; 32], [1; 32], [9; 32])
+                .unwrap();
+        let passport = json!({"challenge": "c", "proof": [1, 2]});
+        let approval = DelegateApproval {
+            host_key: [5; 32],
+            host_signature: [6; 64],
+        };
+        let fields = |body: &Value| {
+            let mut keys: Vec<String> = body.as_object().unwrap().keys().cloned().collect();
+            keys.sort();
+            keys
+        };
+        let plain = add_body(passport.clone(), &[8, 8], &actions, vec![4; 64], None);
+        assert_eq!(
+            fields(&plain),
+            [
+                "device_key",
+                "passport",
+                "revision",
+                "salt",
+                "session",
+                "signature",
+                "stamp"
+            ]
+        );
+        let delegated = add_body(passport, &[8, 8], &actions, vec![4; 64], Some(&approval));
+        let mut expected = fields(&plain);
+        expected.push("delegate".into());
+        expected.sort();
+        assert_eq!(fields(&delegated), expected);
+        assert_eq!(
+            delegated["delegate"],
+            json!({"host_key": vec![5u8; 32], "host_signature": vec![6u8; 64]})
+        );
+        assert_eq!(delegated["device_key"], json!(vec![7u8; 32]));
+        assert_eq!(delegated["revision"], json!(vec![9u8; 32]));
     }
 
     #[test]
