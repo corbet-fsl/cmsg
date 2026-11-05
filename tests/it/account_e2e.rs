@@ -72,6 +72,7 @@ fn device(
             outcome: None,
             verifier_executable: None,
             manifest_file: None,
+            wave_pins: None,
             timeout_seconds: 300,
             threads: 2,
             memory_megabytes: 4096,

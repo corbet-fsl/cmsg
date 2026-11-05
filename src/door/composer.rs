@@ -93,11 +93,16 @@ pub struct ProverArtifacts {
     /// proofs (not the prover worker above). Absent: this device cannot verify waves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verifier_executable: Option<PathBuf>,
-    /// The group's manifest. It authenticates the circuit, keys and SRS files above
-    /// and is itself pinned by the community's published wave policy
-    /// (`WavePolicy.manifest_sha256`); a mismatch refuses every counterpart proof.
+    /// The peer-release group's manifest. It names the circuit, keys and SRS files above
+    /// and is itself pinned by `wave_pins`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest_file: Option<PathBuf>,
+    /// The release's digests of the peer-release group (circuit, keys, manifest), exactly
+    /// like the browser's `registration.prover.wave` in vault.json: the counterpart
+    /// verifier trusts the `wave` and `outcome` keys only through these pins, checked
+    /// before use. Absent: this device cannot verify waves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wave_pins: Option<WavePins>,
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u64,
     #[serde(default = "default_threads")]
@@ -105,6 +110,16 @@ pub struct ProverArtifacts {
     #[serde(default = "default_memory")]
     pub memory_megabytes: usize,
 }
+/// Release pins of the peer-release group: SHA-256 (64 lowercase hex digits) of its circuit
+/// group, its verification-key group and its manifest.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WavePins {
+    pub circuit_sha256: String,
+    pub keys_sha256: String,
+    pub manifest_sha256: String,
+}
+
 /// One extension circuit and its verification key (the SRS and worker are shared).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CircuitFiles {
@@ -1414,6 +1429,7 @@ mod tests {
                 outcome: None,
                 verifier_executable: None,
                 manifest_file: None,
+                wave_pins: None,
                 timeout_seconds: 1,
                 threads: 1,
                 memory_megabytes: 1,
