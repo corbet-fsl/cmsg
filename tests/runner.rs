@@ -481,10 +481,19 @@ async fn the_second_tab_runs_nothing_until_it_takes_the_runner() {
     let flag = lost_again.clone();
     taken.on_lost(move || flag.set(true));
     drop(taken);
+    // The lock manager settles the release asynchronously: the next tab gets it soon.
     let third = RunnerGate::default();
-    assert!(acquire(origin, Ask::IfAvailable, third.clone())
-        .await
-        .unwrap()
-        .is_some());
+    let mut next = None;
+    for _ in 0..100 {
+        next = acquire(origin, Ask::IfAvailable, third.clone())
+            .await
+            .unwrap();
+        if next.is_some() {
+            break;
+        }
+        gloo_timers::future::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(next.is_some(), "a released runner is free for the next tab");
+    assert_eq!(third.state(), RunnerState::Here);
     assert!(!lost_again.get(), "releasing the lock is not losing it");
 }
