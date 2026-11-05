@@ -117,10 +117,40 @@ pub fn decode_reachability(bytes: &[u8]) -> Vec<Address> {
         .collect()
 }
 
-/// First contact: where to reach a member never heard from. The embedder
-/// implements it from the forum entry (the profile's `reachability`).
+/// First contact: where to reach a member never heard from, from the forum
+/// entry (the profile's `reachability`). Every Mesh bind installs the
+/// [`ForumDirectory`]; an embedder may bind another one afterwards.
 pub trait Directory {
     fn reachability(&self, peer: &str) -> Option<Vec<u8>>;
+}
+
+/// The production [`Directory`]: the reachability descriptor each member's
+/// forum entry publishes, as this device's own search and watch pages showed it
+/// (only the entries the member sees, i.e. matches). Nothing is asked of the
+/// forum for it: no lookup per peer, so the forum learns nothing about whom this
+/// member contacts. Memory only and bounded; the latest page wins per member.
+/// One per member origin, shared by the Door (which feeds it) and the bound
+/// Mesh (which reads it), in every runtime.
+#[derive(Clone, Default)]
+pub struct ForumDirectory(Rc<RefCell<BTreeMap<String, Vec<u8>>>>);
+impl ForumDirectory {
+    /// Take the descriptors of one finished page.
+    pub(super) fn learn(&self, entries: Vec<(String, Vec<u8>)>) {
+        let mut known = self.0.borrow_mut();
+        for (member, reach) in entries {
+            if decode_reachability(&reach).is_empty()
+                || (known.len() >= MAX_PEERS && !known.contains_key(&member))
+            {
+                continue;
+            }
+            known.insert(member, reach);
+        }
+    }
+}
+impl Directory for ForumDirectory {
+    fn reachability(&self, peer: &str) -> Option<Vec<u8>> {
+        self.0.borrow().get(peer).cloned()
+    }
 }
 
 /// Offline hand-over (GAPMAP 11.4): where a frame goes when its peer cannot be
@@ -242,6 +272,20 @@ impl Door {
         let mesh = self.meshes.get(origin).ok_or(ErrorCode::Unavailable)?;
         *mesh.shared.mailbox.borrow_mut() = Some(mailbox);
         Ok(())
+    }
+
+    /// The forum directory of `origin` (created empty on first use).
+    pub(super) fn forum_directory(&mut self, origin: &str) -> ForumDirectory {
+        self.directories
+            .entry(origin.to_owned())
+            .or_default()
+            .clone()
+    }
+
+    /// A finished forum page of `origin`: (member, published reachability) of
+    /// every entry the member sees. Feeds the forum directory only.
+    pub(super) fn learn_forum_page(&mut self, origin: &str, entries: Vec<(String, Vec<u8>)>) {
+        self.forum_directory(origin).learn(entries);
     }
 
     /// The reachability descriptor for the profile: this Door's own listener

@@ -26,6 +26,7 @@ pub use group_visit::{
     due_for_exchange, mark_exchanged, note_group_opened, GroupOpened, GroupOpenedAck,
 };
 pub(super) use groups::groups;
+pub(in crate::door) use handlers::ForumPage;
 pub(super) use handlers::{attend, discovery, search, watch};
 pub use handlers::{CommittedOwner, CommittedRead, OwnerFuture, ReadPolicy, SignedAttendance};
 pub(super) use profile::profile_publish;

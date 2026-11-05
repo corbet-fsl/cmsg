@@ -358,6 +358,9 @@ pub struct Door {
     foyers: BTreeMap<String, foyer::Binding>,
     boards: BTreeMap<String, Box<dyn facades::BoundBoard>>,
     meshes: BTreeMap<String, facades::BoundMesh>,
+    /// Per member origin: the reachability the own forum search pages showed
+    /// (courier first contact). Outlives a Mesh rebind; routing data only.
+    directories: BTreeMap<String, courier::ForumDirectory>,
     vaults: BTreeMap<String, Box<dyn facades::BoundVault>>,
     accounts: BTreeMap<String, account::AccountActor>,
     /// Lent by the trusted embedder: opens a FRESH global session and binds a new
@@ -407,6 +410,7 @@ impl Door {
             foyers: BTreeMap::new(),
             boards: BTreeMap::new(),
             meshes: BTreeMap::new(),
+            directories: BTreeMap::new(),
             vaults: BTreeMap::new(),
             accounts: BTreeMap::new(),
             session_renewal: None,

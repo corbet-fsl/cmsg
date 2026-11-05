@@ -283,6 +283,24 @@ pub(super) struct OwnedBoard<T, R, O> {
     desk_loaded: bool,
 }
 
+/// A finished page: what the member sees, and (member, published reachability)
+/// of the same entries for the forum directory, which only the Door reads.
+pub(in crate::door) type ForumPage = (cbrd::DiscoveryPage, Vec<(String, Vec<u8>)>);
+
+/// The reachability every entry of a checked page publishes, for the entries
+/// the member sees (the discovery projection: matches only). Read from the
+/// verified publications the page already holds; nothing more is requested.
+fn forum_reach(page: &cbrd::Page) -> Vec<(String, Vec<u8>)> {
+    page.pairs
+        .iter()
+        .filter(|pair| pair.decision().is_match())
+        .map(|pair| {
+            let transcript = pair.owner().transcript();
+            (transcript.member.clone(), transcript.reachability.clone())
+        })
+        .collect()
+}
+
 /// The durable form of the desk, kept by the owner in its encrypted records.
 #[derive(Default, Serialize, Deserialize)]
 struct DeskRecord {
@@ -633,7 +651,7 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
         signature: Vec<u8>,
         expires: u64,
         kind: PageKind,
-    ) -> Result<cbrd::DiscoveryPage> {
+    ) -> Result<ForumPage> {
         self.idle()?;
         let action = match kind {
             PageKind::Search => "search",
@@ -691,7 +709,7 @@ impl<T: clnk::Transport, R, O: CommittedOwner> OwnedBoard<T, R, O> {
                             board.finish_watch_committed(pending, context)
                         }
                     }
-                    .map(|page| page.discovery())
+                    .map(|page| (page.discovery(), forum_reach(&page)))
                     .map_err(board_error)
                 })
             })
@@ -1135,7 +1153,7 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
         prepared: cbrd::Prepared,
         signature: Vec<u8>,
         expires: u64,
-    ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
+    ) -> OwnedFuture<'_, ForumPage> {
         Box::pin(self.page(prepared, signature, expires, PageKind::Search))
     }
     fn watch(
@@ -1143,7 +1161,7 @@ impl<T: clnk::Transport, R: crate::door::RoomLink, O: CommittedOwner> BoundBoard
         prepared: cbrd::Prepared,
         signature: Vec<u8>,
         expires: u64,
-    ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
+    ) -> OwnedFuture<'_, ForumPage> {
         Box::pin(self.page(prepared, signature, expires, PageKind::Watch))
     }
     fn groups(&mut self, expires: u64) -> OwnedFuture<'_, Vec<cbrd::GroupView>> {
@@ -1550,11 +1568,12 @@ async fn page(
         admitted: _admitted,
     } = vault.sign_board(&prepared, &origin, now, expires).await?;
     current::version(foyer, &door.config.community, expires, now)?;
-    let result = if watch {
+    let (result, reach) = if watch {
         board.watch(prepared, signature, expires).await?
     } else {
         board.search(prepared, signature, expires).await?
     };
+    door.learn_forum_page(&origin, reach);
     Ok((result, vec![]))
 }
 pub(in crate::door) async fn discovery(

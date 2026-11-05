@@ -65,7 +65,7 @@ pub(super) trait BoundBoard {
         _prepared: cbrd::Prepared,
         _signature: Vec<u8>,
         _expires: u64,
-    ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
+    ) -> OwnedFuture<'_, board::ForumPage> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
     fn group_act(
@@ -117,7 +117,7 @@ pub(super) trait BoundBoard {
         _prepared: cbrd::Prepared,
         _signature: Vec<u8>,
         _expires: u64,
-    ) -> OwnedFuture<'_, cbrd::DiscoveryPage> {
+    ) -> OwnedFuture<'_, board::ForumPage> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
     /// One step of joining a member room (request, wait, join).
@@ -1067,7 +1067,10 @@ impl Door {
                 _lifetime: lifetime,
             },
         );
-        Ok(())
+        // First contact in every runtime: the forum directory this origin's own
+        // search pages feed. An embedder may bind another one afterwards.
+        let directory = self.forum_directory(origin);
+        self.bind_directory(origin, Box::new(directory))
     }
 
     pub(super) fn member_origin(&self, origin: &str) -> Result<()> {

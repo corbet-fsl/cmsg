@@ -285,6 +285,141 @@ mod isolation {
         assert_eq!(mailbox.left.borrow().len(), 1);
     }
 
+    /// A listener of its own and a record of every address a frame went to.
+    struct Recording(Address, Arc<std::sync::Mutex<Vec<Address>>>);
+    #[async_trait]
+    impl Backend for Recording {
+        fn scheme(&self) -> Scheme {
+            Scheme::new("tor").unwrap()
+        }
+        fn capabilities(&self) -> Capabilities {
+            Fresh(Arc::new(AtomicU8::new(0)), false).capabilities()
+        }
+        fn max_payload(&self) -> usize {
+            1 << 16
+        }
+        async fn listen(&self) -> std::result::Result<Box<dyn Listener>, cmsh::Error> {
+            Ok(Box::new(Silent(self.0.clone())))
+        }
+        async fn app_message(
+            &self,
+            to: &Address,
+            _: &[u8],
+        ) -> std::result::Result<(), cmsh::Error> {
+            self.1.lock().unwrap().push(to.clone());
+            Ok(())
+        }
+        async fn app_call(
+            &self,
+            _: &Address,
+            _: &[u8],
+        ) -> std::result::Result<Vec<u8>, cmsh::Error> {
+            Ok(vec![])
+        }
+    }
+
+    fn hello(sender: &str) -> Outgoing {
+        use crate::door::inbox_waves::types::{Hello, WaveMessage};
+        Outgoing {
+            peer: "bob".into(),
+            body: Body::Wave {
+                envelope: Envelope {
+                    version: 1,
+                    conversation: [3; 32],
+                    sender: sender.into(),
+                    sequence: 0,
+                    message: WaveMessage::Hello {
+                        nonce: [4; 32],
+                        hello: Hello {
+                            conversation: [3; 32],
+                            group: [0; 32],
+                            contact_policy: [0; 32],
+                            history: [0; 32],
+                            opened_at: 1,
+                            expires_at: 2,
+                            sender_authority: [0; 32],
+                            sender_challenge: [0; 32],
+                            sender_handle: vec![],
+                        },
+                    },
+                },
+            },
+        }
+    }
+
+    /// A5: the first wave to a member this device has never heard from (the
+    /// book is empty) routes by the reachability that member's forum entry
+    /// published, as this member's own search page showed it. The Mesh bind is
+    /// the composition point: nothing else is bound by the embedder.
+    #[tokio::test]
+    async fn a_first_wave_routes_by_the_reachability_the_forum_page_showed() {
+        let a = "http://127.0.0.1:1".to_owned();
+        let config = Configuration::new(
+            "community".into(),
+            [(Role::Member, [a.clone()].into())].into(),
+        )
+        .unwrap();
+        let mut door = Door::new(config);
+        let sent = Arc::new(std::sync::Mutex::new(vec![]));
+        let mesh = cmsh::Mesh::builder(Arc::new(Tokio))
+            .backend(Arc::new(Recording(address(30), sent.clone())))
+            .build()
+            .unwrap();
+        door.bind_mesh(&a, mesh).await.unwrap();
+        let shared = door.courier_shared(&a).unwrap();
+        let mut left = BTreeSet::new();
+        // No page yet: no address, nothing goes out.
+        assert_eq!(deliver(&shared, &hello("alice"), &mut left).await, None);
+        assert!(sent.lock().unwrap().is_empty());
+        // The member's search page showed bob's card with bob's published descriptor
+        // (and a card without one, which routes nowhere).
+        door.learn_forum_page(
+            &a,
+            vec![
+                ("bob".into(), encode_reachability(&[address(40)])),
+                ("carol".into(), vec![]),
+            ],
+        );
+        assert!(shared.book.borrow().get("bob").is_none());
+        assert_eq!(
+            deliver(&shared, &hello("alice"), &mut left).await,
+            Some(true)
+        );
+        assert_eq!(*sent.lock().unwrap(), vec![address(40)]);
+        // The book took it over; a later page with a new descriptor does not
+        // override what bob's own frames say, but reaches a fresh Mesh bind.
+        assert_eq!(shared.book.borrow().get("bob"), Some(&vec![address(40)]));
+        let mut carol = hello("alice");
+        carol.peer = "carol".into();
+        assert_eq!(deliver(&shared, &carol, &mut left).await, None);
+    }
+
+    /// The directory is bounded like the book, keeps the latest descriptor per
+    /// member and ignores entries without one.
+    #[test]
+    fn the_forum_directory_keeps_the_latest_bounded_entry_per_member() {
+        let directory = ForumDirectory::default();
+        directory.learn(vec![("bob".into(), encode_reachability(&[address(1)]))]);
+        directory.learn(vec![
+            ("bob".into(), encode_reachability(&[address(2)])),
+            ("dave".into(), vec![]),
+        ]);
+        assert_eq!(
+            directory
+                .reachability("bob")
+                .map(|r| decode_reachability(&r)),
+            Some(vec![address(2)])
+        );
+        assert_eq!(directory.reachability("dave"), None);
+        directory.learn(
+            (0..MAX_PEERS + 10)
+                .map(|n| (format!("m{n}"), encode_reachability(&[address(3)])))
+                .collect(),
+        );
+        assert_eq!(directory.0.borrow().len(), MAX_PEERS);
+        assert!(directory.reachability("bob").is_some());
+    }
+
     #[tokio::test]
     async fn an_external_token_cannot_reach_the_internal_grant() {
         let a = "http://127.0.0.1:1".to_owned();
