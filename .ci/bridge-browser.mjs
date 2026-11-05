@@ -46,6 +46,9 @@ export async function member() {
     check(refused, 'wrong configured origin accepted');
   }
   const client = await createVaultClient(config);
+  // A community frame neither runs a ceremony nor proves: no passkey and no cross-origin isolation.
+  check(document.querySelector('[data-cmsg-vault]')?.allow
+    === "publickey-credentials-get 'none'; publickey-credentials-create 'none'; cross-origin-isolated 'none'", 'community frame policy widened');
   const status = await client.call('runtime.status', {});
   check(status.preload === 'unavailable', 'fabricated readiness');
   check((await client.invoke('login.start', {})).error === 'unavailable', 'fabricated login');

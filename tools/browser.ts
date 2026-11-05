@@ -223,9 +223,11 @@ export async function createVaultClient(configuration: VaultBridgeConfiguration)
   frame.setAttribute('data-cmsg-vault', '');
   frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox');
   // Only the wallet frame holds the device's one passkey; a community frame never runs a ceremony.
+  // Only the wallet frame proves, so only it may be cross-origin isolated (threads need it; the
+  // member page must send COOP/COEP too, and without isolation the prover runs on one thread).
   frame.allow = walletFrame
-    ? `publickey-credentials-get ${vault}; publickey-credentials-create ${vault}`
-    : "publickey-credentials-get 'none'; publickey-credentials-create 'none'";
+    ? `publickey-credentials-get ${vault}; publickey-credentials-create ${vault}; cross-origin-isolated ${vault}`
+    : "publickey-credentials-get 'none'; publickey-credentials-create 'none'; cross-origin-isolated 'none'";
   frame.referrerPolicy = 'no-referrer';
   const encoder = new TextEncoder();
   let port: MessagePort | undefined;
