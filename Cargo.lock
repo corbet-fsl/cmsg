@@ -2181,7 +2181,7 @@ dependencies = [
 [[package]]
 name = "cmsh"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libs/cmsh.git?branch=main#a35ec2dbfe4b69f83ebcd8d3580874eba8f9a0e9"
+source = "git+https://git.corbet.ch/corbet-libs/cmsh.git?branch=main#73c9ecdcfe637f44e2e132c94b4d93191974b8a1"
 dependencies = [
  "async-trait",
  "cdht",
@@ -2819,7 +2819,7 @@ dependencies = [
 [[package]]
 name = "ctnd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctnd.git?branch=main#84b6dd51c303e2779c3d92dcfc2cbe38c82a330b"
+source = "git+https://git.corbet.ch/corbet-foss/ctnd.git?branch=main#9a408e2a7dfda0b7b51f5cd9dfc65f4f84928878"
 dependencies = [
  "cgrp",
  "schemars 1.2.2",
@@ -2849,7 +2849,7 @@ dependencies = [
 [[package]]
 name = "ctrn"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/ctrn.git?branch=main#b865f0c1b1d8851c5dc8ec6647e93bf706d895a4"
+source = "git+https://git.corbet.ch/corbet-foss/ctrn.git?branch=main#d17ea49ebf4e2a13f663425af4b495f4f660fdb8"
 dependencies = [
  "arti-client",
  "async-trait",
@@ -2954,7 +2954,7 @@ dependencies = [
 [[package]]
 name = "cvfy"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cvfy.git?branch=main#af69314cf937294c1532d41394ac4e290349043e"
+source = "git+https://git.corbet.ch/corbet-foss/cvfy.git?branch=main#7dc1a60cc06814d1116b37ea4ed0842afb22a944"
 dependencies = [
  "czkp",
  "data-encoding",
@@ -2966,7 +2966,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#58dabe3396d4a8c93ed8a8446621084ca916a666"
+source = "git+https://git.corbet.ch/corbet-libs/cvld?branch=main#5ebffc2912d975efb2251eef325068dec25cb91e"
 dependencies = [
  "any_ascii",
  "blind-rsa-signatures",
@@ -3067,7 +3067,7 @@ dependencies = [
 [[package]]
 name = "cwst"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-foss/cwst.git?branch=main#4e99ed510d470c94c7015f8a4450542584ee34b8"
+source = "git+https://git.corbet.ch/corbet-foss/cwst.git?branch=main#2d85fcb9e45d3b79cdf7d1e62913c824764f1e79"
 dependencies = [
  "atomicwrites",
  "blake3",
@@ -3107,7 +3107,7 @@ dependencies = [
 [[package]]
 name = "cxch"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-foss/cxch.git?branch=main#4bf1426ec6b82ef854b4459705b70dfb43b22a64"
+source = "git+https://git.corbet.ch/corbet-foss/cxch.git?branch=main#5e6aa049214190c55d06aa96a6b51944b2f55ff4"
 dependencies = [
  "cgrd",
  "cnvl",
