@@ -114,6 +114,11 @@ impl<I: Identity, W: TorWatcher + 'static> cmsh::Spawn for Spawner<I, W> {
 
 /// Closure and task completion for the exact bound Mesh/network lifetime.
 pub struct Drain<I: Identity, W: TorWatcher + 'static>(Rc<Control<I, W>>);
+impl<I: Identity, W: TorWatcher + 'static> Clone for Drain<I, W> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
 impl<I: Identity, W: TorWatcher + 'static> Drain<I, W> {
     pub fn close(&self) {
         self.0.close();

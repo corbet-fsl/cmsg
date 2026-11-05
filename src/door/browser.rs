@@ -216,6 +216,14 @@ pub mod prover;
 pub mod records;
 #[cfg(all(target_arch = "wasm32", feature = "browser-tor"))]
 pub mod restore;
+#[cfg(target_arch = "wasm32")]
+pub mod runner;
+#[cfg(all(
+    target_arch = "wasm32",
+    feature = "browser-tor",
+    feature = "browser-prover"
+))]
+pub mod waves;
 
 /// One HTTPS (or Oblivious HTTP) transport to a configured service.
 fn open_transport(service: &Service, roots: &[Vec<u8>]) -> Result<foyer::Transport> {

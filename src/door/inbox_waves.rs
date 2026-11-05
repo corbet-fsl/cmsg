@@ -12,6 +12,12 @@
 //! result through `inbox.wave_job_done`.
 pub mod account_ports;
 mod desk;
+/// The device side (ports and worker), shared by the native device and the browser.
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    all(feature = "browser-prover", target_arch = "wasm32")
+))]
+pub mod device;
 pub(crate) mod engine;
 pub mod feed_trust;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]

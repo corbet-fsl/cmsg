@@ -442,7 +442,10 @@ impl CurrentEnrollment<'_> {
 /// The verified current common roster as the wave wallet reads it: every row of the
 /// current publication with its leaf and path, under the published root. Public
 /// data only; valid until the publication's slot ends.
-#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    all(feature = "browser-prover", target_arch = "wasm32")
+))]
 pub struct VerifiedRoster {
     pub checkpoint: std::sync::Arc<ckmg::wallet_engine::account::Checkpoint>,
     /// Exclusive end of the publication slot.
@@ -450,7 +453,10 @@ pub struct VerifiedRoster {
 }
 
 /// Every row of a verified tree, in published order, as wallet roster rows.
-#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    all(feature = "browser-prover", target_arch = "wasm32")
+))]
 fn roster_rows(
     tree: &enrollment::EnrollmentTree,
 ) -> Result<Vec<ckmg::wallet_engine::account::Enrollment>> {
@@ -459,7 +465,10 @@ fn roster_rows(
         .collect()
 }
 
-#[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    all(feature = "browser-prover", target_arch = "wasm32")
+))]
 impl AccountAdmission<'_> {
     /// The complete current common roster for an ACTIVE member, through the fixed
     /// original registry action of this admission: the same signature, slot, policy

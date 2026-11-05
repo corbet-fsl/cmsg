@@ -22,6 +22,15 @@ and after the owner await, with the same grant expiry and a nonregressing clock.
 An updated requirement can withhold a completed read. Lifecycle and login
 actions remain available so the client can refresh, lock or close its owners.
 
+One wave runner per device: in the browser every tab has its own vault frame,
+and only the tab holding the device's runner lock (`navigator.locks`, one per
+member origin) binds the Mesh and runs the background jobs (courier, wave
+worker). In any other tab the Inbox and Mesh actions answer the typed error
+`runner_elsewhere`; `runner.status` reports `here` or `elsewhere`, and
+`runner.take` moves the runner to the calling tab (the lock is stolen, the old
+holder ends its jobs and Mesh at once and its session ends; it can take the
+runner back after unlocking again). A native device is always `here`.
+
 `board.status` and `board.disconnect` return the actual Board Status.
 `vault.lock` consumes and locks the actual Vault before emitting VaultLocked.
 `mesh.disconnect` closes the retained actual Mesh listener before emitting

@@ -495,12 +495,27 @@ fn pair_base_matches(evidence: &[u8], live: Option<[u8; 32]>) -> bool {
 /// application operation (not a login step) is undetermined: it refuses that
 /// operation and leaves the session open for the next, freshly checked one.
 pub(crate) fn refusal_ends_session(action: &str, error: ErrorCode) -> bool {
-    error != ErrorCode::Unavailable || action.starts_with("login.")
+    // `RunnerElsewhere` is a state of this tab, never a fault of the session.
+    !matches!(error, ErrorCode::Unavailable | ErrorCode::RunnerElsewhere)
+        || action.starts_with("login.")
 }
 
 #[cfg(test)]
 mod verdict_tests {
     use super::{foyer_refusal, policy_refusal, records_refusal, CheckGuard};
+
+    #[test]
+    fn runner_elsewhere_never_ends_the_session() {
+        use crate::door::ErrorCode;
+        assert!(!super::refusal_ends_session(
+            "inbox.wave_send",
+            ErrorCode::RunnerElsewhere
+        ));
+        assert!(super::refusal_ends_session(
+            "inbox.wave_send",
+            ErrorCode::Refused
+        ));
+    }
     use ckmg::Error;
     use std::{cell::Cell, rc::Rc};
 

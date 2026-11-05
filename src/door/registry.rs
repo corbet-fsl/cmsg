@@ -28,6 +28,7 @@ use inbox_waves::{
     wave_receive as inbox_wave_receive, wave_send as inbox_wave_send, waves as inbox_waves_list,
 };
 use login::{cancel as login_cancel, poll as login_poll, start as login_start};
+use runner::{status as runner_status, take as runner_take};
 use vouching::{
     contacts as voucher_contacts, explanation as voucher_explanation,
     link_create as voucher_link_create, link_revoke as voucher_link_revoke, links as voucher_links,
@@ -155,7 +156,7 @@ pub(super) const DELEGATE_ACTIONS: [&str; 40] = [
 pub(super) struct Action {
     name: &'static str,
     pub version: u16,
-    family: Family,
+    pub family: Family,
     pub authority: Authority,
     effect: Effect,
     body: fn() -> Value,
@@ -588,6 +589,8 @@ macro_rules! actions {
 actions! {
     "runtime.status" => status(Empty) -> RuntimeStatus, Read, Local;
     "runtime.describe" => describe(Empty) -> Vec<ActionDescription>, Read, Local;
+    "runner.status" => runner_status(Empty) -> runner::RunnerStatus, Read, Local;
+    "runner.take" => runner_take(Empty) -> runner::RunnerStatus, LocalLifecycle, Local;
     "client.revoke" => revoke(Empty) -> Revoked, LocalRevocation, Local;
     "foyer.refresh" => foyer_refresh(Empty) -> Empty, FoyerCheck, Foyer;
     "board.status" => board_status(Empty) -> cbrd::Status, Read, Board;

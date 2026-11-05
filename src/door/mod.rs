@@ -75,10 +75,11 @@ pub mod record;
 pub mod record_job;
 mod registry;
 pub(crate) mod rooms;
+pub mod runner;
+pub mod tasks;
 mod transient;
 mod voucher_thread;
 mod vouching;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod wave_job;
 pub use rooms::RoomLink;
 #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
@@ -136,6 +137,9 @@ pub enum ErrorCode {
     /// The server no longer accepts this delegate's key (its registry row was revoked or
     /// the member left). The delegation is dead: drop it and ask for the passkey.
     DelegateRevoked,
+    /// Another tab of this device runs the Mesh and the background jobs: this Door's
+    /// Mesh actions are not served here. `runner.take` moves the runner to this tab.
+    RunnerElsewhere,
 }
 
 impl ErrorCode {
@@ -155,7 +159,8 @@ impl ErrorCode {
             | Self::Clock
             | Self::Reconcile
             | Self::ProofWindowElapsed
-            | Self::SessionExpired => 75,
+            | Self::SessionExpired
+            | Self::RunnerElsewhere => 75,
         }
     }
 }
@@ -366,8 +371,11 @@ pub struct Door {
     #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
     record_jobs: BTreeMap<String, account::Shared<record::RecordJob>>,
     /// The background wave proof worker per community origin (trusted embedding only).
-    #[cfg(not(target_arch = "wasm32"))]
     wave_workers: BTreeMap<String, std::rc::Rc<dyn wave_job::WaveWorker>>,
+    /// Per origin: run the wave worker's next round now (the member started writing).
+    wave_wakes: BTreeMap<String, wave_job::Wake>,
+    /// The runner gate per member origin (browser tabs; see `runner`).
+    runner_gates: BTreeMap<String, runner::RunnerGate>,
     /// What the restoring composer binds into ports and a worker per community origin
     /// (trusted embedding only).
     #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
@@ -405,8 +413,9 @@ impl Door {
             activation_prover: None,
             #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
             record_jobs: BTreeMap::new(),
-            #[cfg(not(target_arch = "wasm32"))]
             wave_workers: BTreeMap::new(),
+            wave_wakes: BTreeMap::new(),
+            runner_gates: BTreeMap::new(),
             #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
             wave_devices: BTreeMap::new(),
             wave_ports: BTreeMap::new(),
@@ -458,7 +467,6 @@ impl Door {
 
     /// Trusted embedding control: run the background wave proof worker for `origin`
     /// while its courier runs. Set once per origin; the worker cannot be replaced.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn set_wave_worker(
         &mut self,
         origin: &str,
@@ -468,10 +476,22 @@ impl Door {
             return Err(ErrorCode::Unauthorized);
         }
         self.wave_workers.insert(origin.to_owned(), worker);
+        self.wave_wakes
+            .insert(origin.to_owned(), wave_job::Wake::default());
         Ok(())
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn wave_wake(&self, origin: &str) -> Option<wave_job::Wake> {
+        self.wave_wakes.get(origin).cloned()
+    }
+
+    /// Trusted embedding control: the member started writing a wave, so the wave worker
+    /// of `origin` runs its next round now (witness, roster, trust and provers warm before
+    /// the Terms return; nothing is sent). False when `origin` runs no worker.
+    pub fn wake_wave_worker(&self, origin: &str) -> bool {
+        self.wave_wake(origin).map(|wake| wake.now()).is_some()
+    }
+
     pub(crate) fn wave_worker(
         &self,
         origin: &str,
@@ -481,7 +501,7 @@ impl Door {
 
     /// Whether the embedding already installed the wave ports or the wave worker of
     /// `origin` (both are set once and never replaced).
-    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    #[allow(dead_code)] // only a build that composes a wave device calls it
     pub(crate) fn waves_installed(&self, origin: &str) -> bool {
         self.wave_ports.contains_key(origin) || self.wave_workers.contains_key(origin)
     }
@@ -743,6 +763,7 @@ impl Door {
         }
         // All projections converge here after the same scope/origin/capability check.
         if let Some(action) = local {
+            self.runner_check(origin, action.family)?;
             let result = (action.handler)(self, &key, request.body.get()).await?;
             check_result_size(&result.0)?;
             Ok(result)

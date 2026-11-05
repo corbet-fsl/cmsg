@@ -339,67 +339,7 @@ async fn drain_composer(composer: &mut Option<Box<dyn VaultComposer>>) -> Result
     .unwrap_or(Err(ErrorCode::Reconcile))
 }
 
-/// One courier per bound Mesh of the Door, started after the dispatch that bound
-/// the Mesh (the login) and ended with it.
-#[derive(Default)]
-struct Couriers(
-    Vec<(
-        String,
-        std::rc::Rc<super::courier::Shared>,
-        super::courier::Courier,
-    )>,
-);
-
-impl Couriers {
-    async fn sync(&mut self, door: &super::courier::SharedDoor) {
-        let bound = door.lock().await.courier_shareds();
-        self.0.retain(|(origin, shared, _)| {
-            bound
-                .iter()
-                .any(|(o, s)| o == origin && std::rc::Rc::ptr_eq(s, shared))
-        });
-        for (origin, shared) in bound {
-            if self
-                .0
-                .iter()
-                .any(|(o, s, _)| *o == origin && std::rc::Rc::ptr_eq(s, &shared))
-            {
-                continue;
-            }
-            let courier =
-                super::courier::spawn(door.clone(), &origin, super::courier::Config::default());
-            #[cfg(feature = "native-prover")]
-            if let Some(job) = door.lock().await.record_job(&origin) {
-                let closed = shared.clone();
-                tokio::task::spawn_local(super::record_job::run(
-                    door.clone(),
-                    origin.clone(),
-                    job,
-                    std::rc::Rc::new(move || closed.closed.get()),
-                    super::record_job::Cadence::default(),
-                ));
-            }
-            if let Some(worker) = door.lock().await.wave_worker(&origin) {
-                let closed = shared.clone();
-                tokio::task::spawn_local(super::wave_job::run(
-                    door.clone(),
-                    origin.clone(),
-                    worker,
-                    std::rc::Rc::new(move || closed.closed.get()),
-                    super::wave_job::Cadence::default(),
-                ));
-            }
-            self.0.push((origin, shared, courier));
-        }
-    }
-
-    async fn stop(&mut self, door: &super::courier::SharedDoor) {
-        door.lock().await.stop_couriers();
-        for (_, _, courier) in self.0.drain(..) {
-            let _ = courier.finished().await;
-        }
-    }
-}
+use super::courier::Couriers;
 
 impl Owner {
     async fn start<F, Fut, T>(

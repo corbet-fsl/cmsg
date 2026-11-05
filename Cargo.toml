@@ -92,6 +92,8 @@ cbrd = { git = "https://git.corbet.ch/corbet-fsl/cbrd.git", branch = "main", def
 futures-channel = "0.3"
 gloo-timers = { version = "0.4", features = ["futures"] }
 futures-util = "0.3"
+# The background jobs share the Door through tokio's runtime-free sync primitives (no tokio runtime in the browser).
+tokio = { version = "1.47", default-features = false, features = ["sync"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
@@ -102,10 +104,12 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 
 [dev-dependencies]
-cmsg = { path = ".", features = ["client-version-fixture"] }
+cmsg = { path = ".", features = ["client-version-fixture", "courier-fixture"] }
 cpky = { git = "https://git.corbet.ch/corbet-libre/cpky.git", branch = "main", features = ["test-authenticator"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+# The client-version fixture of the own tests is a tokio task-local (no runtime is started).
+tokio = { version = "1.47", default-features = false, features = ["sync", "rt"] }
 futures-util = "0.3"
 gloo-net = "0.7"
 gloo-timers = { version = "0.4", features = ["futures"] }
@@ -155,6 +159,8 @@ interrupt-points = []
 # Test only: run a future as an older client (`door::with_client_version`) to exercise the
 # minimum-client-version gate. Always enabled for this crate's own tests; production builds never enable it.
 client-version-fixture = []
+# Test only: queue a courier frame and read the running jobs (tests/runner.rs). Production builds never enable it.
+courier-fixture = []
 browser-tor = ["ckmg/browser-tor", "cmsh/tor-records", "dep:ctrn"]
 
 [[example]]
@@ -172,6 +178,12 @@ required-features = ["conformance"]
 [[test]]
 name = "it"
 path = "tests/it/main.rs"
+
+# The background jobs on this runtime and the one wave runner per device across tabs
+# (the lock itself needs a browser: navigator.locks).
+[[test]]
+name = "runner"
+path = "tests/runner.rs"
 
 [[test]]
 name = "foyer"

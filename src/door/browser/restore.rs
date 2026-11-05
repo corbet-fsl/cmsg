@@ -1,10 +1,12 @@
 //! One already-enrolled restoration using original browser and custody owners.
 use super::{
     identity::{TransportClient, TransportOwner},
-    mesh, records, VaultComposer,
+    mesh, records, runner, VaultComposer,
 };
 use crate::door::{
-    custody, login, network_browser, ClientToken, Door, ErrorCode, Event, Output, Result,
+    custody, login, network_browser,
+    runner::{RunnerGate, RunnerState, RunnerStatus},
+    ClientToken, Door, ErrorCode, Event, Output, Result,
 };
 use ckmg::Clock;
 use cmsh::tor_discovery::TorWatcher;
@@ -40,6 +42,12 @@ pub struct Composer<W: TorWatcher + 'static> {
     mesh: Option<Mesh<W>>,
     mesh_drain: Option<mesh::Drain<TransportClient, W>>,
     database: Option<cwst::browser::IndexedDb>,
+    /// The member's wave stack, bound beside the Mesh once the network is up.
+    #[cfg(feature = "browser-prover")]
+    waves: Option<super::waves::Waves<W>>,
+    /// This tab's runner lock, while it holds it, and the Door's view of it.
+    runner: Option<runner::Held>,
+    gate: RunnerGate,
     closed: bool,
     draining: Option<Completion>,
 }
@@ -69,6 +77,10 @@ impl<W: TorWatcher + 'static> Composer<W> {
             mesh: None,
             mesh_drain: None,
             database: None,
+            #[cfg(feature = "browser-prover")]
+            waves: None,
+            runner: None,
+            gate: RunnerGate::default(),
             closed: false,
             draining: None,
         }
@@ -76,6 +88,13 @@ impl<W: TorWatcher + 'static> Composer<W> {
 
     pub(crate) fn with_board(mut self, board: Option<crate::door::board::PendingBoard>) -> Self {
         self.board = board;
+        self
+    }
+
+    /// The member's wave stack (provers and counterpart verifier of this deployment).
+    #[cfg(feature = "browser-prover")]
+    pub fn with_waves(mut self, waves: Option<super::waves::Waves<W>>) -> Self {
+        self.waves = waves;
         self
     }
 
@@ -199,19 +218,81 @@ impl<W: TorWatcher + 'static> Composer<W> {
         };
         let owners = member.prepare_recovery(&candidate, network.clone()).await?;
         let peers = network.clone();
+        #[cfg(feature = "browser-prover")]
+        let handles = network.clone();
         let restored = owners.open(network, backend).await?;
         let mut owner = door
             .bind_vault_with_board_owner(origin, restored.vault, restored.intent, restored.lifetime)
             .await?;
         owner.enable_verified_groups(peers, door.current_policy(origin)?)?;
+        #[cfg(feature = "browser-prover")]
+        if let Some(waves) = self.waves.take() {
+            waves.bind(door, origin, handles)?;
+        }
         if let Some(board) = self.board.take() {
             board.bind(door, origin, owner)?;
         }
+        // One runner per device: only the tab that holds the lock binds the Mesh.
+        // Another tab keeps its network for a later `runner.take`.
+        door.set_runner_gate(origin, self.gate.clone())?;
+        if let Some(held) =
+            runner::acquire(origin, runner::Ask::IfAvailable, self.gate.clone()).await?
+        {
+            self.bind_runner(door, origin, held).await?;
+        }
+        Ok(())
+    }
+
+    /// Bind the Mesh under the held runner lock. Losing the lock ends this tab's jobs
+    /// (the courier and the wave worker stop with the bound Mesh's shared state) and
+    /// its Mesh at once; the session itself ends at the next dispatch.
+    async fn bind_runner(
+        &mut self,
+        door: &mut Door,
+        origin: &str,
+        held: runner::Held,
+    ) -> Result<()> {
         let retained = self.network.take().ok_or(ErrorCode::Unavailable)?;
         let (cleanup, binding) = Mesh::prepare_bind(door, origin, retained);
+        let closer = cleanup.clone();
         self.mesh_drain = Some(cleanup);
         self.mesh = Some(binding.await?);
+        let shared = door.courier_shared(origin);
+        held.on_lost(move || {
+            if let Some(shared) = shared {
+                shared.close();
+            }
+            closer.close();
+        });
+        self.runner = Some(held);
         Ok(())
+    }
+
+    /// `runner.take`: move the runner to this tab (steal the lock, bind the Mesh).
+    async fn take_runner(&mut self, door: &mut Door, origin: &str) -> Result<RunnerStatus> {
+        if self.mesh.is_none() {
+            // A tab that lost the lock has no network left to bind: it needs a fresh
+            // session, after which it comes up without the lock and can take it.
+            if self.closed || self.network.is_none() {
+                return Err(ErrorCode::SessionExpired);
+            }
+            let held = runner::acquire(origin, runner::Ask::Steal, self.gate.clone())
+                .await?
+                .ok_or(ErrorCode::Unavailable)?;
+            self.bind_runner(door, origin, held).await?;
+        }
+        Ok(RunnerStatus {
+            state: RunnerState::Here,
+        })
+    }
+
+    /// The live records network: the Mesh's when this tab runs, else the retained one.
+    fn records_live(&self) -> Result<()> {
+        match (&self.mesh, &self.network) {
+            (Some(mesh), _) => mesh.records().map(|_| ()),
+            (None, Some(network)) => network.records().map(|_| ()),
+            (None, None) => Err(ErrorCode::Unavailable),
+        }
     }
 }
 
@@ -226,10 +307,34 @@ impl<W: TorWatcher + 'static> VaultComposer for Composer<W> {
         now: u64,
     ) -> LocalBoxFuture<'a, Result<()>> {
         async move {
-            let Output::Ok { result, events } = output else {
+            // Another tab took the runner: this session ends (its Mesh already did).
+            if self.runner.is_some() && self.gate.elsewhere() {
                 self.close();
-                return Ok(()); // Preserve the original refusal unchanged.
+            }
+            let Output::Ok { result, events } = output else {
+                // Preserve the original refusal unchanged. An operation refused as
+                // unavailable (or answered `runner_elsewhere`) ends only itself, as on
+                // the native device; every other refusal still ends the session.
+                if let Output::Error { error } = output {
+                    if custody::refusal_ends_session(action, *error) {
+                        self.close();
+                    }
+                }
+                return Ok(());
             };
+            if action == "runner.take" {
+                let status = self.take_runner(door, origin).await?;
+                *result = serde_json::to_value(status).map_err(|__cause| {
+                    crate::door::cause::emit(
+                        file!(),
+                        line!(),
+                        "ErrorCode::Unavailable",
+                        ErrorCode::Unavailable,
+                        &__cause,
+                    )
+                })?;
+                return Ok(());
+            }
             let status = if matches!(action, "login.start" | "login.poll" | "login.cancel") {
                 serde_json::from_value::<login::Status>(result.clone()).ok()
             } else {
@@ -263,19 +368,9 @@ impl<W: TorWatcher + 'static> VaultComposer for Composer<W> {
             if attempt.composer.configuration.is_some() {
                 attempt.composer.restore(door, origin, token, now).await?;
             }
-            attempt
-                .composer
-                .mesh
-                .as_ref()
-                .ok_or(ErrorCode::Unavailable)?
-                .records()?;
+            attempt.composer.records_live()?;
             let status = door.complete_login_recovery(origin, token, now).await?;
-            attempt
-                .composer
-                .mesh
-                .as_ref()
-                .ok_or(ErrorCode::Unavailable)?
-                .records()?;
+            attempt.composer.records_live()?;
             *result = serde_json::to_value(status).map_err(|__cause| {
                 crate::door::cause::emit(
                     file!(),
@@ -298,6 +393,10 @@ impl<W: TorWatcher + 'static> VaultComposer for Composer<W> {
         self.closed = true;
         self.configuration.take();
         self.board.take();
+        #[cfg(feature = "browser-prover")]
+        self.waves.take();
+        // Releasing the lock is no loss: the next tab may take it.
+        self.runner.take();
         let mesh_drain = self.mesh_drain.take();
         if let Some(cleanup) = &mesh_drain {
             cleanup.close();

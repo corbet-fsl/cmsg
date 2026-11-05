@@ -166,6 +166,21 @@ impl WaveJobs for LeaseJobs {
     }
 }
 
+/// Run the next round now instead of at the cadence: the member started writing a wave,
+/// so the round loads the witness, the roster and the trust and builds the provers
+/// before the Terms come back (decided 2026-11-05: speculative reservation is only this
+/// warm-up; nothing is sent, no Hello leaves before the member sends).
+#[derive(Clone, Default)]
+pub struct Wake(Rc<std::cell::Cell<bool>>);
+impl Wake {
+    pub fn now(&self) {
+        self.0.set(true);
+    }
+    fn take(&self) -> bool {
+        self.0.replace(false)
+    }
+}
+
 /// Cadence of the worker, in seconds.
 #[derive(Clone, Copy, Debug)]
 pub struct Cadence {
@@ -194,6 +209,7 @@ pub async fn run(
     origin: String,
     worker: Rc<dyn WaveWorker>,
     closed: Rc<dyn Fn() -> bool>,
+    wake: Wake,
     cadence: Cadence,
 ) {
     let mut wait = cadence.start;
@@ -204,7 +220,10 @@ pub async fn run(
             if closed() {
                 return;
             }
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            if wake.take() {
+                break;
+            }
+            super::tasks::sleep(Duration::from_secs(1)).await;
             slept += 1;
         }
         if closed() {
@@ -311,6 +330,7 @@ mod tests {
                     ORIGIN.to_owned(),
                     Rc::new(Counting(rounds.clone())),
                     Rc::new(move || stop.get()),
+                    Wake::default(),
                     Cadence {
                         start: 1,
                         check: 5,

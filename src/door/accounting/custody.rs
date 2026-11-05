@@ -404,7 +404,22 @@ where
         let mut vault = self.vault.open().await?;
         crate::door::record::finish_record(&mut vault, proof).await
     }
+}
 
+/// The wave wallet's witness steps on the account's own Vault (native device and
+/// browser vault frame alike).
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    all(feature = "browser-prover", target_arch = "wasm32")
+))]
+impl<B, C, E, A, R> CommunityAccount<B, C, E, A, R>
+where
+    B: cwst::backend::Backend,
+    C: Clock,
+    E: Entropy,
+    A: Authority,
+    R: Records,
+{
     /// The member's evolving account witness (the wave wallet's state), reopened under
     /// `roster`, the caller's verified current common roster. Before the first wave the
     /// Vault holds no witness yet: it is the accepted account itself. Fresh original

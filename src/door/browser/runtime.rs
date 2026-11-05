@@ -96,8 +96,12 @@ impl BrowserRuntime {
         let (sender, mut receiver) = mpsc::channel::<Command>(MAX_CLIENTS);
         let (finished, completion) = oneshot::channel();
         wasm_bindgen_futures::spawn_local(async move {
-            // The task is the sole Door owner. A panic terminates this owner;
-            // there is no shared Door to recover or reuse after a partial effect.
+            // The task owns the Door and shares it only with the background jobs of
+            // its bound Meshes (courier, wave job), exactly as the native owner does.
+            // A panic terminates this owner; there is no Door to recover or reuse
+            // after a partial effect.
+            let door = Rc::new(tokio::sync::Mutex::new(door));
+            let mut couriers = crate::door::courier::Couriers::default();
             while let Some(command) = receiver.next().await {
                 // Selection only. Door still validates the original bytes;
                 // rejected dispatches cannot begin custody or become success.
@@ -106,13 +110,15 @@ impl BrowserRuntime {
                     .unwrap_or_default();
                 let mut result = match now() {
                     Ok(time) => {
-                        door.dispatch(
-                            &origin,
-                            token.expose_for_transport(),
-                            command.bytes.as_bytes(),
-                            time,
-                        )
-                        .await
+                        door.lock()
+                            .await
+                            .dispatch(
+                                &origin,
+                                token.expose_for_transport(),
+                                command.bytes.as_bytes(),
+                                time,
+                            )
+                            .await
                     }
                     Err(error) => Output::Error { error },
                 };
@@ -128,7 +134,7 @@ impl BrowserRuntime {
                         Ok(time) => {
                             composer
                                 .after_dispatch(
-                                    &mut door,
+                                    &mut *door.lock().await,
                                     &origin,
                                     &token,
                                     &action,
@@ -150,6 +156,9 @@ impl BrowserRuntime {
                         result = Output::Error { error };
                     }
                 }
+                // A Mesh bound by this dispatch starts its courier and jobs; one that
+                // ended (vault lock, disconnect, a lost runner lock) ends them.
+                couriers.sync(&door).await;
                 // A vanished waiter does not alter child completion ownership.
                 let _ = command.reply.send(result);
             }
@@ -161,7 +170,15 @@ impl BrowserRuntime {
             } else {
                 Ok(())
             };
-            door.close_owned().await;
+            couriers.stop(&door).await;
+            let drained = match Rc::try_unwrap(door) {
+                Ok(door) => {
+                    door.into_inner().close_owned().await;
+                    drained
+                }
+                // A job still holds the Door: nothing may close it twice.
+                Err(_) => Err(ErrorCode::Reconcile),
+            };
             let _ = finished.send(drained);
         });
         Ok(Self {

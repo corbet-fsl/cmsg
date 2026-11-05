@@ -175,7 +175,6 @@ pub(super) struct Shared {
     pub directory: RefCell<Option<Box<dyn Directory>>>,
     pub mailbox: RefCell<Option<Rc<dyn Mailbox>>>,
     pub closed: Cell<bool>,
-    #[cfg(not(target_arch = "wasm32"))]
     pub stop: tokio::sync::Notify,
 }
 impl Shared {
@@ -189,13 +188,11 @@ impl Shared {
             directory: RefCell::new(None),
             mailbox: RefCell::new(None),
             closed: Cell::new(false),
-            #[cfg(not(target_arch = "wasm32"))]
             stop: tokio::sync::Notify::new(),
         }
     }
     pub(super) fn close(&self) {
         self.closed.set(true);
-        #[cfg(not(target_arch = "wasm32"))]
         self.stop.notify_one();
     }
     pub(super) fn push(&self, peer: &str, body: Body) {
@@ -269,6 +266,16 @@ impl Door {
         for mesh in self.meshes.values() {
             mesh.shared.close();
         }
+    }
+
+    /// Test fixture only: queue `body` for `peer` on the bound Mesh of `origin`, as an
+    /// owner action does.
+    #[cfg(feature = "courier-fixture")]
+    pub fn courier_queue(&self, origin: &str, peer: &str, body: Body) -> Result<()> {
+        self.courier_shared(origin)
+            .ok_or(ErrorCode::Unavailable)?
+            .push(peer, body);
+        Ok(())
     }
 
     pub(super) fn courier_shared(&self, origin: &str) -> Option<Rc<Shared>> {
@@ -853,10 +860,9 @@ struct State {
 }
 
 pub fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    // The custody clock: system time natively, `Date.now()` in the browser (where
+    // `std::time::SystemTime` is not available).
+    ckmg::Clock::now(&mut super::custody::SystemClock).unwrap_or(0)
 }
 
 /// One pass of the Door-side work: start-up recovery, due duties, and the list
@@ -1111,36 +1117,110 @@ async fn deliver(shared: &Shared, item: &Outgoing, left: &mut BTreeSet<Vec<u8>>)
         .then_some(false)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub use run::{spawn, Courier, SharedDoor};
+pub use super::tasks::SharedDoor;
+pub use run::{spawn, Courier, Couriers};
 
-#[cfg(not(target_arch = "wasm32"))]
 mod run {
     use super::*;
-    use tokio::sync::Mutex;
-
-    /// The Door shared between the embedder's dispatcher and the courier. Each
-    /// side locks it per call; the courier never holds it across a network send.
-    pub type SharedDoor = Rc<Mutex<Door>>;
+    use crate::door::tasks;
+    use futures_util::future::{select, Either};
 
     /// A running courier. Dropping it does not stop the task; closing the Mesh
     /// (`mesh.disconnect`, vault lock, Door close) does.
     pub struct Courier {
-        task: tokio::task::JoinHandle<Report>,
+        task: tasks::Task<Report>,
     }
     impl Courier {
         /// Wait for the courier to end and read its counters.
         pub async fn finished(self) -> Option<Report> {
-            self.task.await.ok()
+            self.task.finished().await
         }
     }
 
-    /// Start the courier of `origin` on the current `LocalSet`. The Mesh must
-    /// be bound (`Door::bind_mesh`); otherwise the courier ends at once.
+    /// Start the courier of `origin` on the current thread (the native owner's
+    /// `LocalSet` or the browser vault frame). The Mesh must be bound
+    /// (`Door::bind_mesh`); otherwise the courier ends at once.
     pub fn spawn(door: SharedDoor, origin: &str, config: Config) -> Courier {
         let origin = origin.to_owned();
         Courier {
-            task: tokio::task::spawn_local(run(door, origin, config)),
+            task: tasks::spawn(run(door, origin, config)),
+        }
+    }
+
+    /// One courier per bound Mesh of the Door, started after the dispatch that bound
+    /// the Mesh (the login) and ended with it, together with the background jobs of
+    /// that origin. Native and browser owners run the same set.
+    #[derive(Default)]
+    pub struct Couriers(Vec<(String, Rc<Shared>, Courier, Vec<tasks::Task<()>>)>);
+
+    impl Couriers {
+        /// Start what a newly bound Mesh needs and forget the ones that ended.
+        pub async fn sync(&mut self, door: &SharedDoor) {
+            let bound = door.lock().await.courier_shareds();
+            self.0.retain(|(origin, shared, _, _)| {
+                bound
+                    .iter()
+                    .any(|(o, s)| o == origin && Rc::ptr_eq(s, shared))
+            });
+            for (origin, shared) in bound {
+                if self
+                    .0
+                    .iter()
+                    .any(|(o, s, _, _)| *o == origin && Rc::ptr_eq(s, &shared))
+                {
+                    continue;
+                }
+                let courier = spawn(door.clone(), &origin, Config::default());
+                let mut jobs = Vec::new();
+                #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+                if let Some(job) = door.lock().await.record_job(&origin) {
+                    let closed = shared.clone();
+                    jobs.push(tasks::spawn(crate::door::record_job::run(
+                        door.clone(),
+                        origin.clone(),
+                        job,
+                        Rc::new(move || closed.closed.get()),
+                        crate::door::record_job::Cadence::default(),
+                    )));
+                }
+                let (worker, wake) = {
+                    let guard = door.lock().await;
+                    (guard.wave_worker(&origin), guard.wave_wake(&origin))
+                };
+                if let Some(worker) = worker {
+                    let closed = shared.clone();
+                    jobs.push(tasks::spawn(crate::door::wave_job::run(
+                        door.clone(),
+                        origin.clone(),
+                        worker,
+                        Rc::new(move || closed.closed.get()),
+                        wake.unwrap_or_default(),
+                        crate::door::wave_job::Cadence::default(),
+                    )));
+                }
+                self.0.push((origin, shared, courier, jobs));
+            }
+        }
+
+        /// The running couriers: each origin with the number of jobs beside its courier.
+        #[cfg(feature = "courier-fixture")]
+        pub fn running(&self) -> Vec<(String, usize)> {
+            self.0
+                .iter()
+                .map(|(origin, _, _, jobs)| (origin.clone(), jobs.len()))
+                .collect()
+        }
+
+        /// Ask every courier (and with it every job) to end and wait for all of them,
+        /// so that no job still holds the Door afterwards.
+        pub async fn stop(&mut self, door: &SharedDoor) {
+            door.lock().await.stop_couriers();
+            for (_, _, courier, jobs) in self.0.drain(..) {
+                let _ = courier.finished().await;
+                for job in jobs {
+                    let _ = job.finished().await;
+                }
+            }
         }
     }
 
@@ -1154,23 +1234,37 @@ mod run {
             if shared.closed.get() {
                 break;
             }
-            tokio::select! {
-                biased;
-                _ = shared.stop.notified() => break,
-                incoming = shared.listener.next() => {
-                    match incoming {
-                        Some(cmsh::Incoming::Message { payload, .. }) => {
-                            let mut guard = door.lock().await;
-                            receive(&mut guard, &origin, &shared, &payload, now(), &mut state.report).await;
-                        }
-                        Some(cmsh::Incoming::Call { .. }) => state.report.dropped += 1,
-                        Some(cmsh::Incoming::ListenerClosed(scheme, _)) => {
-                            shared.own.borrow_mut().retain(|a| *a.scheme() != scheme);
-                        }
-                        None => break,
+            // Stop first, then a frame, then the tick (the order of a biased select).
+            let woke = select(
+                Box::pin(shared.stop.notified()),
+                select(
+                    Box::pin(shared.listener.next()),
+                    Box::pin(tasks::sleep(tick)),
+                ),
+            )
+            .await;
+            match woke {
+                Either::Left(_) => break,
+                Either::Right((Either::Left((incoming, _)), _)) => match incoming {
+                    Some(cmsh::Incoming::Message { payload, .. }) => {
+                        let mut guard = door.lock().await;
+                        receive(
+                            &mut guard,
+                            &origin,
+                            &shared,
+                            &payload,
+                            now(),
+                            &mut state.report,
+                        )
+                        .await;
                     }
-                }
-                _ = tokio::time::sleep(tick) => {}
+                    Some(cmsh::Incoming::Call { .. }) => state.report.dropped += 1,
+                    Some(cmsh::Incoming::ListenerClosed(scheme, _)) => {
+                        shared.own.borrow_mut().retain(|a| *a.scheme() != scheme);
+                    }
+                    None => break,
+                },
+                Either::Right((Either::Right(_), _)) => {}
             }
             cycle(&door, &origin, &shared, &config, &mut state).await;
             collect_left(&door, &origin, &shared, &config, &mut state).await;

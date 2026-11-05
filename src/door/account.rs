@@ -173,14 +173,23 @@ pub(super) enum Command {
     #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
     RecordFinish(Shared<std::cell::Cell<Option<super::record::RecordProof>>>),
     /// Wave wallet: reopen the account witness under this verified current roster.
-    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    #[cfg(any(
+        all(feature = "native-prover", not(target_arch = "wasm32")),
+        all(feature = "browser-prover", target_arch = "wasm32")
+    ))]
     WitnessLoad(Shared<std::sync::Arc<ckmg::wallet_engine::account::Checkpoint>>),
     /// Wave wallet: make this accepted witness state the durable one.
-    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    #[cfg(any(
+        all(feature = "native-prover", not(target_arch = "wasm32")),
+        all(feature = "browser-prover", target_arch = "wasm32")
+    ))]
     WitnessStore(Shared<ckmg::wallet_engine::account::Account>),
     /// Wave wallet: the verified current common roster, read through a fresh
     /// admission of this active member (never from a cache of the actor).
-    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    #[cfg(any(
+        all(feature = "native-prover", not(target_arch = "wasm32")),
+        all(feature = "browser-prover", target_arch = "wasm32")
+    ))]
     Roster,
     /// How many vouchers the accepted account may still hand out in this sponsor
     /// role (member 0, admin 1, root 2), read from its committed state. Reads only.
@@ -217,13 +226,22 @@ pub(super) enum Answer {
     #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
     RecordCached,
     /// Wave wallet: the reopened account witness.
-    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    #[cfg(any(
+        all(feature = "native-prover", not(target_arch = "wasm32")),
+        all(feature = "browser-prover", target_arch = "wasm32")
+    ))]
     Witness(Shared<ckmg::wallet_engine::account::Account>),
     /// Wave wallet: the witness state is durable.
-    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    #[cfg(any(
+        all(feature = "native-prover", not(target_arch = "wasm32")),
+        all(feature = "browser-prover", target_arch = "wasm32")
+    ))]
     WitnessStored,
     /// Wave wallet: the verified current common roster.
-    #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+    #[cfg(any(
+        all(feature = "native-prover", not(target_arch = "wasm32")),
+        all(feature = "browser-prover", target_arch = "wasm32")
+    ))]
     Roster(Shared<super::accounting::VerifiedRoster>),
     /// Vouchers the account may still hand out (before the device's open links).
     Remaining(u64),
@@ -384,11 +402,12 @@ fn own_path(command: &Command) -> bool {
         | Command::Join(_)
         | Command::VoucherRemaining(_) => true,
         #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
-        Command::RecordPrepare(_)
-        | Command::RecordFinish(_)
-        | Command::WitnessLoad(_)
-        | Command::WitnessStore(_)
-        | Command::Roster => true,
+        Command::RecordPrepare(_) | Command::RecordFinish(_) => true,
+        #[cfg(any(
+            all(feature = "native-prover", not(target_arch = "wasm32")),
+            all(feature = "browser-prover", target_arch = "wasm32")
+        ))]
+        Command::WitnessLoad(_) | Command::WitnessStore(_) | Command::Roster => true,
         _ => false,
     }
 }
@@ -420,11 +439,14 @@ pub(super) async fn repeat<S: Standing>(command: Command, state: &mut S) -> Repe
                 unreachable!("returned above")
             }
             #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
-            Command::RecordPrepare(_)
-            | Command::RecordFinish(_)
-            | Command::WitnessLoad(_)
-            | Command::WitnessStore(_)
-            | Command::Roster => unreachable!("returned above"),
+            Command::RecordPrepare(_) | Command::RecordFinish(_) => unreachable!("returned above"),
+            #[cfg(any(
+                all(feature = "native-prover", not(target_arch = "wasm32")),
+                all(feature = "browser-prover", target_arch = "wasm32")
+            ))]
+            Command::WitnessLoad(_) | Command::WitnessStore(_) | Command::Roster => {
+                unreachable!("returned above")
+            }
         });
     }
     match command {
@@ -1446,7 +1468,10 @@ mod run {
                     mailbox.reply(reply);
                     continue;
                 }
-                #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+                #[cfg(any(
+                    all(feature = "native-prover", not(target_arch = "wasm32")),
+                    all(feature = "browser-prover", target_arch = "wasm32")
+                ))]
                 Command::WitnessLoad(roster) => {
                     let reply = account
                         .witness_load(std::sync::Arc::clone(roster))
@@ -1455,7 +1480,10 @@ mod run {
                     mailbox.reply(reply);
                     continue;
                 }
-                #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+                #[cfg(any(
+                    all(feature = "native-prover", not(target_arch = "wasm32")),
+                    all(feature = "browser-prover", target_arch = "wasm32")
+                ))]
                 Command::WitnessStore(witness) => {
                     let reply = account
                         .witness_store(witness)
@@ -1464,7 +1492,10 @@ mod run {
                     mailbox.reply(reply);
                     continue;
                 }
-                #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
+                #[cfg(any(
+                    all(feature = "native-prover", not(target_arch = "wasm32")),
+                    all(feature = "browser-prover", target_arch = "wasm32")
+                ))]
                 Command::Roster => {
                     // Only an active member reads the roster; the admission is fresh
                     // and is dropped with this reply.
@@ -1733,11 +1764,16 @@ mod run {
             | Command::Settle(_)
             | Command::VoucherRemaining(_) => (Err(ErrorCode::Unavailable), Next::Carry),
             #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
-            Command::RecordPrepare(_)
-            | Command::RecordFinish(_)
-            | Command::WitnessLoad(_)
-            | Command::WitnessStore(_)
-            | Command::Roster => (Err(ErrorCode::Unavailable), Next::Carry),
+            Command::RecordPrepare(_) | Command::RecordFinish(_) => {
+                (Err(ErrorCode::Unavailable), Next::Carry)
+            }
+            #[cfg(any(
+                all(feature = "native-prover", not(target_arch = "wasm32")),
+                all(feature = "browser-prover", target_arch = "wasm32")
+            ))]
+            Command::WitnessLoad(_) | Command::WitnessStore(_) | Command::Roster => {
+                (Err(ErrorCode::Unavailable), Next::Carry)
+            }
             Command::Activate => {
                 let Some(admission) = stage.admission() else {
                     return (Err(ErrorCode::Unavailable), Next::Carry);
