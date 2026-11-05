@@ -26,6 +26,13 @@ before an external result, event or output escapes. Contacts and Wallet stay at
 their owners. Admin/root projections must preserve the actual cvld registry via
 Foyer; there is no frontend-to-cvld bypass or copied administrative action table.
 
+The wallet session renews silently by the wallet device key K (A13): the embedding lends the
+wallet Door's binding ONE `WalletRenewal` (`Door::set_wallet_renewal`, K from the unlocked
+wallet opening, never the PRF); before every forwarded call the binding renews the global session
+through Foyer once it is within 300 s of its deadline. A refused renewal ends the renewer (the
+session then ends at its deadline into the ordinary passkey login); a transient one is retried at
+the next call.
+
 No member keys or PRF appear in API data, errors or logs. A local paired-client
 capability is distinct from passkeys, remote sessions and member authority.
 Original request bytes reach typed decoding intact; unknown/duplicate fields and

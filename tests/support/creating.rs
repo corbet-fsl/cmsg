@@ -97,6 +97,7 @@ async fn a_lent_global_session_serves_creation_and_nothing_else() {
         root_board: false,
         sessions,
         uncertain: false,
+        renewal: None,
     };
     let issue = owner_operation("creation_token_issue").unwrap();
     let other = owner_operation("passport_challenge").unwrap();

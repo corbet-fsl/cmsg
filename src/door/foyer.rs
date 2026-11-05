@@ -111,6 +111,25 @@ pub(super) struct Binding {
     pub root_board: bool,
     pub sessions: Sessions,
     pub uncertain: bool,
+    /// The device's ONE wallet session renewer (A13), on the wallet Door's binding only.
+    pub renewal: Option<WalletRenewal>,
+}
+
+/// A13: the wallet session renews by the wallet device key K, silently. The renewer holds only K
+/// (never the PRF) and the wallet host it signs for; before every global call it renews the
+/// session once it is within `cfyr::wallet_session::RENEW_WINDOW_SECONDS` (300 s) of its
+/// deadline, or past it. A refused renewal (revoked K or passkey, logout) ends the renewer: the
+/// session then expires into the ordinary passkey login.
+pub struct WalletRenewal {
+    key: ckmg::passkey::WalletSessionKey,
+    host: String,
+}
+
+impl WalletRenewal {
+    /// K from the unlocked wallet opening, for the wallet `host` (`wallet.<domain>`).
+    pub fn new(key: ckmg::passkey::WalletSessionKey, host: String) -> Self {
+        Self { key, host }
+    }
 }
 
 pub(super) struct Operation {
@@ -379,6 +398,38 @@ impl Binding {
             .await
             .map(|info| info.expires)
             .map_err(map_error)
+    }
+
+    /// A13: renew the global session by K when it is due at `now` (see [`WalletRenewal`]).
+    /// Without a renewer, or when not due, nothing is sent. Returns whether it renewed.
+    pub(super) async fn renew_wallet_if_due(&mut self, now: u64) -> Result<bool> {
+        let Some(renewal) = &self.renewal else {
+            return Ok(false);
+        };
+        if self.uncertain {
+            return Err(ErrorCode::Reconcile);
+        }
+        let client = self
+            .sessions
+            .clients
+            .get_mut(&Scope::Global)
+            .ok_or(ErrorCode::Unavailable)?;
+        let device = *renewal.key.public_key().value();
+        match client
+            .renew_wallet_session(&renewal.host, now, device, |payload| {
+                renewal.key.sign(payload).ok()
+            })
+            .await
+        {
+            Ok(renewed) => Ok(renewed),
+            // Refused for good: no renewal is tried again; the session ends at its deadline.
+            Err(cfyr::Error::Unauthorized) => {
+                self.renewal = None;
+                Ok(false)
+            }
+            // Transient: the current session stays; the next call tries again.
+            Err(_) => Ok(false),
+        }
     }
 
     pub(super) fn community_client(&mut self) -> Result<&mut Foyer<Transport>> {
@@ -835,6 +886,77 @@ mod held_tests {
             ErrorCode::Unauthorized
         );
         assert_eq!(ErrorCode::HeldInLobby.exit_code(), 77);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32"), not(feature = "ohttp")))]
+mod renewal_tests {
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    const WALLET: &str = "https://wallet.example.test";
+    const MEMBER: &str = "https://alpha.example.test";
+
+    fn key() -> WalletRenewal {
+        let prf = ckmg::passkey::PrfOutput::from_bytes(&[7; 32]).unwrap();
+        WalletRenewal::new(
+            ckmg::passkey::WalletSessionKey::new(&prf).unwrap(),
+            "wallet.example.test".into(),
+        )
+    }
+
+    fn door() -> Door {
+        let mut door = Door::new(
+            super::super::Configuration::new(
+                "alpha".into(),
+                BTreeMap::from([(Role::Member, BTreeSet::from([WALLET.into(), MEMBER.into()]))]),
+            )
+            .unwrap(),
+        );
+        // Nothing listens here: any request the renewer sent would fail as unavailable.
+        for (origin, scope) in [(WALLET, Scope::Global), (MEMBER, Scope::Community)] {
+            door.bind_foyer(
+                origin,
+                Role::Member,
+                Sessions::new(
+                    scope,
+                    Foyer::new(fixture_transport(
+                        "http://127.0.0.1:9",
+                        "wallet.example.test",
+                    )),
+                ),
+            )
+            .unwrap();
+        }
+        door
+    }
+
+    /// A13: exactly ONE renewer per device, and only on the wallet member Door.
+    #[test]
+    fn the_device_has_one_wallet_renewer_on_the_wallet_door_only() {
+        let mut door = door();
+        assert_eq!(
+            door.set_wallet_renewal(MEMBER, key()).err(),
+            Some(ErrorCode::Unauthorized)
+        );
+        door.set_wallet_renewal(WALLET, key()).unwrap();
+        assert_eq!(
+            door.set_wallet_renewal(WALLET, key()).err(),
+            Some(ErrorCode::Unauthorized)
+        );
+    }
+
+    /// A session whose family was never anchored to K cannot renew: the renewer ends at once,
+    /// silently and without a request, and the call goes on with the current session.
+    #[tokio::test]
+    async fn a_session_with_no_anchored_family_ends_the_renewer_without_a_request() {
+        let mut door = door();
+        door.set_wallet_renewal(WALLET, key()).unwrap();
+        let binding = door.foyers.get_mut(WALLET).unwrap();
+        assert_eq!(binding.renew_wallet_if_due(1_800_000_000).await, Ok(false));
+        assert!(binding.renewal.is_none());
+        // Without a renewer nothing is ever sent either.
+        assert_eq!(binding.renew_wallet_if_due(1_800_000_000).await, Ok(false));
     }
 }
 

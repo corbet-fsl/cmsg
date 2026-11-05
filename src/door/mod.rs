@@ -576,8 +576,35 @@ impl Door {
                 root_board: self.config.root_board,
                 sessions,
                 uncertain: false,
+                renewal: None,
             },
         );
+        Ok(())
+    }
+
+    /// Trusted embedding control (A13): make the wallet Door of `origin` the device's ONE wallet
+    /// session renewer, with K from the unlocked wallet opening. Absent from every callable
+    /// projection; a second renewer is refused.
+    pub fn set_wallet_renewal(
+        &mut self,
+        origin: &str,
+        renewal: foyer::WalletRenewal,
+    ) -> Result<()> {
+        if self
+            .foyers
+            .values()
+            .any(|binding| binding.renewal.is_some())
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let binding = self.foyers.get_mut(origin).ok_or(ErrorCode::Unauthorized)?;
+        if binding.role != Role::Member
+            || binding.sessions.primary != foyer::Scope::Global
+            || binding.sessions.global_creation_only
+        {
+            return Err(ErrorCode::Unauthorized);
+        }
+        binding.renewal = Some(renewal);
         Ok(())
     }
 
@@ -777,6 +804,8 @@ impl Door {
             let action = remote.expect("a registered operation was resolved");
             let body = json::unique_value(request.body.get())?;
             let foyer = self.foyers.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
+            // A13: a due wallet session renews by K first, silently.
+            foyer.renew_wallet_if_due(now).await?;
             let result = foyer.call(action, body).await?;
             Ok((result, vec![]))
         }
