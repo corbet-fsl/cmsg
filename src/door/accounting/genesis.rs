@@ -702,9 +702,7 @@ mod proven {
             let response = response?;
             let trust = self
                 .enrollment
-                .with_verified(|_, _, _, current| {
-                    response_trust_with_join(current, response.join_publication())
-                })
+                .with_verified(|_, _, _, current| response_trust_with_join(current, &response))
                 .map_err(|__cause| {
                     crate::door::cause::emit(
                         file!(),

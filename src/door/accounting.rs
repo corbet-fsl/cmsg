@@ -82,6 +82,14 @@ pub struct PreparedEnrollment<'p> {
 
 struct CurrentAdmission {
     material: cblc::publication::PublicVerifierMaterial,
+    /// The Charter's own Balance publication `material` was read from: the device's
+    /// newest-known floor, which fences any other publication an answer carries
+    /// (read only by the holder engine's response trust).
+    #[cfg(any(
+        all(feature = "native-prover", not(target_arch = "wasm32")),
+        feature = "browser-prover"
+    ))]
+    balance: cbcn::balance::Balance,
     /// The standing and voucher parameters of the same verified rulebook; the engine
     /// refuses a genesis unless their digest is the material's published one.
     standing: czkp::standing::Params,
@@ -399,6 +407,11 @@ impl AccountAdmission<'_> {
                         standing,
                         material_digest: Sha256::digest(balance.payload()).into(),
                         material,
+                        #[cfg(any(
+                            all(feature = "native-prover", not(target_arch = "wasm32")),
+                            feature = "browser-prover"
+                        ))]
+                        balance: balance.clone(),
                         trust,
                         grant,
                         origin: origin.into(),

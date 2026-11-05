@@ -2091,6 +2091,7 @@ dependencies = [
  "axum",
  "blind-rsa-signatures",
  "browser-coverage-runtime-cmsg",
+ "cbcn",
  "cblc",
  "cblv",
  "cbrd",

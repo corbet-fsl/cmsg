@@ -203,7 +203,7 @@ impl AccountAdmission<'_> {
                     &__cause,
                 )
             })?,
-            response.join_publication(),
+            &response,
         )
         .map_err(|__cause| {
             crate::door::cause::emit(
@@ -320,7 +320,7 @@ impl AccountAdmission<'_> {
             &current.material.extension_policy,
             &current.material.account_response_key,
         )?;
-        let trust = response_trust_with_join(&current, response.join_publication())?;
+        let trust = response_trust_with_join(&current, &response)?;
         account
             .vault()
             .await?

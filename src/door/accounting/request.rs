@@ -411,76 +411,157 @@ mod lower {
     /// The same trust, plus the join descriptor the response's own community
     /// publication names. A first genesis accepted after the record freeze has no
     /// frozen frontier, so its join-time ancestry may only sit under this
-    /// descriptor. The publication is data on the response: it is authenticated
-    /// with the community ring this admission already holds, validated like the
-    /// current material and time-checked at the admission's own sample, and it
-    /// names a descriptor or the response carries no ancestry at all.
+    /// descriptor. The publication is consulted ONLY for exactly that pair (an
+    /// ancestry and no frontier): any other response is checked under the current
+    /// material alone, and a bad attachment cannot refuse it. When it is consulted,
+    /// [`fenced_join_descriptor`] authenticates and fences it, and any refusal is
+    /// `Reconcile`: the acceptance itself is untouched, a later read may carry a
+    /// publication that verifies, and state A stays until one does.
     pub fn response_trust_with_join(
         current: &CurrentAdmission,
-        publication: Option<&cblc::contracts::JoinPublication>,
+        response: &AcceptedResponse,
     ) -> Result<engine::ResponseTrust> {
-        let mut trust = response_trust(&current.material)?;
-        let Some(publication) = publication else {
+        trust_with_join(
+            &current.material,
+            &current.trust,
+            &current.balance,
+            current.now,
+            response,
+        )
+    }
+
+    /// [`response_trust_with_join`] over exactly the current admission's verified
+    /// parts: its material, its community ring, the Charter's Balance the material
+    /// was read from, and its time sample.
+    pub(super) fn trust_with_join(
+        material: &cblc::publication::PublicVerifierMaterial,
+        admission: &admission::AdmissionTrust,
+        newest: &cbcn::balance::Balance,
+        now: u64,
+        response: &AcceptedResponse,
+    ) -> Result<engine::ResponseTrust> {
+        let mut trust = response_trust(material)?;
+        if response.ancestry.is_none() || trust.frontier.is_some() {
+            return Ok(trust);
+        }
+        let Some(publication) = response.join_publication() else {
             return Ok(trust);
         };
-        let now = current.now;
-        let material =
-            cblc::publication::verify_publication(&current.trust.policy_keys, &publication.0, now)
-                .map_err(|__cause| {
-                    crate::door::cause::emit(
-                        file!(),
-                        line!(),
-                        "ErrorCode::Unauthorized",
-                        ErrorCode::Unauthorized,
-                        &__cause,
-                    )
-                })?;
-        material
-            .validate_at(&current.trust.community_id, now)
-            .map_err(|__cause| {
-                crate::door::cause::emit(
-                    file!(),
-                    line!(),
-                    "ErrorCode::Unauthorized",
-                    ErrorCode::Unauthorized,
-                    &__cause,
-                )
-            })?;
-        let descriptor = material
-            .record_epoch
-            .ok_or(ErrorCode::Unauthorized)
-            .map_err(|__cause| {
-                crate::door::cause::emit(
-                    file!(),
-                    line!(),
-                    "ErrorCode::Unauthorized",
-                    ErrorCode::Unauthorized,
-                    &__cause,
-                )
-            })?;
-        let community: [u8; 32] = Sha256::digest(current.trust.community_id.as_bytes()).into();
-        // The device holds no rulebook key for the record period here: the
-        // descriptor's own arithmetic supplies it, and `validate` still checks the
-        // whole window shape (root, issuer key, community, bounds) with it.
-        let period = descriptor.starts_at / descriptor.epoch;
-        descriptor
-            .validate(&community, period)
-            .and_then(|()| descriptor.check_time(now))
-            .map_err(|__cause| {
-                crate::door::cause::emit(
-                    file!(),
-                    line!(),
-                    "ErrorCode::Unauthorized",
-                    ErrorCode::Unauthorized,
-                    &__cause,
-                )
-            })?;
+        let descriptor = fenced_join_descriptor(
+            admission,
+            material.policy_epoch,
+            newest,
+            &publication.0,
+            response.acceptance.accepted_at,
+            now,
+        )
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Reconcile",
+                ErrorCode::Reconcile,
+                &__cause,
+            )
+        })?;
         trust.join = Some(engine::JoinEpoch {
             epoch: descriptor.epoch,
             root: descriptor.root,
             issuer_key: descriptor.issuer_key,
         });
         Ok(trust)
+    }
+
+    /// The record epoch descriptor a community publication carried on an account
+    /// answer names, FENCED against the device's own view exactly as the Charter
+    /// fences its own Balance:
+    ///
+    /// - authenticated with the community ring this admission holds (csgn
+    ///   `SettingsSnapshot`) and read as the Balance owner's document
+    ///   (`cbcn::balance::Balance::verify`) under the CURRENT policy epoch, so a
+    ///   publication of another policy epoch is refused;
+    /// - no older than the Charter's newest-known Balance, and at the same revision
+    ///   byte-identical to it (`check_successor`: rollback and equivocation are
+    ///   refused), so the operator cannot pick an older or a forked descriptor;
+    /// - validated like the current material, with a descriptor frozen under no
+    ///   later policy epoch than the current one and a valid window shape;
+    /// - time-checked at the operator's signed `accepted_at`, not at the device's
+    ///   clock: the descriptor must have been current when the ancestry was
+    ///   issued, and a device that reads the acceptance back after the window
+    ///   checks the same fact. The engine binds `accepted_at` to the acceptance
+    ///   signature and the statement window before anything is adopted.
+    pub(super) fn fenced_join_descriptor(
+        trust: &admission::AdmissionTrust,
+        policy_epoch: u64,
+        newest: &cbcn::balance::Balance,
+        publication: &[u8],
+        accepted_at: u64,
+        now: u64,
+    ) -> Result<czkp::record::Epoch> {
+        let material = cblc::publication::verify_publication(&trust.policy_keys, publication, now)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
+        cbcn::balance::Balance::verify(
+            &trust.policy_keys,
+            publication,
+            policy_epoch,
+            material.revision,
+            now,
+        )
+        .and_then(|joined| joined.check_successor(newest))
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unauthorized",
+                ErrorCode::Unauthorized,
+                &__cause,
+            )
+        })?;
+        material
+            .validate_at(&trust.community_id, now)
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
+        let descriptor = material.record_epoch.ok_or(ErrorCode::Unauthorized)?;
+        if material.policy_epoch != policy_epoch || descriptor.policy_epoch > policy_epoch {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let community: [u8; 32] = Sha256::digest(trust.community_id.as_bytes()).into();
+        // The device holds no rulebook key for the record period here: the
+        // descriptor's own arithmetic supplies it, and `validate` still checks the
+        // whole window shape (root, issuer key, community, bounds) with it. A zero
+        // epoch has no period and is refused here instead of dividing by it.
+        let period = descriptor
+            .starts_at
+            .checked_div(descriptor.epoch)
+            .ok_or(ErrorCode::Unauthorized)?;
+        descriptor
+            .validate(&community, period)
+            .and_then(|()| descriptor.check_time(accepted_at))
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })?;
+        Ok(descriptor)
     }
 
     /// The trust a STORED state-B response is re-checked under: the descriptor it
@@ -1613,5 +1694,346 @@ pub(in crate::door) mod fixtures {
             ancestry: None,
             join_publication: None,
         }
+    }
+}
+
+/// The join publication a newcomer's answer carries is fenced against the
+/// device's own newest-known Balance, checked at the acceptance time, and
+/// consulted only for an ancestry without a frontier (review M3, M4, L8).
+#[cfg(all(
+    test,
+    any(
+        all(feature = "native-prover", not(target_arch = "wasm32")),
+        feature = "browser-prover"
+    )
+))]
+mod join_fence_tests {
+    use super::lower::{fenced_join_descriptor, trust_with_join};
+    use super::*;
+    use csgn::{Kind, SecretKey, Signer};
+
+    const COMMUNITY: &str = "community-example";
+    /// The acceptance time: inside the descriptor window [100, 200).
+    const ACCEPTED_AT: u64 = 150;
+
+    fn signer() -> Signer {
+        Signer::new(COMMUNITY, SecretKey::from_seed(&mut [31; 32]), 1, 2000).unwrap()
+    }
+
+    fn community() -> [u8; 32] {
+        Sha256::digest(COMMUNITY.as_bytes()).into()
+    }
+
+    fn scope() -> cblc::accounting::AccountProofScope {
+        cblc::accounting::AccountProofScope {
+            circuit_digest: [1; 32],
+            verifying_key_digest: [2; 32],
+        }
+    }
+
+    /// The record epoch 1 descriptor (period 100 s), frozen under policy epoch 1.
+    fn descriptor() -> czkp::record::Epoch {
+        czkp::record::Epoch {
+            purpose: czkp::record::Purpose::RecordEpochV3,
+            community: community(),
+            policy_epoch: 1,
+            epoch: 1,
+            starts_at: 100,
+            expires_at: 200,
+            root: [5; 32],
+            issuer_key: [6; 32],
+            proof_scope: scope(),
+            leaf_count: 4,
+            download_digest: [7; 32],
+            download_bytes: 1000,
+        }
+    }
+
+    fn material(
+        revision: u64,
+        record_epoch: Option<czkp::record::Epoch>,
+    ) -> cblc::publication::PublicVerifierMaterial {
+        let account = cblc::accounting::AccountPolicy {
+            initial_credit: 3,
+            maximum_available: 4,
+            outgoing_reservation: 1,
+            incoming_reservation: 1,
+            policy_revision: 1,
+            policy_valid_from: 1,
+            policy_valid_until: 2000,
+            newcomer_period: 100,
+            rate_window: 20,
+            newcomer_admissions: 2,
+            maximum_admissions: 4,
+            refill_period: 100,
+            refill_units: 1,
+            abandon_after: 1000,
+        };
+        let policy_digest = account.digest(&community()).unwrap();
+        let issuer = p256::ecdsa::SigningKey::from_slice(&[3; 32]).unwrap();
+        let point = issuer.verifying_key().to_encoded_point(false);
+        cblc::publication::PublicVerifierMaterial {
+            purpose: cblc::publication::Purpose::PublicVerifierV2,
+            community: COMMUNITY.into(),
+            revision,
+            policy_epoch: 1,
+            policy: cblc::AccountLedgerPolicy {
+                account,
+                max_authorization_seconds: 100,
+                max_proof_bytes: extensions::EXTENSION_PROOF_BYTES,
+                checkpoint_period_seconds: 100,
+            },
+            policy_digest,
+            admission_policy_digest: [3; 32],
+            extension_policy: ExtensionPolicy {
+                revision: 1,
+                public_record_quorum: 10,
+                change_token_cost: 1,
+                deposit_delay_seconds: 1,
+                minimum_deposit_batch: 2,
+                standing_policy_digest: [9; 32],
+            },
+            proof_scope: scope(),
+            manifest_sha256: [3; 32],
+            account_response_key: [4; 32],
+            certificate_keys: vec![czkp::issuer_keys::CertificateKeyPeriod {
+                public_key: point.as_bytes()[1..].to_vec(),
+                valid_from: 1,
+                valid_until: None,
+            }],
+            community_identity: [8; 32],
+            settlement: None,
+            wave_verifier: None,
+            record_epoch,
+        }
+    }
+
+    fn publish(
+        signer: &mut Signer,
+        material: &cblc::publication::PublicVerifierMaterial,
+    ) -> Vec<u8> {
+        signer
+            .sign(
+                Kind::SettingsSnapshot,
+                &serde_json::to_vec(material).unwrap(),
+                100,
+                1000,
+            )
+            .unwrap()
+    }
+
+    /// The Charter's own Balance, as the device's current admission holds it.
+    fn charter(
+        signer: &mut Signer,
+        material: &cblc::publication::PublicVerifierMaterial,
+    ) -> cbcn::balance::Balance {
+        let bytes = publish(signer, material);
+        cbcn::balance::Balance::verify(
+            signer.key_ring(),
+            &bytes,
+            material.policy_epoch,
+            material.revision,
+            110,
+        )
+        .unwrap()
+    }
+
+    fn admission(signer: &Signer) -> admission::AdmissionTrust {
+        admission::AdmissionTrust {
+            community_id: COMMUNITY.into(),
+            policy_digest: "policy".into(),
+            policy_keys: signer.key_ring().clone(),
+        }
+    }
+
+    /// An accepted answer, with or without a join-time ancestry, carrying the
+    /// given publication bytes.
+    fn answer(ancestry: bool, publication: Option<Vec<u8>>) -> AcceptedResponse {
+        let mut response = fixtures::accepted(&fixtures::signed(1), ACCEPTED_AT);
+        response.ancestry = ancestry.then(|| {
+            Box::new(EpochAncestryCertificate {
+                community: community(),
+                owner: [1; 32],
+                epoch: 1,
+                root: [5; 32],
+                frozen_leaf: [2; 32],
+                state: [3; 32],
+                version: 1,
+                proof_scope: scope(),
+                issued_at: ACCEPTED_AT,
+                signature: vec![0; 64],
+                record: czkp::record::SignedLeaf {
+                    leaf: czkp::record::Leaf {
+                        owner: [1; 32],
+                        version: 1,
+                        state: [3; 32],
+                        required_inbox: [7; 32],
+                        role: 0,
+                        blinding: [8; 32],
+                    },
+                    signature: vec![0; 64],
+                },
+            })
+        });
+        response.join_publication = publication.map(cblc::contracts::JoinPublication);
+        response
+    }
+
+    /// The newcomer's case: the Charter's Balance (revision 1) has no record epoch,
+    /// the operator's newer publication (revision 2) names epoch 1.
+    struct Case {
+        signer: Signer,
+        newest: cbcn::balance::Balance,
+        newest_material: cblc::publication::PublicVerifierMaterial,
+    }
+
+    fn case() -> Case {
+        let mut signer = signer();
+        let newest_material = material(1, None);
+        let newest = charter(&mut signer, &newest_material);
+        Case {
+            signer,
+            newest,
+            newest_material,
+        }
+    }
+
+    impl Case {
+        fn fence(
+            &self,
+            publication: &[u8],
+            accepted_at: u64,
+            now: u64,
+        ) -> Result<czkp::record::Epoch> {
+            fenced_join_descriptor(
+                &admission(&self.signer),
+                self.newest_material.policy_epoch,
+                &self.newest,
+                publication,
+                accepted_at,
+                now,
+            )
+        }
+
+        fn trust(&self, response: &AcceptedResponse) -> Result<engine_trust::ResponseTrust> {
+            trust_with_join(
+                &self.newest_material,
+                &admission(&self.signer),
+                &self.newest,
+                160,
+                response,
+            )
+        }
+    }
+
+    use ckmg::wallet_engine::account as engine_trust;
+
+    #[test]
+    fn a_newer_publication_of_the_current_policy_epoch_names_the_join_descriptor() {
+        let mut case = case();
+        let joined = publish(&mut case.signer, &material(2, Some(descriptor())));
+        assert_eq!(case.fence(&joined, ACCEPTED_AT, 160).unwrap(), descriptor());
+        let trust = case.trust(&answer(true, Some(joined))).unwrap();
+        let join = trust.join.expect("the join descriptor");
+        assert_eq!(
+            (join.epoch, join.root, join.issuer_key),
+            (1, [5; 32], [6; 32])
+        );
+        assert!(trust.frontier.is_none());
+    }
+
+    /// M3: the operator cannot pick a publication OLDER than the device's own
+    /// Charter Balance, nor a different document at the same revision.
+    #[test]
+    fn a_publication_older_than_or_forking_the_charter_balance_is_refused() {
+        let mut signer = signer();
+        let newest_material = material(3, None);
+        let newest = charter(&mut signer, &newest_material);
+        let mut case = Case {
+            signer,
+            newest,
+            newest_material,
+        };
+        let older = publish(&mut case.signer, &material(2, Some(descriptor())));
+        assert!(case.fence(&older, ACCEPTED_AT, 160).is_err());
+        let forked = publish(&mut case.signer, &material(3, Some(descriptor())));
+        assert!(case.fence(&forked, ACCEPTED_AT, 160).is_err());
+        // The identical document at the same revision is the Charter's own.
+        let same = case.newest.signed_bytes().to_vec();
+        assert!(
+            case.fence(&same, ACCEPTED_AT, 160).is_err(),
+            "it names no record epoch"
+        );
+    }
+
+    /// M3: another policy epoch, or a descriptor frozen under a LATER policy epoch
+    /// than the current one, is refused.
+    #[test]
+    fn a_publication_of_another_policy_epoch_or_a_later_frozen_descriptor_is_refused() {
+        let mut case = case();
+        let mut other = material(2, Some(descriptor()));
+        other.policy_epoch = 2;
+        let other = publish(&mut case.signer, &other);
+        assert!(case.fence(&other, ACCEPTED_AT, 160).is_err());
+        let mut later = descriptor();
+        later.policy_epoch = 2;
+        let later = publish(&mut case.signer, &material(2, Some(later)));
+        assert!(case.fence(&later, ACCEPTED_AT, 160).is_err());
+    }
+
+    /// M4: the descriptor must have been current when the ancestry was issued, so it
+    /// is checked at `accepted_at`: a device that reads the acceptance back after
+    /// the window still admits it, and an acceptance outside the window never.
+    #[test]
+    fn the_descriptor_is_checked_at_the_acceptance_not_at_the_device_clock() {
+        let mut case = case();
+        let joined = publish(&mut case.signer, &material(2, Some(descriptor())));
+        assert_eq!(case.fence(&joined, ACCEPTED_AT, 250).unwrap(), descriptor());
+        for outside in [99, 200, 250] {
+            assert!(case.fence(&joined, outside, 160).is_err(), "{outside}");
+        }
+    }
+
+    /// A descriptor naming epoch 0 has no period: it is refused, never divided by.
+    #[test]
+    fn a_descriptor_of_epoch_zero_is_refused_without_dividing_by_it() {
+        let mut case = case();
+        let mut zero = descriptor();
+        zero.epoch = 0;
+        let zero = publish(&mut case.signer, &material(2, Some(zero)));
+        assert!(case.fence(&zero, ACCEPTED_AT, 160).is_err());
+    }
+
+    /// L8: the publication is consulted only for an ancestry with no frontier. A bad
+    /// attachment on an answer without ancestry, or under a frontier, refuses
+    /// nothing; where it is consulted, its failure is Reconcile (not a certain
+    /// refusal), so state A stays for a later read.
+    #[test]
+    fn a_publication_is_consulted_only_for_an_ancestry_without_a_frontier() {
+        let case = case();
+        let garbage = Some(vec![9, 8, 7]);
+        let trust = case.trust(&answer(false, garbage.clone())).unwrap();
+        assert!(trust.join.is_none() && trust.frontier.is_none());
+        assert!(matches!(
+            case.trust(&answer(true, garbage.clone())),
+            Err(ErrorCode::Reconcile)
+        ));
+        // Under a frontier the publication is never read.
+        let mut signer = signer();
+        let framed = material(1, Some(descriptor()));
+        let newest = charter(&mut signer, &framed);
+        let trust = trust_with_join(
+            &framed,
+            &admission(&signer),
+            &newest,
+            160,
+            &answer(true, garbage),
+        )
+        .unwrap();
+        assert!(trust.join.is_none());
+        assert_eq!(trust.frontier.map(|frontier| frontier.epoch), Some(1));
+        // An ancestry with no frontier and no publication gets no descriptor (the
+        // engine's strict arm then refuses it).
+        assert!(case.trust(&answer(true, None)).unwrap().join.is_none());
     }
 }

@@ -33,6 +33,9 @@ crate-type = ["rlib", "cdylib"]
 cblv = { git = "https://git.corbet.ch/corbet-libre/cblv.git", branch = "main", optional = true }
 crbk = { git = "https://git.corbet.ch/corbet-libre/crbk.git", branch = "main", default-features = false }
 cblc = { git = "https://git.corbet.ch/corbet-fsl/cblc.git", branch = "main", default-features = false, features = ["publication"] }
+# The Charter's newest-known Balance floor (revision rollback, same-revision equivocation)
+# fences a publication carried on an account answer exactly as the Charter fences its own.
+cbcn = { git = "https://git.corbet.ch/corbet-libre/cbcn.git", branch = "main" }
 cwlt = { git = "https://git.corbet.ch/corbet-foss/cwlt.git", branch = "main", default-features = false, features = ["passport", "wave", "schema"] }
 czkp = { git = "https://git.corbet.ch/corbet-foss/czkp.git", branch = "main" }
 ckyh = { git = "https://git.corbet.ch/corbet-libre/ckyh.git", branch = "main", default-features = false }
