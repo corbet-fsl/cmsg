@@ -163,6 +163,124 @@ fn request(action: &str) -> Vec<u8> {
     .unwrap()
 }
 
+/// Inbox actions that stay callable below the signed minimum version because they are
+/// cleanup (release or settle something already held), each with its one-line reason.
+/// Empty: every Inbox action, including the background-worker calls, is guarded; a new
+/// Inbox action fails the test until it is guarded or listed here with a reason.
+const CLEANUP_EXEMPT_INBOX: [(&str, &str); 0] = [];
+
+/// A minimal request body for a JSON schema: required fields only, the first variant.
+fn sample(schema: &Value) -> Value {
+    if let Some(value) = schema.get("const") {
+        return value.clone();
+    }
+    if let Some(value) = schema.get("enum").and_then(Value::as_array) {
+        return value[0].clone();
+    }
+    for key in ["oneOf", "anyOf"] {
+        if let Some(variants) = schema.get(key).and_then(Value::as_array) {
+            let pick = variants
+                .iter()
+                .find(|variant| variant.get("type") != Some(&json!("null")))
+                .unwrap_or(&variants[0]);
+            return sample(pick);
+        }
+    }
+    let kind = match schema.get("type") {
+        Some(Value::Array(kinds)) => kinds
+            .iter()
+            .find(|kind| *kind != "null")
+            .or(kinds.first())
+            .and_then(Value::as_str),
+        other => other.and_then(Value::as_str),
+    };
+    match kind {
+        Some("object") => {
+            let properties = schema.get("properties").and_then(Value::as_object);
+            let required = schema.get("required").and_then(Value::as_array);
+            let mut object = serde_json::Map::new();
+            for name in required.into_iter().flatten().filter_map(Value::as_str) {
+                let property = properties
+                    .and_then(|all| all.get(name))
+                    .unwrap_or(&Value::Null);
+                object.insert(name.into(), sample(property));
+            }
+            Value::Object(object)
+        }
+        Some("array") => {
+            let count = schema.get("minItems").and_then(Value::as_u64).unwrap_or(0);
+            let item = schema.get("items").map(sample).unwrap_or(Value::Null);
+            Value::Array(vec![item; count as usize])
+        }
+        Some("string") => json!("a"),
+        Some("integer" | "number") => schema.get("minimum").cloned().unwrap_or(json!(0)),
+        Some("boolean") => json!(false),
+        _ => Value::Null,
+    }
+}
+
+/// Wave capabilities for the first phase only: the version guard refuses before any of
+/// them is called, so each one is unreachable by construction.
+struct NoPorts;
+type Owned<'a, T> = crate::door::facades::OwnedFuture<'a, T>;
+impl crate::door::inbox_waves::WavePorts for NoPorts {
+    fn policy(&self, _: u64) -> crate::door::Result<crate::door::inbox_waves::Policy> {
+        unreachable!("refused before the owner call")
+    }
+    fn terms<'a>(
+        &'a self,
+        _: &'a [u8; 32],
+        _: &'a crate::door::inbox_waves::Hello,
+        _: &'a str,
+        _: u64,
+        _: &'a dyn crate::door::inbox_waves::AccountSigner,
+    ) -> Owned<'a, crate::door::inbox_waves::Terms> {
+        unreachable!("refused before the owner call")
+    }
+    fn sign_contact<'a>(
+        &'a self,
+        _: crate::door::inbox_waves::ContactRequest<'a>,
+        _: u64,
+        _: &'a dyn crate::door::inbox_waves::AccountSigner,
+    ) -> Owned<'a, Vec<u8>> {
+        unreachable!("refused before the owner call")
+    }
+    fn verify_contact<'a>(
+        &'a self,
+        _: crate::door::inbox_waves::ContactRequest<'a>,
+        _: &'a [u8],
+        _: u64,
+    ) -> Owned<'a, ()> {
+        unreachable!("refused before the owner call")
+    }
+    fn verify_reservation<'a>(
+        &'a self,
+        _: &'a cwlt::wave::WaveStatement,
+        _: &'a [u8],
+        _: &'a cwlt::wave::WaveContext,
+        _: u64,
+    ) -> Owned<'a, cwlt::wave::VerifiedWaveReservation> {
+        unreachable!("refused before the owner call")
+    }
+    fn verify_outcome<'a>(
+        &'a self,
+        _: &'a cwlt::wave::WaveOutcomeStatement,
+        _: &'a [u8],
+        _: &'a cwlt::wave::WaveContext,
+        _: cwlt::wave::WaveOutcome,
+        _: &'a [u8; 32],
+        _: u64,
+    ) -> Owned<'a, cwlt::wave::VerifiedWaveOutcome> {
+        unreachable!("refused before the owner call")
+    }
+    fn own_record<'a>(&'a self, _: &'a ckmg::Binding) -> Owned<'a, ()> {
+        unreachable!("refused before the owner call")
+    }
+    fn peer_lineage<'a>(&'a self, _: &'a ckmg::Binding) -> Owned<'a, ckmg::Lineage> {
+        unreachable!("refused before the owner call")
+    }
+}
+
 /// The runtime version is below the signed requirement at first, meets it after the first
 /// refresh and is below it again after the second.
 #[tokio::test]
@@ -170,7 +288,37 @@ async fn signed_minimum_version_guards_every_inbox_action_without_disabling_clea
     crate::door::with_client_version("0.0.1", minimum_version_guards_every_inbox_action()).await;
 }
 
+/// The one list of Inbox reads that carry the signed minimum-version guard. Both loops and
+/// the expected number of lease checks derive from it; a new read is added here (the
+/// catalog check below keeps every entry a real Inbox action).
+const GUARDED_INBOX_READS: [&str; 5] = [
+    "inbox.snapshot",
+    "inbox.history",
+    "inbox.thread",
+    "inbox.relation",
+    "inbox.delivery_status",
+];
+
 async fn minimum_version_guards_every_inbox_action() {
+    // The set under test is the catalog's: every Family::Inbox action.
+    let catalog = registry::catalog();
+    let inbox: Vec<_> = catalog
+        .iter()
+        .filter(|entry| entry.family == registry::Family::Inbox)
+        .collect();
+    for action in GUARDED_INBOX_READS {
+        assert!(
+            inbox.iter().any(|entry| entry.action == action),
+            "{action} is not an Inbox action of the catalog"
+        );
+    }
+    for (action, reason) in CLEANUP_EXEMPT_INBOX {
+        assert!(!reason.is_empty(), "{action} needs a reason");
+        assert!(
+            inbox.iter().any(|entry| entry.action == action),
+            "{action} is not an Inbox action of the catalog"
+        );
+    }
     let now = cbrd::clnk::Clock::now(&crate::door::board::SystemClock).unwrap() / 1000;
     let server = PublicFeed::new(feed(now, 1)).await;
     let foyer = server.foyer(now).await;
@@ -189,6 +337,7 @@ async fn minimum_version_guards_every_inbox_action() {
     )
     .unwrap();
     door.vaults.insert(ORIGIN.into(), Box::new(owner));
+    door.bind_waves(ORIGIN, Box::new(NoPorts)).unwrap();
     let token = door
         .pair_client(
             ORIGIN,
@@ -201,25 +350,38 @@ async fn minimum_version_guards_every_inbox_action() {
             now + 120,
         )
         .unwrap();
-    for action in [
-        "inbox.snapshot",
-        "inbox.history",
-        "inbox.thread",
-        "inbox.relation",
-        "inbox.delivery_status",
-    ] {
-        assert!(matches!(
-            door.dispatch(
-                ORIGIN,
-                token.expose_for_transport(),
-                &request(action),
-                live_now()
-            )
-            .await,
-            Output::Error {
-                error: ErrorCode::UnsupportedVersion
-            }
-        ));
+    // Every Inbox action of the catalog, not a hand-kept subset, is refused below the
+    // signed minimum unless it is listed as cleanup.
+    for entry in &inbox {
+        if CLEANUP_EXEMPT_INBOX
+            .iter()
+            .any(|(name, _)| *name == entry.action)
+        {
+            continue;
+        }
+        let bytes = if GUARDED_INBOX_READS.contains(&entry.action.as_str()) {
+            request(&entry.action)
+        } else {
+            serde_json::to_vec(&Invocation {
+                action: entry.action.clone(),
+                version: entry.version,
+                body: sample(&entry.body),
+            })
+            .unwrap()
+        };
+        let reply = door
+            .dispatch(ORIGIN, token.expose_for_transport(), &bytes, live_now())
+            .await;
+        assert!(
+            matches!(
+                reply,
+                Output::Error {
+                    error: ErrorCode::UnsupportedVersion
+                }
+            ),
+            "{} is not guarded by the signed minimum version",
+            entry.action
+        );
     }
     assert_eq!(checks.get(), 0);
     server
@@ -236,13 +398,7 @@ async fn minimum_version_guards_every_inbox_action() {
         )
         .await;
     crate::door::set_client_version(env!("CARGO_PKG_VERSION"));
-    for action in [
-        "inbox.snapshot",
-        "inbox.history",
-        "inbox.thread",
-        "inbox.relation",
-        "inbox.delivery_status",
-    ] {
+    for action in GUARDED_INBOX_READS {
         assert!(matches!(
             door.dispatch(
                 ORIGIN,
@@ -254,7 +410,8 @@ async fn minimum_version_guards_every_inbox_action() {
             Output::Ok { .. }
         ));
     }
-    assert_eq!(checks.get(), 4);
+    // One signed-requirement check per guarded action: the count follows the list.
+    assert_eq!(checks.get(), GUARDED_INBOX_READS.len());
     server
         .refresh(
             door.foyers
