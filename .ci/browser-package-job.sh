@@ -6,10 +6,11 @@ export CARGO_BUILD_JOBS=2
 export CI="${CI:-true}"
 export CI_COMMIT_SHA="${CI_COMMIT_SHA:-$(git rev-parse HEAD)}"
 export CARGO_HOME="${CARGO_HOME:-/caches/cargo}"
+# (nixpkgs comes from the fleet repo's own lock, so every run gets the same, cached OpenSSL.)
 # The native stage (cargo run --example registry) links openssl-sys: declare the OpenSSL development files from nixpkgs here instead of relying on a worker's environment.
 if [[ -z "${OPENSSL_LIB_DIR:-}" ]]; then
   command -v nix >/dev/null || { echo 'worker is missing nix (OpenSSL development files)' >&2; exit 3; }
-  openssl_paths=$(nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths nixpkgs#openssl.dev nixpkgs#openssl.out)
+  openssl_paths=$(nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths --inputs-from git+https://git.corbet.ch/corbet-infra/infra-corbet-ch.git nixpkgs#openssl.dev nixpkgs#openssl.out)
   openssl_dev=$(grep -- '-dev$' <<<"$openssl_paths" | head -1)
   openssl_out=$(grep -v -- '-dev$' <<<"$openssl_paths" | head -1)
   export OPENSSL_LIB_DIR="$openssl_out/lib" OPENSSL_INCLUDE_DIR="$openssl_dev/include" PKG_CONFIG_PATH="$openssl_dev/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
