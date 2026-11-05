@@ -6,6 +6,14 @@ export CARGO_BUILD_JOBS=2
 export CI="${CI:-true}"
 export CI_COMMIT_SHA="${CI_COMMIT_SHA:-$(git rev-parse HEAD)}"
 export CARGO_HOME="${CARGO_HOME:-/caches/cargo}"
+# The native stage (cargo run --example registry) links openssl-sys: declare the OpenSSL development files from nixpkgs here instead of relying on a worker's environment.
+if [[ -z "${OPENSSL_LIB_DIR:-}" ]]; then
+  command -v nix >/dev/null || { echo 'worker is missing nix (OpenSSL development files)' >&2; exit 3; }
+  openssl_paths=$(nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths nixpkgs#openssl.dev nixpkgs#openssl.out)
+  openssl_dev=$(grep -- '-dev$' <<<"$openssl_paths" | head -1)
+  openssl_out=$(grep -v -- '-dev$' <<<"$openssl_paths" | head -1)
+  export OPENSSL_LIB_DIR="$openssl_out/lib" OPENSSL_INCLUDE_DIR="$openssl_dev/include" PKG_CONFIG_PATH="$openssl_dev/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+fi
 printf 'worker: commit=%s cargo_home=%s target=%s\n' "$CI_COMMIT_SHA" "$CARGO_HOME" "${CARGO_TARGET_DIR:-unset}"
 # Provisioned tools live in the shared worker cache: the wasm-bindgen CLI whose
 # version equals Cargo.lock's library, and a pinned esbuild.
