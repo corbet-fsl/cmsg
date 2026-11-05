@@ -435,6 +435,21 @@ impl AccountAdmission<'_> {
     }
 }
 
+/// The expiry of an account delegation (and of its root device authorization): the admission
+/// grant's own expiry. The admission itself must still be current (`current.expires`, which
+/// includes the session lease) whenever the device signs; only the signed lifetime is the grant's.
+fn delegation_expiry(current: &CurrentAdmission) -> u64 {
+    signed_lifetime(current.now, current.expires, current.grant.expires_at).unwrap_or(0)
+}
+
+/// The signed lifetime of a delegation made at `now` under an admission current until
+/// `admission_until` (grant, lease, charter and balance together) with a grant ending at
+/// `grant_until`: the grant's end. None when the admission is no longer current. A zero
+/// lifetime never matches a plan's expiry and never verifies.
+fn signed_lifetime(now: u64, admission_until: u64, grant_until: u64) -> Option<u64> {
+    (now < admission_until && admission_until <= grant_until).then_some(grant_until)
+}
+
 impl<'p> AccountAdmission<'p> {
     /// Have the root authorize this community device under its own one-use
     /// intent, and return the verified authorization with the guard that keeps the
@@ -457,7 +472,12 @@ impl<'p> AccountAdmission<'p> {
         R: Records,
     {
         let current = self.current()?;
-        let expires = current.expires.min(intents.expires);
+        // The delegation lives as long as the ADMISSION GRANT (<= 1 day), not the device
+        // session's lease: a roster slot admits only delegations that cover the whole slot, so a
+        // lease-bound delegation emptied every roster ~15 min after the last enrollment. The
+        // intents are single-use at signing time only. Revocation still ends a delegation at the
+        // next slot: the slot builder asks the registry about every delegation's device.
+        let expires = delegation_expiry(&current);
         let plan = account
             .vault()
             .await?
@@ -477,8 +497,8 @@ impl<'p> AccountAdmission<'p> {
         if plan.binding().community() != self.cohort.scope
             || plan.binding().member() != self.cohort.member
             || plan.device().value() != &self.cohort.device
-            || expires > current.expires
-            || current.now >= expires
+            || expires != delegation_expiry(&current)
+            || current.now >= current.expires
         {
             return Err(ErrorCode::Unauthorized);
         }
@@ -523,7 +543,7 @@ impl<'p> AccountAdmission<'p> {
                 )
             })?;
         let current = self.current()?;
-        if expires > current.expires {
+        if expires != delegation_expiry(&current) {
             return Err(ErrorCode::Unauthorized);
         }
         let authorization: admission::DeviceAuthorization =
@@ -649,8 +669,8 @@ impl<'p> AccountAdmission<'p> {
             || device.value() != &self.cohort.device
             || B64.encode(lineage.root.value()) != delegation.authorization.root_public_key
             || current.grant != delegation.admission
-            || current.now >= expires
-            || expires > current.expires
+            || current.now >= current.expires
+            || expires != delegation_expiry(&current)
         {
             return Err(ErrorCode::Unauthorized);
         }
@@ -946,5 +966,23 @@ mod resend_tests {
         let out = block(submit_with_resend(&mut port, json!({})));
         assert_eq!(out, Err(ErrorCode::Reconcile));
         assert_eq!(port.resends, 0);
+    }
+}
+
+#[cfg(test)]
+mod lifetime_tests {
+    use super::signed_lifetime;
+
+    #[test]
+    fn a_delegation_lives_as_long_as_its_admission_grant_not_the_session_lease() {
+        // The stored toy case: lease ~15 min, grant one day.
+        let (now, lease, grant) = (1_793_858_594, 1_793_859_483, 1_793_923_200);
+        assert_eq!(signed_lifetime(now, lease, grant), Some(grant));
+        // A slot 20 min after enrollment is still covered by that delegation.
+        assert!(signed_lifetime(now, lease, grant).unwrap() >= now + 20 * 60 + 300);
+        // Signing still needs a current admission: an ended lease signs nothing.
+        assert_eq!(signed_lifetime(lease, lease, grant), None);
+        // The admission can never outlive its own grant.
+        assert_eq!(signed_lifetime(now, grant + 1, grant), None);
     }
 }
