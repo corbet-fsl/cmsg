@@ -62,9 +62,10 @@ async fn a_delegated_door_admits_member_purposes_and_refuses_the_rest_with_the_t
         BTreeMap::from([(Role::Member, BTreeSet::from([origin.into()]))]),
     )
     .unwrap();
-    let mut door = Door::new(config);
-    assert!(!door.is_delegated());
-    door.restrict_to_delegation();
+    // L9: the delegated Door is built from a real delegation, no other way.
+    let bundle = crate::door::unlock_once::fixture::enrolled(&[([1; 32], "a")]).await;
+    let delegation = bundle.delegation(&[1; 32], "a").unwrap();
+    let mut door = Door::from_delegation(config, delegation).unwrap();
     assert!(door.is_delegated());
     // Every listed delegate action is a real action (a rename cannot silently drop one).
     for name in registry::DELEGATE_ACTIONS {

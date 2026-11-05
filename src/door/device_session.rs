@@ -73,18 +73,8 @@ impl Door {
             .ok_or(ErrorCode::Unavailable)?
             .begin_device_session()
             .await?;
-        let message = challenge.message(&self.config.community);
-        let signature = delegation
-            .sign_device_session(&message)
-            .map_err(|__cause| {
-                crate::door::cause::emit(
-                    file!(),
-                    line!(),
-                    "ErrorCode::Unauthorized",
-                    ErrorCode::Unauthorized,
-                    &__cause,
-                )
-            })?;
+        let signature =
+            sign_delegated_challenge(delegation, &challenge.message(&self.config.community))?;
         let device_key: [u8; 32] = delegation.device_public_key().value().to_owned();
         // The server's distinct `delegate_revoked` reason arrives as `DelegateRevoked`, its
         // `needs_passkey` as `NeedsPasskey`; every other refusal keeps its own code.
@@ -94,6 +84,28 @@ impl Door {
             .finish_device_session(challenge.nonce, user, device_key, signature.to_vec())
             .await
     }
+}
+
+/// The delegate's signature over the server's challenge `message`. The message already
+/// starts with the `cvld.device-session.v1\0` tag and ckmg prepends that tag itself, so the
+/// payload behind the tag is what the delegate signs; a message without the tag is refused
+/// (M1: signing it whole would sign the tag twice, which the server never accepts).
+pub(super) fn sign_delegated_challenge(
+    delegation: &ckmg::DeviceDelegation,
+    message: &[u8],
+) -> Result<[u8; 64]> {
+    let payload = message
+        .strip_prefix(ckmg::DeviceFormat::DeviceSession.tag())
+        .ok_or(ErrorCode::Unauthorized)?;
+    delegation.sign_device_session(payload).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unauthorized",
+            ErrorCode::Unauthorized,
+            &__cause,
+        )
+    })
 }
 
 /// Stamp salt of an admin session: SHA-256 of the device key's signature over the garden

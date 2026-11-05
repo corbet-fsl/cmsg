@@ -410,10 +410,19 @@ impl Door {
         }
     }
 
-    /// Trusted embedding: mark this Door as opened from a `ckmg::DeviceDelegation`. It
-    /// admits community-session work only (D1); there is no way back to a full Door.
-    pub fn restrict_to_delegation(&mut self) {
-        self.delegated = true;
+    /// A Door opened from a `ckmg::DeviceDelegation` (D1): the only way to a delegated Door.
+    /// It admits community-session work only and there is no way back to a full Door. The
+    /// delegation must be of this Door's own community (`Unauthorized` otherwise).
+    pub fn from_delegation(
+        config: Configuration,
+        delegation: &ckmg::DeviceDelegation,
+    ) -> Result<Self> {
+        if delegation.community() != config.community {
+            return Err(ErrorCode::Unauthorized);
+        }
+        let mut door = Self::new(config);
+        door.delegated = true;
+        Ok(door)
     }
 
     /// Whether this Door is restricted to a delegation's authority.

@@ -221,13 +221,15 @@ impl DeviceUnlock {
     }
 
     /// The community device key (lineage device) this device presents in `scope`:
-    /// what the community's device-key registry binds at join.
+    /// what the community's device-key registry binds at join. A resumed start answers
+    /// for a community its bundle does not hold with the typed `NeedsPasskey`, like every
+    /// other path of a resumed start (L7).
     pub fn community_device(&self, fingerprint: &[u8; 32], scope: &str) -> Result<ckmg::PublicKey> {
         if let Held::Resumed(bundle) = &self.held {
             return bundle
                 .delegation(fingerprint, scope)
                 .map(ckmg::DeviceDelegation::device_public_key)
-                .ok_or(ErrorCode::InvalidRequest);
+                .ok_or(NeedsPasskey.code());
         }
         self.community_opening(fingerprint, scope)?
             .device()
@@ -442,8 +444,83 @@ pub async fn revoked<S: UnlockStore, L: LocalData>(
     })
 }
 
+/// Real community delegations for tests: a `ckmg::Keys` over an in-memory store enrols one per
+/// joined community, exactly as a ceremony does. Shared by the unlock and the Door tests.
+#[cfg(test)]
+pub(crate) mod fixture {
+    /// Test-only key store of the community custody a ceremony opens.
+    #[derive(Clone, Default)]
+    struct Memory(
+        std::rc::Rc<std::cell::RefCell<std::collections::HashMap<ckmg::Locator, Vec<u8>>>>,
+    );
+    impl ckmg::SecureStore for Memory {
+        async fn load(
+            &mut self,
+            location: &ckmg::Locator,
+        ) -> std::result::Result<Option<Vec<u8>>, ckmg::Error> {
+            Ok(self.0.borrow().get(location).cloned())
+        }
+        async fn compare_exchange(
+            &mut self,
+            location: &ckmg::Locator,
+            expected: Option<[u8; 32]>,
+            next: &[u8],
+        ) -> std::result::Result<ckmg::Commit, ckmg::Error> {
+            let mut data = self.0.borrow_mut();
+            if data.get(location).map(|v| *ckmg::hash(v).value()) != expected {
+                return Ok(ckmg::Commit::Conflict);
+            }
+            data.insert(*location, next.to_vec());
+            Ok(ckmg::Commit::Committed)
+        }
+    }
+    #[derive(Clone)]
+    struct Time;
+    impl ckmg::Clock for Time {
+        fn now(&mut self) -> std::result::Result<u64, ckmg::Error> {
+            Ok(1000)
+        }
+    }
+    /// Permissive test authority; not production membership.
+    struct Live;
+    impl ckmg::Authority for Live {
+        async fn check(
+            &mut self,
+            _: ckmg::Authorization<'_>,
+        ) -> std::result::Result<(), ckmg::Error> {
+            Ok(())
+        }
+    }
+
+    /// The delegations a ceremony enrols while its community custody is open (the
+    /// ceremony happens anyway; `Action::DelegateDevice` rides on its evidence).
+    pub(crate) async fn enrolled(joined: &[([u8; 32], &str)]) -> cvlt::ResumeBundle {
+        let mut bundle = cvlt::ResumeBundle::new();
+        for (fingerprint, scope) in joined {
+            let prf = ckmg::passkey::PrfOutput::from_bytes(&[fingerprint[0] ^ 0x40; 32]).unwrap();
+            let mut keys = ckmg::Keys::new(Memory::default(), Time, ckmg::SystemEntropy, Live);
+            let receipt = keys
+                .create_scope(
+                    &prf,
+                    ckmg::Binding::new(scope, "member").unwrap(),
+                    ckmg::DeviceInfo::new("device", b"credential").unwrap(),
+                    b"registration",
+                )
+                .await
+                .unwrap();
+            keys.acknowledge(receipt.operation).await.unwrap();
+            let purposes = [ckmg::Purpose::new(ckmg::Scope::Member, "board", 1).unwrap()];
+            let (receipt, delegation) = keys.delegate_device(&purposes, b"ceremony").await.unwrap();
+            keys.acknowledge(receipt.operation).await.unwrap();
+            bundle.insert(*fingerprint, scope, delegation).unwrap();
+        }
+        bundle
+    }
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
+    use super::fixture::enrolled;
     use super::*;
     use cfyr::passkeys::software::{SoftwareAuthenticator, TestConfiguration};
     use cfyr::passkeys::{Client, Context};
@@ -547,75 +624,6 @@ mod tests {
         unlock
     }
 
-    /// Test-only key store of the community custody a ceremony opens.
-    #[derive(Clone, Default)]
-    struct Memory(
-        std::rc::Rc<std::cell::RefCell<std::collections::HashMap<ckmg::Locator, Vec<u8>>>>,
-    );
-    impl ckmg::SecureStore for Memory {
-        async fn load(
-            &mut self,
-            location: &ckmg::Locator,
-        ) -> std::result::Result<Option<Vec<u8>>, ckmg::Error> {
-            Ok(self.0.borrow().get(location).cloned())
-        }
-        async fn compare_exchange(
-            &mut self,
-            location: &ckmg::Locator,
-            expected: Option<[u8; 32]>,
-            next: &[u8],
-        ) -> std::result::Result<ckmg::Commit, ckmg::Error> {
-            let mut data = self.0.borrow_mut();
-            if data.get(location).map(|v| *ckmg::hash(v).value()) != expected {
-                return Ok(ckmg::Commit::Conflict);
-            }
-            data.insert(*location, next.to_vec());
-            Ok(ckmg::Commit::Committed)
-        }
-    }
-    #[derive(Clone)]
-    struct Time;
-    impl ckmg::Clock for Time {
-        fn now(&mut self) -> std::result::Result<u64, ckmg::Error> {
-            Ok(1000)
-        }
-    }
-    /// Permissive test authority; not production membership.
-    struct Live;
-    impl ckmg::Authority for Live {
-        async fn check(
-            &mut self,
-            _: ckmg::Authorization<'_>,
-        ) -> std::result::Result<(), ckmg::Error> {
-            Ok(())
-        }
-    }
-
-    /// The delegations a ceremony enrols while its community custody is open (the
-    /// ceremony happens anyway; `Action::DelegateDevice` rides on its evidence).
-    async fn enrolled(joined: &[([u8; 32], &str)]) -> cvlt::ResumeBundle {
-        let mut bundle = cvlt::ResumeBundle::new();
-        for (fingerprint, scope) in joined {
-            let prf = ckmg::passkey::PrfOutput::from_bytes(&[fingerprint[0] ^ 0x40; 32]).unwrap();
-            let mut keys = ckmg::Keys::new(Memory::default(), Time, ckmg::SystemEntropy, Live);
-            let receipt = keys
-                .create_scope(
-                    &prf,
-                    ckmg::Binding::new(scope, "member").unwrap(),
-                    ckmg::DeviceInfo::new("device", b"credential").unwrap(),
-                    b"registration",
-                )
-                .await
-                .unwrap();
-            keys.acknowledge(receipt.operation).await.unwrap();
-            let purposes = [ckmg::Purpose::new(ckmg::Scope::Member, "board", 1).unwrap()];
-            let (receipt, delegation) = keys.delegate_device(&purposes, b"ceremony").await.unwrap();
-            keys.acknowledge(receipt.operation).await.unwrap();
-            bundle.insert(*fingerprint, scope, delegation).unwrap();
-        }
-        bundle
-    }
-
     const JOINED: [([u8; 32], &str); 2] = [([1; 32], "garden"), ([2; 32], "orchard")];
 
     /// Tests keep the wrapping key in the user-only file: never the real OS key store.
@@ -672,25 +680,35 @@ mod tests {
             assert!(resumed.resumed_session(&[2; 32], "orchard").is_ok());
             // The delegated Door, opened from this resume with 0 prompts: it reaches the
             // foyer step (no owner is bound here, so `Unavailable`), where a full Door
-            // that was not restricted refuses to sign as a delegate at all.
-            let mut full = crate::door::Door::new(
+            // refuses to sign as a delegate at all.
+            let config = |community: &str| {
                 crate::door::Configuration::new(
-                    "garden".into(),
+                    community.into(),
                     std::collections::BTreeMap::from([(
                         crate::door::Role::Member,
                         std::collections::BTreeSet::from(["https://m.example".to_string()]),
                     )]),
                 )
-                .unwrap(),
-            );
+                .unwrap()
+            };
+            let mut full = crate::door::Door::new(config("garden"));
             assert_eq!(
                 full.open_delegated_session("https://m.example", "u", delegate)
                     .await,
                 Err(ErrorCode::NeedsPasskey)
             );
-            full.restrict_to_delegation();
+            // L9: `from_delegation` is the only way to a delegated Door, and only for the
+            // delegation's own community.
             assert_eq!(
-                full.open_delegated_session("https://m.example", "u", delegate)
+                crate::door::Door::from_delegation(config("orchard"), delegate).err(),
+                Some(ErrorCode::Unauthorized)
+            );
+            let mut restricted =
+                crate::door::Door::from_delegation(config("garden"), delegate).unwrap();
+            assert!(restricted.is_delegated());
+            assert_eq!(
+                restricted
+                    .open_delegated_session("https://m.example", "u", delegate)
                     .await,
                 Err(ErrorCode::Unavailable)
             );
@@ -711,9 +729,11 @@ mod tests {
                 resumed.resumed_session(&[3; 32], "meadow").err(),
                 Some(NeedsPasskey)
             );
+            // The same typed state on every path of a resumed start (L7), also for a
+            // community the bundle does not hold.
             assert_eq!(
                 resumed.community_device(&[3; 32], "meadow").err(),
-                Some(ErrorCode::InvalidRequest)
+                Some(ErrorCode::NeedsPasskey)
             );
             // Persisting from a resumed start keeps the bundle as it is.
             persist(
@@ -836,5 +856,138 @@ mod tests {
             .await
             .unwrap();
         });
+    }
+
+    const NONCE: [u8; 32] = [9; 32];
+    const ISSUED: u64 = 1000;
+    const COMMUNITY: &str = "alpha";
+
+    /// The community service's answer to `device_session_finish`, as cvld's
+    /// `CommunityService::device_session_finish` gives it: the one-use nonce, then the
+    /// signature over cvld's own message under `verify_strict`, then the registry row of the
+    /// key (`registered`, and whether it was `revoked`). The verification is never skipped:
+    /// a signature over any other bytes is `unauthorized`, whatever the row says.
+    fn finish(
+        registered: [u8; 32],
+        revoked: bool,
+        body: &serde_json::Value,
+    ) -> (u16, serde_json::Value) {
+        use cvld::error::{Error, ErrorBody};
+        let refuse = |error: Error| {
+            (
+                error.http_status(),
+                serde_json::to_value(ErrorBody::from(error)).unwrap(),
+            )
+        };
+        let nonce: [u8; 32] = serde_json::from_value(body["nonce"].clone()).unwrap();
+        let device: [u8; 32] = serde_json::from_value(body["device_key"].clone()).unwrap();
+        let signature: Vec<u8> = serde_json::from_value(body["signature"].clone()).unwrap();
+        let (Ok(key), Ok(signature)) = (
+            ed25519_dalek::VerifyingKey::from_bytes(&device),
+            ed25519_dalek::Signature::from_slice(&signature),
+        ) else {
+            return refuse(Error::Unauthorized);
+        };
+        let message = cvld::device_session::message(COMMUNITY, &nonce, ISSUED);
+        if nonce != NONCE || key.verify_strict(&message, &signature).is_err() {
+            return refuse(Error::Unauthorized);
+        }
+        if device != registered {
+            return refuse(Error::Unauthorized);
+        }
+        if revoked {
+            return refuse(Error::DelegateRevoked);
+        }
+        (
+            200,
+            json!({"token": "session", "user": body["user"], "role": "member",
+                   "expires": ISSUED + 600}),
+        )
+    }
+
+    /// A community service stand-in on a loopback port; returns its base URL.
+    async fn serve_community(registered: [u8; 32], revoked: bool) -> String {
+        use http_body_util::{BodyExt, Full};
+        use hyper::{body::Bytes, service::service_fn, Request, Response};
+        use hyper_util::rt::TokioIo;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                tokio::spawn(async move {
+                    let handler =
+                        service_fn(move |request: Request<hyper::body::Incoming>| async move {
+                            let name = request.uri().path().trim_start_matches("/v1/").to_owned();
+                            let bytes = request.into_body().collect().await.unwrap().to_bytes();
+                            let body = serde_json::from_slice(&bytes).unwrap_or_default();
+                            let (status, reply) = match name.as_str() {
+                                "device_session_begin" => {
+                                    (200, json!({"nonce": NONCE, "issued": ISSUED}))
+                                }
+                                "device_session_finish" => finish(registered, revoked, &body),
+                                _ => (404, json!({})),
+                            };
+                            Ok::<_, std::convert::Infallible>(
+                                Response::builder()
+                                    .status(status)
+                                    .header("content-type", "application/json")
+                                    .body(Full::new(Bytes::from(reply.to_string())))
+                                    .unwrap(),
+                            )
+                        });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), handler)
+                        .await;
+                });
+            }
+        });
+        base
+    }
+
+    /// M1 (review 2026-11-05): the delegate signs the challenge so that the community
+    /// service's own check holds. `Challenge::message` already starts with the device-session
+    /// tag and ckmg prepends it again, so the payload behind the tag is what is signed. The
+    /// stand-in service verifies with cvld's message and `verify_strict`; a key the row lists
+    /// opens the session, a revoked delegate is told so (the distinct reason is reachable only
+    /// through a signature that verified), and another key's row stays a plain refusal.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_delegated_session_verifies_at_the_community_service() {
+        let bundle = fixture::enrolled(&[([1; 32], COMMUNITY)]).await;
+        let delegation = bundle.delegation(&[1; 32], COMMUNITY).unwrap();
+        let key: [u8; 32] = delegation.device_public_key().value().to_owned();
+        let origin = "https://member.example";
+        let open = |registered: [u8; 32], revoked: bool| async move {
+            let base = serve_community(registered, revoked).await;
+            let config = crate::door::Configuration::new(
+                COMMUNITY.into(),
+                std::collections::BTreeMap::from([(
+                    crate::door::Role::Member,
+                    std::collections::BTreeSet::from([origin.to_string()]),
+                )]),
+            )
+            .unwrap();
+            let mut door = crate::door::Door::from_delegation(config, delegation).unwrap();
+            let transport = crate::door::foyer::fixture_transport(&base, "alpha.example.test");
+            door.bind_foyer(
+                origin,
+                crate::door::Role::Member,
+                crate::door::foyer::Sessions::new(
+                    crate::door::foyer::Scope::Community,
+                    cfyr::Foyer::new(transport),
+                ),
+            )
+            .unwrap();
+            door.open_delegated_session(origin, "member", delegation)
+                .await
+        };
+        // A message that does not lead with the device-session tag is never signed.
+        assert_eq!(
+            crate::door::device_session::sign_delegated_challenge(delegation, b"other bytes"),
+            Err(ErrorCode::Unauthorized)
+        );
+        assert_eq!(open(key, false).await, Ok(ISSUED + 600));
+        assert_eq!(open(key, true).await, Err(ErrorCode::DelegateRevoked));
+        assert_eq!(open([5; 32], true).await, Err(ErrorCode::Unauthorized));
     }
 }
