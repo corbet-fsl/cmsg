@@ -31,7 +31,10 @@ pub fn prepare_revision_evidence(
     host_signature: [u8; 64],
     clock: &mut impl ckmg::Clock,
 ) -> Result<cvlt::PreparedLineageEvidence> {
-    if !matches!(receipt.change, ckmg::Change::DeviceAuthorized(_)) {
+    if !matches!(
+        receipt.change,
+        ckmg::Change::DeviceAuthorized(_) | ckmg::Change::DeviceDelegated(_)
+    ) {
         return Err(refused());
     }
     let presentation = StampPresentation::from_bytes(&stamp.presentation).map_err(|__cause| {

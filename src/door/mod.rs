@@ -61,6 +61,7 @@ pub mod network_native;
 pub mod ohttp;
 pub mod pairing;
 pub mod pairing_delegate;
+pub mod pairing_delegate_host;
 mod pairing_flow;
 #[cfg(all(feature = "embedded-authenticator", not(target_arch = "wasm32")))]
 pub mod pairing_guest;

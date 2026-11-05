@@ -667,7 +667,133 @@ mod verdict_tests {
 
 #[cfg(test)]
 mod pair_tests {
-    use super::pair_base_matches;
+    use super::{admission, pair_base_matches};
+    use ckmg::{Action, Authorization};
+
+    fn key(n: u8) -> ckmg::PublicKey {
+        ckmg::PublicKey::new(ckmg::VLD0, [n; 32])
+    }
+
+    fn request<'a>(
+        binding: &'a ckmg::Binding,
+        action: Action,
+        target: Option<ckmg::PublicKey>,
+        statement: Option<[u8; 32]>,
+        evidence: &'a [u8],
+    ) -> Authorization<'a> {
+        Authorization {
+            binding,
+            root: Some(key(1)),
+            device: key(2),
+            epoch: 1,
+            action,
+            target,
+            statement,
+            signing: None,
+            now: 10,
+            evidence,
+        }
+    }
+
+    /// A11 Q1 (decided 2026-11-05): `DelegateDevice` is admitted exactly like `Pair`: only
+    /// against the single-use intent, with a target (K_d) and the delegation statement, and as
+    /// pairing-like, so its evidence (the pre-delegation lineage digest) must equal the live
+    /// head (`pair_base_matches`). Without intent, target or statement it is refused.
+    #[test]
+    fn delegate_device_is_admitted_exactly_like_pair() {
+        let binding = ckmg::Binding::new("alpha", "member").unwrap();
+        let base = [7u8; 32];
+        for action in [Action::Pair, Action::DelegateDevice] {
+            assert_eq!(
+                admission(
+                    &request(&binding, action, Some(key(3)), Some([4; 32]), &base),
+                    true
+                ),
+                Some((true, true)),
+                "{action:?}"
+            );
+            for (target, statement, intent) in [
+                (None, Some([4; 32]), true),
+                (Some(key(3)), None, true),
+                (Some(key(3)), Some([4; 32]), false),
+            ] {
+                assert_eq!(
+                    admission(&request(&binding, action, target, statement, &base), intent),
+                    None,
+                    "{action:?}"
+                );
+            }
+        }
+        // Any other action naming a target stays refused.
+        assert_eq!(
+            admission(
+                &request(
+                    &binding,
+                    Action::PublishLineage,
+                    Some(key(3)),
+                    Some([4; 32]),
+                    &base
+                ),
+                true
+            ),
+            None
+        );
+        // A stale base never matches the live head.
+        assert!(!pair_base_matches(&base, Some([8; 32])));
+    }
+
+    /// The single-use intent names exactly one K_d: a DelegateDevice request for another key
+    /// (or another statement) is refused and spends the admission.
+    #[test]
+    fn an_intent_for_another_delegation_key_is_refused() {
+        let binding = ckmg::Binding::new("alpha", "member").unwrap();
+        let command = |target| ckmg::AdmittedCommand {
+            binding: binding.clone(),
+            origin: "https://alpha.example".into(),
+            action: Action::DelegateDevice,
+            device: key(2),
+            root: Some(key(1)),
+            epoch: 1,
+            target: Some(target),
+            statement: Some([4; 32]),
+            transcript: None,
+            format: None,
+            expires: 100,
+        };
+        let base = [7u8; 32];
+        let (mut admit, mut verifier) = ckmg::intent_channel();
+        let _guard = admit.admit(command(key(3)), 10).unwrap();
+        let other = request(
+            &binding,
+            Action::DelegateDevice,
+            Some(key(9)),
+            Some([4; 32]),
+            &base,
+        );
+        assert!(verifier.consume(&other, "https://alpha.example").is_err());
+        let (mut admit, mut verifier) = ckmg::intent_channel();
+        let _guard = admit.admit(command(key(3)), 10).unwrap();
+        let wrong_statement = request(
+            &binding,
+            Action::DelegateDevice,
+            Some(key(3)),
+            Some([5; 32]),
+            &base,
+        );
+        assert!(verifier
+            .consume(&wrong_statement, "https://alpha.example")
+            .is_err());
+        let (mut admit, mut verifier) = ckmg::intent_channel();
+        let _guard = admit.admit(command(key(3)), 10).unwrap();
+        let exact = request(
+            &binding,
+            Action::DelegateDevice,
+            Some(key(3)),
+            Some([4; 32]),
+            &base,
+        );
+        assert!(verifier.consume(&exact, "https://alpha.example").is_ok());
+    }
 
     #[test]
     fn a_pair_applies_only_to_the_exact_live_lineage_it_extends() {
@@ -682,6 +808,60 @@ mod pair_tests {
     }
 }
 
+/// Which generic member actions the authority admits at all, before any live check: whether
+/// the action needs the single-use intent (`signing`), and whether it is pairing-like (a
+/// target key, and the pre-change lineage digest as evidence that must equal the live head).
+/// `None` refuses.
+fn admission(request: &Authorization<'_>, intent: bool) -> Option<(bool, bool)> {
+    let pair = matches!(request.action, Action::Pair | Action::DelegateDevice);
+    let signing = match request.action {
+        Action::Use if request.signing.is_none() => false,
+        // Device pairing: the existing device adds exactly one proven new device. Only
+        // against a distinct, single-use admitted command naming that target and the
+        // digest of the exact pairing request; the lineage digest is not the statement.
+        // A delegation (A11 Q1, 2026-11-05) is admitted exactly the same way: the intent
+        // names K_d and the delegation statement, and the pre-delegation lineage digest is
+        // the evidence that must equal the live head.
+        Action::Pair | Action::DelegateDevice
+            if request.signing.is_none()
+                && request.target.is_some()
+                && request.statement.is_some()
+                && intent =>
+        {
+            true
+        }
+        Action::SignDeviceEd25519
+            if request.signing.is_some() && request.statement.is_none() && intent =>
+        {
+            true
+        }
+        // Next lineage record revision for a pending device authorization: only against a
+        // distinct single-use admitted command, and the statement (the previous head's
+        // digest) must be the live selected head, exactly like any other statement.
+        Action::PublishLineage
+            if request.signing.is_none() && request.statement.is_some() && intent =>
+        {
+            true
+        }
+        // Profile signer plus Envelope custody: only against a distinct,
+        // single-use admitted command for exactly this action.
+        Action::LendProfileCustody
+            if request.signing.is_none() && request.statement.is_none() && intent =>
+        {
+            true
+        }
+        _ => return None,
+    };
+    if request.root.is_none()
+        || request.epoch == 0
+        || (request.target.is_some() && !pair)
+        || request.evidence.len() > ckmg::MAX_MESSAGE_BYTES
+    {
+        return None;
+    }
+    Some((signing, pair))
+}
+
 impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C, B> {
     async fn check(&mut self, mut request: Authorization<'_>) -> Result<(), Error> {
         if request.action == Action::AuthorizeAccountDevice {
@@ -691,55 +871,8 @@ impl<C: Clock, B: cdht::runtime::Backend> ckmg::Authority for MemberAuthority<C,
         }
         self.discard_pending_current();
         self.live.lifetime.check(&request)?;
-        let pair = request.action == Action::Pair;
-        let signing = match request.action {
-            Action::Use if request.signing.is_none() => false,
-            // Device pairing: the existing device adds exactly one proven new device. Only
-            // against a distinct, single-use admitted command naming that target and the
-            // digest of the exact pairing request; the lineage digest is not the statement.
-            Action::Pair
-                if request.signing.is_none()
-                    && request.target.is_some()
-                    && request.statement.is_some()
-                    && self.intent.is_some() =>
-            {
-                true
-            }
-            Action::SignDeviceEd25519
-                if request.signing.is_some()
-                    && request.statement.is_none()
-                    && self.intent.is_some() =>
-            {
-                true
-            }
-            // Next lineage record revision for a pending device authorization: only against a
-            // distinct single-use admitted command, and the statement (the previous head's
-            // digest) must be the live selected head, exactly like any other statement.
-            Action::PublishLineage
-                if request.signing.is_none()
-                    && request.statement.is_some()
-                    && self.intent.is_some() =>
-            {
-                true
-            }
-            // Profile signer plus Envelope custody: only against a distinct,
-            // single-use admitted command for exactly this action.
-            Action::LendProfileCustody
-                if request.signing.is_none()
-                    && request.statement.is_none()
-                    && self.intent.is_some() =>
-            {
-                true
-            }
-            _ => return Err(Error::Unauthorized),
-        };
-        if request.root.is_none()
-            || request.epoch == 0
-            || (request.target.is_some() && !pair)
-            || request.evidence.len() > ckmg::MAX_MESSAGE_BYTES
-        {
-            return Err(Error::Unauthorized);
-        }
+        let (signing, pair) =
+            admission(&request, self.intent.is_some()).ok_or(Error::Unauthorized)?;
         let mut guard = CheckGuard::new(&self.live.lifetime);
         let result = self.current_lineage(request, signing, pair).await;
         guard.settle(&result);

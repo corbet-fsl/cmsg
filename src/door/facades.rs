@@ -1,6 +1,7 @@
 //! Bound actual owner facades. Type erasure here preserves their own methods;
 //! no generic accepting domain driver or caller-supplied success is exposed.
 use super::*;
+mod delegation_custody;
 mod group_custody;
 mod inbox_custody;
 mod lineage_custody;
@@ -500,6 +501,24 @@ pub(super) trait BoundVault {
     fn pairing_anchor(&mut self) -> OwnedFuture<'_, ckmg::Lineage> {
         Box::pin(async { Err(ErrorCode::Unavailable) })
     }
+    /// Remote delegation (A11): enrol the offer's K_d as a delegate and seal the granted
+    /// custody to the CLI, under a distinct single-use DelegateDevice admission (Q1).
+    fn delegate_remote<'a>(
+        &'a mut self,
+        _offer: &'a ckmg::DelegationOffer,
+        _purposes: &'a [ckmg::Purpose],
+        _origin: &'a str,
+    ) -> OwnedFuture<'a, (ckmg::Receipt, ckmg::SealedDelegation)> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
+    /// Remove a delegate from the lineage (a pure delegate revocation, Q2).
+    fn remove_delegate<'a>(
+        &'a mut self,
+        _key: ckmg::PublicKey,
+        _origin: &'a str,
+    ) -> OwnedFuture<'a, ckmg::Receipt> {
+        Box::pin(async { Err(ErrorCode::Unavailable) })
+    }
     /// Retain the prepared evidence of the pending approval receipt, durably.
     fn retain_pairing_evidence<'a>(
         &'a mut self,
@@ -871,6 +890,21 @@ where
         origin: &'a str,
     ) -> OwnedFuture<'a, PairApproved> {
         Box::pin(self.pair_owned(request, origin))
+    }
+    fn delegate_remote<'a>(
+        &'a mut self,
+        offer: &'a ckmg::DelegationOffer,
+        purposes: &'a [ckmg::Purpose],
+        origin: &'a str,
+    ) -> OwnedFuture<'a, (ckmg::Receipt, ckmg::SealedDelegation)> {
+        Box::pin(self.delegate_remote_owned(offer, purposes, origin))
+    }
+    fn remove_delegate<'a>(
+        &'a mut self,
+        key: ckmg::PublicKey,
+        origin: &'a str,
+    ) -> OwnedFuture<'a, ckmg::Receipt> {
+        Box::pin(self.remove_delegate_owned(key, origin))
     }
     fn revision_record<'a>(
         &'a mut self,

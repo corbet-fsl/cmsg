@@ -49,6 +49,17 @@ pub trait PairingWallet {
     ) -> Result<Option<PresentedStamp>>;
     /// The wallet's stamp trust, to verify the revision evidence before it is kept.
     async fn stamp_trust(&mut self) -> Result<cvlt::StampTrust>;
+    /// The add step of a DELEGATED key (A11): `device_add` with this device's approval.
+    async fn send_delegated(
+        &mut self,
+        _community: &mut cfyr::Foyer<Transport>,
+        _actions: &PairingActions,
+        _challenge: &StepChallenge,
+        _signature: Vec<u8>,
+        _approval: &device_pair::DelegateApproval,
+    ) -> Result<PresentedStamp> {
+        Err(ErrorCode::Unavailable)
+    }
 }
 
 /// [`PairingWallet`] over the wallet's authenticated Foyer, its passport and its passkeys.
@@ -114,6 +125,25 @@ where
             step,
             challenge,
             signature,
+        )
+        .await
+    }
+
+    async fn send_delegated(
+        &mut self,
+        community: &mut cfyr::Foyer<Transport>,
+        actions: &PairingActions,
+        challenge: &StepChallenge,
+        signature: Vec<u8>,
+        approval: &device_pair::DelegateApproval,
+    ) -> Result<PresentedStamp> {
+        device_pair::send_delegated(
+            community,
+            self.passport,
+            actions,
+            challenge,
+            signature,
+            approval,
         )
         .await
     }
