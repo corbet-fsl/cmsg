@@ -4,13 +4,8 @@ use super::{facades::MeshLifetime, Door, ErrorCode, Result};
 use std::sync::Arc;
 
 fn native_runtime() -> Result<tor_rtcompat::tokio::TokioRustlsRuntime> {
-    // Arti requires a process TLS provider before runtime construction. Keep an
-    // embedding application's provider; otherwise select the same maintained
-    // ring provider as the original native transport examples. A competing
-    // install can only mean another provider has already won the one-time slot.
-    if rustls::crypto::CryptoProvider::get_default().is_none() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    }
+    // Arti requires a process TLS provider before runtime construction.
+    super::ensure_tls_provider();
     tor_rtcompat::tokio::TokioRustlsRuntime::current().map_err(|__cause| {
         crate::door::cause::emit(
             file!(),

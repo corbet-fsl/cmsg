@@ -70,7 +70,7 @@ arti-client = { version = "0.46", default-features = false, optional = true }
 tor-rtcompat = { version = "0.46", default-features = false, features = ["tokio", "rustls"], optional = true }
 tor-hscrypto = { version = "0.46", default-features = false, optional = true }
 tor-llcrypto = { version = "0.46", optional = true }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 cbrd = { git = "https://git.corbet.ch/corbet-libs/cbrd.git", branch = "main", default-features = false, features = ["http"] }
 futures-util = "0.3"
 cfyr = { git = "https://git.corbet.ch/corbet-libs/cfyr.git", branch = "main", default-features = false, features = ["http"] }
@@ -106,7 +106,7 @@ wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 cvld = { git = "https://git.corbet.ch/corbet-libs/cvld", branch = "main", default-features = false, features = ["development-gate-client", "client-http"] }
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json"] }
 tempfile = "3"
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 ed25519-dalek = "2"
@@ -127,7 +127,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(owned_browser_coverage)"] 
 
 [features]
 # Member-to-server calls through Oblivious HTTP instead of direct HTTPS (streams excepted).
-ohttp = ["cfyr/ohttp", "cbrd/ohttp", "dep:cblv", "cblv/client", "reqwest/rustls"]
+ohttp = ["cfyr/ohttp", "cbrd/ohttp", "dep:cblv", "cblv/client", "reqwest/rustls-no-provider"]
 embedded-authenticator = ["dep:cpky"]
 conformance = []
 native-prover = ["cwlt/native-prover", "cwlt/native-verifier", "dep:cvfy", "czkp/native", "cvlt/wallet-native-prover", "ckmg/wallet-native-prover"]
@@ -135,7 +135,7 @@ native-prover = ["cwlt/native-prover", "cwlt/native-verifier", "dep:cvfy", "czkp
 browser-prover = ["cwlt/browser-prover", "cvlt/wallet-browser-prover", "ckmg/wallet-browser-prover"]
 # Test only: probe exports for the wasm32 browser tests of the prover path; never part of a product build.
 browser-prover-probe = ["browser-prover", "ckmg/wallet-browser-prover-probe"]
-native-tor = ["ckmg/native-tor", "cmsh/tor", "cmsh/tor-records", "dep:ctrn", "dep:arti-client", "dep:tor-rtcompat", "dep:tor-hscrypto", "dep:tor-llcrypto", "dep:rustls"]
+native-tor = ["ckmg/native-tor", "cmsh/tor", "cmsh/tor-records", "dep:ctrn", "dep:arti-client", "dep:tor-rtcompat", "dep:tor-hscrypto", "dep:tor-llcrypto"]
 # Test/fixture only: a private Tor network supplied by embedding code. Production builds never enable it.
 # It also switches on device-side cause logging here and in the cfyr/ckmg dependencies
 # (the e2e device build enables this feature through the composer's `composer` feature).

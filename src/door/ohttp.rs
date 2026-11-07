@@ -138,6 +138,7 @@ pub struct ReqwestPost(reqwest::Client);
 
 #[cfg(not(target_arch = "wasm32"))]
 fn outer() -> Result<Outer> {
+    super::ensure_tls_provider();
     reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())

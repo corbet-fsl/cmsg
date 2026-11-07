@@ -3,6 +3,17 @@
 //! Client grants are local capabilities, never remote member/admin/root authority.
 //! Pairing belongs to the trusted embedding runtime; it is not an API action.
 //! Unavailable domain owners cannot be replaced by caller-provided success values.
+
+/// Native reqwest clients are built with `rustls-no-provider`; the process
+/// default must be selected before one is built. Keep an embedding
+/// application's provider; otherwise pick the maintained ring provider.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn ensure_tls_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
+
 pub mod account;
 #[cfg(any(
     all(feature = "native-prover", not(target_arch = "wasm32")),
@@ -378,6 +389,8 @@ pub struct Door {
 
 impl Door {
     pub fn new(config: Configuration) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        ensure_tls_provider();
         Self {
             config,
             grants: BTreeMap::new(),

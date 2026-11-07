@@ -1543,6 +1543,7 @@ impl Client {
             return Err(ErrorCode::InvalidRequest);
         }
         endpoint.set_path("/invoke");
+        super::ensure_tls_provider();
         let http = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
