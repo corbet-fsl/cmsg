@@ -30,12 +30,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - run: |
@@ -48,7 +48,7 @@ jobs:
           npm --version >> resolution.txt
           date -u +%FT%TZ >> resolution.txt
           sha256sum Cargo.lock tests/fixture/Cargo.lock tools/package-lock.json >> resolution.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: resolved-lock
           path: |
@@ -61,11 +61,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: resolved-lock
       - run: python3 .ci/check-first-party.py
@@ -74,11 +74,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: resolved-lock
       - uses: dtolnay/rust-toolchain@stable
@@ -96,7 +96,7 @@ jobs:
           cargo fmt --all
           git diff -- src tests examples > formatting.patch
           test ! -s formatting.patch
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - name: Generate every consumer surface from Rust
@@ -110,7 +110,7 @@ jobs:
         run: |
           cargo build --locked --features conformance --example client-conformance
           node tools/client-conformance.mjs target/debug/examples/client-conformance
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: generated-local-api
           path: generated
@@ -135,7 +135,7 @@ jobs:
           wasm-bindgen --target web --out-dir generated/wasm target/wasm32-unknown-unknown/debug/cmsg.wasm
           tools/node_modules/.bin/tsc --outDir generated/runtime --strict --target es2022 --module nodenext --moduleResolution nodenext generated/client.ts generated/browser.ts
           cp -R generated/wasm generated/runtime/wasm
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: generated-browser-api
           path: generated
@@ -154,7 +154,7 @@ jobs:
           WASM_BINDGEN_TEST_ONLY_WEB: "1"
           WASM_BINDGEN_SPLIT_LINKED_MODULES: "1"
         run: python3 .ci/with-foyer-fixture.py tests/fixture/target/debug/cmsg-foyer-fixture cargo test --locked --target wasm32-unknown-unknown --lib --test door --test facades --test browser_bridge --test foyer_browser
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: formatting
@@ -164,11 +164,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: resolved-lock
       - uses: dtolnay/rust-toolchain@nightly
@@ -187,7 +187,7 @@ jobs:
       - run: cargo llvm-cov report --text --output-path coverage.txt --ignore-filename-regex '/tests/'
       - run: python3 .ci/test-source-coverage.py
       - run: python3 .ci/check-source-coverage.py coverage.lcov coverage.json coverage.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage
@@ -227,7 +227,7 @@ jobs:
       - run: cargo llvm-cov report --target wasm32-unknown-unknown --lcov --output-path wasm-coverage.lcov --ignore-filename-regex '/tests/'
       - run: cargo llvm-cov report --target wasm32-unknown-unknown --text --output-path wasm-coverage.txt --ignore-filename-regex '/tests/'
       - run: python3 .ci/check-source-coverage.py wasm-coverage.lcov wasm-coverage.json wasm-coverage.txt wasm
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: wasm-coverage
@@ -252,14 +252,14 @@ jobs:
           echo "CMSG_HOSTED_STARTED=$(date +%s)" >> "$GITHUB_ENV"
           echo "CARGO_HOME=$RUNNER_TEMP/cmsg-cargo" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cmsg-target" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - name: Prepare original ephemeral hosted browser tools
