@@ -1,9 +1,5 @@
 name: ci
 on:
-  push:
-    branches: [main]
-    paths: ["Cargo.*", "src/**", "tests/**", "examples/**", "tools/**", ".ci/**", ".github/**"]
-  pull_request:
   workflow_dispatch:
     inputs:
       selector:
