@@ -10,7 +10,7 @@ bindgen_version=0.2.122
 mkdir -p "$tor_root"
 git clone --quiet https://git.corbet.ch/corbet-foss/tor-js.git "$tor_root/tor-js"
 git -C "$tor_root/tor-js" checkout --quiet "$torjs_revision"
-git clone --quiet https://git.corbet.ch/corbet-foss/arti.git "$tor_root/arti"
+git clone --quiet https://git.corbet.ch/corbet-libre/arti.git "$tor_root/arti"
 git -C "$tor_root/arti" checkout --quiet "$arti_revision"
 [[ "$(git -C "$tor_root/tor-js" rev-parse HEAD)" == "$torjs_revision" ]]
 [[ "$(git -C "$tor_root/arti" rev-parse HEAD)" == "$arti_revision" ]]
