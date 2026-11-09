@@ -825,4 +825,40 @@ mod tests {
             .is_err());
         assert_eq!(*calls.borrow(), 2, "only the bad proof itself reached the proof check; forged certificate, state, version, context and a stale lease failed before it");
     }
+
+    /// The p256 behaviour these tests rely on, pinned before the move to p256 0.14
+    /// (RUSTSEC-2026-0387): the test issuer key's public point and its RFC 6979 low-S
+    /// signature equal the cssr/czkp golden vector, which czkp's verifier accepts.
+    #[test]
+    fn test_issuer_primitives_match_the_golden_vector() {
+        use p256::ecdsa::{signature::Signer, Signature, SigningKey};
+        const TRANSCRIPT: &str = "637373722e61636365707465642d73746174652e7632000101010101010101010101010101010101010101010101010101010101010101050505050505050505050505050505050505050505050505050505050505050502020202020202020202020202020202020202020202020202020202020202020303030303030303030303030303030303030303030303030303030303030303040404040404040404040404040404040404040404040404040404040404040400000000000000070000000000000078";
+        const PUBLIC_KEY: &str = "591ab771ebbcfd6d9cb9094d106528add1a69d44c2c1f627f089ec58b9c61adf9f4e6abf0d045c0c693a3c68ad7c97ca72be64def4a26fecd263dd98a92780f0";
+        const SIGNATURE: &str = "5d7dce889d4477d54367b52f8182d46fe42e32b0ade5ff27213dc2d4df38921323c1d7e787bbf99db619b8bd4f716d2fe6715d4c934466931d9eac98f96519a3";
+        let hex = |value: &str| -> Vec<u8> {
+            (0..value.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&value[i..i + 2], 16).unwrap())
+                .collect()
+        };
+        assert_eq!(issuer_point(3), hex(PUBLIC_KEY));
+        let body = czkp::certificate::AcceptedState {
+            community: [1; 32],
+            identity: [5; 32],
+            owner: [2; 32],
+            state: [3; 32],
+            scope: [4; 32],
+            version: 7,
+            accepted_at: 120,
+        };
+        assert_eq!(body.bytes(), hex(TRANSCRIPT));
+        let signature: Signature = SigningKey::from_slice(&[3; 32])
+            .unwrap()
+            .sign(&body.bytes());
+        let signature = signature.normalize_s().unwrap_or(signature);
+        assert_eq!(signature.to_bytes().to_vec(), hex(SIGNATURE));
+        let key: [u8; 64] = issuer_point(3).try_into().unwrap();
+        let stored: [u8; 64] = hex(SIGNATURE).try_into().unwrap();
+        body.verify(&key, &stored).unwrap();
+    }
 }
