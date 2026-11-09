@@ -872,7 +872,7 @@ mod tests {
         revoked: bool,
         body: &serde_json::Value,
     ) -> (u16, serde_json::Value) {
-        use cvld::error::{Error, ErrorBody};
+        use cvld_client::error::{Error, ErrorBody};
         let refuse = |error: Error| {
             (
                 error.http_status(),
@@ -888,7 +888,7 @@ mod tests {
         ) else {
             return refuse(Error::Unauthorized);
         };
-        let message = cvld::device_session::message(COMMUNITY, &nonce, ISSUED);
+        let message = cvld_client::device_session::message(COMMUNITY, &nonce, ISSUED);
         if nonce != NONCE || key.verify_strict(&message, &signature).is_err() {
             return refuse(Error::Unauthorized);
         }

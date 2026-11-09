@@ -105,7 +105,7 @@ browser-coverage-runtime = { package = "browser-coverage-runtime-cmsg", path = "
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-cvld = { git = "https://git.corbet.ch/corbet-fsl/cvld.git", branch = "main", default-features = false, features = ["development-gate-client", "client-http"] }
+cvld-client = { git = "https://git.corbet.ch/corbet-fsl/cvld.git", branch = "main", default-features = false, features = ["development-gate-client", "client-http"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json"] }
 tempfile = "3"
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
