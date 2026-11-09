@@ -434,7 +434,7 @@ mod tests {
         p256::ecdsa::SigningKey::from_slice(&[seed; 32])
             .unwrap()
             .verifying_key()
-            .to_encoded_point(false)
+            .to_sec1_point(false)
             .as_bytes()[1..]
             .to_vec()
     }
@@ -766,7 +766,7 @@ mod tests {
             accepted_at: statement.accepted_at,
         };
         let signature: Signature = key.sign(&body.bytes());
-        let signature = signature.normalize_s().unwrap_or(signature);
+        let signature = signature.normalize_s();
         statement.certificate = signature.to_bytes().to_vec();
         policy
     }
@@ -855,7 +855,7 @@ mod tests {
         let signature: Signature = SigningKey::from_slice(&[3; 32])
             .unwrap()
             .sign(&body.bytes());
-        let signature = signature.normalize_s().unwrap_or(signature);
+        let signature = signature.normalize_s();
         assert_eq!(signature.to_bytes().to_vec(), hex(SIGNATURE));
         let key: [u8; 64] = issuer_point(3).try_into().unwrap();
         let stored: [u8; 64] = hex(SIGNATURE).try_into().unwrap();

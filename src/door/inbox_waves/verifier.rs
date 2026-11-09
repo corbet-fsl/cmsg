@@ -364,7 +364,7 @@ pub(crate) mod fixture {
         p256::ecdsa::SigningKey::from_slice(&[seed; 32])
             .unwrap()
             .verifying_key()
-            .to_encoded_point(false)
+            .to_sec1_point(false)
             .as_bytes()[1..]
             .to_vec()
     }
