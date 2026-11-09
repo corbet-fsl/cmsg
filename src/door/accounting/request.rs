@@ -1771,7 +1771,7 @@ mod join_fence_tests {
         };
         let policy_digest = account.digest(&community()).unwrap();
         let issuer = p256::ecdsa::SigningKey::from_slice(&[3; 32]).unwrap();
-        let point = issuer.verifying_key().to_encoded_point(false);
+        let point = issuer.verifying_key().to_sec1_point(false);
         cblc::publication::PublicVerifierMaterial {
             purpose: cblc::publication::Purpose::PublicVerifierV2,
             community: COMMUNITY.into(),
