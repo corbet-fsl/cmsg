@@ -2125,7 +2125,7 @@ dependencies = [
  "futures-channel",
  "futures-executor",
  "futures-util",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "gloo-net",
  "gloo-timers 0.3.0",
  "hpke",
