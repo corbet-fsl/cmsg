@@ -177,11 +177,14 @@ test "$drift_added" -eq 2
 grep -F "$CHROMEDRIVER" "$runner_copy"
 grep -F "$CHROME_BIN" "$runner_copy"
 export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="python3 $runner_copy"
+# The merged `it` binary also carries the per-portal foyer_browser suites: run every other wasm suite
+# once and then foyer_browser from each real portal (browser-coverage-runner.py).
+export CMSG_BROWSER_PORTALS=1
 CMSG_LAST_GATE="wasm-coverage"
 : "${CMSG_WASM_CLANG_BIN:?Missing unwrapped wasm clang from run-cached.sh}"
 (
 export PATH="$CMSG_WASM_CLANG_BIN:$PATH"
-"$NIGHTLY_CARGO" llvm-cov test --locked --branch --coverage-target-only --target wasm32-unknown-unknown --lib --test door --json --output-path wasm-coverage.json --ignore-filename-regex '/tests/'
+"$NIGHTLY_CARGO" llvm-cov test --locked --branch --coverage-target-only --target wasm32-unknown-unknown --lib --test it --json --output-path wasm-coverage.json --ignore-filename-regex '/tests/'
 )
 "$NIGHTLY_CARGO" llvm-cov report --target wasm32-unknown-unknown --lcov --output-path wasm-coverage.lcov --ignore-filename-regex '/tests/'
 "$NIGHTLY_CARGO" llvm-cov report --target wasm32-unknown-unknown --text --output-path wasm-coverage.txt --ignore-filename-regex '/tests/'

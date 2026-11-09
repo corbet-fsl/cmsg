@@ -9,17 +9,17 @@ use cmsg::door::{
 use serde_json::{json, Value};
 use std::time::Duration;
 
-#[path = "support/initial_network.rs"]
+#[path = "../support/initial_network.rs"]
 mod initial_network;
 
-#[path = "support/wallet.rs"]
+#[path = "../support/wallet.rs"]
 mod wallet;
 use wallet::*;
 
-#[path = "support/foyer_fixture.rs"]
+#[path = "../support/foyer_fixture.rs"]
 mod foyer_fixture;
 
-#[path = "support/common_record.rs"]
+#[path = "../support/common_record.rs"]
 mod common_record;
 
 fn fixture() -> Value {

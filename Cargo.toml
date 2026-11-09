@@ -155,37 +155,28 @@ required-features = ["conformance"]
 
 # v01 integration: first-party dependencies point directly at v01 branches; no [patch] tables.
 
-# Integration tests: ONE native binary (tests/cmsg.rs) instead of one link per file. The browser/wasm-capable
-# suites keep their own target (each needs its own wasm_bindgen_test_configure!), and ohttp_keys keeps its own
-# because the ohttp feature changes the types the other suites compile against.
+# Integration tests: ONE binary (tests/it/main.rs) for every suite that shares the plain native/wasm
+# harness. Targets stay separate only where the harness requires it: foyer leaves its router running
+# past the test, ohttp_keys changes the types every other suite compiles against, pairing_onion_tor
+# runs alone inside the private Tor fixture, and initial_tor is executed directly as the fixture's Tor
+# probe (it must contain only that journey).
 [[test]]
-name = "pairing_onion_tor"
-path = "tests/pairing_onion_tor.rs"
-required-features = ["private-tor-fixture"]
-
-[[test]]
-name = "cmsg"
-path = "tests/cmsg.rs"
-
-[[test]]
-name = "browser_bridge"
-path = "tests/browser_bridge.rs"
-
-[[test]]
-name = "door"
-path = "tests/door.rs"
-
-[[test]]
-name = "facades"
-path = "tests/facades.rs"
+name = "it"
+path = "tests/it/main.rs"
 
 [[test]]
 name = "foyer"
 path = "tests/foyer.rs"
 
 [[test]]
-name = "foyer_browser"
-path = "tests/foyer_browser.rs"
+name = "initial_tor"
+path = "tests/initial_tor.rs"
+required-features = ["native-tor"]
+
+[[test]]
+name = "pairing_onion_tor"
+path = "tests/pairing_onion_tor.rs"
+required-features = ["private-tor-fixture"]
 
 [[test]]
 name = "ohttp_keys"

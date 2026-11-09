@@ -151,9 +151,10 @@ jobs:
       - name: Execute real browser regression and portal matrix
         env:
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: python3 .ci/browser-coverage-runner.py
+          CMSG_BROWSER_PORTALS: "1"
           WASM_BINDGEN_TEST_ONLY_WEB: "1"
           WASM_BINDGEN_SPLIT_LINKED_MODULES: "1"
-        run: python3 .ci/with-foyer-fixture.py tests/fixture/target/debug/cmsg-foyer-fixture cargo test --locked --target wasm32-unknown-unknown --lib --test door --test facades --test browser_bridge --test foyer_browser
+        run: python3 .ci/with-foyer-fixture.py tests/fixture/target/debug/cmsg-foyer-fixture cargo test --locked --target wasm32-unknown-unknown --lib --test it
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -217,13 +218,14 @@ jobs:
       - name: Measure actual browser Rust coverage
         env:
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: python3 .ci/browser-coverage-runner.py
+          CMSG_BROWSER_PORTALS: "1"
           CMSG_COLLECT_COVERAGE: "1"
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS: -Zno-profiler-runtime -Clink-args=--no-gc-sections --cfg=owned_browser_coverage
           WASM_BINDGEN_TEST_ONLY_WEB: "1"
           WASM_BINDGEN_SPLIT_LINKED_MODULES: "1"
           CHROMEDRIVER: /usr/bin/chromedriver
           CC_wasm32_unknown_unknown: clang
-        run: python3 .ci/with-foyer-fixture.py tests/fixture/target/debug/cmsg-foyer-fixture cargo llvm-cov test --locked --branch --coverage-target-only --target wasm32-unknown-unknown --lib --test door --test facades --test browser_bridge --test foyer_browser --json --output-path wasm-coverage.json --ignore-filename-regex '/tests/'
+        run: python3 .ci/with-foyer-fixture.py tests/fixture/target/debug/cmsg-foyer-fixture cargo llvm-cov test --locked --branch --coverage-target-only --target wasm32-unknown-unknown --lib --test it --json --output-path wasm-coverage.json --ignore-filename-regex '/tests/'
       - run: cargo llvm-cov report --target wasm32-unknown-unknown --lcov --output-path wasm-coverage.lcov --ignore-filename-regex '/tests/'
       - run: cargo llvm-cov report --target wasm32-unknown-unknown --text --output-path wasm-coverage.txt --ignore-filename-regex '/tests/'
       - run: python3 .ci/check-source-coverage.py wasm-coverage.lcov wasm-coverage.json wasm-coverage.txt wasm

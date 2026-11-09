@@ -36,5 +36,5 @@ export CMSG_G5_ACCOUNT_CONFIG="$CVLD_G5_ACCOUNT_CONFIG" CMSG_G5_LOSE_FIRST_ACCOU
 fixture="${CARGO_TARGET_DIR:-tests/fixture/target}/debug/cmsg-foyer-fixture"
 export RUST_MIN_STACK=67108864
 # Build the test binary BEFORE the fixture starts (pending passkey ceremonies expire after 300 s).
-nix-shell native-prover-owner/check-shell.nix --run 'set -euo pipefail; export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }${BB_NATIVE_RUSTFLAGS:?Missing original native loader configuration}"; cargo test --locked --features native-prover --test account_e2e --no-run'
-python3 .ci/with-foyer-fixture.py "$fixture" nix-shell native-prover-owner/check-shell.nix --run 'set -euo pipefail; export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }${BB_NATIVE_RUSTFLAGS:?Missing original native loader configuration}"; cargo test --locked --features native-prover --test account_e2e -- --test-threads=1'
+nix-shell native-prover-owner/check-shell.nix --run 'set -euo pipefail; export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }${BB_NATIVE_RUSTFLAGS:?Missing original native loader configuration}"; cargo test --locked --features native-prover --test it --no-run'
+python3 .ci/with-foyer-fixture.py "$fixture" nix-shell native-prover-owner/check-shell.nix --run 'set -euo pipefail; export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }${BB_NATIVE_RUSTFLAGS:?Missing original native loader configuration}"; cargo test --locked --features native-prover --test it -- account_e2e:: --test-threads=1'

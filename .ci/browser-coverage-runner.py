@@ -146,14 +146,36 @@ def main():
             process.wait(timeout=5)
 
 
+PORTALS = ["alpha.example.test", "vault.alpha.example.test", "wallet.example.test",
+           "admin.alpha.example.test", "admin.root.example.test"]
+
+
+def is_merged_test_binary(args):
+    """The `it` test binary carries the per-portal foyer_browser suites; the lib binary does not."""
+    if not args:
+        return False
+    name = Path(args[0]).name
+    return name == "it.wasm" or name.startswith("it-")
+
+
+def portals():
+    # One upstream process per portal produces distinct actual profile files. The merged `it` binary
+    # also carries the origin-independent wasm suites, so run it once without foyer_browser and then
+    # run only foyer_browser from each real HTTPS portal (its relative fetches need the portal origin).
+    # No profile overwrite or browser-origin/CORS impersonation is needed.
+    base = sys.argv[1:]
+    environment = dict(os.environ, CMSG_BROWSER_PORTALS="done")
+    subprocess.run([sys.executable, __file__, *base, "--skip", "foyer_browser::"],
+                   env=environment, check=True)
+    for portal in PORTALS:
+        print("Executing actual HTTPS portal:", portal, flush=True)
+        subprocess.run([sys.executable, __file__, *base, "foyer_browser::"],
+                       env=dict(environment, CMSG_BROWSER_ORIGIN="https://" + portal), check=True)
+
+
 if __name__ == "__main__":
-    if any("foyer_browser" in argument for argument in sys.argv[1:]) and not os.environ.get("CMSG_BROWSER_ORIGIN"):
-        # One upstream process per portal produces distinct actual profile files.
-        # No profile overwrite or browser-origin/CORS impersonation is needed.
-        for portal in ["alpha.example.test", "vault.alpha.example.test", "wallet.example.test",
-                       "admin.alpha.example.test", "admin.root.example.test"]:
-            print("Executing actual HTTPS portal:", portal, flush=True)
-            subprocess.run([sys.executable, __file__, *sys.argv[1:]],
-                           env=dict(os.environ, CMSG_BROWSER_ORIGIN="https://" + portal), check=True)
+    if (os.environ.get("CMSG_BROWSER_PORTALS") == "1" and is_merged_test_binary(sys.argv[1:])
+            and not os.environ.get("CMSG_BROWSER_ORIGIN")):
+        portals()
     else:
         main()

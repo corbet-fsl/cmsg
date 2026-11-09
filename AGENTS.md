@@ -15,22 +15,22 @@ Land: `cargo fmt` in touched repos, rebase on main (never force-push),
 
 Invariants (rule -> enforcing test):
 - Cross-facade effect in one combined encrypted checkpoint before anything escapes
-  -> `tests/support/inbox_waves_owner.rs`, `tests/support/facades.rs`, `tests/foyer_browser.rs`
+  -> `tests/support/inbox_waves_owner.rs`, `tests/support/facades.rs`, `tests/it/foyer_browser.rs`
 - No member keys, PRF material, plaintext, or identifiers in API/errors/logs
   -> `tests/support/foyer.rs::forwarding_catalog_preserves_owner_metadata_and_withholds_session_secrets`
 - Capability + exact origin + role/community scope + expiry/revocation on every dispatch
-  -> `tests/door.rs::capabilities_are_bound_to_origin_scope_role_and_actions`
+  -> `tests/it/door.rs::capabilities_are_bound_to_origin_scope_role_and_actions`
 - One registry, typed parity across HTTP/OpenAPI/MCP/CLI/TS; ambiguous/oversize
   refused; all HTTP `no-store`
-  -> `tests/door.rs::projections_share_typed_action_bodies_and_refusal_semantics`
+  -> `tests/it/door.rs::projections_share_typed_action_bodies_and_refusal_semantics`
 - Real owners only; unbound refuses; Inbox revalidates under Vault guard
-  -> `tests/facades.rs::encrypted_storage_without_unlocked_current_keys_does_not_bind_vault_or_inbox`
+  -> `tests/it/facades.rs::encrypted_storage_without_unlocked_current_keys_does_not_bind_vault_or_inbox`
 - Preload starts unavailable; only a completed network bind releases it
-  -> `tests/door.rs::only_a_completed_network_bind_releases_preload`
+  -> `tests/it/door.rs::only_a_completed_network_bind_releases_preload`
 - Native client forwards original bytes; lost accepted reply reconciles, never blind-retries
-  -> `tests/door.rs::lost_response_reattaches_to_the_kept_outcome`
+  -> `tests/it/door.rs::lost_response_reattaches_to_the_kept_outcome`
 - Wallet enrollment lifecycle runs on an explicit 8 MiB thread (2 MiB test threads overflow)
-  -> `tests/wallet_enrollment.rs::same_certified_wallet_restores_its_holder_issues_and_joins_a_community`
+  -> `tests/it/wallet_enrollment.rs::same_certified_wallet_restores_its_holder_issues_and_joins_a_community`
 
 Pointers: `src/door/mod.rs` (dispatcher), `src/door/registry.rs`,
 `docs/CONTRACT.md`, `docs/COVERAGE.md`, `.ci/verify.sh`.

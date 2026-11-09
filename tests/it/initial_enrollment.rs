@@ -11,10 +11,10 @@ use cpky::{
 };
 use serde_json::{json, Value};
 
-#[path = "support/foyer_fixture.rs"]
+#[path = "../support/foyer_fixture.rs"]
 mod foyer_fixture;
 
-#[path = "support/initial_network.rs"]
+#[path = "../support/initial_network.rs"]
 mod initial_network;
 
 struct Clock(u64);
@@ -43,7 +43,7 @@ fn passkeys() -> cpky::Client<SoftwareAuthenticator> {
     )
 }
 async fn foyer(f: &Value) -> cfyr::Foyer<cfyr::HttpClient> {
-    let roots = [include_bytes!("support/current-tls/ca.der").to_vec()];
+    let roots = [include_bytes!("../support/current-tls/ca.der").to_vec()];
     let origin = f["https"]["base"].as_str().unwrap().to_owned();
     let now = f["now"].as_u64().unwrap();
     let mut trust = cfyr::trust::Trust::native(

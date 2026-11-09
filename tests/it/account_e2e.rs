@@ -8,14 +8,14 @@ use cmsg::door::{composer, composer::Services as _, Output, Role};
 use serde_json::{json, Value};
 use std::{collections::BTreeSet, time::Duration};
 
-#[path = "support/initial_network.rs"]
+#[path = "../support/initial_network.rs"]
 mod initial_network;
 
-#[path = "support/wallet.rs"]
+#[path = "../support/wallet.rs"]
 mod wallet;
 use wallet::*;
 
-#[path = "support/foyer_fixture.rs"]
+#[path = "../support/foyer_fixture.rs"]
 mod foyer_fixture;
 
 fn fixture() -> Value {
@@ -41,7 +41,7 @@ fn device(
     composer::DeviceKeys<cpky::software::SoftwareAuthenticator>,
 ) {
     let root = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("account-e2e-ca.der");
-    std::fs::write(&root, include_bytes!("support/current-tls/ca.der")).unwrap();
+    std::fs::write(&root, include_bytes!("../support/current-tls/ca.der")).unwrap();
     let service = |world: &Value| composer::ServiceSettings {
         origin: world["base"].as_str().unwrap().into(),
         scope: world["scope"].as_str().unwrap().into(),

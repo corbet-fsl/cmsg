@@ -31,11 +31,11 @@ nix-shell tests/fixture/owner/check-shell.nix --run 'bash .ci/native-prover.sh'
 nix-shell tests/fixture/owner/check-shell.nix --run 'cargo test --locked --all-targets --no-run'
 fixture="${CARGO_TARGET_DIR:-tests/fixture/target}/debug/cmsg-foyer-fixture"
 export fixture
-# The foyer test edits the live policy, which invalidates every passport minted by the same fixture;
-# the initial-enrollment and Wallet tests each fill the fixture's bounded pending challenges.
-# Each of these gets its own fixture instance.
-own="foyer initial_enrollment wallet_enrollment"
-others=$(for t in tests/*.rs; do n=$(basename "$t" .rs); case " $own " in *" $n "*) ;; *) printf -- '--test %s ' "$n";; esac; done)
+# The foyer test edits the live policy, which invalidates every passport minted by the same fixture and
+# leaves its router running past the test, so it gets its own fixture instance and process. Every other
+# plain suite is the ONE `it` binary (its feature-gated modules are empty in this pass).
+own="foyer"
+others="--test it"
 export others
 status=0
 # Debug builds of the Wallet flows hold large futures on the test thread.
