@@ -48,12 +48,11 @@ python_env=$(nix build --no-link --print-out-paths --impure --expr '(builtins.ge
 test -n "$python_env" || { echo 'nix python selenium env resolution failed' >&2; exit 2; }
 PATH="$python_env/bin:$PATH"
 python3 -c 'import selenium; print(selenium.__version__)'
-export PROTO_HOME="$toolchains/proto" RUSTUP_HOME="$toolchains/rustup"
-shared_cargo_home=${CARGO_HOME:-}
-export CARGO_HOME="$toolchains/cargo" MOON_HOME="$state/moon-home"
+export PROTO_HOME="$toolchains/proto"
+export MOON_HOME="$state/moon-home"
 export PROTO_AUTO_CLEAN=false PROTO_TELEMETRY=false PROTO_YES=true
 export RUSTUP_INIT_SKIP_PATH_CHECK=yes RUSTUP_TOOLCHAIN=stable
-export PATH="$(dirname "$CCID_BIN"):$CARGO_HOME/bin:$PROTO_HOME/shims:$PROTO_HOME/bin:$PATH"
+export PATH="$(dirname "$CCID_BIN"):$PROTO_HOME/shims:$PROTO_HOME/bin:$PATH"
 export CI_JOBS="${CI_JOBS:-2}" CARGO_BUILD_JOBS="${CI_JOBS:-2}"
 export RUST_TEST_THREADS="${CI_TEST_THREADS:-2}"
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
@@ -81,7 +80,7 @@ toolchain_ensure
 # the per-repo fd 9 lock already held above), never into shared CARGO_HOME.
 export CARGO_INSTALL_ROOT="$state/install-bin"
 export PATH="$CARGO_INSTALL_ROOT/bin:$PATH"
-cargo_bin=$("$CARGO_HOME/bin/rustup" which --toolchain stable cargo)
+cargo_bin=$(rustup which --toolchain stable cargo)
 test -x "$cargo_bin"
 export PATH="$(dirname "$cargo_bin"):$PATH"
 export CCID_SOURCE_REVISION="$CI_COMMIT_SHA"
