@@ -718,3 +718,34 @@ async fn a_session_expiring_mid_join_restarts_the_device_and_the_join_completes(
     let (_, runtime) = embedded.into_parts();
     runtime.shutdown().await.unwrap();
 }
+
+/// Guard: with reqwest built on `rustls-no-provider` (reqwest 0.13 has no ring
+/// feature), `build()` panics while the process has no crypto provider. In a fresh
+/// process, where nothing has selected one yet, the native door client must
+/// select it itself.
+#[test]
+fn native_client_selects_its_tls_provider_in_a_fresh_process() {
+    const CHILD: &str = "CMSG_TLS_PROVIDER_CHILD";
+    const NAME: &str = "native_client_selects_its_tls_provider_in_a_fresh_process";
+    if std::env::var_os(CHILD).is_some() {
+        assert!(
+            rustls::crypto::CryptoProvider::get_default().is_none(),
+            "the child process must start without a crypto provider"
+        );
+        let token = ClientToken(Zeroizing::new("AAAA".into()));
+        assert!(Client::new("http://127.0.0.1:9", ORIGIN, token).is_ok());
+        return;
+    }
+    let (_, module) = module_path!().split_once("::").unwrap();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", &format!("{module}::{NAME}"), "--test-threads=1"])
+        .env(CHILD, "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains(" 1 passed"),
+        "fresh-process run failed:\n{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

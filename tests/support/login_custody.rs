@@ -111,6 +111,8 @@ async fn actual_login_custody_is_consumed_once_with_local_and_original_session_r
     // register_begin); the browser matrix keeps the fixture's pre-minted one.
     #[cfg(not(target_arch = "wasm32"))]
     let registration: &Value = &{
+        // Select the TLS provider at the build site (reqwest 0.13 has no ring feature).
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let minted = reqwest::Client::new()
             .post(fixture["custody_registration_mint"].as_str().unwrap())
             .send()

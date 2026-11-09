@@ -302,6 +302,8 @@ async fn real_owner_unknown_reply_oversize_and_cancellation_never_allow_blind_re
             Output::Ok { .. }
         ));
     }
+    // Select the TLS provider at the build site (reqwest 0.13 has no ring feature).
+    let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::Client::new()
         .post(format!("{base}/__release"))
         .send()

@@ -107,6 +107,8 @@ impl Fixture {
     async fn proof(&self, index: usize) -> Value {
         let root =
             reqwest::Certificate::from_der(include_bytes!("support/current-tls/ca.der")).unwrap();
+        // Select the TLS provider at the build site (reqwest 0.13 has no ring feature).
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let client = reqwest::Client::builder()
             .add_root_certificate(root)
             .redirect(reqwest::redirect::Policy::none())

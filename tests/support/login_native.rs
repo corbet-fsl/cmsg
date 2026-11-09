@@ -148,6 +148,8 @@ async fn unknown_session_result_and_cancelled_reply_fence_original_foyer() {
     let fault = &fixture["login_faults"];
     let base = fault["base"].as_str().unwrap();
     // Minted now, not at fixture start: the owner's login ceremonies live 300 s.
+    // Select the TLS provider at the build site (reqwest 0.13 has no ring feature).
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let minted = reqwest::Client::new()
         .post(format!("{base}/__requests"))
         .send()
@@ -258,6 +260,8 @@ async fn unknown_session_result_and_cancelled_reply_fence_original_foyer() {
         assert!(!door.logins.contains_key(&key));
         assert!(door.foyers[ORIGIN].uncertain);
     }
+    // Select the TLS provider at the build site (reqwest 0.13 has no ring feature).
+    let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::Client::new()
         .post(format!("{base}/__release"))
         .send()
