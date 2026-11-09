@@ -19,7 +19,7 @@ git -C "$tor_root/arti" checkout --quiet "$arti_revision"
 bindgen_dir="$tor_root/bindgen"
 mkdir -p "$bindgen_dir"
 archive="wasm-bindgen-${bindgen_version}-x86_64-unknown-linux-musl.tar.gz"
-base="https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${bindgen_version}"
+base="${WASM_BINDGEN_DOWNLOAD_BASE:-https://github.com/wasm-bindgen/wasm-bindgen/releases/download}/${bindgen_version}"
 (
   cd "$bindgen_dir"
   curl --fail --silent --show-error --location --retry 3 --remote-name "$base/$archive"

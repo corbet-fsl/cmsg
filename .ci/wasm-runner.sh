@@ -4,7 +4,7 @@ set -euo pipefail
 version=$(python3 -c 'import tomllib; p=tomllib.load(open("Cargo.lock","rb"))["package"]; v={x["version"] for x in p if x["name"]=="wasm-bindgen"}; assert len(v)==1; print(v.pop())')
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 archive="wasm-bindgen-${version}-x86_64-unknown-linux-musl.tar.gz"
-base="https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${version}"
+base="${WASM_BINDGEN_DOWNLOAD_BASE:-https://github.com/wasm-bindgen/wasm-bindgen/releases/download}/${version}"
 mkdir "$CI_ACCEPTANCE_ARTIFACTS/runner"
 cd "$CI_ACCEPTANCE_ARTIFACTS/runner"
 curl --user-agent dependency-ci --fail --location --retry 3 --remote-name "$base/$archive"
