@@ -86,7 +86,7 @@ cblv = { git = "https://git.corbet.ch/corbet-libre/cblv.git", branch = "main", f
 ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "main", default-features = false, optional = true }
 cbrd = { git = "https://git.corbet.ch/corbet-fsl/cbrd.git", branch = "main", default-features = false, features = ["browser"] }
 futures-channel = "0.3"
-gloo-timers = { version = "0.3", features = ["futures"] }
+gloo-timers = { version = "0.4", features = ["futures"] }
 futures-util = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
@@ -101,8 +101,8 @@ cpky = { git = "https://git.corbet.ch/corbet-libre/cpky.git", branch = "main", f
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 futures-util = "0.3"
-gloo-net = "0.6"
-gloo-timers = { version = "0.3", features = ["futures"] }
+gloo-net = "0.7"
+gloo-timers = { version = "0.4", features = ["futures"] }
 web-sys = { version = "0.3", features = ["Window", "Location"] }
 browser-coverage-runtime = { package = "browser-coverage-runtime-cmsg", path = ".ci/coverage-runtime" }
 wasm-bindgen-test = "0.3"
