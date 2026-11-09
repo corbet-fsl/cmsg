@@ -11,7 +11,7 @@ if len(owners) != 1:
     raise SystemExit("Expected exactly one resolved original verifier owner")
 owner = owners[0]
 if not re.fullmatch(
-    r"git\+https://git\.corbet\.ch/corbet-foss/czkp\?branch=main#[0-9a-f]{40}",
+    r"git\+https://git\.corbet\.ch/corbet-foss/czkp\.git\?branch=main#[0-9a-f]{40}",
     owner.get("source", ""),
 ):
     raise SystemExit("Expected the canonical resolved verifier owner")

@@ -16,7 +16,7 @@ class Selection(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.source = "git+https://git.corbet.ch/corbet-foss/ctrn.git?branch=v01#" + "a" * 40
+        self.source = "git+https://git.corbet.ch/corbet-foss/ctrn.git?branch=main#" + "a" * 40
         (self.root / "Cargo.toml").touch()
         (self.root / "Cargo.lock").write_text(f'[[package]]\nname="ctrn"\nversion="0.0.0"\nsource="{self.source}"\n')
         self.owner = self.root / "owner"
@@ -48,7 +48,7 @@ class Selection(unittest.TestCase):
         self.assertEqual((source,script,target,executable),(self.source,self.script,self.target,self.executable))
 
     def test_wrong_source_lock_and_duplicate_owner_refuse(self):
-        for source in [self.source.replace("v01","main"),self.source.replace("git.corbet.ch","github.com"),
+        for source in [self.source.replace("branch=main","branch=v01"),self.source.replace("git.corbet.ch","github.com"),
                        self.source.replace("a"*40,"b"*40)]:
             with self.subTest(source=source):
                 self.metadata["packages"][0]["source"] = source

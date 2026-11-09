@@ -20,7 +20,7 @@ def inputs(root, metadata, artifacts):
     if len(owners) != 1 or len(consumers) != 1:
         raise ValueError("expected exact original transport and consumer identities")
     owner, consumer = owners[0], consumers[0]
-    if not re.fullmatch(r"git\+https://git\.corbet\.ch/corbet-foss/ctrn\.git\?branch=v01#[0-9a-f]{40}", owner["source"]):
+    if not re.fullmatch(r"git\+https://git\.corbet\.ch/corbet-foss/ctrn\.git\?branch=main#[0-9a-f]{40}", owner["source"]):
         raise ValueError("unexpected original transport source")
     lock = tomllib.loads((root / "Cargo.lock").read_text())
     locked = [p for p in lock["package"] if p["name"] == "ctrn"]
