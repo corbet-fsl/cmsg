@@ -12,7 +12,10 @@ if len(owners) != 1:
     raise SystemExit("Expected exactly one resolved door owner")
 owner = owners[0]
 runtime = json.loads(Path("runtime-metadata.json").read_text())
-client_owners = [p for p in runtime["packages"] if p["name"] == "cvld"]
+# The production client reaches the door through cvld's client half: the package `cvld-client` (split out of
+# `cvld` on 2026-11-09) or, in older graphs, `cvld` itself. Either way it must come from the door owner's source.
+DOOR_CLIENT_NAMES = ("cvld", "cvld-client")
+client_owners = [p for p in runtime["packages"] if p["name"] in DOOR_CLIENT_NAMES]
 candidate = None
 if os.environ.get('CHECKS') == 'browser-package-candidates':
     from browser_candidates import candidate_door, sha
@@ -22,7 +25,9 @@ else:
     # carries the `.git` suffix; accept both spellings so a lock refreshed before or after the move passes.
     if not re.fullmatch(r"git\+https://git\.corbet\.ch/corbet-(?:libs|fsl)/cvld(?:\.git)?\?branch=main#[0-9a-f]{40}", owner["source"]):
         raise SystemExit("Expected a resolved main revision of the door owner")
-    if len(client_owners) != 1 or client_owners[0]["source"] != owner["source"]:
+    # One package per name, every one of them from exactly the fixture's door source.
+    client_names = [p["name"] for p in client_owners]
+    if not client_owners or len(set(client_names)) != len(client_names) or any(p["source"] != owner["source"] for p in client_owners):
         raise SystemExit("Fixture and production client must use exactly the same door source")
 source = Path(owner["manifest_path"]).parent.resolve()
 destination = Path("tests/fixture/owner")

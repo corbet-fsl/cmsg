@@ -115,7 +115,8 @@ def verify_graphs(composition=None):
                         'metadata and lock disagree on first-party identity')
                 identities[label][name] = identity
         if label == 'runtime':
-            cvld = {p['id'] for p in graph['packages'] if p['name'] == 'cvld'}
+            # cvld's client half arrives as `cvld-client` (since 2026-11-09) or, in older graphs, as `cvld`.
+            cvld = {p['id'] for p in graph['packages'] if p['name'] in ('cvld', 'cvld-client')}
             require(all('development-gate' not in n['features'] for n in graph['resolve']['nodes']
                         if n['id'] in cvld), 'development gate entered production runtime graph')
     for name in identities['runtime'].keys() & identities['fixture'].keys():

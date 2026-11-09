@@ -3,6 +3,7 @@
 set -euo pipefail
 cargo metadata --locked --format-version 1 > runtime-metadata.json
 cargo metadata --locked --manifest-path tests/fixture/Cargo.toml --format-version 1 > fixture-metadata.json
+python3 -B .ci/test-copy-foyer-fixture.py
 python3 .ci/copy-foyer-fixture.py
 if [[ "${CHECKS:-}" == "browser-package-candidates" ]]; then
     cargo build --locked --manifest-path tests/fixture/Cargo.toml
