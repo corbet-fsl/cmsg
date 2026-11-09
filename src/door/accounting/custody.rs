@@ -290,6 +290,52 @@ where
         }
     }
 
+    /// The delegation record (state byte + the exact delegation this device last
+    /// signed) from its own Vault record, read after fresh original Keys
+    /// authority. `None` when none is stored.
+    pub async fn delegation_outbox(&mut self) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
+        let origin = self.origin.clone();
+        self.check(&origin).await?;
+        self.vault()
+            .await?
+            .delegation_outbox()
+            .await
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            })
+    }
+
+    /// Replace the delegation record by compare-and-swap against what the caller
+    /// read. A lost race writes nothing and is `Reconcile`.
+    pub async fn replace_delegation_outbox(
+        &mut self,
+        expected: Option<&[u8]>,
+        record: &[u8],
+    ) -> Result<()> {
+        let origin = self.origin.clone();
+        self.check(&origin).await?;
+        match self
+            .vault()
+            .await?
+            .replace_delegation_outbox(expected, record)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(cvlt::CredentialError::Conflict) => Err(ErrorCode::Reconcile),
+            Err(cvlt::CredentialError::Invalid) => Err(ErrorCode::Refused),
+            Err(__cause) => {
+                crate::door::cause::print(file!(), line!(), "Err ErrorCode::Unavailable", &__cause);
+                Err(ErrorCode::Unavailable)
+            }
+        }
+    }
+
     /// The voucher custody record (link secrets, bond nonces, bonds), read after
     /// fresh original Keys authority.
     pub async fn voucher_custody(&mut self) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {

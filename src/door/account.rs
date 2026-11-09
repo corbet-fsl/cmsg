@@ -695,9 +695,11 @@ mod run {
     use super::super::vouching::Book;
     use super::super::{
         accounting::{
-            existing_active, has_pending, issue_account_admission, voucher_remaining,
-            AcceptedResponse, AccountAdmission, AccountingIntents, CheckpointAcquisition,
-            CommunityAccount, CurrentEnrollment, Elapsed, SignedApplyExtended, SubmittedEnrollment,
+            existing_active, has_pending, issue_account_admission, refresh_delegation,
+            registered_delegation, sent_delegation, voucher_remaining, AcceptedResponse,
+            AccountAdmission, AccountingIntents, CheckpointAcquisition, CommunityAccount,
+            CurrentEnrollment, Delegations, Elapsed, GrantDay, PreparedEnrollment, Refreshed,
+            SignedApplyExtended, SubmittedEnrollment,
         },
         actor::Mailbox,
         custody::SystemClock,
@@ -989,7 +991,8 @@ mod run {
         }
     }
 
-    /// Register the account's record recipient under one fresh admission.
+    /// Register the account's record recipient under one fresh admission, then
+    /// refresh the account delegation under the same admission.
     async fn record_recipient<B, C, E, A, R, GB, GC, GE, GA, GR, G>(
         parts: &mut Fresh<'_, B, C, E, A, R, GB, GC, GE, GA, GR, G>,
         intents: &mut AccountingIntents,
@@ -1020,9 +1023,99 @@ mod run {
             .account
             .store_community_credential(admission.community_credential())
             .await?;
-        admission
+        let recipient = admission
             .register_record_recipient(&mut *parts.account, intents)
-            .await
+            .await;
+        // The daily delegation refresh (decision (b), part 3) under the same fresh
+        // admission: at most one new delegation per grant day, never without one.
+        let mut reissue = Reissue {
+            held: Held::Admitted(admission),
+            account: &mut *parts.account,
+            intents,
+        };
+        match refresh_delegation(&mut reissue).await {
+            Ok(Refreshed::Current) => {}
+            Ok(done) => eprintln!("account actor: delegation refresh: {done:?}"),
+            Err(error) => eprintln!("account actor: delegation refresh: {error:?}"),
+        }
+        recipient
+    }
+
+    /// Where one login's delegation refresh stands with its admission.
+    enum Held<'p> {
+        Admitted(AccountAdmission<'p>),
+        Prepared(PreparedEnrollment<'p>),
+        Spent,
+    }
+
+    /// One login's delegation refresh: the held admission, the account custody
+    /// (its delegation record) and the single-use intents.
+    struct Reissue<'a, 'p, B: cwst::backend::Backend, C, E, A, R> {
+        held: Held<'p>,
+        account: &'a mut CommunityAccount<B, C, E, A, R>,
+        intents: &'a mut AccountingIntents,
+    }
+
+    impl<B, C, E, A, R> Delegations for Reissue<'_, '_, B, C, E, A, R>
+    where
+        B: cwst::backend::Backend,
+        C: Clock,
+        E: Entropy,
+        A: Authority,
+        R: Records,
+    {
+        async fn record(&mut self) -> Result<Option<Vec<u8>>> {
+            Ok(self
+                .account
+                .delegation_outbox()
+                .await?
+                .map(|bytes| bytes.to_vec()))
+        }
+        async fn replace(&mut self, expected: Option<&[u8]>, record: &[u8]) -> Result<()> {
+            self.account
+                .replace_delegation_outbox(expected, record)
+                .await
+        }
+        fn grant(&mut self) -> Result<GrantDay> {
+            match &mut self.held {
+                Held::Admitted(admission) => admission.grant_day(),
+                _ => Err(ErrorCode::Reconcile),
+            }
+        }
+        fn resendable(&mut self, delegation: &[u8]) -> bool {
+            match &mut self.held {
+                Held::Admitted(admission) => admission.resendable(delegation),
+                _ => false,
+            }
+        }
+        async fn sign(&mut self) -> Result<Vec<u8>> {
+            let Held::Admitted(admission) = std::mem::replace(&mut self.held, Held::Spent) else {
+                return Err(ErrorCode::Reconcile);
+            };
+            let prepared = admission
+                .delegate(&mut *self.account, &mut *self.intents)
+                .await
+                .map_err(trace("delegation refresh: delegate"))?;
+            let bytes = prepared.delegation_bytes()?;
+            self.held = Held::Prepared(prepared);
+            Ok(bytes)
+        }
+        async fn send(&mut self, delegation: &[u8]) -> Result<()> {
+            match std::mem::replace(&mut self.held, Held::Spent) {
+                Held::Admitted(mut admission) => {
+                    let sent = admission.resubmit(delegation).await;
+                    self.held = Held::Admitted(admission);
+                    sent
+                }
+                Held::Prepared(prepared) => {
+                    if prepared.delegation_bytes()? != delegation {
+                        return Err(ErrorCode::Reconcile);
+                    }
+                    prepared.submit().await.map(|_| ())
+                }
+                Held::Spent => Err(ErrorCode::Reconcile),
+            }
+        }
     }
 
     /// The actor's view of the enrollment while one admission is held.
@@ -1665,10 +1758,29 @@ mod run {
                             .delegate(account, intents)
                             .await
                             .map_err(trace("delegate"))?;
+                        // The delegation record is written before the delegation is
+                        // sent, so the daily refresh knows this grant day is covered
+                        // and a lost answer is resent with the identical bytes.
+                        let bytes = prepared.delegation_bytes()?;
+                        let stored = account.delegation_outbox().await?.map(|b| b.to_vec());
+                        let pending = sent_delegation(&bytes);
+                        account
+                            .replace_delegation_outbox(stored.as_deref(), &pending)
+                            .await
+                            .map_err(trace("delegation record"))?;
                         let submitted = prepared
                             .submit_for_initialization()
                             .await
                             .map_err(trace("submit"))?;
+                        // A failed acknowledgement leaves `Sent`: the next login
+                        // resends the identical bytes, which the registry accepts again.
+                        let _ = account
+                            .replace_delegation_outbox(
+                                Some(&pending),
+                                &registered_delegation(&bytes),
+                            )
+                            .await
+                            .map_err(trace("delegation record"));
                         checkpoint(stage, submitted)
                             .await
                             .map_err(trace("checkpoint"))

@@ -17,6 +17,14 @@ mod genesis;
 mod lifecycle;
 mod pending;
 mod recipient;
+#[cfg_attr(
+    not(any(
+        all(feature = "native-prover", not(target_arch = "wasm32")),
+        all(feature = "browser-prover", target_arch = "wasm32")
+    )),
+    allow(dead_code)
+)]
+mod refresh;
 mod request;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub use activation::{prove as prove_activation, NativeActivationProver};
@@ -40,6 +48,14 @@ pub use genesis::{ProvenAccount, StagedRequest};
 ))]
 pub use lifecycle::{existing_active, has_pending, voucher_remaining, Activated, Elapsed};
 pub use pending::PendingBinding;
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    all(feature = "browser-prover", target_arch = "wasm32")
+))]
+pub(in crate::door) use refresh::{
+    refresh as refresh_delegation, registered as registered_delegation, sent as sent_delegation,
+    Delegations, GrantDay, Refreshed,
+};
 #[cfg(test)]
 pub(super) use request::fixtures as update_fixtures;
 pub use request::outbox_request_id;
@@ -784,26 +800,7 @@ impl<'p> PreparedEnrollment<'p> {
     }
 
     fn expected_entry(&mut self) -> Result<enrollment::EnrollmentEntry> {
-        let current = self.admission.current()?;
-        let verified = enrollment::verify_delegation(
-            &self.delegation,
-            enrollment::ExpectedAdmission {
-                trust: &current.trust,
-                policy_epoch: self.admission.cohort.epoch,
-                passport_policy_digest: &self.admission.cohort.digest,
-            },
-            current.now,
-        )
-        .map_err(|__cause| {
-            crate::door::cause::emit(
-                file!(),
-                line!(),
-                "ErrorCode::Unauthorized",
-                ErrorCode::Unauthorized,
-                &__cause,
-            )
-        })?;
-        Ok(enrollment::EnrollmentEntry::from_verified(&verified))
+        self.admission.verified_entry(&self.delegation)
     }
     /// Reborrow the exact public original request only while the retained owner
     /// still verifies it. The recipient must independently perform original
