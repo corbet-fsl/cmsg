@@ -102,7 +102,7 @@ def self_test():
     rejects(check_lock, [package('csgn', 'https://github.com/corbet-foss/csgn', 'main')])
     rejects(check_lock, [package('alias', shared, 'main')])
     rejects(check_lock, [package('cwlt-engine', 'https://git.corbet.ch/corbet-foss/ckmg.git', 'v01')])
-    check_lock([package('cwlt-engine', 'https://git.corbet.ch/corbet-foss/cwlt', 'main'),
+    check_lock([package('cwlt-engine', 'https://git.corbet.ch/corbet-libre/cwlt', 'main'),
                 package('cprz-pad', 'https://git.corbet.ch/corbet-foss/cprz.git', 'v01')])
     for declaration in ({'git': shared}, {'git': shared, 'rev': 'a' * 40},
                         {'git': shared, 'branch': 'other'},

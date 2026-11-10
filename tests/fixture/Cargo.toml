@@ -18,7 +18,7 @@ cpsd = { git = "https://git.corbet.ch/corbet-libre/cpsd.git", branch = "main", d
 csgn = { git = "https://git.corbet.ch/corbet-libre/csgn.git", branch = "main", features = ["libsql"] }
 cgbl = { git = "https://git.corbet.ch/corbet-fsl/cgbl.git", branch = "main" }
 ckyh = { git = "https://git.corbet.ch/corbet-libre/ckyh.git", branch = "main" }
-cvch = { git = "https://git.corbet.ch/corbet-foss/cvch.git", branch = "main" }
+cvch = { git = "https://git.corbet.ch/corbet-libre/cvch.git", branch = "main" }
 cpns = { git = "https://git.corbet.ch/corbet-libre/cpns.git", branch = "main" }
 ed25519-dalek = "2"
 axum = "0.8"

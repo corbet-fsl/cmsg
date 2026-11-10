@@ -36,8 +36,8 @@ cblc = { git = "https://git.corbet.ch/corbet-fsl/cblc.git", branch = "main", def
 # The Charter's newest-known Balance floor (revision rollback, same-revision equivocation)
 # fences a publication carried on an account answer exactly as the Charter fences its own.
 cbcn = { git = "https://git.corbet.ch/corbet-libre/cbcn.git", branch = "main" }
-cwlt = { git = "https://git.corbet.ch/corbet-foss/cwlt.git", branch = "main", default-features = false, features = ["passport", "wave", "schema"] }
-czkp = { git = "https://git.corbet.ch/corbet-foss/czkp.git", branch = "main" }
+cwlt = { git = "https://git.corbet.ch/corbet-libre/cwlt.git", branch = "main", default-features = false, features = ["passport", "wave", "schema"] }
+czkp = { git = "https://git.corbet.ch/corbet-libre/czkp.git", branch = "main" }
 ckyh = { git = "https://git.corbet.ch/corbet-libre/ckyh.git", branch = "main", default-features = false }
 cchr = { git = "https://git.corbet.ch/corbet-libre/cchr.git", branch = "main" }
 cpfl = { git = "https://git.corbet.ch/corbet-libre/cpfl.git", branch = "main" }
@@ -52,7 +52,7 @@ cnbx = { git = "https://git.corbet.ch/corbet-fsl/cnbx.git", branch = "main" }
 ctcs = { git = "https://git.corbet.ch/corbet-libre/ctcs.git", branch = "main" }
 cthr = { git = "https://git.corbet.ch/corbet-libre/cthr.git", branch = "main" }
 ckmg = { git = "https://git.corbet.ch/corbet-libre/ckmg.git", branch = "main", features = ["profile-envelope"] }
-cwst = { git = "https://git.corbet.ch/corbet-foss/cwst.git", branch = "main" }
+cwst = { git = "https://git.corbet.ch/corbet-libre/cwst.git", branch = "main" }
 ctnd = { git = "https://git.corbet.ch/corbet-libre/ctnd.git", branch = "main" }
 schemars = "1"
 url = "2"
@@ -62,13 +62,13 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 sha2 = "0.10"
 data-encoding = "2.9"
-cvch = { git = "https://git.corbet.ch/corbet-foss/cvch.git", branch = "main" }
+cvch = { git = "https://git.corbet.ch/corbet-libre/cvch.git", branch = "main" }
 hpke = { version = "0.14", default-features = false, features = ["alloc", "x25519", "chacha", "getrandom"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpky = { git = "https://git.corbet.ch/corbet-libre/cpky.git", branch = "main", optional = true, features = ["embedded-authenticator"] }
-ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "main", optional = true }
-cvfy = { git = "https://git.corbet.ch/corbet-foss/cvfy.git", branch = "main", optional = true }
+ctrn = { git = "https://git.corbet.ch/corbet-libre/ctrn.git", branch = "main", optional = true }
+cvfy = { git = "https://git.corbet.ch/corbet-libre/cvfy.git", branch = "main", optional = true }
 arti-client = { version = "0.46", default-features = false, optional = true }
 tor-rtcompat = { version = "0.46", default-features = false, features = ["tokio", "rustls"], optional = true }
 tor-hscrypto = { version = "0.46", default-features = false, optional = true }
@@ -83,7 +83,7 @@ tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "net", "io-
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 cblv = { git = "https://git.corbet.ch/corbet-libre/cblv.git", branch = "main", features = ["browser"], optional = true }
-ctrn = { git = "https://git.corbet.ch/corbet-foss/ctrn.git", branch = "main", default-features = false, optional = true }
+ctrn = { git = "https://git.corbet.ch/corbet-libre/ctrn.git", branch = "main", default-features = false, optional = true }
 cbrd = { git = "https://git.corbet.ch/corbet-fsl/cbrd.git", branch = "main", default-features = false, features = ["browser"] }
 futures-channel = "0.3"
 gloo-timers = { version = "0.4", features = ["futures"] }

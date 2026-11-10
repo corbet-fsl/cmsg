@@ -16,7 +16,7 @@ class Selection(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.source = "git+https://git.corbet.ch/corbet-foss/ctrn.git?branch=main#" + "a" * 40
+        self.source = "git+https://git.corbet.ch/corbet-libre/ctrn.git?branch=main#" + "a" * 40
         (self.root / "Cargo.toml").touch()
         (self.root / "Cargo.lock").write_text(f'[[package]]\nname="ctrn"\nversion="0.0.0"\nsource="{self.source}"\n')
         self.owner = self.root / "owner"
