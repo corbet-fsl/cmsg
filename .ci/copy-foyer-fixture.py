@@ -23,7 +23,7 @@ if os.environ.get('CHECKS') == 'browser-package-candidates':
 else:
     # The lock names the door owner by its canonical forge path (corbet-libs -> corbet-fsl on 2026-11-09) and
     # carries the `.git` suffix; accept both spellings so a lock refreshed before or after the move passes.
-    if not re.fullmatch(r"git\+https://git\.corbet\.ch/corbet-(?:libs|fsl)/cvld(?:\.git)?\?branch=main#[0-9a-f]{40}", owner["source"]):
+    if not re.fullmatch(r"git\+https://git\.corbet\.ch/corbet-fsl/cvld(?:\.git)?\?branch=main#[0-9a-f]{40}", owner["source"]):
         raise SystemExit("Expected a resolved main revision of the door owner")
     # One package per name, every one of them from exactly the fixture's door source.
     client_names = [p["name"] for p in client_owners]

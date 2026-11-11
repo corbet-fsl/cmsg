@@ -7,17 +7,10 @@ import tomllib
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-FIRST_PARTY = re.compile(r"^(?:git\+)?https?://(?:github\.com/(?:corbet-(?:foss|libs)|cmtymeet)|git\.corbet\.ch/(?:corbet-(?:foss|libs|libre|fsl)|cmty(?:meet|mt)))/")
-CANONICAL = re.compile(r"^https://git\.corbet\.ch/(corbet-(?:foss|libs|libre|fsl))/([a-z][a-z0-9-]*)(\.git)?$")
+FIRST_PARTY = re.compile(r"^(?:git\+)?https?://(?:github\.com/(?:corbet-(?:libre|fsl)|cmtymeet)|git\.corbet\.ch/(?:corbet-(?:libre|fsl)|cmty(?:meet|mt)))/")
+CANONICAL = re.compile(r"^https://git\.corbet\.ch/(corbet-(?:libre|fsl))/([a-z][a-z0-9-]*)(\.git)?$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
-# These retained original owners are deliberately v01. Shared owners use main;
-# accepting another branch or URL spelling is not an integration repair.
-# The v01 original-owner and main-suffix exceptions ended with the 2026-11 org
-# move: every first-party pin is branch = main at its new owner, with or without
-# the historical `.git` suffix. The transitional CANONICAL still matches the
-# retired owners until their last pins refresh away.
-SIBLINGS = {'cprz-blob': 'cprz', 'cprz-pad': 'cprz', 'cwlt-engine': 'cwlt',
-            'cvld-client': 'cvld'}
+SIBLINGS = {'cprz-blob': 'cprz', 'cprz-pad': 'cprz', 'cwlt-engine': 'cwlt', 'cvld-client': 'cvld'}
 
 
 def owner_branch(repo, package):
@@ -27,6 +20,8 @@ def owner_branch(repo, package):
     group, slug, suffix = matched.groups()
     if SIBLINGS.get(package, package) != slug:
         raise ValueError(f'Package {package} differs from its original repository owner')
+    if suffix not in (None, '.git'):
+        raise ValueError(f'Incorrect canonical owner URL for {package}')
     return 'main'
 
 
@@ -76,28 +71,27 @@ def self_test():
     def package(name, repo, branch):
         return {'name': name, 'source': 'git+' + repo + '?branch=' + branch + '#' + 'a' * 40}
     main = package('csgn', shared, 'main')
-    second = package('cdht', original, 'main')
-    check_lock([main, second, {'name': 'local'}])
-    for record in [main, second]:
+    retained = package('cdht', original, 'main')
+    check_lock([main, retained, {'name': 'local'}])
+    for record in [main, retained]:
         name, source = record['name'], record['source']
+        branch = 'main'
         for packages in ([record, record], [record, {'name': name}],
                          [record, dict(record, source=source[:-1] + 'b')],
-                         [dict(record, source=source.replace('branch=main', 'branch=other'))],
-                         [dict(record, source=source.replace('branch=main', 'branch=v01'))],
-                         [dict(record, source=source.replace('branch=main', 'tag=v1'))],
+                         [dict(record, source=source.replace('branch=' + branch, 'branch=other'))],
+                         [dict(record, source=source.replace('branch=' + branch, 'tag=v1'))],
                          [dict(record, source=source.replace('#' + 'a' * 40, '#short'))],
-                         [dict(record, source=source.replace('branch=main', 'branch=main&branch=main'))]):
+                         [dict(record, source=source.replace('branch=' + branch, 'branch=' + branch + '&branch=' + branch))]):
             rejects(check_lock, packages)
-    rejects(check_lock, [package('csgn', shared, 'v01')])
-    rejects(check_lock, [package('cdht', original, 'v01')])
-    rejects(check_lock, [package('csgn', 'https://github.com/corbet-foss/csgn', 'main')])
+    rejects(check_lock, [package('csgn', shared + '.git', 'v01')])
+    rejects(check_lock, [package('cdht', original.replace('git.corbet.ch', 'github.com'), 'main')])
+    rejects(check_lock, [package('csgn', 'https://github.com/corbet-libre/csgn', 'main')])
     rejects(check_lock, [package('alias', shared, 'main')])
     rejects(check_lock, [package('cwlt-engine', 'https://git.corbet.ch/corbet-libre/ckmg.git', 'v01')])
     check_lock([package('cwlt-engine', 'https://git.corbet.ch/corbet-libre/cwlt', 'main'),
                 package('cprz-pad', 'https://git.corbet.ch/corbet-libre/cprz.git', 'main')])
     for declaration in ({'git': shared}, {'git': shared, 'rev': 'a' * 40},
                         {'git': shared, 'branch': 'other'},
-                        {'git': shared, 'branch': 'v01'},
                         {'git': shared, 'branch': 'main', 'rev': 'a' * 40},
                         {'git': shared, 'branch': 'main', 'tag': 'v1'},
                         {'git': shared, 'branch': 'main', 'path': '.'}):
@@ -109,7 +103,7 @@ def self_test():
 
 def check_first_party_orgs():
     """Every current owner resolves on the canonical forge; github.com keeps its former owners."""
-    for owner in ('corbet-foss', 'corbet-libs', 'corbet-libre', 'corbet-fsl',
+    for owner in ('corbet-libre', 'corbet-fsl',
                   'cmtymeet', 'cmtymt'):
         url = f'https://git.corbet.ch/{owner}/example'
         if not FIRST_PARTY.match(url):
@@ -118,8 +112,6 @@ def check_first_party_orgs():
                 'https://user@git.corbet.ch/corbet-libre/example',
                 'https://git.corbet.ch:443/corbet-libre/example',
                 'https://git.corbet.ch/corbet-libre.evil/example',
-                'https://github.com/corbet-libre/example',
-                'https://github.com/corbet-fsl/example',
                 'https://github.com/cmtymt/example'):
         if FIRST_PARTY.match(url):
             raise AssertionError(f'Invalid first-party owner accepted: {url}')
