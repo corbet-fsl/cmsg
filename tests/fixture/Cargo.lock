@@ -1096,7 +1096,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-fsl/cblc.git?branch=main#8aeb279703b7b1ddd539bbc1f45de80d8ede9eb3"
+source = "git+https://git.corbet.ch/corbet-fsl/cblc.git?branch=main#53826f483489c76fcd5a0040c9ea5d6c731ca772"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1149,7 +1149,7 @@ dependencies = [
 [[package]]
 name = "cchr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cchr.git?branch=main#6bcd847c8e6cb493949d543b4b1b0ac17607170e"
+source = "git+https://git.corbet.ch/corbet-libre/cchr.git?branch=main#881fe94d524eedf8995dad398f54967dc4c08884"
 dependencies = [
  "blake3",
  "cbcn",
@@ -2150,7 +2150,7 @@ dependencies = [
 [[package]]
 name = "cvld"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-fsl/cvld.git?branch=main#006cbe044a6f2d46ef46aa22a15bc16e1564a4ec"
+source = "git+https://git.corbet.ch/corbet-fsl/cvld.git?branch=main#3a410edc4dc6815fb1793905b244ebc235c15b8b"
 dependencies = [
  "axum",
  "cblc",
@@ -2202,7 +2202,7 @@ dependencies = [
 [[package]]
 name = "cvld-client"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-fsl/cvld.git?branch=main#006cbe044a6f2d46ef46aa22a15bc16e1564a4ec"
+source = "git+https://git.corbet.ch/corbet-fsl/cvld.git?branch=main#3a410edc4dc6815fb1793905b244ebc235c15b8b"
 dependencies = [
  "any_ascii",
  "axum",
@@ -5643,9 +5643,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pki-types"
-version = "1.15.1"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f4925028c7eb5d1fcdaf196971378ed9d2c1c4efc7dc5d011256f76c99c0a96"
+checksum = "102f35f7de7b06d8c61f1cff6592f5253e0dea431c74867aad5dfd70f44663fb"
 dependencies = [
  "web-time",
  "zeroize",
@@ -6458,7 +6458,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",
