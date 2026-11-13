@@ -143,7 +143,7 @@ pub(in crate::door) async fn profile_publish(
         .ok_or(ErrorCode::Unauthorized)?
         .origin
         .clone();
-    crate::door::transient::absorb(door, &origin, async |door: &mut Door| {
+    crate::door::transient::absorb(door, "profile publish", &origin, async |door: &mut Door| {
         publish_once(door, key, request.clone()).await
     })
     .await

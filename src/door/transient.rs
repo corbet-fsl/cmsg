@@ -15,16 +15,30 @@
 //! budget is the origin's account session: a repeat whose pause would not end
 //! before that session's deadline is not started, and the last typed error is
 //! returned. Nothing here locks a key.
-use super::{Door, ErrorCode, Result};
+use super::{cause::kind, Door, ErrorCode, Result};
 
 /// At most this many attempts of one operation (the first one included).
 pub(super) const ATTEMPTS: u32 = 4;
 /// The pause before the second attempt; it doubles for every further one.
 pub(super) const FIRST_PAUSE_SECONDS: u64 = 1;
 
-/// Run `attempt` and repeat it on a transient error while the budget lasts.
+/// Run `attempt` and repeat it on a transient error while the budget lasts. Every
+/// absorbed error is logged in every build (L20261113a, [`warn`]): one line per repeat
+/// naming `step`, and one more when an attempt after a repeat still fails.
 pub(super) async fn absorb<T>(
     door: &mut Door,
+    step: &'static str,
+    origin: &str,
+    attempt: impl AsyncFnMut(&mut Door) -> Result<T>,
+) -> Result<T> {
+    absorb_logged(warn, door, step, origin, attempt).await
+}
+
+/// [`absorb`] with its log sink as a parameter (the tests read the lines).
+pub(super) async fn absorb_logged<T>(
+    mut log: impl FnMut(&str),
+    door: &mut Door,
+    step: &'static str,
     origin: &str,
     mut attempt: impl AsyncFnMut(&mut Door) -> Result<T>,
 ) -> Result<T> {
@@ -39,11 +53,40 @@ pub(super) async fn absorb<T>(
         );
         let error = match result {
             Err(error @ (ErrorCode::Unavailable | ErrorCode::Reconcile)) => error,
+            Err(error) => {
+                if attempts > 1 {
+                    log(&failed_line(
+                        "action",
+                        step,
+                        attempts,
+                        ATTEMPTS,
+                        &kind(&error),
+                    ));
+                }
+                return Err(error);
+            }
             done => return done,
         };
         if attempts >= ATTEMPTS || !runway(door, origin, pause) || !wait(pause).await {
+            if attempts > 1 {
+                log(&failed_line(
+                    "action",
+                    step,
+                    attempts,
+                    ATTEMPTS,
+                    &kind(&error),
+                ));
+            }
             return Err(error);
         }
+        log(&repeat_line(
+            "action",
+            step,
+            attempts,
+            ATTEMPTS,
+            &kind(&error),
+            pause,
+        ));
         // Development gate only: name the absorbed kind, never a value.
         super::cause::print(file!(), line!(), "transient repeated", &error);
         attempts += 1;
@@ -94,12 +137,25 @@ async fn repeat_start_logged<T, E: StartError>(
             Err(error) if error.transient() && attempts < START_ATTEMPTS => error,
             Err(error) => {
                 if attempts > 1 {
-                    log(&failed_line(&error, attempts));
+                    log(&failed_line(
+                        "start step",
+                        error.step(),
+                        attempts,
+                        START_ATTEMPTS,
+                        &error.kind(),
+                    ));
                 }
                 return Err(error);
             }
         };
-        log(&repeat_line(&error, attempts, pause));
+        log(&repeat_line(
+            "start step",
+            error.step(),
+            attempts,
+            START_ATTEMPTS,
+            &error.kind(),
+            pause,
+        ));
         // Development gate only: name the repeated kind, never a value.
         super::cause::print(file!(), line!(), "start transient repeated", &error);
         start_pause(pause).await;
@@ -108,23 +164,18 @@ async fn repeat_start_logged<T, E: StartError>(
     }
 }
 
-/// The warn line of one repeat: step, attempt n of N, error kind and the pause before
-/// the next attempt. Fixed names and counters only.
-fn repeat_line(error: &impl StartError, attempt: u32, wait: u64) -> String {
+/// The warn line of one repeat of a start step or an action: step, attempt n of N, the
+/// error's variant name and the pause before the next attempt. Fixed names and counters
+/// only, never a value.
+fn repeat_line(what: &str, step: &str, attempt: u32, of: u32, kind: &str, wait: u64) -> String {
     format!(
-        "warn: start step repeated: step=\"{}\" attempt={attempt}/{START_ATTEMPTS} kind={} wait={wait}s",
-        error.step(),
-        error.kind()
+        "warn: {what} repeated: step=\"{step}\" attempt={attempt}/{of} kind={kind} wait={wait}s"
     )
 }
 
-/// The warn line of a start that still fails after at least one repeat.
-fn failed_line(error: &impl StartError, attempt: u32) -> String {
-    format!(
-        "warn: start step failed after repeats: step=\"{}\" attempt={attempt}/{START_ATTEMPTS} kind={}",
-        error.step(),
-        error.kind()
-    )
+/// The warn line of a start step or action that still fails after at least one repeat.
+fn failed_line(what: &str, step: &str, attempt: u32, of: u32, kind: &str) -> String {
+    format!("warn: {what} failed after repeats: step=\"{step}\" attempt={attempt}/{of} kind={kind}")
 }
 
 /// The crate's log of a device: stderr natively, as in every other device line.

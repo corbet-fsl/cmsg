@@ -460,14 +460,14 @@ async fn community_join(
     // the server state (every step is an idempotent state), never carried over.
     // A transient refusal (Unavailable, Reconcile) repeats the join inside the
     // session's own deadline: every step is idempotent on the server.
-    let joined = transient::absorb(door, &origin, async |door: &mut Door| {
+    let joined = transient::absorb(door, "community join", &origin, async |door: &mut Door| {
         join_once(door, key, request.clone()).await
     })
     .await;
     match joined {
         Err(ErrorCode::SessionExpired) if door.session_renewal.is_some() => {
             renew_session(door, &origin).await?;
-            transient::absorb(door, &origin, async |door: &mut Door| {
+            transient::absorb(door, "community join", &origin, async |door: &mut Door| {
                 join_once(door, key, request.clone()).await
             })
             .await
@@ -957,6 +957,18 @@ mod session_tests {
         answer(command)
     }
 
+    /// The first Open answers Reconcile, every later one a deterministic refusal.
+    fn reconcile_then_unauthorized(command: &Command, now: &AtomicU64) -> Reply {
+        if matches!(command, Command::Open) {
+            if now.load(Ordering::SeqCst) == 1_000 {
+                now.fetch_add(1, Ordering::SeqCst);
+                return Err(ErrorCode::Reconcile);
+            }
+            return Err(ErrorCode::Unauthorized);
+        }
+        answer(command)
+    }
+
     /// Open answers a deterministic refusal.
     fn unauthorized_open(command: &Command, _: &AtomicU64) -> Reply {
         if matches!(command, Command::Open) {
@@ -1018,6 +1030,79 @@ mod session_tests {
             Some(ErrorCode::Unauthorized)
         );
         assert_eq!(s.old.load(Ordering::SeqCst), UP_TO_OPEN);
+    }
+
+    /// One join through the absorb with a log sink: its result and the warn lines.
+    async fn join_logged(door: &mut Door) -> (Result<Joined>, Vec<String>) {
+        let origin = super::origin(door, &KEY).expect("origin").to_owned();
+        let mut lines = Vec::new();
+        let joined = transient::absorb_logged(
+            |line: &str| lines.push(line.to_owned()),
+            door,
+            "community join",
+            &origin,
+            async |door: &mut Door| join_once(door, &KEY, Default::default()).await,
+        )
+        .await
+        .map(|(joined, _)| joined);
+        (joined, lines)
+    }
+
+    /// Every absorbed error is logged (L20261113a): one line per repeat with its step,
+    /// attempt, variant and pause, and the final failure once. Fixed names only.
+    #[tokio::test(start_paused = true)]
+    async fn every_absorbed_error_is_logged_with_its_step_and_kind() {
+        let mut s = setup(reconcile_once, None);
+        let (joined, lines) = join_logged(&mut s.door).await;
+        assert!(matches!(joined, Ok(Joined::Active { .. })));
+        assert_eq!(
+            lines,
+            ["warn: action repeated: step=\"community join\" attempt=1/4 kind=Reconcile wait=1s"]
+        );
+
+        let mut s = setup(reconcile_always, None);
+        let (joined, lines) = join_logged(&mut s.door).await;
+        assert_eq!(joined.err(), Some(ErrorCode::Reconcile));
+        assert_eq!(
+            lines,
+            [
+                "warn: action repeated: step=\"community join\" attempt=1/4 kind=Reconcile wait=1s",
+                "warn: action repeated: step=\"community join\" attempt=2/4 kind=Reconcile wait=2s",
+                "warn: action repeated: step=\"community join\" attempt=3/4 kind=Reconcile wait=4s",
+                "warn: action failed after repeats: step=\"community join\" attempt=4/4 kind=Reconcile",
+            ]
+        );
+    }
+
+    /// A deterministic refusal is neither repeated nor logged; one after a repeat ends the
+    /// action and is logged once.
+    #[tokio::test(start_paused = true)]
+    async fn a_refusal_is_logged_only_after_a_repeat() {
+        let mut s = setup(unauthorized_open, None);
+        let (joined, lines) = join_logged(&mut s.door).await;
+        assert_eq!(joined.err(), Some(ErrorCode::Unauthorized));
+        assert!(lines.is_empty());
+
+        let mut s = setup(reconcile_then_unauthorized, None);
+        let (joined, lines) = join_logged(&mut s.door).await;
+        assert_eq!(joined.err(), Some(ErrorCode::Unauthorized));
+        assert_eq!(
+            lines,
+            [
+                "warn: action repeated: step=\"community join\" attempt=1/4 kind=Reconcile wait=1s",
+                "warn: action failed after repeats: step=\"community join\" attempt=2/4 kind=Unauthorized",
+            ]
+        );
+    }
+
+    /// A repeat whose pause would not end before the deadline is not started: nothing is
+    /// absorbed, nothing is logged.
+    #[tokio::test(start_paused = true)]
+    async fn an_unstarted_repeat_is_not_logged() {
+        let mut s = setup(reconcile_at_the_deadline, None);
+        let (joined, lines) = join_logged(&mut s.door).await;
+        assert_eq!(joined.err(), Some(ErrorCode::Reconcile));
+        assert!(lines.is_empty());
     }
 
     #[test]
