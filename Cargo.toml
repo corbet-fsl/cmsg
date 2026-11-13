@@ -57,6 +57,10 @@ ctnd = { git = "https://git.corbet.ch/corbet-libre/ctnd.git", branch = "main" }
 schemars = "1"
 url = "2"
 getrandom = "0.4"
+# The door's rand 0.8 OsRng (`cwlt::passport::rand`, cpsd's caller-supplied RNG) is the platform
+# CSPRNG through rand's own `getrandom` feature (getrandom 0.2). Declared here: it arrived only by
+# feature unification from other crates and left the browser graph with the 933d6ec lock refresh.
+rand_08 = { package = "rand", version = "0.8", default-features = false, features = ["getrandom"] }
 zeroize = { version = "1.8", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
@@ -94,6 +98,8 @@ js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Window", "Location", "Event", "EventTarget", "MessageEvent", "MessageChannel", "MessagePort", "Request", "RequestInit", "RequestMode", "RequestCredentials", "Response"] }
 cfyr = { git = "https://git.corbet.ch/corbet-fsl/cfyr.git", branch = "main", default-features = false, features = ["browser"] }
 getrandom = { version = "0.4", features = ["wasm_js"] }
+# getrandom 0.2 (rand 0.8's OsRng) in the browser: crypto.getRandomValues, its `js` backend only.
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 cmsg = { path = ".", features = ["client-version-fixture"] }

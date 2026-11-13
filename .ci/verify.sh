@@ -56,6 +56,16 @@ cargo test --locked --features ohttp --lib || ohttp_lib=$?
 CMSG_LAST_GATE="native-tests"
 cargo test --locked --all-targets
 test "$ohttp_lib" -eq 0 || { echo "ohttp lib tests failed: $ohttp_lib" >&2; exit "$ohttp_lib"; }
+CMSG_LAST_GATE="browser-lib-check"
+# The browser package's own build: the lib alone (a test build unifies dev-dependency
+# features that can hide a gap, as rand 0.8's OsRng after the 933d6ec lock refresh),
+# with the package's features and the committed lock. Its C code needs the same
+# unwrapped wasm clang as the wasm-pack leg below.
+: "${CMSG_WASM_CLANG_BIN:?Missing unwrapped wasm clang from run-cached.sh}"
+(
+export PATH="$CMSG_WASM_CLANG_BIN:$PATH"
+cargo check --locked --target wasm32-unknown-unknown --lib --features browser-tor,browser-prover
+)
 command -v wasm-pack >/dev/null || { echo 'missing wasm-pack' >&2; exit 2; }
 CMSG_LAST_GATE="wasm-pack"
 # minicov's build script hardcodes `clang` (CC env is ignored) and the default
