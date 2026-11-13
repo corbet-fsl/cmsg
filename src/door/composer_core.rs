@@ -1472,8 +1472,9 @@ where
     let actor_membership = companion.live_membership();
     let actor_policy = companion.current_policy();
     // A 503 from the vault means the device retries (cvld `error.rs`): the opening repeats,
-    // bounded, while it fails `Unavailable` (`transient::repeat_start`), each time from its
-    // own session and lease. Every other error ends the start at once, as before.
+    // bounded, while it fails `Unavailable`, or with an unknown outcome of a lease READ (a
+    // gateway's 502/504, `VaultOpen::transient`), each time from its own session and lease
+    // (`transient::repeat_start`); nothing is resent. Every other error ends the start at once.
     let custody::ComposedMemberVault {
         vault,
         intent,
@@ -1511,8 +1512,15 @@ where
     })
 }
 
+/// The opening's membership read (`lobby`, `device_keys`: `Effect::Check` in cvld's registry).
+const LEASE_OBSERVE: &str = "lease_observe";
+/// The opening's initial-creation read (`initial_creation`: `Effect::Check`; cfyr sends it
+/// as a read, `mutation: false`).
+const LEASE_CREATION: &str = "lease_creation";
+
 /// Why one opening of the community vault failed, typed until it becomes a [`ComposeError`]
-/// with the same step name and text as before. Only `Unavailable` is transient.
+/// with the same step name and text as before. Transient: `Unavailable`, and `Reconcile`
+/// of the two lease reads ([`VaultOpen::transient`]).
 #[derive(Debug)]
 enum VaultOpen {
     Lease(&'static str, cfyr::Error),
@@ -1521,12 +1529,20 @@ enum VaultOpen {
 }
 
 impl super::transient::StartError for VaultOpen {
+    /// `Unavailable` of a lease or custody step, and an unknown outcome (`Reconcile`: a
+    /// gateway's 502/504, a lost answer) of the two lease READS (L20261113a). Repeating a
+    /// read applies nothing, and the repeat is a fresh opening (its own session, nonce and
+    /// lease), never a resend of the failed request. Every denial, and an unknown outcome
+    /// of any other step, ends the start.
     fn transient(&self) -> bool {
-        matches!(
-            self,
+        match self {
             Self::Lease(_, cfyr::Error::Unavailable)
-                | Self::Custody(_, super::ErrorCode::Unavailable)
-        )
+            | Self::Custody(_, super::ErrorCode::Unavailable) => true,
+            Self::Lease(step, cfyr::Error::Reconcile) => {
+                [LEASE_OBSERVE, LEASE_CREATION].contains(step)
+            }
+            _ => false,
+        }
     }
 
     /// The fixed step name; a configuration error has none of its own.
@@ -1563,22 +1579,30 @@ impl From<VaultOpen> for ComposeError {
 mod vault_open_tests {
     use super::{
         super::{transient::StartError, ErrorCode},
-        ComposeError, VaultOpen,
+        ComposeError, VaultOpen, LEASE_CREATION, LEASE_OBSERVE,
     };
 
-    /// Only an `Unavailable` lease or custody answer repeats the opening; a denial, a
-    /// reconcile or a session/configuration failure never does.
+    /// An `Unavailable` lease or custody answer repeats the opening, and so does a
+    /// `Reconcile` (a gateway's 502/504) of the two lease reads. A denial, a reconcile of
+    /// any other step or a session/configuration failure never does.
     #[test]
-    fn only_an_unavailable_vault_opening_is_transient() {
-        assert!(VaultOpen::Lease("lease_creation", cfyr::Error::Unavailable).transient());
+    fn an_unavailable_opening_or_an_unknown_lease_read_is_transient() {
+        assert!(VaultOpen::Lease(LEASE_CREATION, cfyr::Error::Unavailable).transient());
         assert!(VaultOpen::Custody("community vault", ErrorCode::Unavailable).transient());
-        for lease in [
-            cfyr::Error::Unauthorized,
-            cfyr::Error::Refused,
-            cfyr::Error::Reconcile,
-        ] {
-            assert!(!VaultOpen::Lease("lease_observe", lease).transient());
+        for read in [LEASE_OBSERVE, LEASE_CREATION] {
+            assert!(VaultOpen::Lease(read, cfyr::Error::Reconcile).transient());
+            for denial in [
+                cfyr::Error::Unauthorized,
+                cfyr::Error::Refused,
+                cfyr::Error::Forbidden,
+                cfyr::Error::Invalid,
+                cfyr::Error::Expired,
+            ] {
+                assert!(!VaultOpen::Lease(read, denial).transient());
+            }
         }
+        // A lease step nobody classified as a read is never repeated on an unknown outcome.
+        assert!(!VaultOpen::Lease("lease_publication_bind", cfyr::Error::Reconcile).transient());
         for custody in [
             ErrorCode::Unauthorized,
             ErrorCode::Refused,
@@ -1645,6 +1669,207 @@ mod vault_open_tests {
     }
 }
 
+/// Gateway answers on the wire (L20261113a): the real owner client against a raw HTTP
+/// server that plays a proxy in front of cvld.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod gateway_tests {
+    use super::{
+        super::{transient::repeat_start_logged, ErrorCode},
+        VaultOpen, LEASE_OBSERVE,
+    };
+    use std::cell::RefCell;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    const BAD_GATEWAY: &[u8] = b"HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/html\r\nContent-Length: 27\r\nConnection: close\r\n\r\n<html>502 Bad Gateway</html>";
+    const GATEWAY_TIMEOUT: &[u8] =
+        b"HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    const PROXY_UNAVAILABLE: &[u8] =
+        b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    const OWNER_UNAVAILABLE: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: 23\r\nConnection: close\r\n\r\n{\"error\":\"unavailable\"}";
+    const OWNER_UNAUTHORIZED: &[u8] = b"HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: 24\r\nConnection: close\r\n\r\n{\"error\":\"unauthorized\"}";
+    const OWNER_REFUSED: &[u8] = b"HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nContent-Length: 19\r\nConnection: close\r\n\r\n{\"error\":\"refused\"}";
+
+    /// A proxy that answers one connection after another with `answers`, one request each,
+    /// and returns the request paths it saw per connection.
+    async fn proxy(
+        answers: Vec<&'static [u8]>,
+    ) -> (String, tokio::task::JoinHandle<Vec<Vec<String>>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let mut seen = Vec::new();
+            for answer in answers {
+                // No further attempt came: report what was seen instead of waiting forever.
+                let Ok(accepted) =
+                    tokio::time::timeout(std::time::Duration::from_secs(10), listener.accept())
+                        .await
+                else {
+                    break;
+                };
+                let (mut stream, _) = accepted.unwrap();
+                let mut request = Vec::new();
+                let mut paths = Vec::new();
+                // Read every request this connection sends until the client closes it.
+                loop {
+                    let mut buffer = [0; 4096];
+                    let received = stream.read(&mut buffer).await.unwrap_or(0);
+                    if received == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..received]);
+                    let Some(end) = request.windows(4).position(|part| part == b"\r\n\r\n") else {
+                        continue;
+                    };
+                    let head = String::from_utf8_lossy(&request[..end]).to_string();
+                    let length = head
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|value| value.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if request.len() < end + 4 + length {
+                        continue;
+                    }
+                    paths.push(head.split(' ').nth(1).unwrap().to_owned());
+                    request.drain(..end + 4 + length);
+                    stream.write_all(answer).await.unwrap();
+                    stream.shutdown().await.unwrap();
+                }
+                seen.push(paths);
+            }
+            seen
+        });
+        (base, server)
+    }
+
+    /// One opening's lease read, as the real path makes it: a NEW owner client (its own
+    /// connection, standing in for the attempt's own session) sends `lobby` once.
+    async fn lease_read(base: &str) -> Result<(), VaultOpen> {
+        let client = cfyr::HttpClient::new(base.into(), "community.example.test".into(), None)
+            .expect("client");
+        client
+            .call("lobby", serde_json::json!({}))
+            .await
+            .map(drop)
+            .map_err(|error| VaultOpen::Lease(LEASE_OBSERVE, error))
+    }
+
+    /// A gateway's 502, its 504 and its bodiless 503 arrive as `Reconcile` and the owner's
+    /// own 503 as `Unavailable`; on a lease read each one restarts the opening FRESH. Every
+    /// attempt opens its own connection and sends the read exactly once: nothing is
+    /// resent. The owner's `Unauthorized` then ends the start at once with its error, and
+    /// every absorbed answer is logged with its step and kind only.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_gateway_answer_on_a_lease_read_restarts_the_opening_fresh_and_is_logged() {
+        for (gateway, kind) in [
+            (BAD_GATEWAY, "Reconcile"),
+            (GATEWAY_TIMEOUT, "Reconcile"),
+            (PROXY_UNAVAILABLE, "Reconcile"),
+            (OWNER_UNAVAILABLE, "Unavailable"),
+        ] {
+            let (base, server) = proxy(vec![gateway, gateway, OWNER_UNAUTHORIZED]).await;
+            let lines = RefCell::new(Vec::new());
+            let opened = repeat_start_logged(
+                |line: &str| lines.borrow_mut().push(line.to_owned()),
+                async || lease_read(&base).await,
+            )
+            .await;
+            assert!(
+                matches!(
+                    opened,
+                    Err(VaultOpen::Lease(LEASE_OBSERVE, cfyr::Error::Unauthorized))
+                ),
+                "{opened:?}"
+            );
+            assert_eq!(
+                server.await.unwrap(),
+                [["/v1/lobby"], ["/v1/lobby"], ["/v1/lobby"]],
+                "one send per attempt, each on its own connection"
+            );
+            assert_eq!(
+                lines.into_inner(),
+                [
+                    format!("warn: start step repeated: step=\"lease_observe\" attempt=1/3 kind={kind} wait=1s"),
+                    format!("warn: start step repeated: step=\"lease_observe\" attempt=2/3 kind={kind} wait=2s"),
+                    "warn: start step failed after repeats: step=\"lease_observe\" attempt=3/3 kind=Unauthorized".to_owned(),
+                ]
+            );
+        }
+    }
+
+    /// A gateway answer that lasts: three fresh attempts, then the same error as before.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_lasting_gateway_answer_ends_after_three_fresh_attempts() {
+        let (base, server) = proxy(vec![BAD_GATEWAY; 3]).await;
+        let lines = RefCell::new(Vec::new());
+        let opened = repeat_start_logged(
+            |line: &str| lines.borrow_mut().push(line.to_owned()),
+            async || lease_read(&base).await,
+        )
+        .await;
+        let error = super::ComposeError::from(opened.expect_err("a lasting 502 fails"));
+        assert_eq!(
+            error.to_string(),
+            "device composition at lease_observe: Reconcile"
+        );
+        assert_eq!(server.await.unwrap().len(), 3);
+        assert_eq!(
+            lines.into_inner().last().map(String::as_str),
+            Some("warn: start step failed after repeats: step=\"lease_observe\" attempt=3/3 kind=Reconcile")
+        );
+    }
+
+    /// The owner's own denials are never repeated: one attempt, one send, nothing logged.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_owner_denial_on_a_lease_read_is_never_repeated() {
+        for (denial, error) in [
+            (OWNER_UNAUTHORIZED, cfyr::Error::Unauthorized),
+            (OWNER_REFUSED, cfyr::Error::Refused),
+        ] {
+            let (base, server) = proxy(vec![denial]).await;
+            let lines = RefCell::new(Vec::<String>::new());
+            let opened = repeat_start_logged(
+                |line: &str| lines.borrow_mut().push(line.to_owned()),
+                async || lease_read(&base).await,
+            )
+            .await;
+            assert!(
+                matches!(opened, Err(VaultOpen::Lease(LEASE_OBSERVE, found)) if found == error),
+                "{opened:?}"
+            );
+            assert_eq!(server.await.unwrap(), [["/v1/lobby"]]);
+            assert!(lines.into_inner().is_empty());
+        }
+    }
+
+    /// An unknown outcome of any step that is not a lease read (a custody step, or a lease
+    /// step nobody classified as a read) is never repeated: the start ends at once.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unknown_outcome_outside_the_lease_reads_is_never_repeated() {
+        for unknown in [
+            VaultOpen::Custody("community vault", ErrorCode::Reconcile),
+            VaultOpen::Lease("lease_publication_bind", cfyr::Error::Reconcile),
+        ] {
+            let calls = std::cell::Cell::new(0u32);
+            let lines = RefCell::new(Vec::<String>::new());
+            let error = RefCell::new(Some(unknown));
+            let opened: Result<(), VaultOpen> = repeat_start_logged(
+                |line: &str| lines.borrow_mut().push(line.to_owned()),
+                async || {
+                    calls.set(calls.get() + 1);
+                    Err(error.borrow_mut().take().expect("one attempt only"))
+                },
+            )
+            .await;
+            assert!(opened.is_err());
+            assert_eq!(calls.get(), 1);
+            assert!(lines.into_inner().is_empty());
+        }
+    }
+}
+
 /// One opening of the community vault (step 5): the recovery lease holds its session for the
 /// device's life, so it gets a third session of the same device key and the Door's own session
 /// stays free for owner actions (creation claim, vouching), as the wallet Door lends its
@@ -1693,10 +1918,10 @@ where
         .live_membership()
         .observe_lease(now)
         .await
-        .map_err(|error| VaultOpen::Lease("lease_observe", error))?
+        .map_err(|error| VaultOpen::Lease(LEASE_OBSERVE, error))?
         .device_initial_creation(vault_policy, now)
         .await
-        .map_err(|error| VaultOpen::Lease("lease_creation", error))?;
+        .map_err(|error| VaultOpen::Lease(LEASE_CREATION, error))?;
     let owners = custody::prepare_device_initial_recovery(
         recovered,
         held,

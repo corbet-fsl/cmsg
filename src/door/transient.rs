@@ -102,7 +102,8 @@ pub(super) const START_ATTEMPTS: u32 = 3;
 /// are fixed names (the step, the error's variant), never a value, key, token, member
 /// identifier or record content.
 pub(super) trait StartError: std::fmt::Debug {
-    /// Whether the step repeats on this error: its `Unavailable` only.
+    /// Whether the step repeats on this error: its `Unavailable`, and an unknown outcome
+    /// only where the failed request was a read (a fresh attempt then resends nothing).
     fn transient(&self) -> bool;
     /// The start step that failed.
     fn step(&self) -> &'static str;
@@ -125,7 +126,7 @@ pub(super) async fn repeat_start<T, E: StartError>(
 }
 
 /// [`repeat_start`] with its log sink as a parameter (the tests read the lines).
-async fn repeat_start_logged<T, E: StartError>(
+pub(super) async fn repeat_start_logged<T, E: StartError>(
     mut log: impl FnMut(&str),
     mut attempt: impl AsyncFnMut() -> std::result::Result<T, E>,
 ) -> std::result::Result<T, E> {
