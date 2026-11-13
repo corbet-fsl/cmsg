@@ -468,7 +468,7 @@ impl AccountAdmission<'_> {
     pub async fn current_roster(&mut self) -> Result<VerifiedRoster> {
         let response = self
             .lease
-            .current_enrollment_checkpoint(now)
+            .current_roster_checkpoint(now)
             .await
             .map_err(|__cause| {
                 crate::door::cause::emit(

@@ -229,6 +229,15 @@ async fn enroll_open_lose_the_response_reopen_activate_and_repeat_on_the_real_op
                 _ => assert_eq!(again["accepted_at"], accepted_at),
             }
         }
+        // 10. The active member reads the current common roster exactly as the wave wallet
+        // does: a fresh admission through the account actor, which submits no enrollment.
+        // The signed publication is verified row by row and must hold this member's row.
+        use cmsg::door::inbox_waves::native::{ActorRoster, RosterSource as _};
+        let door = std::rc::Rc::new(tokio::sync::Mutex::new(door));
+        ActorRoster::default()
+            .roster(&door, origin)
+            .await
+            .expect("an active member reads the current roster");
     })
     .await
     .expect("bounded real-operator account lifecycle");
