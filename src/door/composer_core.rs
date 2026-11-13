@@ -1480,7 +1480,7 @@ where
         member,
         account,
         lifetime,
-    } = super::transient::repeat_start(VaultOpen::transient, async || {
+    } = super::transient::repeat_start(async || {
         open_community_vault(
             services,
             unlock,
@@ -1520,13 +1520,32 @@ enum VaultOpen {
     Other(ComposeError),
 }
 
-impl VaultOpen {
+impl super::transient::StartError for VaultOpen {
     fn transient(&self) -> bool {
         matches!(
             self,
             Self::Lease(_, cfyr::Error::Unavailable)
                 | Self::Custody(_, super::ErrorCode::Unavailable)
         )
+    }
+
+    /// The fixed step name; a configuration error has none of its own.
+    fn step(&self) -> &'static str {
+        match self {
+            Self::Lease(name, _)
+            | Self::Custody(name, _)
+            | Self::Other(ComposeError::Step(name, _) | ComposeError::Inconsistent(name)) => name,
+            Self::Other(ComposeError::Config(_)) => "device configuration",
+        }
+    }
+
+    /// The inner error's variant name only, never its text.
+    fn kind(&self) -> String {
+        match self {
+            Self::Lease(_, error) => super::cause::kind(error),
+            Self::Custody(_, error) => super::cause::kind(error),
+            Self::Other(error) => super::cause::kind(error),
+        }
     }
 }
 
@@ -1542,7 +1561,10 @@ impl From<VaultOpen> for ComposeError {
 
 #[cfg(test)]
 mod vault_open_tests {
-    use super::{super::ErrorCode, ComposeError, VaultOpen};
+    use super::{
+        super::{transient::StartError, ErrorCode},
+        ComposeError, VaultOpen,
+    };
 
     /// Only an `Unavailable` lease or custody answer repeats the opening; a denial, a
     /// reconcile or a session/configuration failure never does.
@@ -1566,6 +1588,39 @@ mod vault_open_tests {
         }
         let session = ComposeError::Step("device session", "Unavailable".into());
         assert!(!VaultOpen::Other(session).transient());
+    }
+
+    /// A repeat logs the step and the inner error's variant only: never a step error's text,
+    /// a configuration value or any other field.
+    #[test]
+    fn a_vault_opening_names_its_step_and_kind_never_a_value() {
+        let named = |error: VaultOpen| (error.step(), error.kind());
+        assert_eq!(
+            named(VaultOpen::Lease("lease_creation", cfyr::Error::Unavailable)),
+            ("lease_creation", "Unavailable".into())
+        );
+        assert_eq!(
+            named(VaultOpen::Custody(
+                "community vault",
+                ErrorCode::Unavailable
+            )),
+            ("community vault", "Unavailable".into())
+        );
+        assert_eq!(
+            named(VaultOpen::Other(ComposeError::Step(
+                "device session",
+                "hunter2".into()
+            ))),
+            ("device session", "Step".into())
+        );
+        assert_eq!(
+            named(VaultOpen::Other(ComposeError::Inconsistent("progress"))),
+            ("progress", "Inconsistent".into())
+        );
+        assert_eq!(
+            named(VaultOpen::Other(ComposeError::Config("hunter2".into()))),
+            ("device configuration", "Config".into())
+        );
     }
 
     /// The error a start ends with keeps the step name and text it had before the repeat.
