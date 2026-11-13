@@ -51,6 +51,38 @@ pub(super) async fn absorb<T>(
     }
 }
 
+/// At most this many attempts of the community vault opening at device start (the
+/// first one included): 1 s and 2 s of pause, 3 s in all.
+pub(super) const START_ATTEMPTS: u32 = 3;
+
+/// Device start (decision 2026-11-13, journey row 13): a `503` from the vault means
+/// the device retries (cvld `error.rs`), so one start step is repeated while its
+/// error is transient. `transient` names the one transient kind of the step's typed
+/// error, `Unavailable`; every other error returns at once. The pause starts at
+/// [`FIRST_PAUSE_SECONDS`] and doubles. Every attempt starts from nothing (its own
+/// session, lease and recovery): a failed lease is never reused. After the last
+/// attempt its error returns unchanged. Nothing here locks a key.
+pub(super) async fn repeat_start<T, E: std::fmt::Debug>(
+    transient: impl Fn(&E) -> bool,
+    mut attempt: impl AsyncFnMut() -> std::result::Result<T, E>,
+) -> std::result::Result<T, E> {
+    let mut pause = FIRST_PAUSE_SECONDS;
+    let mut attempts = 1;
+    loop {
+        let error = match attempt().await {
+            Err(error) if transient(&error) => error,
+            done => return done,
+        };
+        if attempts >= START_ATTEMPTS || !wait(pause).await {
+            return Err(error);
+        }
+        // Development gate only: name the repeated kind, never a value.
+        super::cause::print(file!(), line!(), "start transient repeated", &error);
+        attempts += 1;
+        pause = pause.saturating_mul(2);
+    }
+}
+
 /// Whether the origin's live account session still runs after `pause`. Without
 /// a live session there is no deadline to repeat inside.
 fn runway(door: &Door, origin: &str, pause: u64) -> bool {
@@ -69,4 +101,73 @@ async fn wait(seconds: u64) -> bool {
 #[cfg(target_arch = "wasm32")]
 async fn wait(_: u64) -> bool {
     false
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod start_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    /// A vault that answers `Unavailable` twice and then opens: the start repeats
+    /// and succeeds, after the 1 s and 2 s pauses.
+    #[tokio::test(start_paused = true)]
+    async fn a_transient_unavailable_is_repeated_until_the_vault_opens() {
+        let calls = Cell::new(0u32);
+        let started = tokio::time::Instant::now();
+        let opened = repeat_start(
+            |error: &ErrorCode| *error == ErrorCode::Unavailable,
+            async || {
+                calls.set(calls.get() + 1);
+                if calls.get() <= 2 {
+                    Err(ErrorCode::Unavailable)
+                } else {
+                    Ok("vault")
+                }
+            },
+        )
+        .await;
+        assert_eq!(opened, Ok("vault"));
+        assert_eq!(calls.get(), 3);
+        assert_eq!(started.elapsed(), std::time::Duration::from_secs(3));
+    }
+
+    /// A vault that stays `Unavailable`: bounded, the last error returns unchanged.
+    #[tokio::test(start_paused = true)]
+    async fn a_lasting_unavailable_ends_after_the_last_attempt_with_the_same_error() {
+        let calls = Cell::new(0u32);
+        let opened: std::result::Result<(), ErrorCode> = repeat_start(
+            |error: &ErrorCode| *error == ErrorCode::Unavailable,
+            async || {
+                calls.set(calls.get() + 1);
+                Err(ErrorCode::Unavailable)
+            },
+        )
+        .await;
+        assert_eq!(opened, Err(ErrorCode::Unavailable));
+        assert_eq!(calls.get(), START_ATTEMPTS);
+    }
+
+    /// A genuine denial is never repeated: one attempt, its error at once.
+    #[tokio::test(start_paused = true)]
+    async fn an_unauthorized_or_refused_start_fails_at_once_without_a_repeat() {
+        for denial in [
+            ErrorCode::Unauthorized,
+            ErrorCode::Refused,
+            ErrorCode::Reconcile,
+        ] {
+            let calls = Cell::new(0u32);
+            let started = tokio::time::Instant::now();
+            let opened: std::result::Result<(), ErrorCode> = repeat_start(
+                |error: &ErrorCode| *error == ErrorCode::Unavailable,
+                async || {
+                    calls.set(calls.get() + 1);
+                    Err(denial)
+                },
+            )
+            .await;
+            assert_eq!(opened, Err(denial));
+            assert_eq!(calls.get(), 1);
+            assert_eq!(started.elapsed(), std::time::Duration::ZERO);
+        }
+    }
 }

@@ -1467,58 +1467,36 @@ where
         &community_network,
     )
     .await?;
-    // The recovery lease holds its session for the device's life: it gets a third session of
-    // the same device key, so the Door's own session stays free for owner actions (creation
-    // claim, vouching), as the wallet Door lends its companion for creation.
-    let mut vault_session = services.foyer(Service::Community).await?;
-    {
-        let opening = unlock
-            .community_opening(fingerprint, community_name)
-            .map_err(step("community opening"))?;
-        super::device_join::open_session(
-            &mut vault_session,
-            community_name,
-            user,
-            &device,
-            &mut session_signer(&opening),
-        )
-        .await
-        .map_err(step("device session"))?;
-    }
     // The companion session outlives this call: the account actor admits through it.
     let companion: &'static Foyer<Transport> = Box::leak(Box::new(companion));
     let actor_membership = companion.live_membership();
     let actor_policy = companion.current_policy();
-    let vault_session: &'static Foyer<Transport> = Box::leak(Box::new(vault_session));
-    let vault_policy: &'static mut Policy = Box::leak(Box::new(vault_session.current_policy()));
-    let held = vault_session
-        .live_membership()
-        .observe_lease(now)
-        .await
-        .map_err(step("lease_observe"))?
-        .device_initial_creation(vault_policy, now)
-        .await
-        .map_err(step("lease_creation"))?;
-    let owners = custody::prepare_device_initial_recovery(
-        recovered,
-        held,
-        community_network.clone(),
-        stamps,
-    )
-    .await
-    .map_err(step("community recovery"))?;
-    // One owner per Store: the Door holds the community Vault (voucher custody,
-    // community creation, ...) and the account actor works through its port.
+    // A 503 from the vault means the device retries (cvld `error.rs`): the opening repeats,
+    // bounded, while it fails `Unavailable` (`transient::repeat_start`), each time from its
+    // own session and lease. Every other error ends the start at once, as before.
     let custody::ComposedMemberVault {
         vault,
         intent,
         member,
         account,
         lifetime,
-    } = owners
-        .open_member_vault(community_network, community_storage)
+    } = super::transient::repeat_start(VaultOpen::transient, async || {
+        open_community_vault(
+            services,
+            unlock,
+            fingerprint,
+            community_name,
+            user,
+            &device,
+            recovered,
+            stamps,
+            community_network.clone(),
+            community_storage.clone(),
+        )
         .await
-        .map_err(step("community vault"))?;
+    })
+    .await
+    .map_err(ComposeError::from)?;
     let owner = door
         .bind_vault_with_board_owner(community_origin, vault, intent, lifetime)
         .await
@@ -1531,6 +1509,151 @@ where
         actor_policy,
         device,
     })
+}
+
+/// Why one opening of the community vault failed, typed until it becomes a [`ComposeError`]
+/// with the same step name and text as before. Only `Unavailable` is transient.
+#[derive(Debug)]
+enum VaultOpen {
+    Lease(&'static str, cfyr::Error),
+    Custody(&'static str, super::ErrorCode),
+    Other(ComposeError),
+}
+
+impl VaultOpen {
+    fn transient(&self) -> bool {
+        matches!(
+            self,
+            Self::Lease(_, cfyr::Error::Unavailable)
+                | Self::Custody(_, super::ErrorCode::Unavailable)
+        )
+    }
+}
+
+impl From<VaultOpen> for ComposeError {
+    fn from(error: VaultOpen) -> Self {
+        match error {
+            VaultOpen::Lease(name, error) => step(name)(error),
+            VaultOpen::Custody(name, error) => step(name)(error),
+            VaultOpen::Other(error) => error,
+        }
+    }
+}
+
+#[cfg(test)]
+mod vault_open_tests {
+    use super::{super::ErrorCode, ComposeError, VaultOpen};
+
+    /// Only an `Unavailable` lease or custody answer repeats the opening; a denial, a
+    /// reconcile or a session/configuration failure never does.
+    #[test]
+    fn only_an_unavailable_vault_opening_is_transient() {
+        assert!(VaultOpen::Lease("lease_creation", cfyr::Error::Unavailable).transient());
+        assert!(VaultOpen::Custody("community vault", ErrorCode::Unavailable).transient());
+        for lease in [
+            cfyr::Error::Unauthorized,
+            cfyr::Error::Refused,
+            cfyr::Error::Reconcile,
+        ] {
+            assert!(!VaultOpen::Lease("lease_observe", lease).transient());
+        }
+        for custody in [
+            ErrorCode::Unauthorized,
+            ErrorCode::Refused,
+            ErrorCode::Reconcile,
+        ] {
+            assert!(!VaultOpen::Custody("community recovery", custody).transient());
+        }
+        let session = ComposeError::Step("device session", "Unavailable".into());
+        assert!(!VaultOpen::Other(session).transient());
+    }
+
+    /// The error a start ends with keeps the step name and text it had before the repeat.
+    #[test]
+    fn a_failed_opening_surfaces_the_same_step_error_as_before() {
+        let error = ComposeError::from(VaultOpen::Custody(
+            "community vault",
+            ErrorCode::Unavailable,
+        ));
+        assert_eq!(
+            error.to_string(),
+            "device composition at community vault: Unavailable"
+        );
+        let error = ComposeError::from(VaultOpen::Lease(
+            "lease_creation",
+            cfyr::Error::Unauthorized,
+        ));
+        assert_eq!(
+            error.to_string(),
+            "device composition at lease_creation: Unauthorized"
+        );
+    }
+}
+
+/// One opening of the community vault (step 5): the recovery lease holds its session for the
+/// device's life, so it gets a third session of the same device key and the Door's own session
+/// stays free for owner actions (creation claim, vouching), as the wallet Door lends its
+/// companion for creation. Then the lease, the recovery and the member vault. One owner per
+/// Store: the Door holds the community Vault (voucher custody, community creation, ...) and the
+/// account actor works through its port.
+#[allow(clippy::too_many_arguments)]
+async fn open_community_vault<S, B, N>(
+    services: &mut S,
+    unlock: &super::unlock_once::DeviceUnlock,
+    fingerprint: &[u8; 32],
+    community_name: &str,
+    user: &str,
+    device: &ckmg::PublicKey,
+    recovered: &'static cvlt::RecoveryCandidate,
+    stamps: &cvlt::StampTrust,
+    community_network: N,
+    community_storage: B,
+) -> Result<custody::ComposedMemberVault<'static, 'static, B, N>, VaultOpen>
+where
+    S: Services,
+    B: cwst::backend::Backend + Clone + 'static,
+    N: cdht::Network + Clone + 'static,
+{
+    let mut vault_session = services
+        .foyer(Service::Community)
+        .await
+        .map_err(VaultOpen::Other)?;
+    {
+        let opening = unlock
+            .community_opening(fingerprint, community_name)
+            .map_err(|error| VaultOpen::Other(step("community opening")(error)))?;
+        super::device_join::open_session(
+            &mut vault_session,
+            community_name,
+            user,
+            device,
+            &mut session_signer(&opening),
+        )
+        .await
+        .map_err(|error| VaultOpen::Other(step("device session")(error)))?;
+    }
+    let vault_session: &'static Foyer<Transport> = Box::leak(Box::new(vault_session));
+    let vault_policy: &'static mut Policy = Box::leak(Box::new(vault_session.current_policy()));
+    let held = vault_session
+        .live_membership()
+        .observe_lease(now)
+        .await
+        .map_err(|error| VaultOpen::Lease("lease_observe", error))?
+        .device_initial_creation(vault_policy, now)
+        .await
+        .map_err(|error| VaultOpen::Lease("lease_creation", error))?;
+    let owners = custody::prepare_device_initial_recovery(
+        recovered,
+        held,
+        community_network.clone(),
+        stamps,
+    )
+    .await
+    .map_err(|error| VaultOpen::Custody("community recovery", error))?;
+    owners
+        .open_member_vault(community_network, community_storage)
+        .await
+        .map_err(|error| VaultOpen::Custody("community vault", error))
 }
 
 /// The names a composition needs: the two service origins and the community name.
