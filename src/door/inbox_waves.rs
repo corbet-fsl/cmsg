@@ -137,6 +137,8 @@ pub(super) async fn wave_prewarm(
     )
     .await?;
     door.observe(completed)?;
+    // The origin's wave worker runs its next round now (witness, roster, trust, provers).
+    door.wake_wave_worker(&origin);
     if let Some(prewarm) = door.wave_prewarm.get(&origin) {
         let warm = prewarm.prewarm();
         #[cfg(target_arch = "wasm32")]
