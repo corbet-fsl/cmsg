@@ -1018,7 +1018,12 @@ impl<B: cwst::backend::Backend, C, E, A, R> std::ops::DerefMut for PortVault<'_,
 }
 
 impl<B: cwst::backend::Backend, C, E, A, R> AccountPort<B, C, E, A, R> {
-    pub(crate) async fn vault(&mut self) -> Result<PortVault<'_, B, C, E, A, R>> {
+    /// Borrow the Door's Vault for one use, armed until the borrow drops. `grant` is the
+    /// account actor's verified grant end for its two account signatures, else None.
+    pub(crate) async fn vault(
+        &mut self,
+        grant: Option<crate::door::accounting::VerifiedGrantEnd>,
+    ) -> Result<PortVault<'_, B, C, E, A, R>> {
         if self.lifetime.is_closed() {
             return Err(ErrorCode::Unauthorized);
         }
@@ -1031,7 +1036,7 @@ impl<B: cwst::backend::Backend, C, E, A, R> AccountPort<B, C, E, A, R> {
         }
         Ok(PortVault {
             guard,
-            _arm: self.arm.arm(),
+            _arm: self.arm.arm_carrying(grant),
         })
     }
 }

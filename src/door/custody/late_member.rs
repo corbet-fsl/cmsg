@@ -130,20 +130,20 @@ pub struct LateMemberAuthority<A> {
     initial: A,
     slot: MemberSlot,
     member: Option<(Binding, Box<dyn BoardSigning>)>,
-    account_armed: Rc<Cell<bool>>,
+    arm: Rc<ArmState>,
 }
 
 impl<A> LateMemberAuthority<A> {
-    /// `account_armed` is the account port's arm: while it is set the account's
-    /// device signatures belong to `initial`, never to the Board's member authority.
-    pub fn new(initial: A, account_armed: Rc<Cell<bool>>) -> (Self, MemberSlot) {
+    /// `arm` is the account port's arm: while it is held the account's device
+    /// signatures belong to `initial`, never to the Board's member authority.
+    pub fn new(initial: A, arm: Rc<ArmState>) -> (Self, MemberSlot) {
         let slot = MemberSlot::default();
         (
             Self {
                 initial,
                 slot: slot.clone(),
                 member: None,
-                account_armed,
+                arm,
             },
             slot,
         )
@@ -157,7 +157,7 @@ impl<A> LateMemberAuthority<A> {
     /// admitted command for exactly that action.
     fn board(&mut self, request: &Authorization<'_>) -> Option<&mut Box<dyn BoardSigning>> {
         let board = match request.action {
-            Action::SignDeviceEd25519 => !self.account_armed.get(),
+            Action::SignDeviceEd25519 => !self.arm.is_armed(),
             Action::LendProfileCustody => {
                 request.target.is_none() && request.statement.is_none() && request.signing.is_none()
             }
@@ -194,6 +194,30 @@ impl<A> LateMemberAuthority<A> {
     }
 }
 
+impl<A> LateMemberAuthority<A> {
+    /// Defence in depth for the two account signatures this router hands to `initial`
+    /// while the arm carries the account actor's verified grant (L20261114b): never past
+    /// min(grant end, now + 24 h). `initial` still applies its own lease and grant check;
+    /// every other signature's bound is `initial`'s alone.
+    fn account_cap(&self, request: &Authorization<'_>) -> Result<(), Error> {
+        let (Some(grant), Some(signing)) = (self.arm.grant_end(), request.signing) else {
+            return Ok(());
+        };
+        if super::is_account_signature(request)
+            && signing.expires > super::signature_bound(request, Some(grant), 0, request.now)
+        {
+            crate::door::cause::print(
+                file!(),
+                line!(),
+                "account signature past the grant end or the one-day cap",
+                &Error::Expired,
+            );
+            return Err(Error::Expired);
+        }
+        Ok(())
+    }
+}
+
 impl<A: ckmg::Authority> ckmg::Authority for LateMemberAuthority<A> {
     async fn check_initial_activation(
         &mut self,
@@ -210,13 +234,17 @@ impl<A: ckmg::Authority> ckmg::Authority for LateMemberAuthority<A> {
     async fn check(&mut self, request: Authorization<'_>) -> Result<(), Error> {
         match self.board(&request) {
             Some(member) => member.board_check(request).await,
-            None => self.initial.check(request).await,
+            None => {
+                self.account_cap(&request)?;
+                self.initial.check(request).await
+            }
         }
     }
     fn check_checkpoint_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
         self.initial.check_checkpoint_current(request)
     }
     fn check_account_device_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
+        self.account_cap(&request)?;
         self.initial.check_account_device_current(request)
     }
     async fn check_account_signing(&mut self, request: Authorization<'_>) -> Result<(), Error> {
@@ -228,7 +256,10 @@ impl<A: ckmg::Authority> ckmg::Authority for LateMemberAuthority<A> {
     async fn check_device_signing(&mut self, request: Authorization<'_>) -> Result<(), Error> {
         match self.board(&request) {
             Some(member) => member.board_signing(request).await,
-            None => self.initial.check_device_signing(request).await,
+            None => {
+                self.account_cap(&request)?;
+                self.initial.check_device_signing(request).await
+            }
         }
     }
     async fn check_record_recipient(&mut self, request: Authorization<'_>) -> Result<(), Error> {
@@ -243,7 +274,10 @@ impl<A: ckmg::Authority> ckmg::Authority for LateMemberAuthority<A> {
     fn check_device_signing_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
         match self.board(&request) {
             Some(member) => member.board_current(request),
-            None => self.initial.check_device_signing_current(request),
+            None => {
+                self.account_cap(&request)?;
+                self.initial.check_device_signing_current(request)
+            }
         }
     }
     fn check_record_recipient_current(&mut self, request: Authorization<'_>) -> Result<u64, Error> {
@@ -331,10 +365,10 @@ mod tests {
         }
     }
 
-    fn late() -> (LateMemberAuthority<Initial>, MemberSlot, Rc<Cell<bool>>) {
-        let armed = Rc::new(Cell::new(false));
-        let (authority, slot) = LateMemberAuthority::new(Initial, armed.clone());
-        (authority, slot, armed)
+    fn late() -> (LateMemberAuthority<Initial>, MemberSlot, AccountArm) {
+        let arm = AccountArm::default();
+        let (authority, slot) = LateMemberAuthority::new(Initial, arm.state());
+        (authority, slot, arm)
     }
 
     /// Before the start restore proves the device is in the current lineage, Board
@@ -396,9 +430,9 @@ mod tests {
     #[tokio::test]
     async fn account_signing_stays_with_the_initial_authority() {
         let binding = Binding::new("c", "m").unwrap();
-        let (mut authority, slot, armed) = late();
+        let (mut authority, slot, arm) = late();
         slot.install(binding.clone(), Member).unwrap();
-        armed.set(true);
+        let _armed = arm.arm();
         assert_eq!(
             authority
                 .check(request(&binding, Action::SignDeviceEd25519))
@@ -499,5 +533,197 @@ mod tests {
             Err(Error::Unauthorized)
         );
         drop(guard);
+    }
+
+    /// Stands for the initial recovery authority's expiry rule (L20261114b): a signature
+    /// needs a live lease and an expiry within `signature_bound` of the arm it shares.
+    struct Leased(Rc<ArmState>);
+    const NOW: u64 = 1_000;
+    const LEASE: u64 = NOW + 900;
+    const GRANT: u64 = NOW + 20 * 3_600;
+    impl Leased {
+        fn rule(&self, request: &Authorization<'_>) -> Result<u64, Error> {
+            let signing = request.signing.ok_or(Error::Unauthorized)?;
+            if request.now >= LEASE
+                || signing.expires
+                    > super::super::signature_bound(request, self.0.grant_end(), LEASE, request.now)
+            {
+                return Err(Error::Expired);
+            }
+            Ok(request.now)
+        }
+    }
+    impl Authority for Leased {
+        async fn check(&mut self, request: Authorization<'_>) -> Result<(), Error> {
+            self.rule(&request).map(|_| ())
+        }
+        fn check_account_device_current(
+            &mut self,
+            request: Authorization<'_>,
+        ) -> Result<u64, Error> {
+            self.rule(&request)
+        }
+        fn check_device_signing_current(
+            &mut self,
+            request: Authorization<'_>,
+        ) -> Result<u64, Error> {
+            self.rule(&request)
+        }
+    }
+
+    /// Accepts every signature, so only the router's own cap can refuse.
+    struct Permissive;
+    impl Authority for Permissive {
+        async fn check(&mut self, _: Authorization<'_>) -> Result<(), Error> {
+            Ok(())
+        }
+        fn check_account_device_current(&mut self, _: Authorization<'_>) -> Result<u64, Error> {
+            Ok(NOW)
+        }
+        fn check_device_signing_current(&mut self, _: Authorization<'_>) -> Result<u64, Error> {
+            Ok(NOW)
+        }
+    }
+
+    fn signing(
+        binding: &Binding,
+        format: Option<ckmg::DeviceFormat>,
+        expires: u64,
+        now: u64,
+    ) -> Authorization<'_> {
+        let action = match format {
+            None => Action::AuthorizeAccountDevice,
+            Some(_) => Action::SignDeviceEd25519,
+        };
+        super::super::signing_request(binding, action, format, expires, now)
+    }
+
+    const DELEGATION: Option<ckmg::DeviceFormat> = Some(ckmg::DeviceFormat::AccountingDelegation);
+
+    /// Both account signatures reach the initial authority and are accepted up to the
+    /// grant end the arm carries, in the async and the final check.
+    async fn both_through<A: Authority>(
+        authority: &mut LateMemberAuthority<A>,
+        binding: &Binding,
+        expires: u64,
+    ) -> [Result<u64, Error>; 4] {
+        [
+            authority
+                .check(signing(binding, None, expires, NOW))
+                .await
+                .map(|_| NOW),
+            authority.check_account_device_current(signing(binding, None, expires, NOW)),
+            authority
+                .check_device_signing(signing(binding, DELEGATION, expires, NOW))
+                .await
+                .map(|_| NOW),
+            authority.check_device_signing_current(signing(binding, DELEGATION, expires, NOW)),
+        ]
+    }
+
+    #[tokio::test]
+    async fn both_account_signatures_are_accepted_up_to_the_grant_end() {
+        let binding = Binding::new("c", "m").unwrap();
+        let arm = AccountArm::default();
+        let (mut authority, slot) = LateMemberAuthority::new(Leased(arm.state()), arm.state());
+        slot.install(binding.clone(), Member).unwrap();
+        let _armed = arm.arm_carrying(Some(crate::door::accounting::VerifiedGrantEnd::for_test(
+            GRANT,
+        )));
+        assert_eq!(
+            both_through(&mut authority, &binding, GRANT).await,
+            [Ok(NOW); 4]
+        );
+    }
+
+    /// Every other signature keeps the initial authority's lease bound while armed.
+    #[tokio::test]
+    async fn any_other_signature_past_the_lease_is_refused() {
+        let binding = Binding::new("c", "m").unwrap();
+        let arm = AccountArm::default();
+        let (mut authority, _slot) = LateMemberAuthority::new(Leased(arm.state()), arm.state());
+        let _armed = arm.arm_carrying(Some(crate::door::accounting::VerifiedGrantEnd::for_test(
+            GRANT,
+        )));
+        let request = Some(ckmg::DeviceFormat::AccountRequest);
+        assert_eq!(
+            authority
+                .check_device_signing(signing(&binding, request, LEASE + 1, NOW))
+                .await,
+            Err(Error::Expired)
+        );
+        assert_eq!(
+            authority.check_device_signing_current(signing(&binding, request, LEASE + 1, NOW)),
+            Err(Error::Expired)
+        );
+        assert_eq!(
+            authority.check_device_signing_current(signing(&binding, request, LEASE, NOW)),
+            Ok(NOW)
+        );
+    }
+
+    /// The router itself refuses an account signature past the carried grant end, even in
+    /// front of an inner authority that would accept it.
+    #[tokio::test]
+    async fn an_account_signature_past_the_grant_end_is_refused() {
+        let binding = Binding::new("c", "m").unwrap();
+        let arm = AccountArm::default();
+        let (mut authority, _slot) = LateMemberAuthority::new(Permissive, arm.state());
+        let _armed = arm.arm_carrying(Some(crate::door::accounting::VerifiedGrantEnd::for_test(
+            GRANT,
+        )));
+        assert_eq!(
+            both_through(&mut authority, &binding, GRANT + 1).await,
+            [Err(Error::Expired); 4]
+        );
+        assert_eq!(
+            both_through(&mut authority, &binding, GRANT).await,
+            [Ok(NOW); 4]
+        );
+    }
+
+    /// The router's one-day cap holds even when the carried grant claims a longer end.
+    #[tokio::test]
+    async fn an_account_signature_past_one_day_is_refused_even_under_a_longer_grant() {
+        let binding = Binding::new("c", "m").unwrap();
+        let cap = NOW + super::super::ACCOUNT_SIGNATURE_MAX_SECONDS;
+        let arm = AccountArm::default();
+        let (mut authority, _slot) = LateMemberAuthority::new(Permissive, arm.state());
+        let _armed = arm.arm_carrying(Some(crate::door::accounting::VerifiedGrantEnd::for_test(
+            NOW + 3 * super::super::ACCOUNT_SIGNATURE_MAX_SECONDS,
+        )));
+        assert_eq!(
+            both_through(&mut authority, &binding, cap + 1).await,
+            [Err(Error::Expired); 4]
+        );
+        assert_eq!(
+            both_through(&mut authority, &binding, cap).await,
+            [Ok(NOW); 4]
+        );
+    }
+
+    /// No live lease, no signature; and with the arm dropped the grant is gone, so neither
+    /// account signature outlives the lease (the delegation format then is the Board's).
+    #[tokio::test]
+    async fn no_lease_or_a_disarmed_arm_gives_no_signature() {
+        let binding = Binding::new("c", "m").unwrap();
+        let arm = AccountArm::default();
+        let (mut authority, _slot) = LateMemberAuthority::new(Leased(arm.state()), arm.state());
+        let armed = arm.arm_carrying(Some(crate::door::accounting::VerifiedGrantEnd::for_test(
+            GRANT,
+        )));
+        assert_eq!(
+            authority.check_account_device_current(signing(&binding, None, GRANT, LEASE)),
+            Err(Error::Expired)
+        );
+        assert_eq!(
+            authority.check_device_signing_current(signing(&binding, DELEGATION, GRANT, LEASE)),
+            Err(Error::Expired)
+        );
+        drop(armed);
+        assert_eq!(
+            both_through(&mut authority, &binding, GRANT).await,
+            [Err(Error::Expired); 4]
+        );
     }
 }

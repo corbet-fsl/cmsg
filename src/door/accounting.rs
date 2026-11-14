@@ -99,6 +99,30 @@ pub struct PreparedEnrollment<'p> {
     _device: ckmg::IntentGuard,
 }
 
+/// The end of the policy-signed admission grant this account actor has just verified
+/// (`AccountAdmission::current`). It is the only value custody accepts as the bound of the
+/// two account signatures (L20261114b), carried on the account port's arm only while armed.
+/// Nothing outside the actor's own grant verification constructs it: the field is private
+/// and the one constructor reads a grant `verify_admission` accepted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VerifiedGrantEnd(u64);
+impl VerifiedGrantEnd {
+    /// From the grant `admission::verify_admission` has just accepted; the caller is
+    /// `AccountAdmission::current` only.
+    fn verified(grant: &admission::AdmissionGrant) -> Self {
+        Self(grant.expires_at)
+    }
+    /// The grant's end (Unix seconds).
+    pub(crate) fn get(self) -> u64 {
+        self.0
+    }
+    /// A stand-in for custody's unit tests, which hold no live admission.
+    #[cfg(test)]
+    pub(crate) fn for_test(end: u64) -> Self {
+        Self(end)
+    }
+}
+
 struct CurrentAdmission {
     material: cblc::publication::PublicVerifierMaterial,
     /// The Charter's own Balance publication `material` was read from: the device's
@@ -115,6 +139,8 @@ struct CurrentAdmission {
     material_digest: [u8; 32],
     trust: admission::AdmissionTrust,
     grant: admission::AdmissionGrant,
+    /// `grant`'s end, as the value the arm carries to custody for the two account signatures.
+    grant_end: VerifiedGrantEnd,
     origin: String,
     now: u64,
     expires: u64,
@@ -432,6 +458,7 @@ impl AccountAdmission<'_> {
                         ))]
                         balance: balance.clone(),
                         trust,
+                        grant_end: VerifiedGrantEnd::verified(&grant),
                         grant,
                         origin: origin.into(),
                         now: checked,
@@ -543,8 +570,10 @@ impl<'p> AccountAdmission<'p> {
                     &__cause,
                 )
             })?;
+        // The arm carries this verified grant's end: custody bounds exactly this signature
+        // (and the delegation's) by it instead of the lease, never beyond now + 24 h.
         let authorization = account
-            .vault()
+            .vault_for_grant(current.grant_end)
             .await?
             .keys()
             .authorize_account_device(plan)
@@ -718,7 +747,7 @@ impl<'p> AccountAdmission<'p> {
                 )
             })?;
         let signature = account
-            .vault()
+            .vault_for_grant(current.grant_end)
             .await?
             .keys()
             .sign_device_ed25519_current(

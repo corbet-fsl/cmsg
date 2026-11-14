@@ -22,6 +22,10 @@ pub struct InitialRecoveryAuthority<'a, 'p, C, N: cdht::Network> {
     pub(super) request_intent: Option<ckmg::IntentVerifier>,
     pub(super) delegation_spent: bool,
     pub(super) account_signing: Option<(Action, Vec<u8>, u64)>,
+    /// The account port's arm on this Vault (composed member and owned account Vaults):
+    /// while held for one of the two account signatures it carries the account actor's
+    /// verified grant end, which bounds that signature instead of the lease (L20261114b).
+    pub(super) account_arm: Option<Rc<super::ArmState>>,
     /// The wallet's stamp trust for a device-key member, whose genesis evidence is a stamp
     /// and whose lease holds its device key instead of a passkey certificate. Present exactly
     /// when the lease is a device lease (`lease.device_key()`); the passkey path keeps None.
@@ -278,21 +282,18 @@ impl<C: Clock, N: cdht::Network> InitialRecoveryAuthority<'_, '_, C, N> {
         if completed < now {
             return Err(Error::Clock);
         }
-        if let Some(signing) = signing {
-            if completed >= signing.expires
-                || signing.expires
-                    > self.initial.expires().map_err(|__cause| {
-                        crate::door::cause::emit(
-                            file!(),
-                            line!(),
-                            "Error::Unauthorized",
-                            Error::Unauthorized,
-                            &__cause,
-                        )
-                    })?
-            {
-                return Err(Error::Expired);
-            }
+        if signing.is_some() {
+            let lease = self.initial.expires().map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "Error::Unauthorized",
+                    Error::Unauthorized,
+                    &__cause,
+                )
+            })?;
+            let grant = self.account_arm.as_ref().and_then(|arm| arm.grant_end());
+            signing_current(request, grant, lease, completed)?;
         }
         Ok(completed)
     }
@@ -560,6 +561,7 @@ async fn complete_recovery<B: cwst::backend::Backend, N: cdht::Network + Clone>(
         request_intent: None,
         delegation_spent: false,
         account_signing: None,
+        account_arm: None,
         stamps,
         refreshed: super::operation_scope::Reused::new(&super::operation_scope::DISPATCH),
         lineage: super::operation_scope::Reused::new(&super::operation_scope::DISPATCH),
@@ -595,6 +597,25 @@ async fn complete_recovery<B: cwst::backend::Backend, N: cdht::Network + Clone>(
         .await
 }
 
+/// The final expiry rule of a signature at `completed`: the lease is still live and the
+/// signature unexpired, and its expiry is within [`super::signature_bound`] (the lease, or for
+/// the two account signatures the carried grant end capped at completed + 24 h).
+fn signing_current(
+    request: &Authorization<'_>,
+    grant: Option<super::super::accounting::VerifiedGrantEnd>,
+    lease: u64,
+    completed: u64,
+) -> Result<(), Error> {
+    let signing = request.signing.ok_or(Error::Unauthorized)?;
+    if completed >= lease
+        || completed >= signing.expires
+        || signing.expires > super::signature_bound(request, grant, lease, completed)
+    {
+        return Err(Error::Expired);
+    }
+    Ok(())
+}
+
 /// Decided 2026-10-27 (custody review): a lease refresh that could not check
 /// (`Unavailable`, `Reconcile`) refuses this one call as ckmg `Unavailable`, which
 /// leaves the keys usable for a later call; every other outcome is a genuine denial
@@ -624,5 +645,124 @@ mod lease_refresh_tests {
             lease_refresh_error(&cfyr::Error::Unauthorized),
             Error::Unauthorized
         );
+    }
+}
+
+#[cfg(test)]
+mod account_expiry_tests {
+    use super::super::{signing_request, AccountArm, ACCOUNT_SIGNATURE_MAX_SECONDS};
+    use super::*;
+    use crate::door::accounting::VerifiedGrantEnd;
+
+    const NOW: u64 = 1_000;
+    const LEASE: u64 = NOW + 900;
+    const GRANT: u64 = NOW + 20 * 3_600;
+
+    fn account(binding: &Binding, delegation: bool, expires: u64) -> Authorization<'_> {
+        if delegation {
+            signing_request(
+                binding,
+                Action::SignDeviceEd25519,
+                Some(ckmg::DeviceFormat::AccountingDelegation),
+                expires,
+                NOW,
+            )
+        } else {
+            signing_request(binding, Action::AuthorizeAccountDevice, None, expires, NOW)
+        }
+    }
+
+    /// Both account signatures may expire at the carried grant end, past the lease.
+    #[test]
+    fn both_account_signatures_are_accepted_up_to_the_grant_end() {
+        let binding = Binding::new("c", "m").unwrap();
+        let grant = Some(VerifiedGrantEnd::for_test(GRANT));
+        for delegation in [false, true] {
+            assert_eq!(
+                signing_current(&account(&binding, delegation, GRANT), grant, LEASE, NOW),
+                Ok(())
+            );
+        }
+    }
+
+    /// Every other signature keeps the lease bound, also while a grant is carried.
+    #[test]
+    fn any_other_signature_past_the_lease_is_refused() {
+        let binding = Binding::new("c", "m").unwrap();
+        let grant = Some(VerifiedGrantEnd::for_test(GRANT));
+        let request = signing_request(
+            &binding,
+            Action::SignDeviceEd25519,
+            Some(ckmg::DeviceFormat::AccountRequest),
+            LEASE + 1,
+            NOW,
+        );
+        assert_eq!(
+            signing_current(&request, grant, LEASE, NOW),
+            Err(Error::Expired)
+        );
+        let within = signing_request(
+            &binding,
+            Action::SignDeviceEd25519,
+            Some(ckmg::DeviceFormat::AccountRequest),
+            LEASE,
+            NOW,
+        );
+        assert_eq!(signing_current(&within, grant, LEASE, NOW), Ok(()));
+    }
+
+    /// An account signature past the grant end is refused.
+    #[test]
+    fn an_account_signature_past_the_grant_end_is_refused() {
+        let binding = Binding::new("c", "m").unwrap();
+        let grant = Some(VerifiedGrantEnd::for_test(GRANT));
+        for delegation in [false, true] {
+            assert_eq!(
+                signing_current(&account(&binding, delegation, GRANT + 1), grant, LEASE, NOW),
+                Err(Error::Expired)
+            );
+        }
+    }
+
+    /// The one-day cap holds even when the carried grant claims a longer end.
+    #[test]
+    fn an_account_signature_past_one_day_is_refused_even_under_a_longer_grant() {
+        let binding = Binding::new("c", "m").unwrap();
+        let cap = NOW + ACCOUNT_SIGNATURE_MAX_SECONDS;
+        let grant = Some(VerifiedGrantEnd::for_test(
+            NOW + 3 * ACCOUNT_SIGNATURE_MAX_SECONDS,
+        ));
+        for delegation in [false, true] {
+            assert_eq!(
+                signing_current(&account(&binding, delegation, cap + 1), grant, LEASE, NOW),
+                Err(Error::Expired)
+            );
+            assert_eq!(
+                signing_current(&account(&binding, delegation, cap), grant, LEASE, NOW),
+                Ok(())
+            );
+        }
+    }
+
+    /// No live lease, no signature; and a disarmed arm carries no grant, so the account
+    /// signatures fall back to the lease bound.
+    #[test]
+    fn no_lease_or_a_disarmed_arm_gives_no_signature() {
+        let binding = Binding::new("c", "m").unwrap();
+        let grant = Some(VerifiedGrantEnd::for_test(GRANT));
+        for delegation in [false, true] {
+            let request = account(&binding, delegation, GRANT);
+            assert_eq!(
+                signing_current(&request, grant, LEASE, LEASE),
+                Err(Error::Expired)
+            );
+            let arm = AccountArm::default();
+            let state = arm.state();
+            drop(arm.arm_carrying(grant));
+            assert_eq!(
+                signing_current(&request, state.grant_end(), LEASE, NOW),
+                Err(Error::Expired)
+            );
+        }
     }
 }

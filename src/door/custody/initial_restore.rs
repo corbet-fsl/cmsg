@@ -112,6 +112,7 @@ async fn prepare_recovery<'a, 'p, N: cdht::Network + Clone>(
         request_intent: None,
         delegation_spent: false,
         account_signing: None,
+        account_arm: None,
         stamps,
         refreshed: super::operation_scope::Reused::new(&super::operation_scope::DISPATCH),
         lineage: super::operation_scope::Reused::new(&super::operation_scope::DISPATCH),
@@ -441,8 +442,15 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
                 )
             })?
             .to_owned();
+        // The owned account Vault's own arm: its initial authority reads the grant end the
+        // account actor carries for the two account signatures (L20261114b).
+        let arm = AccountArm::default();
+        let state = arm.state();
         let vault = self
-            .open_root(network, backend)
+            .open_root_with(network, backend, |mut initial| {
+                initial.account_arm = Some(state);
+                initial
+            })
             .await?
             .restore_account_only_custody()
             .await
@@ -457,26 +465,28 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
             })?;
         super::super::accounting::CommunityAccount::recovered(
             origin,
-            super::super::accounting::AccountVault::Owned(vault),
+            super::super::accounting::AccountVault::Owned(vault, arm),
         )
         .await
     }
 
     /// Open the community Store ONCE for the Door (single owner per Store): the
     /// account-only custody, plus the three account channels the actor spends
-    /// through its port. The initial authority spends those channels by itself,
-    /// so the port's arm selects nothing here.
+    /// through its port. The initial authority spends those channels by itself, so
+    /// the port's arm selects nothing for it; it reads only the grant end the arm
+    /// carries for the two account signatures (L20261114b).
     pub async fn open_member_vault<B: cwst::backend::Backend>(
         self,
         network: N,
         backend: B,
     ) -> super::super::Result<ComposedMemberVault<'a, 'p, B, N>> {
         let (owners, intents, request) = self.with_accounting_intents()?;
-        let arm = std::rc::Rc::new(std::cell::Cell::new(false));
+        let arm = AccountArm::default();
         let mut member = None;
         let mut vault = owners
-            .open_root_with(network, backend, |initial| {
-                let (late, slot) = LateMemberAuthority::new(initial, arm.clone());
+            .open_root_with(network, backend, |mut initial| {
+                initial.account_arm = Some(arm.state());
+                let (late, slot) = LateMemberAuthority::new(initial, arm.state());
                 member = Some(slot);
                 late
             })
@@ -528,7 +538,7 @@ impl<'a, 'p, N: cdht::Network + Clone> InitialRecoveryOwners<'a, 'p, N> {
             account: AccountWiring {
                 intents,
                 request,
-                arm: AccountArm(arm),
+                arm,
             },
             lifetime: CustodyLifetime {
                 binding,

@@ -1,5 +1,6 @@
 //! Original community account paired with its authenticated recovery origin.
 use super::*;
+use crate::door::custody::{AccountArm, ArmGuard};
 use crate::door::facades::{AccountPort, PortVault};
 use cvlt::WalletCustody;
 
@@ -15,10 +16,16 @@ pub struct CommunityAccount<B: cwst::backend::Backend, C, E, A, R> {
 }
 
 impl<B: cwst::backend::Backend, C, E, A, R> AccountVault<B, C, E, A, R> {
-    pub(super) async fn open(&mut self) -> Result<VaultRef<'_, B, C, E, A, R>> {
+    pub(super) async fn open(
+        &mut self,
+        grant: Option<super::VerifiedGrantEnd>,
+    ) -> Result<VaultRef<'_, B, C, E, A, R>> {
         Ok(match self {
-            Self::Owned(vault) => VaultRef::Owned(vault),
-            Self::Port(port) => VaultRef::Port(port.vault().await?),
+            Self::Owned(vault, arm) => VaultRef::Owned {
+                vault,
+                _arm: arm.arm_carrying(grant),
+            },
+            Self::Port(port) => VaultRef::Port(port.vault(grant).await?),
         })
     }
 }
@@ -26,21 +33,25 @@ impl<B: cwst::backend::Backend, C, E, A, R> AccountVault<B, C, E, A, R> {
 /// Where the account's Vault lives: an owned one (the registration composer, which
 /// has no Door yet) or the Door's own Vault through a port. The port is the only
 /// form on a running device: the Door's Vault stays the one owner of its Store.
+/// An owned Vault keeps the arm its own initial authority reads the verified grant from.
 pub enum AccountVault<B: cwst::backend::Backend, C, E, A, R> {
-    Owned(Vault<B, C, E, A, R, WalletCustody>),
+    Owned(Vault<B, C, E, A, R, WalletCustody>, AccountArm),
     Port(AccountPort<B, C, E, A, R>),
 }
 
-/// The account's Vault borrowed for one use.
+/// The account's Vault borrowed for one use, armed until it drops.
 pub(super) enum VaultRef<'a, B: cwst::backend::Backend, C, E, A, R> {
-    Owned(&'a mut Vault<B, C, E, A, R, WalletCustody>),
+    Owned {
+        vault: &'a mut Vault<B, C, E, A, R, WalletCustody>,
+        _arm: ArmGuard,
+    },
     Port(PortVault<'a, B, C, E, A, R>),
 }
 impl<B: cwst::backend::Backend, C, E, A, R> std::ops::Deref for VaultRef<'_, B, C, E, A, R> {
     type Target = Vault<B, C, E, A, R, WalletCustody>;
     fn deref(&self) -> &Self::Target {
         match self {
-            Self::Owned(vault) => vault,
+            Self::Owned { vault, .. } => vault,
             Self::Port(vault) => vault,
         }
     }
@@ -48,7 +59,7 @@ impl<B: cwst::backend::Backend, C, E, A, R> std::ops::Deref for VaultRef<'_, B, 
 impl<B: cwst::backend::Backend, C, E, A, R> std::ops::DerefMut for VaultRef<'_, B, C, E, A, R> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
-            Self::Owned(vault) => vault,
+            Self::Owned { vault, .. } => vault,
             Self::Port(vault) => vault,
         }
     }
@@ -70,7 +81,7 @@ where
     ) -> Result<Self> {
         let mut vault = vault;
         let (lineage, credential, device) = {
-            let mut vault = vault.open().await?;
+            let mut vault = vault.open(None).await?;
             let lineage = vault.keys().lineage().await.map_err(|__cause| {
                 crate::door::cause::emit(
                     file!(),
@@ -126,7 +137,17 @@ where
 
     /// The account's Vault for one use: the Door's own Vault through the port.
     pub(super) async fn vault(&mut self) -> Result<VaultRef<'_, B, C, E, A, R>> {
-        self.vault.open().await
+        self.vault.open(None).await
+    }
+
+    /// The account's Vault for one of the two account signatures (the root's device
+    /// authorization and the delegation): the arm carries `grant`, which custody accepts as
+    /// their bound instead of the lease (L20261114b), until the borrow drops.
+    pub(super) async fn vault_for_grant(
+        &mut self,
+        grant: super::VerifiedGrantEnd,
+    ) -> Result<VaultRef<'_, B, C, E, A, R>> {
+        self.vault.open(Some(grant)).await
     }
 
     pub(super) async fn check(&mut self, origin: &str) -> Result<()> {
@@ -439,7 +460,7 @@ where
         crate::door::record::RecordWindow,
         Option<crate::door::record::RecordWork>,
     )> {
-        let mut vault = self.vault.open().await?;
+        let mut vault = self.vault.open(None).await?;
         crate::door::record::prepare_record(source, &mut vault, configuration, prover).await
     }
 
@@ -447,7 +468,7 @@ where
         &mut self,
         proof: crate::door::record::RecordProof,
     ) -> Result<()> {
-        let mut vault = self.vault.open().await?;
+        let mut vault = self.vault.open(None).await?;
         crate::door::record::finish_record(&mut vault, proof).await
     }
 }
@@ -477,7 +498,7 @@ where
     ) -> Result<ckmg::wallet_engine::account::Account> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        let mut vault = self.vault.open().await?;
+        let mut vault = self.vault.open(None).await?;
         let stored = vault.witness_state().await.map_err(|__cause| {
             crate::door::cause::emit(
                 file!(),
@@ -553,7 +574,7 @@ where
     ) -> Result<()> {
         let origin = self.origin.clone();
         self.check(&origin).await?;
-        let mut vault = self.vault.open().await?;
+        let mut vault = self.vault.open(None).await?;
         let engine = vault.keys().wallet_engine().await.map_err(|__cause| {
             crate::door::cause::emit(
                 file!(),

@@ -364,25 +364,96 @@ struct AccountVerifiers {
     delegation: ckmg::IntentVerifier,
     request: ckmg::IntentVerifier,
     delegation_spent: bool,
-    armed: Rc<Cell<bool>>,
+    arm: Rc<ArmState>,
+}
+
+/// The state of an account port's arm, shared with the custody owners of the same Vault:
+/// whether the account actor holds the Vault, and, for exactly its two account signatures,
+/// the end of the admission grant the actor verified. The grant is present only while armed.
+#[derive(Default)]
+pub struct ArmState {
+    armed: Cell<bool>,
+    grant: Cell<Option<super::accounting::VerifiedGrantEnd>>,
+}
+impl ArmState {
+    pub(crate) fn is_armed(&self) -> bool {
+        self.armed.get()
+    }
+    /// The account actor's verified grant end; None whenever the arm is not held.
+    pub(crate) fn grant_end(&self) -> Option<super::accounting::VerifiedGrantEnd> {
+        if self.armed.get() {
+            self.grant.get()
+        } else {
+            None
+        }
+    }
 }
 
 /// Held by the account port around each of its Vault calls: while armed, the
 /// member owner spends the account channels instead of the Board's.
-#[derive(Clone)]
-pub struct AccountArm(Rc<Cell<bool>>);
+#[derive(Clone, Default)]
+pub struct AccountArm(Rc<ArmState>);
 impl AccountArm {
-    /// Arm until the returned guard drops.
+    /// The state the custody owners of this Vault read.
+    pub(crate) fn state(&self) -> Rc<ArmState> {
+        self.0.clone()
+    }
+    /// Arm until the returned guard drops, carrying no grant.
     pub fn arm(&self) -> ArmGuard {
-        self.0.set(true);
+        self.arm_carrying(None)
+    }
+    /// Arm until the returned guard drops, carrying `grant` (the account actor's two
+    /// account signatures only; see [`signature_bound`]).
+    pub(crate) fn arm_carrying(
+        &self,
+        grant: Option<super::accounting::VerifiedGrantEnd>,
+    ) -> ArmGuard {
+        self.0.grant.set(grant);
+        self.0.armed.set(true);
         ArmGuard(self.0.clone())
     }
 }
-/// Disarms on drop.
-pub struct ArmGuard(Rc<Cell<bool>>);
+/// Disarms on drop and clears the carried grant.
+pub struct ArmGuard(Rc<ArmState>);
 impl Drop for ArmGuard {
     fn drop(&mut self) {
-        self.0.set(false);
+        self.0.armed.set(false);
+        self.0.grant.set(None);
+    }
+}
+
+/// The hard cap on an account signature's lifetime, on top of the grant end: the admission
+/// grant lives at most one day (L20261114b, defence in depth).
+pub(crate) const ACCOUNT_SIGNATURE_MAX_SECONDS: u64 = 24 * 60 * 60;
+
+/// Exactly the two account signatures: the root's `AuthorizeAccountDevice` and the device's
+/// `SignDeviceEd25519` in the `AccountingDelegation` format.
+fn is_account_signature(request: &Authorization<'_>) -> bool {
+    match request.action {
+        Action::AuthorizeAccountDevice => request.signing.is_some_and(|s| s.format.is_none()),
+        Action::SignDeviceEd25519 => request
+            .signing
+            .is_some_and(|s| s.format == Some(ckmg::DeviceFormat::AccountingDelegation)),
+        _ => false,
+    }
+}
+
+/// The latest signing expiry custody accepts for `request` at `now`, given the `lease`
+/// bound (L20261114b). Exactly the two account signatures, and only while the arm carries the
+/// account actor's verified grant end, may outlive the lease: up to min(grant end, now + 24 h).
+/// Every other signature, and these two without a carried grant, keep the lease. This never
+/// admits a signature by itself: every owner still refuses unless now < lease.
+pub(crate) fn signature_bound(
+    request: &Authorization<'_>,
+    grant: Option<super::accounting::VerifiedGrantEnd>,
+    lease: u64,
+    now: u64,
+) -> u64 {
+    match grant {
+        Some(end) if is_account_signature(request) => end
+            .get()
+            .min(now.saturating_add(ACCOUNT_SIGNATURE_MAX_SECONDS)),
+        _ => lease,
     }
 }
 
@@ -452,13 +523,13 @@ impl MemberAuthorityBuilder {
         let (root, root_verifier) = ckmg::intent_channel();
         let (device, device_verifier) = ckmg::intent_channel();
         let (request, request_verifier) = ckmg::intent_channel();
-        let armed = Rc::new(Cell::new(false));
+        let arm = AccountArm::default();
         authority.account = Some(AccountVerifiers {
             root: root_verifier,
             delegation: device_verifier,
             request: request_verifier,
             delegation_spent: false,
-            armed: armed.clone(),
+            arm: arm.state(),
         });
         Ok((
             authority,
@@ -470,7 +541,7 @@ impl MemberAuthorityBuilder {
                 expires: u64::MAX,
             },
             request,
-            AccountArm(armed),
+            arm,
         ))
     }
     /// Construct exact local signing admission with this same member owner.
@@ -1160,5 +1231,103 @@ mod signing_bound_tests {
         let shared = slot.signing_bound();
         shared.note(70);
         assert_eq!(slot.signing_bound().clamp(1_000, 10), Ok(70));
+    }
+}
+
+/// One signing request for the custody owners' expiry tests (L20261114b): `format` None
+/// for `AuthorizeAccountDevice`, a device format for `SignDeviceEd25519`.
+#[cfg(test)]
+pub(super) fn signing_request<'a>(
+    binding: &'a Binding,
+    action: Action,
+    format: Option<ckmg::DeviceFormat>,
+    expires: u64,
+    now: u64,
+) -> Authorization<'a> {
+    Authorization {
+        binding,
+        root: Some(PublicKey::new(ckmg::VLD0, [3; 32])),
+        device: PublicKey::new(ckmg::VLD0, [1; 32]),
+        epoch: 1,
+        action,
+        target: None,
+        statement: None,
+        signing: Some(ckmg::DeviceSigning {
+            transcript: b"transcript",
+            format,
+            expires,
+        }),
+        now,
+        evidence: &[],
+    }
+}
+
+#[cfg(test)]
+mod account_arm_tests {
+    use super::*;
+    use crate::door::accounting::VerifiedGrantEnd;
+
+    /// The grant end is visible to custody only while the arm is held, and a disarm clears
+    /// it: a later plain arm carries no grant.
+    #[test]
+    fn the_grant_end_is_present_only_while_armed_and_cleared_on_disarm() {
+        let arm = AccountArm::default();
+        let state = arm.state();
+        assert_eq!(state.grant_end(), None);
+        let guard = arm.arm_carrying(Some(VerifiedGrantEnd::for_test(5_000)));
+        assert!(state.is_armed());
+        assert_eq!(state.grant_end(), Some(VerifiedGrantEnd::for_test(5_000)));
+        drop(guard);
+        assert!(!state.is_armed());
+        assert_eq!(state.grant_end(), None);
+        let _plain = arm.arm();
+        assert!(state.is_armed());
+        assert_eq!(state.grant_end(), None);
+    }
+
+    /// Exactly the two account signatures take the carried grant (capped at now + 24 h);
+    /// every other signature, and these two without a grant, keep the lease.
+    #[test]
+    fn only_the_two_account_signatures_take_the_grant_bound() {
+        let binding = Binding::new("c", "m").unwrap();
+        let grant = Some(VerifiedGrantEnd::for_test(50_000));
+        let (lease, now) = (1_000, 100);
+        let root = signing_request(&binding, Action::AuthorizeAccountDevice, None, 0, now);
+        let delegation = signing_request(
+            &binding,
+            Action::SignDeviceEd25519,
+            Some(ckmg::DeviceFormat::AccountingDelegation),
+            0,
+            now,
+        );
+        assert_eq!(signature_bound(&root, grant, lease, now), 50_000);
+        assert_eq!(signature_bound(&delegation, grant, lease, now), 50_000);
+        assert_eq!(signature_bound(&root, None, lease, now), lease);
+        assert_eq!(signature_bound(&delegation, None, lease, now), lease);
+        let long = Some(VerifiedGrantEnd::for_test(
+            now + 3 * ACCOUNT_SIGNATURE_MAX_SECONDS,
+        ));
+        assert_eq!(
+            signature_bound(&delegation, long, lease, now),
+            now + ACCOUNT_SIGNATURE_MAX_SECONDS
+        );
+        for format in [
+            ckmg::DeviceFormat::AccountRequest,
+            ckmg::DeviceFormat::AccountStatus,
+            ckmg::DeviceFormat::RecordRecipient,
+            ckmg::DeviceFormat::DeviceSession,
+        ] {
+            let other = signing_request(&binding, Action::SignDeviceEd25519, Some(format), 0, now);
+            assert_eq!(signature_bound(&other, grant, lease, now), lease);
+        }
+        // A root authorization naming a device format is not the account authorization.
+        let shaped = signing_request(
+            &binding,
+            Action::AuthorizeAccountDevice,
+            Some(ckmg::DeviceFormat::AccountingDelegation),
+            0,
+            now,
+        );
+        assert_eq!(signature_bound(&shaped, grant, lease, now), lease);
     }
 }

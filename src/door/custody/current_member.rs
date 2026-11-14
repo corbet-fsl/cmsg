@@ -73,6 +73,7 @@ fn verify_read(
     observed: &cfyr::membership::Observation,
     credential: &[u8],
     stamps: Option<&cvlt::StampTrust>,
+    grant: Option<super::super::accounting::VerifiedGrantEnd>,
     now: u64,
 ) -> Result<u64, Error> {
     lifetime
@@ -168,19 +169,43 @@ fn verify_read(
         return Err(Error::Unauthorized);
     }
     lifetime.bound.note(observed.expires);
-    let mut until = selected
-        .valid_until()
-        .min(charter.valid_until())
-        .min(observed.expires);
+    deadline(
+        request,
+        selected.valid_until(),
+        charter.valid_until(),
+        observed.expires,
+        grant,
+        now,
+    )
+}
+
+/// The time rule of one current check at `now`: the operation's exclusive deadline, the
+/// minimum of the lineage, Charter and membership lease bounds (and the signature's own
+/// expiry). A signature's expiry must lie within the lineage and Charter bounds and within
+/// [`super::signature_bound`]: the lease, or for exactly the two account signatures the
+/// grant end the arm carries, capped at now + 24 h (L20261114b). The lease bound stays in the
+/// deadline, so no live lease means no signature.
+fn deadline(
+    request: &Authorization<'_>,
+    lineage: u64,
+    charter: u64,
+    lease: u64,
+    grant: Option<super::super::accounting::VerifiedGrantEnd>,
+    now: u64,
+) -> Result<u64, Error> {
+    let until = lineage.min(charter).min(lease);
+    let signable = lineage
+        .min(charter)
+        .min(super::signature_bound(request, grant, lease, now));
     if now >= until
         || request
             .signing
-            .is_some_and(|signing| signing.expires > until || now >= signing.expires)
+            .is_some_and(|signing| signing.expires > signable || now >= signing.expires)
     {
         // Which bound refused (names only, never values).
-        let bound = if until == observed.expires {
+        let bound = if until == lease {
             "verify_read Expired bound: membership"
-        } else if until == charter.valid_until() {
+        } else if until == charter {
             "verify_read Expired bound: charter"
         } else {
             "verify_read Expired bound: lineage"
@@ -189,7 +214,7 @@ fn verify_read(
             "verify_read Expired reason: now past bound"
         } else if request
             .signing
-            .is_some_and(|signing| signing.expires > until)
+            .is_some_and(|signing| signing.expires > signable)
         {
             "verify_read Expired reason: signing expires past bound"
         } else {
@@ -199,10 +224,10 @@ fn verify_read(
         crate::door::cause::print(file!(), line!(), reason, &Error::Expired);
         return Err(Error::Expired);
     }
-    if let Some(signing) = request.signing {
-        until = until.min(signing.expires);
-    }
-    Ok(until)
+    Ok(match request.signing {
+        Some(signing) => until.min(signing.expires),
+        None => until,
+    })
 }
 
 impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
@@ -239,7 +264,8 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         shape(&request, purpose).inspect_err(|__e| {
             crate::door::cause::print(file!(), line!(), "current_member", __e)
         })?;
-        let account_armed = self.account.as_ref().is_some_and(|a| a.armed.get());
+        let account_armed = self.account.as_ref().is_some_and(|a| a.arm.is_armed());
+        let grant = self.account.as_ref().and_then(|a| a.arm.grant_end());
         match purpose {
             Purpose::DeviceSigning if self.intent.is_none() && !account_armed => {
                 crate::door::cause::print(
@@ -325,7 +351,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
                     return Err(Error::Unauthorized);
                 }
                 verify_read(
-                    &read, lifetime, &request, charter, observed, credential, stamps, now,
+                    &read, lifetime, &request, charter, observed, credential, stamps, grant, now,
                 )
             },
         );
@@ -471,6 +497,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         let origin = &self.live.origin;
         let clock = &mut self.live.clock;
         let stamps = self.stamps.as_ref();
+        let grant = self.account.as_ref().and_then(|a| a.arm.grant_end());
         let checked = pending.lease.with_community_policy(
             &mut self.policy,
             || match clock.now() {
@@ -501,6 +528,7 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
                     observed,
                     credential,
                     stamps,
+                    grant,
                     now,
                 )
             },
@@ -522,6 +550,148 @@ impl<C: Clock, B: cdht::runtime::Backend> MemberAuthority<C, B> {
         })?;
         // Taking the attempt releases the held original session on every exit.
         Ok(completed)
+    }
+}
+
+#[cfg(test)]
+mod account_expiry_tests {
+    use super::super::{signing_request, AccountArm, ACCOUNT_SIGNATURE_MAX_SECONDS};
+    use super::*;
+    use crate::door::accounting::VerifiedGrantEnd;
+
+    const NOW: u64 = 1_000;
+    const LEASE: u64 = NOW + 900;
+    const GRANT: u64 = NOW + 20 * 3_600;
+    /// Lineage and Charter bounds well past the grant: only the lease or the grant decides.
+    const LONG: u64 = NOW + 30 * 24 * 3_600;
+
+    fn account(binding: &Binding, delegation: bool, expires: u64) -> Authorization<'_> {
+        if delegation {
+            signing_request(
+                binding,
+                Action::SignDeviceEd25519,
+                Some(ckmg::DeviceFormat::AccountingDelegation),
+                expires,
+                NOW,
+            )
+        } else {
+            signing_request(binding, Action::AuthorizeAccountDevice, None, expires, NOW)
+        }
+    }
+
+    fn check(
+        request: &Authorization<'_>,
+        grant: Option<VerifiedGrantEnd>,
+        now: u64,
+    ) -> Result<u64, Error> {
+        deadline(request, LONG, LONG, LEASE, grant, now)
+    }
+
+    /// Both account signatures may expire at the carried grant end, past the lease; the
+    /// operation itself must still complete inside the lease.
+    #[test]
+    fn both_account_signatures_are_accepted_up_to_the_grant_end() {
+        let binding = Binding::new("c", "m").unwrap();
+        let grant = Some(VerifiedGrantEnd::for_test(GRANT));
+        for delegation in [false, true] {
+            assert_eq!(
+                check(&account(&binding, delegation, GRANT), grant, NOW),
+                Ok(LEASE)
+            );
+        }
+    }
+
+    /// Every other signature keeps the lease bound, also while a grant is carried.
+    #[test]
+    fn any_other_signature_past_the_lease_is_refused() {
+        let binding = Binding::new("c", "m").unwrap();
+        let grant = Some(VerifiedGrantEnd::for_test(GRANT));
+        for format in [
+            ckmg::DeviceFormat::AccountRequest,
+            ckmg::DeviceFormat::DeviceSession,
+        ] {
+            let past = signing_request(
+                &binding,
+                Action::SignDeviceEd25519,
+                Some(format),
+                LEASE + 1,
+                NOW,
+            );
+            assert_eq!(check(&past, grant, NOW), Err(Error::Expired));
+            let within = signing_request(
+                &binding,
+                Action::SignDeviceEd25519,
+                Some(format),
+                LEASE,
+                NOW,
+            );
+            assert_eq!(check(&within, grant, NOW), Ok(LEASE));
+        }
+    }
+
+    /// An account signature past the grant end is refused.
+    #[test]
+    fn an_account_signature_past_the_grant_end_is_refused() {
+        let binding = Binding::new("c", "m").unwrap();
+        let grant = Some(VerifiedGrantEnd::for_test(GRANT));
+        for delegation in [false, true] {
+            assert_eq!(
+                check(&account(&binding, delegation, GRANT + 1), grant, NOW),
+                Err(Error::Expired)
+            );
+        }
+    }
+
+    /// The one-day cap holds even when the carried grant claims a longer end.
+    #[test]
+    fn an_account_signature_past_one_day_is_refused_even_under_a_longer_grant() {
+        let binding = Binding::new("c", "m").unwrap();
+        let cap = NOW + ACCOUNT_SIGNATURE_MAX_SECONDS;
+        let grant = Some(VerifiedGrantEnd::for_test(
+            NOW + 3 * ACCOUNT_SIGNATURE_MAX_SECONDS,
+        ));
+        for delegation in [false, true] {
+            assert_eq!(
+                check(&account(&binding, delegation, cap + 1), grant, NOW),
+                Err(Error::Expired)
+            );
+            assert_eq!(
+                check(&account(&binding, delegation, cap), grant, NOW),
+                Ok(LEASE)
+            );
+        }
+    }
+
+    /// The lineage and Charter bounds still cap an account signature.
+    #[test]
+    fn the_lineage_and_charter_bounds_still_cap_an_account_signature() {
+        let binding = Binding::new("c", "m").unwrap();
+        let grant = Some(VerifiedGrantEnd::for_test(GRANT));
+        let request = account(&binding, true, GRANT);
+        assert_eq!(
+            deadline(&request, GRANT - 1, LONG, LEASE, grant, NOW),
+            Err(Error::Expired)
+        );
+        assert_eq!(
+            deadline(&request, LONG, GRANT - 1, LEASE, grant, NOW),
+            Err(Error::Expired)
+        );
+    }
+
+    /// No live lease, no signature; and a disarmed arm carries no grant, so the account
+    /// signatures fall back to the lease bound.
+    #[test]
+    fn no_lease_or_a_disarmed_arm_gives_no_signature() {
+        let binding = Binding::new("c", "m").unwrap();
+        let grant = Some(VerifiedGrantEnd::for_test(GRANT));
+        for delegation in [false, true] {
+            let request = account(&binding, delegation, GRANT);
+            assert_eq!(check(&request, grant, LEASE), Err(Error::Expired));
+            let arm = AccountArm::default();
+            let state = arm.state();
+            drop(arm.arm_carrying(grant));
+            assert_eq!(check(&request, state.grant_end(), NOW), Err(Error::Expired));
+        }
     }
 }
 
