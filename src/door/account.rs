@@ -1082,6 +1082,9 @@ mod run {
                 _ => Err(ErrorCode::Reconcile),
             }
         }
+        async fn lineage(&mut self) -> Result<[u8; 32]> {
+            self.account.lineage_digest().await
+        }
         fn resendable(&mut self, delegation: &[u8]) -> bool {
             match &mut self.held {
                 Held::Admitted(admission) => admission.resendable(delegation),
@@ -1762,8 +1765,9 @@ mod run {
                         // sent, so the daily refresh knows this grant day is covered
                         // and a lost answer is resent with the identical bytes.
                         let bytes = prepared.delegation_bytes()?;
+                        let lineage = account.lineage_digest().await?;
                         let stored = account.delegation_outbox().await?.map(|b| b.to_vec());
-                        let pending = sent_delegation(&bytes);
+                        let pending = sent_delegation(&lineage, &bytes);
                         account
                             .replace_delegation_outbox(stored.as_deref(), &pending)
                             .await
@@ -1777,7 +1781,7 @@ mod run {
                         let _ = account
                             .replace_delegation_outbox(
                                 Some(&pending),
-                                &registered_delegation(&bytes),
+                                &registered_delegation(&lineage, &bytes),
                             )
                             .await
                             .map_err(trace("delegation record"));

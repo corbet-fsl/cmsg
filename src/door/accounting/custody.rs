@@ -140,6 +140,26 @@ where
         self.vault.open(None).await
     }
 
+    /// The digest of the member's current lineage (revision, root and devices), read fresh
+    /// from Keys: the delegation refresh re-signs when it differs from the one it signed under.
+    pub(in crate::door) async fn lineage_digest(&mut self) -> Result<[u8; 32]> {
+        self.vault()
+            .await?
+            .keys()
+            .lineage()
+            .await
+            .and_then(|lineage| lineage.digest())
+            .map_err(|__cause| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unauthorized",
+                    ErrorCode::Unauthorized,
+                    &__cause,
+                )
+            })
+    }
+
     /// The account's Vault for one of the two account signatures (the root's device
     /// authorization and the delegation): the arm carries `grant`, which custody accepts as
     /// their bound instead of the lease (L20261114b), until the borrow drops.

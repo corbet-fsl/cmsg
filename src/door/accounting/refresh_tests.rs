@@ -93,6 +93,8 @@ struct Device {
     crash: Option<Crash>,
     /// Another writer changes the record between this device's read and write.
     interfere: bool,
+    /// The digest of the member's current lineage (changes when a device is added or removed).
+    lineage: LineageDigest,
 }
 
 impl Device {
@@ -107,6 +109,7 @@ impl Device {
             sends: Vec::new(),
             crash: None,
             interfere: false,
+            lineage: [1; 32],
         }
     }
 
@@ -116,6 +119,7 @@ impl Device {
             record: self.record.clone(),
             row: self.row.clone(),
             rows: self.rows,
+            lineage: self.lineage,
             ..Self::new(fresh, now)
         }
     }
@@ -139,7 +143,7 @@ impl Delegations for Device {
     }
     async fn replace(&mut self, expected: Option<&[u8]>, record: &[u8]) -> Result<()> {
         if std::mem::take(&mut self.interfere) {
-            self.record = Some(registered(&delegation(day(0), 0)));
+            self.record = Some(registered(&self.lineage, &delegation(day(0), 0)));
         }
         if self.record.as_deref() != expected {
             return Err(ErrorCode::Reconcile);
@@ -157,6 +161,9 @@ impl Delegations for Device {
     }
     fn grant(&mut self) -> Result<GrantDay> {
         self.fresh.ok_or(ErrorCode::Unauthorized)
+    }
+    async fn lineage(&mut self) -> Result<LineageDigest> {
+        Ok(self.lineage)
     }
     fn resendable(&mut self, bytes: &[u8]) -> bool {
         let d = parsed(bytes);
@@ -352,4 +359,63 @@ fn an_unreadable_record_is_replaced_by_one_signed_delegation() {
     assert_eq!(block(refresh(&mut device)), Ok(Refreshed::Issued));
     assert_eq!(device.signs, 1);
     assert!(device.stored().registered);
+}
+
+/// Review M2: a stored delegation is resent only under exactly its own grant and before its end.
+#[test]
+fn a_stored_delegation_is_resent_only_under_its_own_grant_and_before_its_end() {
+    let stored = parsed(&delegation(day(D1), D1 + 10));
+    let fresh = stored.admission.clone();
+    assert!(resend_allowed(&fresh, D1 + 20, &stored));
+    assert!(!resend_allowed(&fresh, stored.expires_at, &stored));
+    // The same day and epoch, but a re-signed grant: not the stored one.
+    let mut resigned = fresh.clone();
+    resigned.signature = "another-grant-signature".into();
+    assert_eq!(GrantDay::of(&resigned), GrantDay::of(&fresh));
+    assert!(!resend_allowed(&resigned, D1 + 20, &stored));
+    let mut later = fresh;
+    later.expires_at += 1;
+    assert!(!resend_allowed(&later, D1 + 20, &stored));
+}
+
+/// Review M3: the member keeps a roster row while any of their devices is current. A and B
+/// register on the same grant day, so the registry's one row of the member is B's. B is then
+/// revoked (removed from the lineage), and the slot builder drops B's row. A's next login sees
+/// the changed lineage and takes the row back at once, not at the next grant day.
+#[test]
+fn a_revoked_device_hands_the_members_row_back_to_a_surviving_one_at_once() {
+    let (only_a, with_b, a_again) = ([1; 32], [2; 32], [3; 32]);
+    let mut a = Device::new(D1, D1 + 600);
+    a.lineage = only_a;
+    assert_eq!(block(refresh(&mut a)), Ok(Refreshed::Issued));
+    let a_first = a.stored().delegation;
+    // B pairs (the lineage gains B) and registers: its later delegation becomes the row.
+    let mut b = Device::new(D1, D1 + 900);
+    b.lineage = with_b;
+    b.row = a.row.clone();
+    b.rows = a.rows;
+    assert_eq!(block(refresh(&mut b)), Ok(Refreshed::Issued));
+    let b_row = b.row.clone().unwrap();
+    assert_ne!(b_row, a_first);
+    // B is revoked: the lineage loses B, and the slot builder leaves B's row out.
+    let current = |row: &Option<Vec<u8>>| row.as_ref().filter(|row| **row != b_row).cloned();
+    let mut a = a.restarted(D1, D1 + 1_500);
+    a.row = Some(b_row.clone());
+    a.rows = b.rows;
+    assert_eq!(
+        current(&a.row),
+        None,
+        "without a re-issue the member has no row"
+    );
+    a.lineage = a_again;
+    // A's next login, the same grant day: A signs a later delegation, which the registry
+    // accepts in place of B's, so the next slot holds the member through A.
+    assert_eq!(block(refresh(&mut a)), Ok(Refreshed::Issued));
+    let row = current(&a.row).expect("the next slot contains the member through A");
+    assert_eq!(row, a.stored().delegation);
+    assert_eq!(parsed(&row).admission.issued_at, D1);
+    assert!(a.stored().registered);
+    // Nothing changes on the next login under the same lineage.
+    a.now = D1 + 2_000;
+    assert_eq!(block(refresh(&mut a)), Ok(Refreshed::Current));
 }

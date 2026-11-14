@@ -7,9 +7,15 @@
 //! identical bytes, which the registry accepts again without a second record.
 //!
 //! The device keeps the last delegation it signed in its own Vault record
-//! (`delegation_outbox`): one state byte and the exact delegation bytes. The
-//! record is written BEFORE the delegation is sent (persist-before-send) and
-//! replaced only by compare-and-swap.
+//! (`delegation_outbox`): one state byte, the digest of the member's lineage it was
+//! signed under, and the exact delegation bytes. The record is written BEFORE the
+//! delegation is sent (persist-before-send) and replaced only by compare-and-swap.
+//!
+//! A lineage change (a device added, removed or revoked) also re-signs at once, not
+//! at the next grant day: the registry holds one row per member, the last device's,
+//! so after that device is revoked a surviving one must take the row back, or the
+//! member has no roster row until the next day (review M3; the design keeps a member
+//! in the roster while any of their devices is current).
 use super::*;
 
 const SENT: u8 = 1;
@@ -38,10 +44,14 @@ impl GrantDay {
     }
 }
 
+/// The digest of the member's lineage (`ckmg::Lineage::digest`: revision, root and devices).
+pub(in crate::door) type LineageDigest = [u8; 32];
+
 /// One stored delegation record.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::door) struct Stored {
     registered: bool,
+    lineage: LineageDigest,
     delegation: Vec<u8>,
     day: GrantDay,
 }
@@ -49,29 +59,31 @@ pub(in crate::door) struct Stored {
 impl Stored {
     /// Read a record; an unreadable one is `None` (the device then signs anew).
     pub(in crate::door) fn parse(record: &[u8]) -> Option<Self> {
-        let (&state, delegation) = record.split_first()?;
+        let (&state, rest) = record.split_first()?;
         let registered = match state {
             SENT => false,
             REGISTERED => true,
             _ => return None,
         };
+        let (lineage, delegation) = rest.split_first_chunk::<32>()?;
         let parsed: enrollment::AccountingDelegation = serde_json::from_slice(delegation).ok()?;
         Some(Self {
             registered,
+            lineage: *lineage,
             delegation: delegation.to_vec(),
             day: GrantDay::of(&parsed.admission),
         })
     }
 }
 
-/// The record that says `delegation` is signed and about to be (or was) sent.
-pub(in crate::door) fn sent(delegation: &[u8]) -> Vec<u8> {
-    [&[SENT][..], delegation].concat()
+/// The record that says `delegation`, signed under `lineage`, is about to be (or was) sent.
+pub(in crate::door) fn sent(lineage: &LineageDigest, delegation: &[u8]) -> Vec<u8> {
+    [&[SENT][..], lineage, delegation].concat()
 }
 
-/// The record that says the registry accepted `delegation`.
-pub(in crate::door) fn registered(delegation: &[u8]) -> Vec<u8> {
-    [&[REGISTERED][..], delegation].concat()
+/// The record that says the registry accepted `delegation`, signed under `lineage`.
+pub(in crate::door) fn registered(lineage: &LineageDigest, delegation: &[u8]) -> Vec<u8> {
+    [&[REGISTERED][..], lineage, delegation].concat()
 }
 
 /// What one login does with the delegation.
@@ -85,21 +97,36 @@ pub(in crate::door) enum Step {
     Sign,
 }
 
-/// The decision, from the stored record and the fresh admission's grant day.
-/// `resendable` says whether stored bytes still verify under the fresh admission
-/// and cover now.
+/// The decision, from the stored record, the fresh admission's grant day and the
+/// member's current lineage. `resendable` says whether stored bytes still verify
+/// under the fresh admission and cover now.
 pub(in crate::door) fn decide(
     stored: Option<&Stored>,
     fresh: GrantDay,
+    lineage: &LineageDigest,
     resendable: impl FnOnce(&[u8]) -> bool,
 ) -> Step {
     match stored {
         None => Step::Sign,
         Some(stored) if stored.day.renewed_by(fresh) => Step::Sign,
+        // Another device was added, removed or revoked since: take the member's row back.
+        Some(stored) if stored.lineage != *lineage => Step::Sign,
         Some(stored) if stored.registered => Step::Nothing,
         Some(stored) if resendable(&stored.delegation) => Step::Resend(stored.delegation.clone()),
         Some(_) => Step::Sign,
     }
+}
+
+/// The resend rule of a stored `Sent` delegation (review M2, as the design states it): only
+/// when the fresh admission's grant is exactly the one the delegation carries, and now is
+/// before its end. A grant re-signed for the same day and epoch is not the stored one: the
+/// device then signs anew instead of resending bytes made under another grant.
+fn resend_allowed(
+    fresh: &admission::AdmissionGrant,
+    now: u64,
+    delegation: &enrollment::AccountingDelegation,
+) -> bool {
+    *fresh == delegation.admission && now < delegation.expires_at
 }
 
 /// The outcome of one login's refresh.
@@ -118,6 +145,8 @@ pub(in crate::door) trait Delegations {
     async fn replace(&mut self, expected: Option<&[u8]>, record: &[u8]) -> Result<()>;
     /// The fresh admission's grant day.
     fn grant(&mut self) -> Result<GrantDay>;
+    /// The digest of the member's current lineage.
+    async fn lineage(&mut self) -> Result<LineageDigest>;
     /// Whether these stored delegation bytes verify under the fresh admission and cover now.
     fn resendable(&mut self, delegation: &[u8]) -> bool;
     /// Sign a new delegation under the fresh admission (sends nothing).
@@ -133,22 +162,25 @@ pub(in crate::door) async fn refresh<D: Delegations>(device: &mut D) -> Result<R
     let raw = device.record().await?;
     let stored = raw.as_deref().and_then(Stored::parse);
     let fresh = device.grant()?;
-    match decide(stored.as_ref(), fresh, |bytes| device.resendable(bytes)) {
+    let lineage = device.lineage().await?;
+    match decide(stored.as_ref(), fresh, &lineage, |bytes| {
+        device.resendable(bytes)
+    }) {
         Step::Nothing => Ok(Refreshed::Current),
         Step::Resend(delegation) => {
             device.send(&delegation).await?;
             device
-                .replace(raw.as_deref(), &registered(&delegation))
+                .replace(raw.as_deref(), &registered(&lineage, &delegation))
                 .await?;
             Ok(Refreshed::Resent)
         }
         Step::Sign => {
             let delegation = device.sign().await?;
-            let pending = sent(&delegation);
+            let pending = sent(&lineage, &delegation);
             device.replace(raw.as_deref(), &pending).await?;
             device.send(&delegation).await?;
             device
-                .replace(Some(&pending), &registered(&delegation))
+                .replace(Some(&pending), &registered(&lineage, &delegation))
                 .await?;
             Ok(Refreshed::Issued)
         }
@@ -189,15 +221,16 @@ impl AccountAdmission<'_> {
         Ok(enrollment::EnrollmentEntry::from_verified(&verified))
     }
 
-    /// Whether stored delegation bytes verify under this admission and cover now.
+    /// Whether stored delegation bytes verify under this admission, were made under exactly
+    /// its fresh grant, and cover now (the design's resend rule).
     pub(in crate::door) fn resendable(&mut self, delegation: &[u8]) -> bool {
         serde_json::from_slice::<enrollment::AccountingDelegation>(delegation)
             .ok()
             .is_some_and(|delegation| {
                 self.verified_entry(&delegation).is_ok()
-                    && self
-                        .current()
-                        .is_ok_and(|current| current.now < delegation.expires_at)
+                    && self.current().is_ok_and(|current| {
+                        resend_allowed(&current.grant, current.now, &delegation)
+                    })
             })
     }
 
