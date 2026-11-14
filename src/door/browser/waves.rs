@@ -30,21 +30,30 @@ pub struct Waves<W: TorWatcher + 'static>(Bind<W>);
 
 impl<W: TorWatcher + 'static> Waves<W> {
     /// `record` is the record-currency mark the device's record job keeps.
-    pub fn new<P, C>(capabilities: WaveCapabilities<P, C>, record: RecordCurrent) -> Self
+    pub fn new<P, C>(
+        capabilities: WaveCapabilities<P, C>,
+        record: RecordCurrent,
+        prewarm: Option<std::rc::Rc<dyn crate::door::inbox_waves::WavePrewarm>>,
+    ) -> Self
     where
         P: WaveProver + 'static,
         C: ProofCheck + 'static,
     {
         Self(Box::new(move |door, origin, network| {
             let charter = door.current_policy(origin)?;
-            device::bind(
+            let bound = device::bind(
                 door,
                 origin,
                 capabilities,
                 record,
                 TorHandleOpener::new(network),
                 charter,
-            )
+            )?;
+            // The compose-time warm-up is bound with the ports: one bind, one origin.
+            if let Some(prewarm) = prewarm {
+                door.bind_wave_prewarm(origin, prewarm)?;
+            }
+            Ok(bound)
         }))
     }
 

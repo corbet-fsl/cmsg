@@ -252,6 +252,9 @@ mod runtime {
             self,
             community: &str,
             board: Option<crate::door::board::PendingBoard>,
+            #[cfg(feature = "browser-prover")] waves: Option<
+                crate::door::browser::waves::Waves<RefuseWatches>,
+            >,
         ) -> Result<Box<dyn crate::door::VaultComposer>> {
             let validated = self.validated()?;
             // Fixed domain plus the immutable Door community, never a second
@@ -259,8 +262,7 @@ mod runtime {
             let mut scope = Sha256::new();
             scope.update(b"cmsg.tor.scope.v1\0");
             scope.update(community.as_bytes());
-            Ok(Box::new(
-                browser::restore::Composer::new(browser::restore::Configuration {
+            let composer = browser::restore::Composer::new(browser::restore::Configuration {
                     transport: validated.transport,
                     records: validated.records,
                     scope: ctrn::Scope(scope.finalize().into()),
@@ -268,8 +270,10 @@ mod runtime {
                     watcher: RefuseWatches,
                     database: validated.database,
                 })
-                .with_board(board),
-            ))
+                .with_board(board);
+            #[cfg(feature = "browser-prover")]
+            let composer = composer.with_waves(waves);
+            Ok(Box::new(composer))
         }
 
         /// The same deployment budgets for a registration's dial-only bootstrap client: its

@@ -612,3 +612,80 @@ pub fn refusing() -> Arc<dyn AccountProver> {
 /// Test-only exports for the browser tests of this prover path (never part of a product build).
 #[cfg(feature = "browser-prover-probe")]
 mod probe;
+
+/// The wave capabilities of a deployment that load in the background. `VaultHost::new` is
+/// synchronous, so the pinned wave group is fetched and authenticated after construction: until
+/// it is loaded the provers, the counterpart verifier and the warm-up answer `Unavailable` (the
+/// job stays recorded and is offered again), never a weaker check. A deployment whose group is
+/// refused stays unavailable and logs its cause; nothing is half-bound.
+pub fn lazy_wave_capabilities(
+    deployment: ProverDeployment,
+) -> (
+    crate::door::inbox_waves::device::WaveCapabilities<BrowserWaveProver, WorkerCheck>,
+    std::rc::Rc<dyn crate::door::inbox_waves::WavePrewarm>,
+) {
+    use std::{cell::RefCell, rc::Rc};
+    type Provers = Rc<dyn Fn() -> Result<BrowserWaveProver>>;
+    struct Loaded {
+        provers: Provers,
+        verifier: VerifierFactory<WorkerCheck>,
+        prewarm: Rc<dyn crate::door::inbox_waves::WavePrewarm>,
+    }
+    let slot: Rc<RefCell<Option<Loaded>>> = Rc::default();
+    let filling = Rc::clone(&slot);
+    wasm_bindgen_futures::spawn_local(async move {
+        let loaded = async {
+            let group = WaveGroup::load(&deployment).await?;
+            let update = configure(&deployment).await?;
+            let verifier = group.verifier_factory()?;
+            let first = group.provers(&deployment).await?;
+            let prewarm = first.prewarm_handle();
+            let group = Rc::new(group);
+            let provers: Provers = Rc::new(move || {
+                let unavailable = |_| ErrorCode::Unavailable;
+                let update = BrowserProver::new(update.clone(), Arc::new(WorkerPort))
+                    .map_err(|e| unavailable(e))?;
+                Ok(BrowserWaveProver {
+                    update,
+                    wave: group.prover(Program::Wave).map_err(unavailable)?,
+                    outcome: group.prover(Program::Outcome).map_err(unavailable)?,
+                })
+            });
+            Ok::<_, ComposeError>(Loaded {
+                provers,
+                verifier,
+                prewarm,
+            })
+        }
+        .await;
+        match loaded {
+            Ok(loaded) => *filling.borrow_mut() = Some(loaded),
+            Err(cause) => web_sys::console::error_1(&format!("wave group refused: {cause:?}").into()),
+        }
+    });
+    let provers_slot = Rc::clone(&slot);
+    let verifier_slot = Rc::clone(&slot);
+    let capabilities = crate::door::inbox_waves::device::WaveCapabilities {
+        provers: Rc::new(move || match provers_slot.borrow().as_ref() {
+            Some(loaded) => (loaded.provers)(),
+            None => Err(ErrorCode::Unavailable),
+        }),
+        verifier: Box::new(move |policy, now, until| match verifier_slot.borrow().as_ref() {
+            Some(loaded) => (loaded.verifier)(policy, now, until),
+            None => Err(ErrorCode::Unavailable),
+        }),
+    };
+    struct Lazy<F: Fn() -> Option<Rc<dyn crate::door::inbox_waves::WavePrewarm>>>(F);
+    impl<F: Fn() -> Option<Rc<dyn crate::door::inbox_waves::WavePrewarm>>>
+        crate::door::inbox_waves::WavePrewarm for Lazy<F>
+    {
+        fn prewarm(&self) -> Pin<Box<dyn Future<Output = ()>>> {
+            match (self.0)() {
+                Some(inner) => inner.prewarm(),
+                None => Box::pin(async {}),
+            }
+        }
+    }
+    let prewarm = Rc::new(Lazy(move || slot.borrow().as_ref().map(|l| Rc::clone(&l.prewarm))));
+    (capabilities, prewarm)
+}

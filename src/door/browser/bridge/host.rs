@@ -503,7 +503,29 @@ impl VaultHost {
                     {
                         let community = config.runtime.community.clone();
                         let (door, board) = config.runtime.construct_restoring()?;
-                        let composer = deployment.composer(&community, board)?;
+                        // The wave stack of the deployment's pinned wave group, loaded in the
+                        // background (nothing is bound without a prover deployment that ships one).
+                        #[cfg(feature = "browser-prover")]
+                        let waves = config
+                            .registration
+                            .as_ref()
+                            .and_then(|registration| registration.prover.clone())
+                            .filter(|prover| prover.wave.is_some())
+                            .map(|prover| {
+                                let (capabilities, prewarm) =
+                                    super::super::prover::lazy_wave_capabilities(prover);
+                                super::super::waves::Waves::new(
+                                    capabilities,
+                                    crate::door::record::RecordCurrent::default(),
+                                    Some(prewarm),
+                                )
+                            });
+                        let composer = deployment.composer(
+                            &community,
+                            board,
+                            #[cfg(feature = "browser-prover")]
+                            waves,
+                        )?;
                         Self::attach_with_composer(door, config.member_origin, origin, composer)
                     }
                     #[cfg(not(feature = "browser-tor"))]
