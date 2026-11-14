@@ -284,7 +284,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -295,7 +295,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1555,7 +1555,7 @@ dependencies = [
 [[package]]
 name = "cbcn"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cbcn.git?branch=main#3fa7a5c13a3da18421fda52f8451012d74d96e39"
+source = "git+https://git.corbet.ch/corbet-libre/cbcn.git?branch=main#7d15de2782e3b0392976cd01ab4fec28b6e6f572"
 dependencies = [
  "csgn",
  "serde",
@@ -1565,7 +1565,7 @@ dependencies = [
 [[package]]
 name = "cblc"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-fsl/cblc.git?branch=main#53826f483489c76fcd5a0040c9ea5d6c731ca772"
+source = "git+https://git.corbet.ch/corbet-fsl/cblc.git?branch=main#97cb9d7719eccd8303d192e91ff70a93508551ac"
 dependencies = [
  "cbcn",
  "cmbl",
@@ -1582,7 +1582,7 @@ dependencies = [
 [[package]]
 name = "cblv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cblv.git?branch=main#ebb2a72e6da570ed2d485ec019201e0b349f59ba"
+source = "git+https://git.corbet.ch/corbet-libre/cblv.git?branch=main#64169eecca6770c63c15e653f97e2677490d596e"
 dependencies = [
  "bhttp",
  "getrandom 0.4.3",
@@ -1598,7 +1598,7 @@ dependencies = [
 [[package]]
 name = "cbrd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-fsl/cbrd.git?branch=main#5c00914739e2016a3f070b3891c617e37f87a829"
+source = "git+https://git.corbet.ch/corbet-fsl/cbrd.git?branch=main#8e9d4b9c44d6e149ce1d40fc9cfb36d08d9bdfa4"
 dependencies = [
  "blake3",
  "cchr",
@@ -1638,7 +1638,7 @@ dependencies = [
 [[package]]
 name = "cchr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cchr.git?branch=main#881fe94d524eedf8995dad398f54967dc4c08884"
+source = "git+https://git.corbet.ch/corbet-libre/cchr.git?branch=main#bbd76fc188d4c9afa39ef24201e8710f56c81e22"
 dependencies = [
  "blake3",
  "cbcn",
@@ -1661,7 +1661,7 @@ dependencies = [
 [[package]]
 name = "cdht"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cdht.git?branch=main#505125356b23976763ef5f10f0380a464ad021a9"
+source = "git+https://git.corbet.ch/corbet-libre/cdht.git?branch=main#76d78fb067a4b5318bf9c6228a29a45bb071ec1a"
 dependencies = [
  "blake3",
  "capnp",
@@ -1678,7 +1678,7 @@ dependencies = [
 [[package]]
 name = "cdlv"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cdlv.git?branch=main#fe644ce0121c6a10ec85cf6c81535d7303b8876b"
+source = "git+https://git.corbet.ch/corbet-libre/cdlv.git?branch=main#a5be771785d4d939e4ff5cc422eb6a8f3ce5d02e"
 dependencies = [
  "ckmg",
  "ctcs",
@@ -1701,7 +1701,7 @@ dependencies = [
 [[package]]
 name = "cfbk"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cfbk.git?branch=main#5f7dec374f967412b8ffa3ddae1e5a1762b8b5a4"
+source = "git+https://git.corbet.ch/corbet-libre/cfbk.git?branch=main#9b35e9eabe345efb6b5ff05f7e1ec057073427ed"
 
 [[package]]
 name = "cfg-if"
@@ -1718,7 +1718,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 [[package]]
 name = "cfrm"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-fsl/cfrm.git?branch=main#46552f69a58cea82467415dfe30ce9ada70aa4af"
+source = "git+https://git.corbet.ch/corbet-fsl/cfrm.git?branch=main#99e558157129ce2e4096fa60dc077322269afa88"
 dependencies = [
  "cblv",
  "crbk",
@@ -1738,7 +1738,7 @@ dependencies = [
 [[package]]
 name = "cfry"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cfry.git?branch=main#3d2be8ebaed05fac891f2204d656d0a8c8579259"
+source = "git+https://git.corbet.ch/corbet-libre/cfry.git?branch=main#70bba882a9c3aaa4c8be3a7f02ed27a4996834ca"
 dependencies = [
  "bytes",
  "futures",
@@ -1753,7 +1753,7 @@ dependencies = [
 [[package]]
 name = "cfyr"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-fsl/cfyr.git?branch=main#b5f815ac609f4ed11c4a2502dce00eb582c905bd"
+source = "git+https://git.corbet.ch/corbet-fsl/cfyr.git?branch=main#d990487ffa49d67d377967fe3af23c8783d06c1e"
 dependencies = [
  "cblc",
  "cnvy",
@@ -1769,7 +1769,7 @@ dependencies = [
 [[package]]
 name = "cgrd"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cgrd.git?branch=main#1bf25c20c4393028c66e92f936b22195ffe96a0e"
+source = "git+https://git.corbet.ch/corbet-libre/cgrd.git?branch=main#3f62ae3a6a8845e77e04900d5d3382c82873a0a3"
 dependencies = [
  "bigdecimal",
  "cpns",
@@ -1790,7 +1790,7 @@ dependencies = [
 [[package]]
 name = "cgrp"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cgrp.git?branch=main#a5706c5ae7ad6645877ddf4fd78c38125abb2ae7"
+source = "git+https://git.corbet.ch/corbet-libre/cgrp.git?branch=main#5eb172353e15052fd37896e6e3612f7008790ebd"
 dependencies = [
  "ckmg",
  "cmbl",
@@ -1922,7 +1922,7 @@ dependencies = [
 [[package]]
 name = "ckmg"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/ckmg.git?branch=main#67de337f3520efe7dad00cad9c81c289f9da1419"
+source = "git+https://git.corbet.ch/corbet-libre/ckmg.git?branch=main#cf4a1fbb69b1f18f3962ec2a3ed74c6e02bd979a"
 dependencies = [
  "arti-client",
  "blake3",
@@ -1956,7 +1956,7 @@ dependencies = [
 [[package]]
 name = "ckyh"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/ckyh.git?branch=main#26d3fcd647d04b9f1dc39a2a399ceee265f475e1"
+source = "git+https://git.corbet.ch/corbet-libre/ckyh.git?branch=main#e0ca86168f2260b2c4489232ada56ce86237027d"
 dependencies = [
  "ciborium",
  "crlt",
@@ -2029,7 +2029,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 [[package]]
 name = "clnk"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/clnk.git?branch=main#fb929a49bd7ff6d2b465aca4ee9753d21b2fa5da"
+source = "git+https://git.corbet.ch/corbet-libre/clnk.git?branch=main#ae00155c373e74f12abf10468e974c6b131d32df"
 dependencies = [
  "cfrm",
  "cmbl",
@@ -2053,7 +2053,7 @@ dependencies = [
 [[package]]
 name = "cmbl"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cmbl.git?branch=main#d7cd785c007e6cea3a5c9c4d299ef33131e6a7d0"
+source = "git+https://git.corbet.ch/corbet-libre/cmbl.git?branch=main#1319fbd27ea8179784bdd1ef20824f3f64560c63"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
@@ -2072,7 +2072,7 @@ dependencies = [
 [[package]]
 name = "cmmr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cmmr.git?branch=main#166ef88d5f49d71f3e00abc31e30ba2b1e9a4f46"
+source = "git+https://git.corbet.ch/corbet-libre/cmmr.git?branch=main#f83767ae595f201d36d7dba1ce211a77cc83e26f"
 dependencies = [
  "serde",
 ]
@@ -2161,7 +2161,7 @@ dependencies = [
 [[package]]
 name = "cmsh"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-fsl/cmsh.git?branch=main#455d8a0e07bf675366da22c72da97a3764f353c3"
+source = "git+https://git.corbet.ch/corbet-fsl/cmsh.git?branch=main#38e11497ebe6931bdad854fb8414cf93b876acaf"
 dependencies = [
  "async-trait",
  "cdht",
@@ -2176,7 +2176,7 @@ dependencies = [
 [[package]]
 name = "cnbx"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-fsl/cnbx.git?branch=main#5e3f9b31815d87c1a073eb57f9656a560c861ddf"
+source = "git+https://git.corbet.ch/corbet-fsl/cnbx.git?branch=main#7de9882bdc69b17a42685d30668f66e6ce3f5f90"
 dependencies = [
  "cdlv",
  "cgrp",
@@ -2194,7 +2194,7 @@ dependencies = [
 [[package]]
 name = "cnvl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cnvl.git?branch=main#ae85ec3632564860644f908c6247db2a1b59f8ad"
+source = "git+https://git.corbet.ch/corbet-libre/cnvl.git?branch=main#02a2ad9c18d6a12f71d556a573e92f4cfbf75f76"
 dependencies = [
  "cgrd",
  "chacha20poly1305 0.11.0",
@@ -2210,7 +2210,7 @@ dependencies = [
 [[package]]
 name = "cnvy"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cnvy.git?branch=main#622b5259e44daebafeb533db73613a000da2a633"
+source = "git+https://git.corbet.ch/corbet-libre/cnvy.git?branch=main#d460756189c6a16a7eb6799e92e19bff781b15d2"
 dependencies = [
  "cchr",
  "futures-util",
@@ -2403,7 +2403,7 @@ dependencies = [
 [[package]]
 name = "cpfl"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cpfl.git?branch=main#11df82fd4f3b7cff9481ea5e4a812e977ac93f55"
+source = "git+https://git.corbet.ch/corbet-libre/cpfl.git?branch=main#50ef5672870b20adf0f5fcad45d3c454be13cd69"
 dependencies = [
  "blake3",
  "cgrd",
@@ -2424,7 +2424,7 @@ dependencies = [
 [[package]]
 name = "cpky"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cpky.git?branch=main#65034b662a3e6191caf0f2986e0ee529aca6f54c"
+source = "git+https://git.corbet.ch/corbet-libre/cpky.git?branch=main#0f819cd63862c0d0b0a2285a2ae6570d3671b632"
 dependencies = [
  "async-trait",
  "axum",
@@ -2461,7 +2461,7 @@ dependencies = [
 [[package]]
 name = "cpns"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cpns.git?branch=main#ca0c981029a26148cd930ffd39fe5be2f842173a"
+source = "git+https://git.corbet.ch/corbet-libre/cpns.git?branch=main#3c492804d6507dbb61fb055bf1751412177444ed"
 dependencies = [
  "getrandom 0.4.3",
  "sha2 0.11.1",
@@ -2472,7 +2472,7 @@ dependencies = [
 [[package]]
 name = "cprz"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cprz.git?branch=main#c7300c8f794205faa54d2e09da784652313616b7"
+source = "git+https://git.corbet.ch/corbet-libre/cprz.git?branch=main#43b5a114e794f5540f037e2d2865c71c6a9e7168"
 dependencies = [
  "cprz-blob",
 ]
@@ -2480,7 +2480,7 @@ dependencies = [
 [[package]]
 name = "cprz-blob"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cprz.git?branch=main#c7300c8f794205faa54d2e09da784652313616b7"
+source = "git+https://git.corbet.ch/corbet-libre/cprz.git?branch=main#43b5a114e794f5540f037e2d2865c71c6a9e7168"
 dependencies = [
  "brotli",
 ]
@@ -2488,12 +2488,12 @@ dependencies = [
 [[package]]
 name = "cprz-pad"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cprz.git?branch=main#c7300c8f794205faa54d2e09da784652313616b7"
+source = "git+https://git.corbet.ch/corbet-libre/cprz.git?branch=main#43b5a114e794f5540f037e2d2865c71c6a9e7168"
 
 [[package]]
 name = "cpsd"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cpsd.git?branch=main#321233d80d1e68a3969495b9224616816bd31cd0"
+source = "git+https://git.corbet.ch/corbet-libre/cpsd.git?branch=main#66ce30c0782ec4d15550d9ebb182ee9854281515"
 dependencies = [
  "ark-bls12-381",
  "ark-ec 0.4.2",
@@ -2552,7 +2552,7 @@ dependencies = [
 [[package]]
 name = "crbk"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/crbk.git?branch=main#e9238de7826d91548c4f5575b9d24f6975a77054"
+source = "git+https://git.corbet.ch/corbet-libre/crbk.git?branch=main#3e4fdae8857f6e9b44df5e1eb0ab1973c32060a4"
 dependencies = [
  "czkp",
  "semver",
@@ -2573,7 +2573,7 @@ dependencies = [
 [[package]]
 name = "crlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/crlt.git?branch=main#d80ddf00284fc200e7522ad627a723afa1786ed0"
+source = "git+https://git.corbet.ch/corbet-libre/crlt.git?branch=main#64f93fed6b80e34814fec2f840eed100e33bc403"
 dependencies = [
  "deadpool",
  "libsql",
@@ -2692,7 +2692,7 @@ dependencies = [
 [[package]]
 name = "csgn"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/csgn.git?branch=main#bb79c367b2878949d8ae6739fcc4709490212824"
+source = "git+https://git.corbet.ch/corbet-libre/csgn.git?branch=main#e33d6c943d83328ee91f7804d833c9d3be3ac4cf"
 dependencies = [
  "ciborium-ll",
  "coset",
@@ -2705,7 +2705,7 @@ dependencies = [
 [[package]]
 name = "cshm"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cshm.git?branch=main#65f75befc8e4136eb10d01eddfae1e0ca07fbc0f"
+source = "git+https://git.corbet.ch/corbet-libre/cshm.git?branch=main#88abc98d9a56fac5e2e50eb87a070e56f905edb5"
 dependencies = [
  "bigdecimal",
  "jsonschema",
@@ -2717,7 +2717,7 @@ dependencies = [
 [[package]]
 name = "csrh"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/csrh.git?branch=main#fdab72cd7f11c36b14487b51bc37a47bcc3cee26"
+source = "git+https://git.corbet.ch/corbet-libre/csrh.git?branch=main#2ae12ee8f580dd8202c86970bb142c191300ad38"
 dependencies = [
  "cgrd",
  "cpfl",
@@ -2729,7 +2729,7 @@ dependencies = [
 [[package]]
 name = "cswb"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cswb.git?branch=main#86bc00478abb7a17a924e99350ac5dafcf332ea5"
+source = "git+https://git.corbet.ch/corbet-libre/cswb.git?branch=main#411a69d971f4c37299a721146e8373f0315203c9"
 dependencies = [
  "cchr",
  "cmmr",
@@ -2753,7 +2753,7 @@ checksum = "8fd9f3db6f2cfef61c10613071955154ffdc9e515daebff26de4b54e35038fdd"
 [[package]]
 name = "ctcs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/ctcs.git?branch=main#6d622a19d114db196cefd98f820e9e2aea897728"
+source = "git+https://git.corbet.ch/corbet-libre/ctcs.git?branch=main#f0ba4ac1793ecf9473d0eb7f254083ef25933951"
 dependencies = [
  "ckmg",
  "cwst",
@@ -2765,7 +2765,7 @@ dependencies = [
 [[package]]
 name = "cthr"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cthr.git?branch=main#6e70800c26ef5b56a7404f614a5051270b2f7bc9"
+source = "git+https://git.corbet.ch/corbet-libre/cthr.git?branch=main#3fdd84b359dca3c58e84e6020a1e815940f8e90c"
 dependencies = [
  "cchr",
  "cgrp",
@@ -2791,7 +2791,7 @@ dependencies = [
 [[package]]
 name = "ctnd"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/ctnd.git?branch=main#7271152beb6ae8df0a752e9c7840c76886fee139"
+source = "git+https://git.corbet.ch/corbet-libre/ctnd.git?branch=main#690de38f799944e885e3f436714259150fbcf5e9"
 dependencies = [
  "cgrp",
  "schemars 1.2.2",
@@ -2821,7 +2821,7 @@ dependencies = [
 [[package]]
 name = "ctrn"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/ctrn.git?branch=main#afa3908c9653235ac7f156813056f22a8741ca30"
+source = "git+https://git.corbet.ch/corbet-libre/ctrn.git?branch=main#0466cd13b2bf2e2ebc89e9877d1aff90a5ae65cd"
 dependencies = [
  "arti-client",
  "async-trait",
@@ -2908,7 +2908,7 @@ dependencies = [
 [[package]]
 name = "cvch"
 version = "0.2.1"
-source = "git+https://git.corbet.ch/corbet-libre/cvch.git?branch=main#e2a915fa2de172a831266f233dba4f8347acee21"
+source = "git+https://git.corbet.ch/corbet-libre/cvch.git?branch=main#d8a6b59d3d839c55b9557f44a7534b4e37168674"
 dependencies = [
  "cfbk",
  "csgn",
@@ -2927,7 +2927,7 @@ dependencies = [
 [[package]]
 name = "cvfy"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cvfy.git?branch=main#4234a9e136074585d21b477b1a23bc2221c1eeba"
+source = "git+https://git.corbet.ch/corbet-libre/cvfy.git?branch=main#81c320e6ac6d7f0978f2542fa4846e6af7e5a6c3"
 dependencies = [
  "czkp",
  "data-encoding",
@@ -2939,7 +2939,7 @@ dependencies = [
 [[package]]
 name = "cvld-client"
 version = "0.2.0"
-source = "git+https://git.corbet.ch/corbet-fsl/cvld.git?branch=main#3a410edc4dc6815fb1793905b244ebc235c15b8b"
+source = "git+https://git.corbet.ch/corbet-fsl/cvld.git?branch=main#0b54dbb42707a7ff7df56eb9481dbcd75d323fa2"
 dependencies = [
  "any_ascii",
  "blind-rsa-signatures",
@@ -2965,7 +2965,7 @@ dependencies = [
 [[package]]
 name = "cvlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-fsl/cvlt.git?branch=main#7f5f87aac09b87508be481b53aac04b0eb87dc2f"
+source = "git+https://git.corbet.ch/corbet-fsl/cvlt.git?branch=main#4e059c8b6adb6166c71d184708849d0a0c0fa329"
 dependencies = [
  "aes-gcm 0.10.3",
  "blake3",
@@ -2994,7 +2994,7 @@ dependencies = [
 [[package]]
 name = "cwlt"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cwlt.git?branch=main#7fe29c30af478fb178e012a5d9da1ecbac1ad06c"
+source = "git+https://git.corbet.ch/corbet-libre/cwlt.git?branch=main#3375ba17a7e22b07c41d9cfefdcd0787729c721e"
 dependencies = [
  "blake3",
  "ckmg",
@@ -3015,7 +3015,7 @@ dependencies = [
 [[package]]
 name = "cwlt-engine"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cwlt.git?branch=main#7fe29c30af478fb178e012a5d9da1ecbac1ad06c"
+source = "git+https://git.corbet.ch/corbet-libre/cwlt.git?branch=main#3375ba17a7e22b07c41d9cfefdcd0787729c721e"
 dependencies = [
  "acvm",
  "barretenberg-rs",
@@ -3041,7 +3041,7 @@ dependencies = [
 [[package]]
 name = "cwst"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/cwst.git?branch=main#90f6aa76323acce35d5acacdc0aabad4f4110046"
+source = "git+https://git.corbet.ch/corbet-libre/cwst.git?branch=main#e7bb38e1a8f3da7ce2401f3e20f94035c77e5463"
 dependencies = [
  "atomicwrites",
  "blake3",
@@ -3064,7 +3064,7 @@ dependencies = [
 [[package]]
 name = "cwvs"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cwvs.git?branch=main#10a9aed1f27cd743a479fec68652148bbfecf373"
+source = "git+https://git.corbet.ch/corbet-libre/cwvs.git?branch=main#a7a03632243d4d96856fdf50015c6c755faaadf6"
 dependencies = [
  "cdlv",
  "ckmg",
@@ -3081,7 +3081,7 @@ dependencies = [
 [[package]]
 name = "cxch"
 version = "0.1.0"
-source = "git+https://git.corbet.ch/corbet-libre/cxch.git?branch=main#0381d4940d33d98c2a6e1ccd64938493c318e867"
+source = "git+https://git.corbet.ch/corbet-libre/cxch.git?branch=main#5291abc0586e9a96f156ef44f2050cf01a76df03"
 dependencies = [
  "cgrd",
  "cnvl",
@@ -3095,7 +3095,7 @@ dependencies = [
 [[package]]
 name = "czkp"
 version = "0.0.0"
-source = "git+https://git.corbet.ch/corbet-libre/czkp.git?branch=main#ebf2ef7e376c6e350d501a5c6f21a3f6150f126b"
+source = "git+https://git.corbet.ch/corbet-libre/czkp.git?branch=main#34e740f022ca585fd3f75237fbf375c391bfadeb"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.6.0",
@@ -3421,12 +3421,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba91f619216e76a5eb2515783f7ec2e271938b51aadac592f4930517f4626863"
 dependencies = [
  "heck",
- "indexmap 1.9.3",
- "itertools 0.10.5",
+ "indexmap 2.14.2",
+ "itertools 0.15.0",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "sha3 0.10.9",
+ "sha3 0.12.0",
  "strum 0.28.0",
  "syn 3.0.6",
  "unicode-ident",
@@ -3550,7 +3550,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3918,7 +3918,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6516,7 +6516,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7678,7 +7678,7 @@ dependencies = [
  "derive-deftly",
  "libc",
  "paste",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -7734,7 +7734,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8396,7 +8396,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8454,7 +8454,7 @@ dependencies = [
  "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9245,7 +9245,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9387,7 +9387,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9550,7 +9550,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11142,7 +11142,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11701,7 +11701,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
