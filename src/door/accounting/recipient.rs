@@ -64,13 +64,12 @@ impl AccountAdmission<'_> {
                     &__cause,
                 )
             })?;
-        let expires_at = expires
-            .min(
-                current
-                    .now
-                    .saturating_add(current.material.policy.max_authorization_seconds),
-            )
-            .min(authorization.expires_at);
+        let expires_at = super::lease_bound_expiry(
+            expires.min(authorization.expires_at),
+            current.now,
+            current.material.policy.max_authorization_seconds,
+            current.expires,
+        );
         if expires_at <= current.now {
             return Err(ErrorCode::Unauthorized);
         }

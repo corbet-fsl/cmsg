@@ -448,10 +448,11 @@ impl AccountAdmission<'_> {
     {
         let (authorization, _root, current, expires) =
             self.authorize_device(account, intents).await?;
-        let expires_at = expires.min(
-            current
-                .now
-                .saturating_add(current.material.policy.max_authorization_seconds),
+        let expires_at = super::lease_bound_expiry(
+            expires,
+            current.now,
+            current.material.policy.max_authorization_seconds,
+            current.expires,
         );
         let mut challenge = [0u8; 32];
         getrandom::fill(&mut challenge).map_err(|__cause| {

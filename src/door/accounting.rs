@@ -102,26 +102,35 @@ pub struct PreparedEnrollment<'p> {
 /// The end of the policy-signed admission grant this account actor has just verified
 /// (`AccountAdmission::current`). It is the only value custody accepts as the bound of the
 /// two account signatures (L20261114b), carried on the account port's arm only while armed.
-/// Nothing outside the actor's own grant verification constructs it: the field is private
-/// and the one constructor reads a grant `verify_admission` accepted.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct VerifiedGrantEnd(u64);
-impl VerifiedGrantEnd {
-    /// From the grant `admission::verify_admission` has just accepted; the caller is
-    /// `AccountAdmission::current` only.
-    fn verified(grant: &admission::AdmissionGrant) -> Self {
-        Self(grant.expires_at)
-    }
-    /// The grant's end (Unix seconds).
-    pub(crate) fn get(self) -> u64 {
-        self.0
-    }
-    /// A stand-in for custody's unit tests, which hold no live admission.
-    #[cfg(test)]
-    pub(crate) fn for_test(end: u64) -> Self {
-        Self(end)
+/// Its own private module makes it a type guarantee (review L2): the one constructor IS the
+/// grant verification, so no other code, in this module or below it, can make one.
+mod grant_end {
+    use super::admission;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct VerifiedGrantEnd(u64);
+    impl VerifiedGrantEnd {
+        /// Verify `grant` under `trust` at `now` (`admission::verify_admission`) and keep its end.
+        pub(in crate::door::accounting) fn verify(
+            grant: &admission::AdmissionGrant,
+            trust: &admission::AdmissionTrust,
+            now: u64,
+        ) -> Result<Self, cblc::Error> {
+            admission::verify_admission(grant, trust, now)?;
+            Ok(Self(grant.expires_at))
+        }
+        /// The grant's end (Unix seconds).
+        pub(crate) fn get(self) -> u64 {
+            self.0
+        }
+        /// A stand-in for custody's unit tests, which hold no live admission.
+        #[cfg(test)]
+        pub(crate) fn for_test(end: u64) -> Self {
+            Self(end)
+        }
     }
 }
+pub use grant_end::VerifiedGrantEnd;
 
 struct CurrentAdmission {
     material: cblc::publication::PublicVerifierMaterial,
@@ -403,15 +412,16 @@ impl AccountAdmission<'_> {
                                 &__cause,
                             )
                         })?;
-                    admission::verify_admission(&grant, &trust, checked).map_err(|__cause| {
-                        crate::door::cause::emit(
-                            file!(),
-                            line!(),
-                            "ErrorCode::Unauthorized",
-                            ErrorCode::Unauthorized,
-                            &__cause,
-                        )
-                    })?;
+                    let grant_end =
+                        VerifiedGrantEnd::verify(&grant, &trust, checked).map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unauthorized",
+                                ErrorCode::Unauthorized,
+                                &__cause,
+                            )
+                        })?;
                     if grant.policy_epoch != cohort.epoch
                         || grant.passport_policy_digest != cohort.digest
                         || grant.pseudonym != cohort.member
@@ -458,7 +468,7 @@ impl AccountAdmission<'_> {
                         ))]
                         balance: balance.clone(),
                         trust,
-                        grant_end: VerifiedGrantEnd::verified(&grant),
+                        grant_end,
                         grant,
                         origin: origin.into(),
                         now: checked,
@@ -483,6 +493,17 @@ impl AccountAdmission<'_> {
 /// includes the session lease) whenever the device signs; only the signed lifetime is the grant's.
 fn delegation_expiry(current: &CurrentAdmission) -> u64 {
     signed_lifetime(current.now, current.expires, current.grant.expires_at).unwrap_or(0)
+}
+
+/// The expiry of a lease-bound device signature (record recipient, account status) made at
+/// `now` under an admission current until `lease`: at most `upper`, the policy's authorization
+/// window and the lease. Custody refuses these formats past the lease (L20261114b keeps the
+/// lease for everything but the two account signatures), while `authorize_device` returns the
+/// grant end, so the lease is clamped here, never inherited from that value.
+fn lease_bound_expiry(upper: u64, now: u64, max_authorization_seconds: u64, lease: u64) -> u64 {
+    upper
+        .min(now.saturating_add(max_authorization_seconds))
+        .min(lease)
 }
 
 /// The signed lifetime of a delegation made at `now` under an admission current until
@@ -997,7 +1018,7 @@ mod resend_tests {
 
 #[cfg(test)]
 mod lifetime_tests {
-    use super::signed_lifetime;
+    use super::{lease_bound_expiry, signed_lifetime};
 
     #[test]
     fn a_delegation_lives_as_long_as_its_admission_grant_not_the_session_lease() {
@@ -1010,5 +1031,19 @@ mod lifetime_tests {
         assert_eq!(signed_lifetime(lease, lease, grant), None);
         // The admission can never outlive its own grant.
         assert_eq!(signed_lifetime(now, grant + 1, grant), None);
+    }
+
+    /// Review M1: the record recipient and account status signatures stay lease-bound although
+    /// `authorize_device` hands their callers the grant end. With an authorization window past
+    /// the lease end (the fixtures' 100 s hid it), the expiry is the lease, which custody accepts.
+    #[test]
+    fn a_lease_bound_signature_never_outlives_the_lease_when_the_window_is_longer() {
+        let (now, lease, grant) = (1_793_858_594, 1_793_859_483, 1_793_923_200);
+        let window = 3_600;
+        assert!(now + window > lease);
+        assert_eq!(lease_bound_expiry(grant, now, window, lease), lease);
+        // A short window still decides when it ends first, and a shorter upper bound too.
+        assert_eq!(lease_bound_expiry(grant, now, 100, lease), now + 100);
+        assert_eq!(lease_bound_expiry(now + 50, now, window, lease), now + 50);
     }
 }
