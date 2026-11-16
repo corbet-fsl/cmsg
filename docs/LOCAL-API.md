@@ -31,10 +31,10 @@ worker). In any other tab the Inbox and Mesh actions answer the typed error
 holder ends its jobs and Mesh at once and its session ends; it can take the
 runner back after unlocking again). A native device is always `here`.
 
-Device removal rotates the member's vault keys. The record job's save that meets the
-rotation makes the app reopen the custody under the new epoch itself and answers the
-typed, retryable error `custody_reopened` (exit code 75, session stays open); the job
-runs again on its next cycle. No client request meets this code yet; a client that does
+Device removal rotates the member's vault keys. A record save that meets the rotation makes
+the engine reopen the custody under the new epoch and run the save once more itself (the
+refused save had no effect). A frontend sees the typed, retryable error `custody_reopened`
+(exit code 75, session stays open) only if that second run meets a rotation as well; it then
 repeats the same request.
 
 `board.status` and `board.disconnect` return the actual Board Status.

@@ -48,6 +48,32 @@ pub(crate) async fn custody_refusal<V: ReopenAfterRotation>(
     super::cause::emit(file!(), line!(), "custody_refusal", fallback, &error)
 }
 
+/// Run one custody save; when it meets a rotation, reopen the custody and run it once more
+/// (the refused save had no effect, so the second run is its first execution). The caller sees
+/// [`ErrorCode::CustodyReopened`] only if the second run meets a rotation as well, so the hard
+/// path stays in the engine and a frontend never retries (owner principle L20261116k).
+pub(crate) async fn retry_after_reopen<V, T>(
+    custody: &mut V,
+    fallback: ErrorCode,
+    mut save: impl AsyncFnMut(&mut V) -> Result<T, WalletRestoreError>,
+) -> Result<T, ErrorCode>
+where
+    V: ReopenAfterRotation,
+{
+    let mut again = true;
+    loop {
+        let error = match save(custody).await {
+            Ok(done) => return Ok(done),
+            Err(error) => error,
+        };
+        let code = custody_refusal(custody, error, fallback).await;
+        if code != ErrorCode::CustodyReopened || !again {
+            return Err(code);
+        }
+        again = false;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,6 +110,45 @@ mod tests {
         );
     }
 
+    fn run(
+        saves: &mut Vec<Result<u8, WalletRestoreError>>,
+        reopens: bool,
+    ) -> (Result<u8, ErrorCode>, u32) {
+        let mut fake = Fake {
+            reopens,
+            reopened: 0,
+        };
+        let result = futures_executor::block_on(retry_after_reopen(
+            &mut fake,
+            ErrorCode::Unauthorized,
+            async |_: &mut Fake| saves.remove(0),
+        ));
+        (result, fake.reopened)
+    }
+
+    #[test]
+    fn a_save_that_met_a_rotation_runs_once_more_after_the_reopen() {
+        let mut saves = vec![Err(WalletRestoreError::Rotated), Ok(7)];
+        assert_eq!(run(&mut saves, true), (Ok(7), 1));
+        assert!(saves.is_empty());
+    }
+
+    #[test]
+    fn a_second_rotation_reaches_the_caller_as_the_retry_code() {
+        let mut saves = vec![
+            Err(WalletRestoreError::Rotated),
+            Err(WalletRestoreError::Rotated),
+        ];
+        assert_eq!(run(&mut saves, true), (Err(ErrorCode::CustodyReopened), 2));
+    }
+
+    #[test]
+    fn a_save_without_a_rotation_is_never_repeated() {
+        let mut saves = vec![Err(WalletRestoreError::Scope)];
+        assert_eq!(run(&mut saves, true), (Err(ErrorCode::Unauthorized), 0));
+        let mut saves = vec![Err(WalletRestoreError::Rotated)];
+        assert_eq!(run(&mut saves, false), (Err(ErrorCode::Unauthorized), 1));
+    }
     #[test]
     fn a_refused_reopen_keeps_the_fallback_code() {
         assert_eq!(
