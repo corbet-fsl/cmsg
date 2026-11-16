@@ -770,18 +770,26 @@ enum Exit {
     Panics,
 }
 
-/// The carrier with one fault in round 4; `reached` hears that round 3 was answered.
+/// The carrier with one fault in round 4; `reached` hears that round 3 was answered, and
+/// `record` (cvlt's record file of the vault) is taken just before round 3 reaches the CLI.
 struct Faulty<K: FnMut(Vec<Delegated>) -> Result<()>> {
     cli: Rc<RefCell<Delegate<K>>>,
     link: Link,
     exit: Exit,
     calls: u8,
     reached: Option<tokio::sync::oneshot::Sender<()>>,
+    record: Option<std::path::PathBuf>,
 }
 
 impl<K: FnMut(Vec<Delegated>) -> Result<()>> Channel for Faulty<K> {
     async fn call(&mut self, _: &cmsh::Address, message: &[u8]) -> Result<Vec<u8>> {
         self.calls += 1;
+        if let (3, Some(record)) = (self.calls, &self.record) {
+            // A non-empty directory where the record goes: cvlt's rename onto it fails.
+            let _ = std::fs::remove_file(record);
+            std::fs::create_dir(record).unwrap();
+            std::fs::write(record.join("taken"), b"").unwrap();
+        }
         if self.calls == ROUNDS {
             if let Some(reached) = self.reached.take() {
                 let _ = reached.send(());
@@ -815,6 +823,7 @@ async fn unfinished(cli: &CliVault, wallet: &Rc<RefCell<Wallet>>, exit: Exit) {
         exit,
         calls: 0,
         reached: None,
+        record: None,
     };
     let result = Delegator::new(wallet.clone(), channel)
         .run(&link, vec![target("garden")])
@@ -841,6 +850,7 @@ async fn login(
         exit,
         calls: 0,
         reached,
+        record: None,
     };
     let served = Delegator::new(wallet, channel)
         .run(&link, vec![target("garden")])
@@ -1140,13 +1150,24 @@ async fn a_ceremony_of_another_identity_leaves_the_vault_untouched() {
 
 /// Re-review 2 on F1a, pinned as built (option (i)): the same-root check also refuses a
 /// delegation after a root rotation (a device removal rotates the root; identity and binding
-/// stay), so the CLI is not re-delegated across epochs. No user sees this while the wallet
-/// refuses every re-delegation; a verified succession chain instead is a protocol change for
-/// the owner at a11r.
+/// stay), so the CLI is not re-delegated across epochs, and its vault is left untouched. No
+/// user sees this while the wallet refuses every re-delegation; a verified succession chain
+/// instead is a protocol change for the owner at a11r.
 #[tokio::test]
 async fn a_delegation_after_a_root_rotation_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
     let wallet = Rc::new(RefCell::new(Wallet::new(&["garden"]).await));
-    let held = delegated_garden(&wallet).await;
+    ceremony(&vault(dir.path()).unwrap(), &wallet, vec![target("garden")])
+        .await
+        .unwrap();
+    let held = resume(dir.path())
+        .load()
+        .unwrap()
+        .delegation(&target("garden").fingerprint, "garden")
+        .unwrap()
+        .lineage()
+        .clone();
+    let key = wallet.borrow().offers["garden"].device;
     {
         let mut wallet = wallet.borrow_mut();
         let custody = wallet.keys.get_mut("garden").unwrap();
@@ -1165,24 +1186,59 @@ async fn a_delegation_after_a_root_rotation_is_refused() {
         let receipt = custody.commit().await.unwrap().unwrap();
         custody.acknowledge(receipt.operation).await.unwrap();
         let rotated = custody.lineage().await.unwrap();
-        let before = held.delegation.lineage();
-        assert_ne!(rotated.root, before.root);
-        assert_eq!(rotated.identity, before.identity);
-        assert_eq!(rotated.binding, before.binding);
-        assert!(rotated
-            .delegates
-            .contains(&held.delegation.device_public_key()));
+        assert_ne!(rotated.root, held.root);
+        assert_eq!(rotated.identity, held.identity);
+        assert_eq!(rotated.binding, held.binding);
+        assert!(rotated.delegates.contains(&key));
     }
-    let current = BTreeMap::from([(
-        "garden".to_string(),
-        Held::of(target("garden").fingerprint, &held.delegation),
-    )]);
-    let (delegate, link, kept) = cli(current);
-    let result = Delegator::new(wallet.clone(), Wire(delegate.clone()))
-        .run(&link, vec![target("garden")])
-        .await;
-    assert_eq!(result.err(), Some(ErrorCode::Unauthorized));
-    assert!(kept.borrow().is_empty());
-    assert!(!delegate.borrow().finished());
+    let before = snapshot(dir.path());
+    assert_eq!(
+        ceremony(&vault(dir.path()).unwrap(), &wallet, vec![target("garden")])
+            .await
+            .err(),
+        Some(ErrorCode::Unauthorized)
+    );
+    // The CLI asked to replace its own key; the grant under the new root was refused.
+    assert_eq!(wallet.borrow().offers["garden"].replaces, Some(key));
     assert_eq!(garden_row(&wallet), (Row::Pending, true));
+    assert_eq!(snapshot(dir.path()), before);
+}
+
+/// Re-review 3, condition (a): the bundle save fails AFTER the pending and users files were
+/// written (cvlt's record path is taken just before round 3 reaches the CLI). The round stays
+/// unanswered, so nothing is activated; once the path is free again, the settlement restores
+/// both files byte for byte and the bundle as it was.
+#[tokio::test]
+async fn a_bundle_save_that_fails_after_the_users_file_is_restored() {
+    let (dir, wallet) = with_orchard().await;
+    let before = snapshot(dir.path());
+    let record = dir.path().join("resume.v2");
+    let cli = vault(dir.path()).unwrap();
+    let (offer, link) = Offer::new(&address(), NOW).unwrap();
+    let delegate = Rc::new(RefCell::new(cli.delegate(offer)));
+    let channel = Faulty {
+        cli: delegate.clone(),
+        link: Link::parse(&link).unwrap(),
+        exit: Exit::RoundFourLost,
+        calls: 0,
+        reached: None,
+        record: Some(record.clone()),
+    };
+    assert_eq!(
+        Delegator::new(wallet.clone(), channel)
+            .run(&link, vec![target("garden")])
+            .await
+            .err(),
+        Some(ErrorCode::Unavailable)
+    );
+    // Written ahead before the bundle failed: the pending and users files name garden.
+    let (users, pending, _, temporary) = snapshot(dir.path());
+    assert_ne!(users, before.0);
+    assert!(pending.is_some() && temporary.is_empty());
+    assert_eq!(garden_row(&wallet), (Row::Pending, true));
+    std::fs::remove_dir_all(&record).unwrap();
+    assert!(cli.settle(false).unwrap().is_empty());
+    drop(delegate);
+    drop(cli);
+    assert_eq!(snapshot(dir.path()), before);
 }
