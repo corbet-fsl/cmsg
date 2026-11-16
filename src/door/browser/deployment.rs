@@ -263,14 +263,14 @@ mod runtime {
             scope.update(b"cmsg.tor.scope.v1\0");
             scope.update(community.as_bytes());
             let composer = browser::restore::Composer::new(browser::restore::Configuration {
-                    transport: validated.transport,
-                    records: validated.records,
-                    scope: ctrn::Scope(scope.finalize().into()),
-                    window: validated.window,
-                    watcher: RefuseWatches,
-                    database: validated.database,
-                })
-                .with_board(board);
+                transport: validated.transport,
+                records: validated.records,
+                scope: ctrn::Scope(scope.finalize().into()),
+                window: validated.window,
+                watcher: RefuseWatches,
+                database: validated.database,
+            })
+            .with_board(board);
             #[cfg(feature = "browser-prover")]
             let composer = composer.with_waves(waves);
             Ok(Box::new(composer))
