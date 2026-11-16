@@ -251,8 +251,7 @@ pub async fn configure(
 /// The peer-release group (`wave` and `outcome`) a deployment ships, read once and authenticated
 /// exactly like the update group: each file is the one whose digest vault.json pins, and the pinned
 /// release manifest names exactly these circuit and key digests. It proves on the deployment's
-/// pinned setup. The community's wave policy must pin this manifest and scope before any proof of
-/// the counterpart is judged (the same rule as the native verifier).
+/// pinned setup. The manifest is pinned by the deployment (`registration.prover.wave` in vault.json); the policy is judged by `WaveVerifier` and never compared with this group.
 pub struct WaveGroup {
     circuit: Vec<u8>,
     keys: Vec<u8>,
@@ -385,6 +384,7 @@ impl WaveGroup {
 /// counterpart of the native `NativeWaveProver`. A proof runs in a Web Worker of this origin that
 /// is handed the member's own witness input once; only a proof whose public inputs this engine
 /// derived comes back.
+#[derive(Clone)]
 pub struct BrowserWaveProver {
     update: BrowserProver,
     wave: BrowserProver,
@@ -438,24 +438,16 @@ impl BrowserWaveProver {
     /// The same warm-up as the handle the embedding runtime binds for the member origin
     /// (`Door::bind_wave_prewarm`), so `inbox.wave_prewarm` reaches it at compose.
     pub fn prewarm_handle(&self) -> std::rc::Rc<dyn crate::door::inbox_waves::WavePrewarm> {
-        std::rc::Rc::new(SetupWarmUp(Arc::from(self.wave.setup_json())))
+        let setup: Arc<str> = Arc::from(self.wave.setup_json());
+        std::rc::Rc::new(crate::door::inbox_waves::WarmOnce::new(move || {
+            let setup = Arc::clone(&setup);
+            Box::pin(async move { warm(&setup).await })
+        }))
     }
 }
 
 async fn warm(setup: &str) -> bool {
     matches!(warm_in_worker(setup).await, Ok(value) if value.as_bool() == Some(true))
-}
-
-/// The pinned setup of the wave stack, warmed at compose (see [`BrowserWaveProver::prewarm`]).
-struct SetupWarmUp(Arc<str>);
-
-impl crate::door::inbox_waves::WavePrewarm for SetupWarmUp {
-    fn prewarm(&self) -> Pin<Box<dyn Future<Output = ()>>> {
-        let setup = Arc::clone(&self.0);
-        Box::pin(async move {
-            warm(&setup).await;
-        })
-    }
 }
 
 /// The browser half of the counterpart verifier: one program's proof check, run by bb.js in a
@@ -636,23 +628,12 @@ pub fn lazy_wave_capabilities(
     wasm_bindgen_futures::spawn_local(async move {
         let loaded = async {
             let group = WaveGroup::load(&deployment).await?;
-            let update = configure(&deployment).await?;
             let verifier = group.verifier_factory()?;
-            let first = group.provers(&deployment).await?;
-            let prewarm = first.prewarm_handle();
-            let group = Rc::new(group);
-            let provers: Provers = Rc::new(move || {
-                fn unavailable<E>(_: E) -> ErrorCode {
-                    ErrorCode::Unavailable
-                }
-                let update = BrowserProver::new(update.clone(), Arc::new(WorkerPort))
-                    .map_err(unavailable)?;
-                Ok(BrowserWaveProver {
-                    update,
-                    wave: group.prover(Program::Wave).map_err(unavailable)?,
-                    outcome: group.prover(Program::Outcome).map_err(unavailable)?,
-                })
-            });
+            // Built once: the group is hashed and parsed here, not every worker round, and the
+            // clones share one in-flight counter, so one proof runs at a time across rounds.
+            let built = group.provers(&deployment).await?;
+            let prewarm = built.prewarm_handle();
+            let provers: Provers = Rc::new(move || Ok(built.clone()));
             Ok::<_, ComposeError>(Loaded {
                 provers,
                 verifier,

@@ -740,6 +740,28 @@ async fn compose_wakes_the_wave_worker_once_warms_once_and_sends_nothing() {
         );
         assert!(wake.pending(), "the worker's next round is requested");
         assert_eq!(warmed.get(), 1, "the setup warm-up started exactly once");
+        // A client that calls again at once does not request another round; one that calls a
+        // full cadence later does.
+        assert!(wake.consume(), "the first compose's round is taken");
+        for (rewind, wakes, why) in [
+            (false, false, "an immediate repeat wakes nothing"),
+            (true, true, "a call a cadence later wakes again"),
+        ] {
+            if rewind {
+                // The engine clock is real time: age the last wake by a full cadence.
+                *door.wave_prewarm_woke.get_mut(ORIGIN).unwrap() = 0;
+            }
+            let reply = door
+                .dispatch(
+                    ORIGIN,
+                    token.expose_for_transport(),
+                    &request("inbox.wave_prewarm"),
+                    live_now(),
+                )
+                .await;
+            assert!(matches!(reply, Output::Ok { .. }));
+            assert_eq!(wake.pending(), wakes, "{why}");
+        }
         assert_eq!(checks.get(), 0, "the bracket reads nothing from the vault");
         door.close_owned().await;
         server.https.shutdown().await.unwrap();

@@ -57,8 +57,8 @@ pub const PROVER_CALIBRATION_PATH: &str = "/prover/calibration.json";
 pub const WAVE_CIRCUIT_PATH: &str = "/prover/wave/circuit.json";
 /// Where the wallet origin serves the peer-release verification-key group.
 pub const WAVE_KEYS_PATH: &str = "/prover/wave/keys.json";
-/// Where the wallet origin serves the release manifest of the peer-release group: the community's
-/// wave policy pins its digest, and it names the digests of the two files above.
+/// Where the wallet origin serves the release manifest of the peer-release group:
+/// pinned by the deployment (`registration.prover.wave` in vault.json); the policy is judged by `WaveVerifier` and never compared with this group; it names the digests of the two files above.
 pub const WAVE_MANIFEST_PATH: &str = "/prover/wave/manifest.json";
 
 /// Public data of the browser prover this deployment ships. The files sit at fixed paths of the

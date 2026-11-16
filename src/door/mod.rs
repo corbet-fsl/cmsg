@@ -381,6 +381,8 @@ pub struct Door {
     wave_ports: BTreeMap<String, Box<dyn inbox_waves::WavePorts>>,
     /// What a compose may warm per member origin (trusted embedding only).
     wave_prewarm: BTreeMap<String, std::rc::Rc<dyn inbox_waves::WavePrewarm>>,
+    /// When each origin last woke its wave worker through `inbox.wave_prewarm` (engine clock, seconds).
+    wave_prewarm_woke: BTreeMap<String, u64>,
     /// The background record job per community origin (trusted embedding only).
     #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
     record_jobs: BTreeMap<String, account::Shared<record::RecordJob>>,
@@ -435,6 +437,7 @@ impl Door {
             wave_devices: BTreeMap::new(),
             wave_ports: BTreeMap::new(),
             wave_prewarm: BTreeMap::new(),
+            wave_prewarm_woke: BTreeMap::new(),
             login_configuration: BTreeMap::new(),
             logins: BTreeMap::new(),
             #[cfg(not(target_arch = "wasm32"))]

@@ -240,8 +240,8 @@ pub async fn probe_wave_check(
 /// The whole counterpart verifier of the browser wave ports (`WaveGroup::verifier_factory`, then
 /// `cwlt::wave::WaveVerifier` over the worker checks) on one statement of the retained release:
 /// `kind` `wave` verifies a reservation, `outcome` a settled outcome (`expected_outcome`,
-/// `receipt_digest` hex). Resolves to `accepted`, or rejects with the refusal (`Unavailable` when the
-/// policy pins another group, `Refused` for a proof or context the verifier does not accept).
+/// `receipt_digest` hex). Resolves to `accepted`, or rejects with the refusal (`Unavailable` when the wave group is not loaded,
+/// `Refused` for a proof or context the verifier does not accept; the policy is judged by `WaveVerifier` and never compared with the group the deployment pins).
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub async fn probe_wave_verify(

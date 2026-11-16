@@ -110,6 +110,44 @@ pub trait WavePrewarm {
     fn prewarm(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
 }
 
+/// A warm-up that runs until it has succeeded once. A warm-up that returned `true` has cached
+/// what the send needs for good, so later calls do nothing; one that is still running is not
+/// started twice. A third-party client may call `inbox.wave_prewarm` as often as it likes.
+pub struct WarmOnce<F> {
+    warm: F,
+    warmed: std::rc::Rc<std::cell::Cell<bool>>,
+    running: std::rc::Rc<std::cell::Cell<bool>>,
+}
+
+impl<F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = bool>>>> WarmOnce<F> {
+    pub fn new(warm: F) -> Self {
+        Self {
+            warm,
+            warmed: Default::default(),
+            running: Default::default(),
+        }
+    }
+}
+
+impl<F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = bool>>>> WavePrewarm
+    for WarmOnce<F>
+{
+    fn prewarm(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>> {
+        if self.warmed.get() || self.running.replace(true) {
+            return Box::pin(async {});
+        }
+        let run = (self.warm)();
+        let warmed = std::rc::Rc::clone(&self.warmed);
+        let running = std::rc::Rc::clone(&self.running);
+        Box::pin(async move {
+            if run.await {
+                warmed.set(true);
+            }
+            running.set(false);
+        })
+    }
+}
+
 /// `inbox.wave_prewarm`: the member started composing. Inside the same current-policy and
 /// clock bracket as every other Inbox action (refused below the signed minimum version), it
 /// wakes the origin's wave worker for a round now and starts the origin's bound warm-up in the
@@ -138,7 +176,16 @@ pub(super) async fn wave_prewarm(
     .await?;
     door.observe(completed)?;
     // The origin's wave worker runs its next round now (witness, roster, trust, provers).
-    door.wake_wave_worker(&origin);
+    // Any client may call this as often as it likes: wake at most once per round cadence.
+    let now = door.clock_floor;
+    let due = door
+        .wave_prewarm_woke
+        .get(&origin)
+        .is_none_or(|last| now >= last.saturating_add(wave_job::Cadence::default().check));
+    if due {
+        door.wave_prewarm_woke.insert(origin.clone(), now);
+        door.wake_wave_worker(&origin);
+    }
     if let Some(prewarm) = door.wave_prewarm.get(&origin) {
         let warm = prewarm.prewarm();
         #[cfg(target_arch = "wasm32")]
@@ -480,6 +527,32 @@ mod prewarm_tests {
         assert_eq!(described.family, super::super::registry::Family::Inbox);
     }
 
+    #[tokio::test]
+    async fn a_warm_up_runs_until_it_succeeds_once_and_never_twice_at_a_time() {
+        let runs = Rc::new(Cell::new(0u32));
+        let outcome = Rc::new(Cell::new(false));
+        let (counted, result) = (runs.clone(), outcome.clone());
+        let once = WarmOnce::new(move || {
+            counted.set(counted.get() + 1);
+            let result = result.get();
+            Box::pin(async move {
+                tokio::task::yield_now().await;
+                result
+            })
+        });
+        // A second call while the first runs does nothing.
+        let first = once.prewarm();
+        once.prewarm().await;
+        assert_eq!(runs.get(), 1);
+        first.await;
+        // The first failed, so the next call tries again; it succeeds.
+        outcome.set(true);
+        once.prewarm().await;
+        assert_eq!(runs.get(), 2);
+        // After a success nothing runs again.
+        once.prewarm().await;
+        assert_eq!(runs.get(), 2);
+    }
     #[test]
     fn only_a_member_origin_gets_one_warm_up() {
         let mut door = door();

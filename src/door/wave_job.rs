@@ -179,6 +179,11 @@ impl Wake {
     fn take(&self) -> bool {
         self.0.replace(false)
     }
+    /// Take the wake like the worker would (tests only).
+    #[cfg(test)]
+    pub(crate) fn consume(&self) -> bool {
+        self.take()
+    }
     /// Whether a wake is waiting (tests only; the worker alone consumes it).
     #[cfg(test)]
     pub(crate) fn pending(&self) -> bool {

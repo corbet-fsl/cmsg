@@ -755,6 +755,7 @@ mod release {
     }
 
     #[tokio::test]
+    #[ignore = "needs CMSG_WAVE_FIXTURE and CMSG_NATIVE_VERIFIER_WORKER; run by .ci/native-prover.sh"]
     async fn the_release_verifies_natively_under_its_pins_and_refuses_every_change() {
         let r = release();
         let pinned = artifacts(&r.dir, &r.dir, pins());

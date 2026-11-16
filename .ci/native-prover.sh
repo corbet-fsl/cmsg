@@ -38,3 +38,16 @@ export RUST_MIN_STACK=67108864
 # Build the test binary BEFORE the fixture starts (pending passkey ceremonies expire after 300 s).
 nix-shell native-prover-owner/check-shell.nix --run 'set -euo pipefail; export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }${BB_NATIVE_RUSTFLAGS:?Missing original native loader configuration}"; cargo test --locked --features native-prover --test it --no-run'
 python3 .ci/with-foyer-fixture.py "$fixture" nix-shell native-prover-owner/check-shell.nix --run 'set -euo pipefail; export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }${BB_NATIVE_RUSTFLAGS:?Missing original native loader configuration}"; cargo test --locked --features native-prover --test it -- account_e2e:: --test-threads=1'
+
+# The native counterpart verifier against the real retained wave release (`inbox_waves::verifier::release`): it needs the
+# wave fixture directory (CMSG_WAVE_FIXTURE, from prover-artifacts.sh) and cblc's explicit czkp-bb-worker binary.
+artifacts=$(mktemp -d)/artifacts
+bash .ci/prover-artifacts.sh "$artifacts"
+# shellcheck disable=SC1091
+source "$artifacts/env"
+cblc_manifest=$(grep -o '"manifest_path":"[^"]*/cblc[^"/]*/Cargo.toml"\|"manifest_path":"[^"]*/cblc/Cargo.toml"' dependency-metadata.json | sort -u | sed 's/^"manifest_path":"//; s/"$//')
+[[ $(printf '%s\n' "$cblc_manifest" | grep -c .) = 1 ]] || { echo "expected exactly one cblc manifest, got: $cblc_manifest" >&2; exit 1; }
+verifier_target="${CARGO_TARGET_DIR:-target}/cblc-verifier-worker"
+nix-shell native-prover-owner/check-shell.nix --run 'set -euo pipefail; export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }${BB_NATIVE_RUSTFLAGS:?Missing original native loader configuration}"; CARGO_TARGET_DIR="'"$verifier_target"'" cargo build --locked --manifest-path "'"$cblc_manifest"'" --example czkp_bb_worker'
+export CMSG_NATIVE_VERIFIER_WORKER="$verifier_target/debug/examples/czkp_bb_worker"
+nix-shell native-prover-owner/check-shell.nix --run 'set -euo pipefail; export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }${BB_NATIVE_RUSTFLAGS:?Missing original native loader configuration}"; cargo test --locked --lib --features native-prover inbox_waves::verifier -- --include-ignored'
