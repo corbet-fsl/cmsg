@@ -215,23 +215,12 @@ where
                     view,
                 };
                 let account = state.load().await?;
-                let now = clock();
                 let leaf = account.owner().leaf;
-                let fresh = {
-                    let guard = door.lock().await;
-                    guard
-                        .current_policy(&origin)?
-                        .with_current(now, |charter| super::feed_trust::derive(charter, leaf, now))
-                        .map_err(|__cause| {
-                            crate::door::cause::emit(
-                                file!(),
-                                line!(),
-                                "ErrorCode::Unavailable",
-                                ErrorCode::Unavailable,
-                                &__cause,
-                            )
-                        })??
-                };
+                let (fresh, now) =
+                    super::feed_trust::with_door_current(&door, &origin, clock, |charter, now| {
+                        super::feed_trust::derive(charter, leaf, now)
+                    })
+                    .await?;
                 trust.set(fresh.clone());
                 // The circuit's issuer key is the ring key of the period that holds the
                 // acceptance of the states this round produces (now).

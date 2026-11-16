@@ -565,3 +565,53 @@ async fn expired_grant_regressed_clock_or_disposed_current_foyer_withhold_real_w
         server.https.shutdown().await.unwrap();
     }
 }
+
+/// Journey row 6: the wave worker reads the Door's current Charter after its witness load.
+/// The Door lock is fair, so another Door action can be served first while the worker waits,
+/// and that action observes the same Trust a second later (every Inbox bracket and Board
+/// read does). The worker's read must take its time once it holds the Door: a time taken
+/// before the wait is behind the Charter's forward-only clock and is refused as a regression.
+#[tokio::test]
+async fn the_wave_trust_read_takes_its_time_once_the_door_is_held() {
+    let now = 2_000_000_000;
+    let server = PublicFeed::new(feed(now, 1)).await;
+    let foyer = server.foyer(now).await;
+    let mut door = Door::new(
+        Configuration::new(
+            "alpha".into(),
+            BTreeMap::from([(Role::Member, BTreeSet::from([ORIGIN.into()]))]),
+        )
+        .unwrap(),
+    );
+    door.bind_foyer(
+        ORIGIN,
+        Role::Member,
+        foyer::Sessions::new(foyer::Scope::Community, foyer),
+    )
+    .unwrap();
+    let door: crate::door::courier::SharedDoor = Rc::new(tokio::sync::Mutex::new(door));
+    let time = Arc::new(AtomicU64::new(now));
+    let clock = {
+        let time = time.clone();
+        move || time.load(Ordering::SeqCst)
+    };
+    // Another Door action holds the Door when the worker asks for it.
+    let held = door.lock().await;
+    let mut read = Box::pin(crate::door::inbox_waves::feed_trust::with_door_current(
+        &door,
+        ORIGIN,
+        clock,
+        |charter, at| Ok((charter.revision(), at)),
+    ));
+    assert!(read.as_mut().now_or_never().is_none(), "the Door is held");
+    // That action observes the same Trust one second later, then releases the Door.
+    time.store(now + 1, Ordering::SeqCst);
+    held.current_policy(ORIGIN)
+        .unwrap()
+        .with_current(now + 1, |_| ())
+        .unwrap();
+    drop(held);
+    assert_eq!(read.await, Ok(((1, now + 1), now + 1)));
+    drop(door);
+    server.https.shutdown().await.unwrap();
+}

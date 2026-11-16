@@ -131,6 +131,35 @@ pub fn derive(charter: &cchr::VerifiedCharter, authority: [u8; 32], now: u64) ->
     })
 }
 
+/// Read the Door's verified current Charter of `origin` (the wave worker's trust read)
+/// and return what `inspect` made of it at the instant `clock` gave, with that instant.
+///
+/// The instant is taken only once the Door is held, after the last await: the Door lock
+/// is fair, so an action served first may observe the same Charter a second later, and a
+/// time taken before the wait would be refused as a clock regression.
+pub async fn with_door_current<T>(
+    door: &super::super::courier::SharedDoor,
+    origin: &str,
+    clock: impl FnOnce() -> u64,
+    inspect: impl FnOnce(&cchr::VerifiedCharter, u64) -> Result<T>,
+) -> Result<(T, u64)> {
+    let guard = door.lock().await;
+    let now = clock();
+    let value = guard
+        .current_policy(origin)?
+        .with_current(now, |charter| inspect(charter, now))
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })??;
+    Ok((value, now))
+}
+
 /// The newest derived trust. Clones share one value.
 #[derive(Clone, Default)]
 pub struct FeedTrust(Rc<RefCell<Option<Trust>>>);
