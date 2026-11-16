@@ -22,10 +22,13 @@
 //!    delegation material SEALED to the CLI's one-time key, and the member's user there; the
 //!    CLI opens and checks each delegation (where it holds one, the new one must be the same
 //!    member's: root, identity and binding), keeps them (merged into its resume bundle, A10b)
-//!    and only then answers with the activation possessions, so no key is ever activated for a
-//!    delegation the CLI does not hold;
+//!    and only then answers with the activation possessions, so a key is never activated for a
+//!    delegation the CLI failed to keep;
 //! 4. the wallet activates the keys and says so, which finishes the ceremony. A ceremony that
-//!    ends before this leaves the CLI's vault as it was (`CliVault::settle`, native).
+//!    ends before this leaves the CLI's vault as it was (`CliVault`, native). If the wallet had
+//!    already activated the keys (round 4 lost or the CLI cancelled), their ACTIVE rows and
+//!    lineage delegates stay for keys the CLI discarded: harmless, since nobody holds them, and
+//!    revocable only once the registry revocation step exists.
 //!
 //! The CLI never receives the PRF, the root, the identity, history or anything derived from
 //! them, and the wallet never receives `K_d`. A CLI that restarts loses its offer: the member
@@ -253,9 +256,9 @@ pub struct Delegated {
 /// made. `keep` is called in round 3 with every delegation of this ceremony, once each is
 /// opened and checked and BEFORE any activation possession leaves the CLI (the caller persists
 /// them); its failure leaves round 3 unanswered, so no key is activated for a delegation the
-/// CLI does not hold. Only round 4, the wallet's word that every key is ACTIVE, finishes the
-/// ceremony: a caller whose ceremony ends unfinished withdraws what it kept
-/// (`CliVault::settle`, native).
+/// CLI failed to keep. Only round 4, the wallet's word that every key is ACTIVE, finishes the
+/// ceremony: a caller whose ceremony ends unfinished withdraws what it kept (`CliVault`,
+/// native).
 pub struct Delegate<K: FnMut(Vec<Delegated>) -> Result<()>> {
     offer: Offer,
     /// What the CLI holds per community (from its resume bundle): a new delegation there
@@ -402,7 +405,7 @@ impl<K: FnMut(Vec<Delegated>) -> Result<()>> Delegate<K> {
                 }
                 // Kept BEFORE any activation possession leaves the CLI: if keeping fails the
                 // round stays unanswered and no key is activated for a delegation the CLI
-                // does not hold.
+                // failed to keep (round 4 is the boundary: see the module notes).
                 let delegated = self
                     .targets
                     .iter()
@@ -631,7 +634,7 @@ pub const USERS_FILE: &str = "delegated-users.json";
 /// The delegations a ceremony wrote ahead whose activation the CLI has not seen yet: per
 /// community, the delegation key. Kept beside the resume bundle from round 3 until round 4
 /// arrives. After a crash between the two the entry stays: such a delegation is not held for a
-/// new ceremony, and the next start keeps it only if the server knows its key as active.
+/// new ceremony (a new one there replaces it) and the delegated start never uses it.
 pub const PENDING_FILE: &str = "delegated-pending.json";
 
 /// The pending file's entries: community -> delegation key.
@@ -647,7 +650,9 @@ type Pending = BTreeMap<String, ckmg::PublicKey>;
 /// delegated start would refuse it). Every write replaces its file atomically: a temporary
 /// file in the same directory, synced, renamed over the file, and the directory synced. What
 /// the vault held when it was opened is remembered: a ceremony that ends without round 4
-/// (failed, expired, refused, or cancelled, which drops the vault unsettled) restores it.
+/// (failed, expired, refused, cancelled or a panic) restores it: the vault is the guard,
+/// [`Self::settle`] restores an unfinished ceremony explicitly, and dropping the vault before
+/// round 4 settled it restores it too.
 #[cfg(not(target_arch = "wasm32"))]
 pub struct CliVault {
     store: cvlt::NativeResume,
@@ -759,8 +764,9 @@ impl CliVault {
         if finished {
             self.settled.set(true);
             let kept = self.kept.take();
-            // Best effort: a start that still finds an entry pending asks the server.
-            let _ = confirm_pending(&self.vault, &kept);
+            // Only now is the delegation the CLI's: while it is still listed as pending, the
+            // delegated start does not use it, so a failure here is reported.
+            confirm_pending(&self.vault, &kept)?;
             return Ok(kept.into_iter().map(|(community, _)| community).collect());
         }
         if self.written.get() {
@@ -992,103 +998,52 @@ fn put_file(path: &std::path::Path, bytes: Option<&[u8]>) -> Result<()> {
 }
 
 /// What a delegated CLI holds for one community: its delegation (sealed form, for every
-/// rebuild of the Door), the member's user there (from [`USERS_FILE`]), and whether its
-/// activation was never seen ([`PENDING_FILE`]).
+/// rebuild of the Door) and the member's user there (from [`USERS_FILE`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub struct DelegatedStart {
     sealed: Zeroizing<Vec<u8>>,
     user: String,
-    provisional: Option<Provisional>,
-}
-
-/// A delegation written ahead whose activation the CLI never saw (it crashed between round 3
-/// and round 4). The first session open decides: the server knows the key as active (it is
-/// confirmed and kept), or it refuses the key (it is removed from the vault).
-#[cfg(not(target_arch = "wasm32"))]
-struct Provisional {
-    store: cvlt::NativeResume,
-    vault: std::path::PathBuf,
-    fingerprint: [u8; 32],
-    community: String,
-    key: ckmg::PublicKey,
-    verdict: std::cell::Cell<Verdict>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Verdict {
-    Open,
-    Confirmed,
-    Discarded,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Provisional {
-    /// The server knows the key as active: it is no longer pending.
-    fn confirm(&self) -> Result<()> {
-        confirm_pending(&self.vault, &[(self.community.clone(), self.key)])
-    }
-
-    /// The server refuses the key: remove the delegation, then its user, then the pending
-    /// entry (each write atomic).
-    fn discard(&self) -> Result<()> {
-        if let Some(mut bundle) = self.store.load() {
-            bundle.remove(&self.fingerprint, &self.community);
-            if bundle.is_empty() {
-                forget_bundle(&self.store, &self.vault)?;
-            } else {
-                save_bundle(&self.store, &self.vault, &bundle)?;
-            }
-        }
-        let mut users = read_users(&self.vault)?;
-        if users.remove(&self.community).is_some() {
-            let path = self.vault.join(USERS_FILE);
-            if users.is_empty() {
-                put_file(&path, None)?;
-            } else {
-                write_private(&path, &encode(&users)?)?;
-            }
-        }
-        self.confirm()
-    }
 }
 
 /// The delegated CLI's start (L9) for `community`: its delegation from the resume bundle in
 /// `store` and its user from `vault`'s users file. `None` when this device holds no
-/// delegation there (it is no delegated device of that community); a delegation without a
-/// user, or two of the same community, is refused. A delegation still pending (a crash
-/// between round 3 and round 4) is tried once: see [`Provisional`].
+/// delegation there (it is no delegated device of that community), and also when the
+/// delegation it holds is still pending ([`PENDING_FILE`]: written ahead in round 3, round 4
+/// never seen, as a crash between the two leaves it). Such a delegation is never used: its key
+/// may never have been activated, and the server's plain refusal cannot say why it refuses. A
+/// new ceremony replaces it. A delegation without a user, or two of the same community, is
+/// refused.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn delegated_start(
-    store: cvlt::NativeResume,
+pub async fn delegated_start<S: super::unlock_once::UnlockStore>(
+    store: &S,
     vault: &std::path::Path,
     community: &str,
 ) -> Result<Option<DelegatedStart>> {
-    let Some(bundle) = store.load() else {
+    let Some(bundle) = store.load().await else {
         return Ok(None);
     };
-    let held: Vec<(&[u8; 32], &DeviceDelegation)> = bundle
+    let held: Vec<&DeviceDelegation> = bundle
         .memberships()
         .filter(|(_, scope)| *scope == community)
-        .filter_map(|(fingerprint, scope)| {
-            bundle
-                .delegation(fingerprint, scope)
-                .map(|delegation| (fingerprint, delegation))
-        })
+        .filter_map(|(fingerprint, scope)| bundle.delegation(fingerprint, scope))
         .collect();
-    let (fingerprint, delegation) = match held.as_slice() {
+    let delegation = match held.as_slice() {
         [] => return Ok(None),
-        [one] => *one,
+        [delegation] => *delegation,
         _ => return Err(ErrorCode::InvalidRequest),
     };
-    let user = read_users(vault)?
-        .remove(community)
-        .ok_or(ErrorCode::Unavailable)?;
+    // Pending before the user: a restore that stopped half way may have taken the user back.
     let pending: Pending = read_file(&vault.join(PENDING_FILE))?
         .as_deref()
         .map(parse_json)
         .transpose()?
         .unwrap_or_default();
+    if pending.get(community) == Some(&delegation.device_public_key()) {
+        return Ok(None);
+    }
+    let user = read_users(vault)?
+        .remove(community)
+        .ok_or(ErrorCode::Unavailable)?;
     let sealed = delegation.to_sealed_bytes().map_err(|__cause| {
         crate::door::cause::emit(
             file!(),
@@ -1098,21 +1053,7 @@ pub fn delegated_start(
             &__cause,
         )
     })?;
-    let key = delegation.device_public_key();
-    let fingerprint = *fingerprint;
-    let provisional = (pending.get(community) == Some(&key)).then(|| Provisional {
-        store,
-        vault: vault.to_owned(),
-        fingerprint,
-        community: community.to_owned(),
-        key,
-        verdict: std::cell::Cell::new(Verdict::Open),
-    });
-    Ok(Some(DelegatedStart {
-        sealed,
-        user,
-        provisional,
-    }))
+    Ok(Some(DelegatedStart { sealed, user }))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1130,9 +1071,6 @@ impl DelegatedStart {
         runtime: super::browser::Configuration,
         roots: &[Vec<u8>],
     ) -> Result<Door> {
-        if self.discarded() {
-            return Err(ErrorCode::Unauthorized);
-        }
         let delegation = DeviceDelegation::from_sealed_bytes(&self.sealed).map_err(|__cause| {
             crate::door::cause::emit(
                 file!(),
@@ -1144,44 +1082,9 @@ impl DelegatedStart {
         })?;
         let origin = runtime.origin.clone();
         let mut door = runtime.construct_delegated_with_roots(roots, &delegation)?;
-        let opened = door
-            .open_delegated_session(&origin, &self.user, &delegation)
-            .await;
-        self.opened(opened)?;
+        door.open_delegated_session(&origin, &self.user, &delegation)
+            .await?;
         Ok(door)
-    }
-
-    /// The pending delegation was refused by the server and removed: it opens nothing.
-    fn discarded(&self) -> bool {
-        self.provisional
-            .as_ref()
-            .is_some_and(|provisional| provisional.verdict.get() == Verdict::Discarded)
-    }
-
-    /// The outcome of a session open. For a pending delegation the first answer decides once:
-    /// opened, it is confirmed (best effort; the next start asks again otherwise); refused as
-    /// `Unauthorized` (the server does not know the key as active), it is removed from the
-    /// vault and the start fails with that refusal, so the next start is no delegated one and
-    /// a new ceremony delegates afresh. Any other failure (the server unreachable) decides
-    /// nothing.
-    fn opened(&self, opened: Result<u64>) -> Result<u64> {
-        let Some(provisional) = &self.provisional else {
-            return opened;
-        };
-        match (provisional.verdict.get(), &opened) {
-            (Verdict::Discarded, _) => Err(ErrorCode::Unauthorized),
-            (Verdict::Open, Ok(_)) => {
-                provisional.verdict.set(Verdict::Confirmed);
-                let _ = provisional.confirm();
-                opened
-            }
-            (Verdict::Open, Err(ErrorCode::Unauthorized)) => {
-                provisional.verdict.set(Verdict::Discarded);
-                provisional.discard()?;
-                Err(ErrorCode::Unauthorized)
-            }
-            _ => opened,
-        }
     }
 
     /// The native start's Door builder (`Embedded::configured_restore_built`): every build,
