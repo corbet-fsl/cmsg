@@ -599,14 +599,16 @@ fn insert_all(bundle: &mut cvlt::ResumeBundle, delegated: Vec<Delegated>) -> Res
     Ok(())
 }
 
-/// What `bundle` holds per community.
+/// What `bundle` holds per community. A delegation `pending` lists (written ahead, its
+/// activation never seen) is not held: a new ceremony there delegates afresh.
 #[cfg(not(target_arch = "wasm32"))]
-fn held_in(bundle: &cvlt::ResumeBundle) -> BTreeMap<String, Held> {
+fn held_in(bundle: &cvlt::ResumeBundle, pending: &Pending) -> BTreeMap<String, Held> {
     bundle
         .memberships()
         .filter_map(|(fingerprint, scope)| {
             bundle
                 .delegation(fingerprint, scope)
+                .filter(|delegation| pending.get(scope) != Some(&delegation.device_public_key()))
                 .map(|delegation| (scope.to_owned(), Held::of(*fingerprint, delegation)))
         })
         .collect()
@@ -626,13 +628,26 @@ pub fn page_link(page: &str, link: &str) -> String {
 /// directory.
 pub const USERS_FILE: &str = "delegated-users.json";
 
+/// The delegations a ceremony wrote ahead whose activation the CLI has not seen yet: per
+/// community, the delegation key. Kept beside the resume bundle from round 3 until round 4
+/// arrives. After a crash between the two the entry stays: such a delegation is not held for a
+/// new ceremony, and the next start keeps it only if the server knows its key as active.
+pub const PENDING_FILE: &str = "delegated-pending.json";
+
+/// The pending file's entries: community -> delegation key.
+#[cfg(not(target_arch = "wasm32"))]
+type Pending = BTreeMap<String, ckmg::PublicKey>;
+
 /// The CLI's delegations of one deployment (native): the resume bundle of its binding and the
-/// users file beside it, in its private vault directory ([`login_delegated`]).
+/// users and pending files beside it, in its private vault directory ([`login_delegated`]).
 ///
 /// A ceremony's delegations are written ahead in round 3, before any key is activated: the
-/// users file first, then the bundle, so a failure between the two never leaves a delegation
-/// without its user (the delegated start would refuse it). What the vault held when it was
-/// opened is remembered, and a ceremony that ends unfinished restores it ([`Self::settle`]).
+/// pending file first (they are unconfirmed until round 4), then the users file, then the
+/// bundle, so a failure between two writes never leaves a delegation without its user (the
+/// delegated start would refuse it). Every write replaces its file atomically: a temporary
+/// file in the same directory, synced, renamed over the file, and the directory synced. What
+/// the vault held when it was opened is remembered: a ceremony that ends without round 4
+/// (failed, expired, refused, or cancelled, which drops the vault unsettled) restores it.
 #[cfg(not(target_arch = "wasm32"))]
 pub struct CliVault {
     store: cvlt::NativeResume,
@@ -642,40 +657,59 @@ pub struct CliVault {
     users: Option<Vec<u8>>,
     /// Its entries.
     known: BTreeMap<String, String>,
+    /// The pending file as it was (`None`: absent).
+    pending_file: Option<Vec<u8>>,
+    /// Its entries.
+    pending: Pending,
     /// The resume bundle as it was (`None`: none).
     previous: Option<cvlt::ResumeBundle>,
+    /// This ceremony's delegations (community and key), once written ahead.
+    kept: std::cell::RefCell<Vec<(String, ckmg::PublicKey)>>,
     /// Something of this ceremony was (or may have been) written.
     written: std::cell::Cell<bool>,
-    communities: std::cell::RefCell<Vec<String>>,
+    /// The ceremony is settled: finished, or restored.
+    settled: std::cell::Cell<bool>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl CliVault {
-    /// The vault of the resume binding `binding` in the private directory `vault`. A users
-    /// file that cannot be read or does not parse is refused (`Unavailable`) and never
+    /// The vault of the resume binding `binding` in the private directory `vault`. A users or
+    /// pending file that cannot be read or does not parse is refused (`Unavailable`) and never
     /// overwritten: the other delegations would lose their user.
     pub fn open(vault: &std::path::Path, binding: &[u8]) -> Result<Self> {
         Self::with_store(super::unlock_once::native_store(vault, binding), vault)
     }
 
     fn with_store(store: cvlt::NativeResume, vault: &std::path::Path) -> Result<Self> {
-        let users = users_file(vault)?;
+        let users = read_file(&vault.join(USERS_FILE))?;
         let known = users
             .as_deref()
-            .map(parse_users)
+            .map(parse_json)
+            .transpose()?
+            .unwrap_or_default();
+        let pending_file = read_file(&vault.join(PENDING_FILE))?;
+        let pending: Pending = pending_file
+            .as_deref()
+            .map(parse_json)
             .transpose()?
             .unwrap_or_default();
         let previous = store.load();
-        let held = previous.as_ref().map(held_in).unwrap_or_default();
+        let held = previous
+            .as_ref()
+            .map(|bundle| held_in(bundle, &pending))
+            .unwrap_or_default();
         Ok(Self {
             store,
             vault: vault.to_owned(),
             held,
             users,
             known,
+            pending_file,
+            pending,
             previous,
+            kept: Default::default(),
             written: Default::default(),
-            communities: Default::default(),
+            settled: Default::default(),
         })
     }
 
@@ -689,84 +723,129 @@ impl CliVault {
         })
     }
 
-    /// Write one ceremony's delegations ahead: the users file, then the bundle.
+    /// Write one ceremony's delegations ahead: the pending file, the users file, the bundle.
     fn keep(&self, delegated: Vec<Delegated>) -> Result<()> {
         let mut users = self.known.clone();
+        let mut pending = self.pending.clone();
+        let mut kept = Vec::with_capacity(delegated.len());
         for entry in &delegated {
+            let key = entry.delegation.device_public_key();
             users.insert(entry.target.community.clone(), entry.user.clone());
+            pending.insert(entry.target.community.clone(), key);
+            kept.push((entry.target.community.clone(), key));
         }
-        let communities: Vec<String> = delegated
-            .iter()
-            .map(|entry| entry.target.community.clone())
-            .collect();
-        let users = encode(&users)?;
+        let (users, pending) = (encode(&users)?, encode(&pending)?);
         let mut bundle = self.store.load().unwrap_or_default();
+        // A delegation of these communities whose activation was never seen gives way.
+        for (community, _) in &kept {
+            drop_pending(&mut bundle, &self.pending, community);
+        }
         insert_all(&mut bundle, delegated)?;
         self.written.set(true);
+        write_private(&self.vault.join(PENDING_FILE), &pending)?;
         write_private(&self.vault.join(USERS_FILE), &users)?;
-        self.store.save(&bundle).map_err(|__cause| {
-            crate::door::cause::emit(
-                file!(),
-                line!(),
-                "ErrorCode::Unavailable",
-                ErrorCode::Unavailable,
-                &__cause,
-            )
-        })?;
-        *self.communities.borrow_mut() = communities;
+        save_bundle(&self.store, &self.vault, &bundle)?;
+        *self.kept.borrow_mut() = kept;
         Ok(())
     }
 
-    /// After the ceremony: whether it `finished` (round 4, every key ACTIVE). A finished one
-    /// returns the delegated communities; an unfinished one restores what the vault held when
-    /// it was opened (the bundle first, then the users file) and returns none.
+    /// After the ceremony: whether it `finished` (round 4: every key is ACTIVE). A finished one
+    /// returns the delegated communities and confirms them; an unfinished one restores what the
+    /// vault held when it was opened and returns none.
     pub fn settle(&self, finished: bool) -> Result<Vec<String>> {
+        if self.settled.get() {
+            return Ok(Vec::new());
+        }
         if finished {
-            return Ok(self.communities.take());
+            self.settled.set(true);
+            let kept = self.kept.take();
+            // Best effort: a start that still finds an entry pending asks the server.
+            let _ = confirm_pending(&self.vault, &kept);
+            return Ok(kept.into_iter().map(|(community, _)| community).collect());
         }
         if self.written.get() {
-            let unavailable = |__cause: cvlt::ResumeError| {
-                crate::door::cause::emit(
-                    file!(),
-                    line!(),
-                    "ErrorCode::Unavailable",
-                    ErrorCode::Unavailable,
-                    &__cause,
-                )
-            };
-            match &self.previous {
-                Some(bundle) => self.store.save(bundle).map_err(unavailable)?,
-                None => self.store.forget().map_err(unavailable)?,
-            }
-            let path = self.vault.join(USERS_FILE);
-            match &self.users {
-                Some(bytes) => write_private(&path, bytes)?,
-                None => {
-                    if let Err(error) = std::fs::remove_file(&path) {
-                        if error.kind() != std::io::ErrorKind::NotFound {
-                            return Err(crate::door::cause::emit(
-                                file!(),
-                                line!(),
-                                "ErrorCode::Unavailable",
-                                ErrorCode::Unavailable,
-                                &error,
-                            ));
-                        }
-                    }
-                }
-            }
-            self.written.set(false);
+            self.restore()?;
         }
+        self.settled.set(true);
         Ok(Vec::new())
     }
+
+    /// Put back what the vault held when it was opened: the bundle first and the pending file
+    /// last, so a delegation written ahead stays listed as pending while it exists.
+    fn restore(&self) -> Result<()> {
+        match &self.previous {
+            Some(bundle) => save_bundle(&self.store, &self.vault, bundle)?,
+            None => forget_bundle(&self.store, &self.vault)?,
+        }
+        put_file(&self.vault.join(USERS_FILE), self.users.as_deref())?;
+        put_file(&self.vault.join(PENDING_FILE), self.pending_file.as_deref())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for CliVault {
+    /// A ceremony dropped unsettled (cancelled) is restored like any unfinished one.
+    fn drop(&mut self) {
+        if self.written.get() && !self.settled.get() {
+            let _ = self.restore();
+        }
+    }
+}
+
+/// Drop from `bundle` the delegation of `community` that `pending` lists as never activated.
+#[cfg(not(target_arch = "wasm32"))]
+fn drop_pending(bundle: &mut cvlt::ResumeBundle, pending: &Pending, community: &str) {
+    let Some(key) = pending.get(community) else {
+        return;
+    };
+    let unconfirmed: Vec<[u8; 32]> = bundle
+        .memberships()
+        .filter(|(fingerprint, scope)| {
+            *scope == community
+                && bundle
+                    .delegation(fingerprint, scope)
+                    .is_some_and(|delegation| delegation.device_public_key() == *key)
+        })
+        .map(|(fingerprint, _)| *fingerprint)
+        .collect();
+    for fingerprint in unconfirmed {
+        bundle.remove(&fingerprint, community);
+    }
+}
+
+/// Remove the `kept` entries from the pending file of `vault` (their activation was seen).
+#[cfg(not(target_arch = "wasm32"))]
+fn confirm_pending(vault: &std::path::Path, kept: &[(String, ckmg::PublicKey)]) -> Result<()> {
+    let path = vault.join(PENDING_FILE);
+    let mut pending: Pending = read_file(&path)?
+        .as_deref()
+        .map(parse_json)
+        .transpose()?
+        .unwrap_or_default();
+    for (community, key) in kept {
+        if pending.get(community) == Some(key) {
+            pending.remove(community);
+        }
+    }
+    put_pending(&path, &pending)
+}
+
+/// The pending file at `path`: written, or removed when nothing is pending.
+#[cfg(not(target_arch = "wasm32"))]
+fn put_pending(path: &std::path::Path, pending: &Pending) -> Result<()> {
+    if pending.is_empty() {
+        return put_file(path, None);
+    }
+    write_private(path, &encode(pending)?)
 }
 
 /// `cmeet login --delegated`: the CLI's side of the ceremony on this device. It makes the
 /// offer behind a fresh ephemeral onion service (never a member key), hands the page link to
 /// `show`, serves the four rounds until they finish or the offer expires, and merges what it
 /// was granted into the native resume bundle of `binding` in `vault` (L2) before any key is
-/// activated ([`CliVault`]); a ceremony that does not finish leaves the vault as it was.
-/// Returns the delegated communities. Nothing here holds the PRF, a root or a wallet session.
+/// activated ([`CliVault`]); a ceremony that does not finish, including one cancelled by
+/// dropping this future, leaves the vault as it was. Returns the delegated communities.
+/// Nothing here holds the PRF, a root or a wallet session.
 #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
 pub async fn login_delegated(
     tor: &super::native::deployment::TorDeployment,
@@ -816,10 +895,10 @@ pub fn cli_binding(runtime: &super::browser::Configuration) -> Option<Vec<u8>> {
     Some([page.origin.as_bytes(), b"\0delegated"].concat())
 }
 
-/// The users file of `vault` as it is (`None`: absent); `Unavailable` when it cannot be read.
+/// The file at `path` as it is (`None`: absent); `Unavailable` when it cannot be read.
 #[cfg(not(target_arch = "wasm32"))]
-fn users_file(vault: &std::path::Path) -> Result<Option<Vec<u8>>> {
-    match std::fs::read(vault.join(USERS_FILE)) {
+fn read_file(path: &std::path::Path) -> Result<Option<Vec<u8>>> {
+    match std::fs::read(path) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(__cause) => Err(crate::door::cause::emit(
@@ -832,9 +911,9 @@ fn users_file(vault: &std::path::Path) -> Result<Option<Vec<u8>>> {
     }
 }
 
-/// The entries of a users file; `Unavailable` when it does not parse.
+/// The entries of a users or pending file; `Unavailable` when it does not parse.
 #[cfg(not(target_arch = "wasm32"))]
-fn parse_users(bytes: &[u8]) -> Result<BTreeMap<String, String>> {
+fn parse_json<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
     serde_json::from_slice(bytes).map_err(|__cause| {
         crate::door::cause::emit(
             file!(),
@@ -850,47 +929,166 @@ fn parse_users(bytes: &[u8]) -> Result<BTreeMap<String, String>> {
 /// does not parse.
 #[cfg(not(target_arch = "wasm32"))]
 fn read_users(vault: &std::path::Path) -> Result<BTreeMap<String, String>> {
-    Ok(users_file(vault)?
+    Ok(read_file(&vault.join(USERS_FILE))?
         .as_deref()
-        .map(parse_users)
+        .map(parse_json)
         .transpose()?
         .unwrap_or_default())
 }
 
+/// Seal `bundle` into `store` (cvlt replaces its record atomically) and sync `vault`, so the
+/// rename is durable too.
+#[cfg(not(target_arch = "wasm32"))]
+fn save_bundle(
+    store: &cvlt::NativeResume,
+    vault: &std::path::Path,
+    bundle: &cvlt::ResumeBundle,
+) -> Result<()> {
+    store.save(bundle).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
+    sync_directory(vault)
+}
+
+/// Delete the bundle of `store` and sync `vault`.
+#[cfg(not(target_arch = "wasm32"))]
+fn forget_bundle(store: &cvlt::NativeResume, vault: &std::path::Path) -> Result<()> {
+    store.forget().map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })?;
+    sync_directory(vault)
+}
+
+/// Make the file at `path` hold `bytes` (atomically), or remove it for `None`.
+#[cfg(not(target_arch = "wasm32"))]
+fn put_file(path: &std::path::Path, bytes: Option<&[u8]>) -> Result<()> {
+    if let Some(bytes) = bytes {
+        return write_private(path, bytes);
+    }
+    if let Err(error) = std::fs::remove_file(path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            return Err(crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &error,
+            ));
+        }
+    }
+    sync_directory(path.parent().unwrap_or(std::path::Path::new(".")))
+}
+
 /// What a delegated CLI holds for one community: its delegation (sealed form, for every
-/// rebuild of the Door) and the member's user there (from [`USERS_FILE`]).
+/// rebuild of the Door), the member's user there (from [`USERS_FILE`]), and whether its
+/// activation was never seen ([`PENDING_FILE`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub struct DelegatedStart {
     sealed: Zeroizing<Vec<u8>>,
     user: String,
+    provisional: Option<Provisional>,
+}
+
+/// A delegation written ahead whose activation the CLI never saw (it crashed between round 3
+/// and round 4). The first session open decides: the server knows the key as active (it is
+/// confirmed and kept), or it refuses the key (it is removed from the vault).
+#[cfg(not(target_arch = "wasm32"))]
+struct Provisional {
+    store: cvlt::NativeResume,
+    vault: std::path::PathBuf,
+    fingerprint: [u8; 32],
+    community: String,
+    key: ckmg::PublicKey,
+    verdict: std::cell::Cell<Verdict>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Verdict {
+    Open,
+    Confirmed,
+    Discarded,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Provisional {
+    /// The server knows the key as active: it is no longer pending.
+    fn confirm(&self) -> Result<()> {
+        confirm_pending(&self.vault, &[(self.community.clone(), self.key)])
+    }
+
+    /// The server refuses the key: remove the delegation, then its user, then the pending
+    /// entry (each write atomic).
+    fn discard(&self) -> Result<()> {
+        if let Some(mut bundle) = self.store.load() {
+            bundle.remove(&self.fingerprint, &self.community);
+            if bundle.is_empty() {
+                forget_bundle(&self.store, &self.vault)?;
+            } else {
+                save_bundle(&self.store, &self.vault, &bundle)?;
+            }
+        }
+        let mut users = read_users(&self.vault)?;
+        if users.remove(&self.community).is_some() {
+            let path = self.vault.join(USERS_FILE);
+            if users.is_empty() {
+                put_file(&path, None)?;
+            } else {
+                write_private(&path, &encode(&users)?)?;
+            }
+        }
+        self.confirm()
+    }
 }
 
 /// The delegated CLI's start (L9) for `community`: its delegation from the resume bundle in
 /// `store` and its user from `vault`'s users file. `None` when this device holds no
 /// delegation there (it is no delegated device of that community); a delegation without a
-/// user, or two of the same community, is refused.
+/// user, or two of the same community, is refused. A delegation still pending (a crash
+/// between round 3 and round 4) is tried once: see [`Provisional`].
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn delegated_start<S: super::unlock_once::UnlockStore>(
-    store: &S,
+pub fn delegated_start(
+    store: cvlt::NativeResume,
     vault: &std::path::Path,
     community: &str,
 ) -> Result<Option<DelegatedStart>> {
-    let Some(bundle) = store.load().await else {
+    let Some(bundle) = store.load() else {
         return Ok(None);
     };
-    let held: Vec<&DeviceDelegation> = bundle
+    let held: Vec<(&[u8; 32], &DeviceDelegation)> = bundle
         .memberships()
         .filter(|(_, scope)| *scope == community)
-        .filter_map(|(fingerprint, scope)| bundle.delegation(fingerprint, scope))
+        .filter_map(|(fingerprint, scope)| {
+            bundle
+                .delegation(fingerprint, scope)
+                .map(|delegation| (fingerprint, delegation))
+        })
         .collect();
-    let delegation = match held.as_slice() {
+    let (fingerprint, delegation) = match held.as_slice() {
         [] => return Ok(None),
-        [delegation] => *delegation,
+        [one] => *one,
         _ => return Err(ErrorCode::InvalidRequest),
     };
     let user = read_users(vault)?
         .remove(community)
         .ok_or(ErrorCode::Unavailable)?;
+    let pending: Pending = read_file(&vault.join(PENDING_FILE))?
+        .as_deref()
+        .map(parse_json)
+        .transpose()?
+        .unwrap_or_default();
     let sealed = delegation.to_sealed_bytes().map_err(|__cause| {
         crate::door::cause::emit(
             file!(),
@@ -900,7 +1098,21 @@ pub async fn delegated_start<S: super::unlock_once::UnlockStore>(
             &__cause,
         )
     })?;
-    Ok(Some(DelegatedStart { sealed, user }))
+    let key = delegation.device_public_key();
+    let fingerprint = *fingerprint;
+    let provisional = (pending.get(community) == Some(&key)).then(|| Provisional {
+        store,
+        vault: vault.to_owned(),
+        fingerprint,
+        community: community.to_owned(),
+        key,
+        verdict: std::cell::Cell::new(Verdict::Open),
+    });
+    Ok(Some(DelegatedStart {
+        sealed,
+        user,
+        provisional,
+    }))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -918,6 +1130,9 @@ impl DelegatedStart {
         runtime: super::browser::Configuration,
         roots: &[Vec<u8>],
     ) -> Result<Door> {
+        if self.discarded() {
+            return Err(ErrorCode::Unauthorized);
+        }
         let delegation = DeviceDelegation::from_sealed_bytes(&self.sealed).map_err(|__cause| {
             crate::door::cause::emit(
                 file!(),
@@ -929,9 +1144,44 @@ impl DelegatedStart {
         })?;
         let origin = runtime.origin.clone();
         let mut door = runtime.construct_delegated_with_roots(roots, &delegation)?;
-        door.open_delegated_session(&origin, &self.user, &delegation)
-            .await?;
+        let opened = door
+            .open_delegated_session(&origin, &self.user, &delegation)
+            .await;
+        self.opened(opened)?;
         Ok(door)
+    }
+
+    /// The pending delegation was refused by the server and removed: it opens nothing.
+    fn discarded(&self) -> bool {
+        self.provisional
+            .as_ref()
+            .is_some_and(|provisional| provisional.verdict.get() == Verdict::Discarded)
+    }
+
+    /// The outcome of a session open. For a pending delegation the first answer decides once:
+    /// opened, it is confirmed (best effort; the next start asks again otherwise); refused as
+    /// `Unauthorized` (the server does not know the key as active), it is removed from the
+    /// vault and the start fails with that refusal, so the next start is no delegated one and
+    /// a new ceremony delegates afresh. Any other failure (the server unreachable) decides
+    /// nothing.
+    fn opened(&self, opened: Result<u64>) -> Result<u64> {
+        let Some(provisional) = &self.provisional else {
+            return opened;
+        };
+        match (provisional.verdict.get(), &opened) {
+            (Verdict::Discarded, _) => Err(ErrorCode::Unauthorized),
+            (Verdict::Open, Ok(_)) => {
+                provisional.verdict.set(Verdict::Confirmed);
+                let _ = provisional.confirm();
+                opened
+            }
+            (Verdict::Open, Err(ErrorCode::Unauthorized)) => {
+                provisional.verdict.set(Verdict::Discarded);
+                provisional.discard()?;
+                Err(ErrorCode::Unauthorized)
+            }
+            _ => opened,
+        }
     }
 
     /// The native start's Door builder (`Embedded::configured_restore_built`): every build,
@@ -952,7 +1202,9 @@ impl DelegatedStart {
     }
 }
 
-/// A user-only file (mode 0600 on unix), replaced atomically.
+/// A user-only file (mode 0600 on unix), replaced atomically: a temporary file in the same
+/// directory is written and synced, renamed over `path`, and the directory is synced, so a
+/// crash leaves either the old file or the new one, never a half-written one.
 #[cfg(not(target_arch = "wasm32"))]
 fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write as _;
@@ -973,10 +1225,38 @@ fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
         use std::os::unix::fs::OpenOptionsExt as _;
         options.mode(0o600);
     }
-    let mut file = options.open(&temporary).map_err(unavailable)?;
-    file.write_all(bytes).map_err(unavailable)?;
-    file.sync_all().map_err(unavailable)?;
-    std::fs::rename(&temporary, path).map_err(unavailable)
+    let written = options
+        .open(&temporary)
+        .and_then(|mut file| {
+            file.write_all(bytes)?;
+            file.sync_all()
+        })
+        .and_then(|()| std::fs::rename(&temporary, path));
+    if let Err(error) = written {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(unavailable(error));
+    }
+    sync_directory(path.parent().unwrap_or(std::path::Path::new(".")))
+}
+
+/// Sync the directory `dir` itself, so a rename or removal in it is durable.
+#[cfg(not(target_arch = "wasm32"))]
+fn sync_directory(dir: &std::path::Path) -> Result<()> {
+    #[cfg(unix)]
+    std::fs::File::open(dir)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

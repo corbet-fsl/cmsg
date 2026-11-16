@@ -588,8 +588,7 @@ async fn the_delegated_start_builds_its_door_from_the_delegation_and_the_users_f
     let dir = tempfile::tempdir().unwrap();
     let store = cvlt::NativeResume::new(dir.path(), b"wallet.example.test\0delegated", None);
     // No bundle yet: this is no delegated device.
-    assert!(delegated_start(&store, dir.path(), "garden")
-        .await
+    assert!(delegated_start(resume(dir.path()), dir.path(), "garden")
         .unwrap()
         .is_none());
     let wallet = Rc::new(RefCell::new(Wallet::new(&["garden", "orchard"]).await));
@@ -606,17 +605,15 @@ async fn the_delegated_start_builds_its_door_from_the_delegation_and_the_users_f
     merge_into(&store, delegated).await.unwrap();
     // A delegation without its user is refused, not guessed.
     assert_eq!(
-        delegated_start(&store, dir.path(), "garden").await.err(),
+        delegated_start(resume(dir.path()), dir.path(), "garden").err(),
         Some(ErrorCode::Unavailable)
     );
     write_private(&dir.path().join(USERS_FILE), &encode(&users).unwrap()).unwrap();
-    let start = delegated_start(&store, dir.path(), "garden")
-        .await
+    let start = delegated_start(resume(dir.path()), dir.path(), "garden")
         .unwrap()
         .unwrap();
     assert_eq!(start.user(), "user-of-garden");
-    assert!(delegated_start(&store, dir.path(), "meadow")
-        .await
+    assert!(delegated_start(resume(dir.path()), dir.path(), "meadow")
         .unwrap()
         .is_none());
     // The Door of the start: delegated (L9); another community's or the wallet's refused.
@@ -689,9 +686,14 @@ async fn a_cli_that_cannot_keep_its_delegations_activates_nothing() {
 
 const BINDING: &[u8] = b"wallet.example.test\0delegated";
 
+/// The CLI's resume store in `dir` (without the OS key store).
+fn resume(dir: &std::path::Path) -> cvlt::NativeResume {
+    cvlt::NativeResume::new(dir, BINDING, None)
+}
+
 /// The CLI's vault in `dir`, opened as `login_delegated` opens it (without the OS key store).
 fn vault(dir: &std::path::Path) -> Result<CliVault> {
-    CliVault::with_store(cvlt::NativeResume::new(dir, BINDING, None), dir)
+    CliVault::with_store(resume(dir), dir)
 }
 
 /// One ceremony of `wallet` for `targets`, served by `cli` and settled as `login_delegated`
@@ -711,17 +713,145 @@ async fn ceremony(
     served.map(|()| communities)
 }
 
+/// What a CLI vault holds: the users and pending files, the bundle's entries (community and
+/// key), and every temporary file left behind.
+type Snapshot = (
+    Option<Vec<u8>>,
+    Option<Vec<u8>>,
+    Vec<(String, ckmg::PublicKey)>,
+    Vec<String>,
+);
+
+/// What the CLI's vault in `dir` holds.
+fn snapshot(dir: &std::path::Path) -> Snapshot {
+    let users = std::fs::read(dir.join(USERS_FILE)).ok();
+    let pending = std::fs::read(dir.join(PENDING_FILE)).ok();
+    let entries = resume(dir)
+        .load()
+        .map(|bundle| {
+            bundle
+                .memberships()
+                .map(|(fingerprint, scope)| {
+                    let key = bundle
+                        .delegation(fingerprint, scope)
+                        .unwrap()
+                        .device_public_key();
+                    (scope.to_owned(), key)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let temporary = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains("tmp"))
+        .collect();
+    (users, pending, entries, temporary)
+}
+
+/// How a ceremony ends without round 4.
+#[derive(Clone, Copy, Debug)]
+enum Exit {
+    /// Every activation fails at the community.
+    ActivationFails,
+    /// Round 4 never reaches the CLI (the offer expires).
+    RoundFourLost,
+    /// The CLI refuses round 4 itself: it does not say every key is active.
+    RoundFourRefused,
+    /// The ceremony is cancelled after round 3: the vault is dropped unsettled.
+    Cancelled,
+}
+
+/// The carrier with one fault in round 4.
+struct Faulty<K: FnMut(Vec<Delegated>) -> Result<()>> {
+    cli: Rc<RefCell<Delegate<K>>>,
+    link: Link,
+    exit: Exit,
+    calls: u8,
+}
+
+impl<K: FnMut(Vec<Delegated>) -> Result<()>> Channel for Faulty<K> {
+    async fn call(&mut self, _: &cmsh::Address, message: &[u8]) -> Result<Vec<u8>> {
+        self.calls += 1;
+        let mut cli = self.cli.borrow_mut();
+        if self.calls == ROUNDS {
+            match self.exit {
+                Exit::RoundFourLost | Exit::Cancelled => return Err(ErrorCode::Unavailable),
+                Exit::RoundFourRefused => {
+                    let (refused, _) = self.link.seal_round(ROUNDS, br#"{"done":0}"#)?;
+                    return cli.serve(&refused, NOW).await;
+                }
+                Exit::ActivationFails => {}
+            }
+        }
+        cli.serve(message, NOW).await
+    }
+}
+
+/// One ceremony of `wallet` for garden, served by `cli`, that ends as `exit` says; the vault
+/// is neither settled nor dropped here.
+async fn unfinished(cli: &CliVault, wallet: &Rc<RefCell<Wallet>>, exit: Exit) {
+    wallet.borrow_mut().fail_activation = matches!(exit, Exit::ActivationFails);
+    let (offer, link) = Offer::new(&address(), NOW).unwrap();
+    let delegate = Rc::new(RefCell::new(cli.delegate(offer)));
+    let channel = Faulty {
+        cli: delegate.clone(),
+        link: Link::parse(&link).unwrap(),
+        exit,
+        calls: 0,
+    };
+    let result = Delegator::new(wallet.clone(), channel)
+        .run(&link, vec![target("garden")])
+        .await;
+    assert!(result.is_err(), "{exit:?}");
+    assert!(!delegate.borrow().finished(), "{exit:?}");
+    wallet.borrow_mut().fail_activation = false;
+}
+
+/// The vault in `dir` after a crash between round 3 and round 4 of a ceremony of `wallet` for
+/// garden: what the CLI wrote ahead stays, nothing restores it. With `activated` the wallet
+/// activated the key before the CLI went down; without, it never did.
+async fn crashed(dir: &std::path::Path, wallet: &Rc<RefCell<Wallet>>, activated: bool) {
+    let cli = vault(dir).unwrap();
+    let exit = if activated {
+        Exit::RoundFourLost
+    } else {
+        Exit::ActivationFails
+    };
+    unfinished(&cli, wallet, exit).await;
+    // The process is gone: no settle, no drop.
+    std::mem::forget(cli);
+    assert!(dir.join(PENDING_FILE).exists());
+}
+
+/// A vault in a fresh directory that holds orchard from `wallet` (of garden and orchard).
+async fn with_orchard() -> (tempfile::TempDir, Rc<RefCell<Wallet>>) {
+    let dir = tempfile::tempdir().unwrap();
+    let wallet = Rc::new(RefCell::new(Wallet::new(&["garden", "orchard"]).await));
+    assert_eq!(
+        ceremony(
+            &vault(dir.path()).unwrap(),
+            &wallet,
+            vec![target("orchard")]
+        )
+        .await
+        .unwrap(),
+        vec!["orchard".to_string()]
+    );
+    (dir, wallet)
+}
+
 /// Review a11 F4: a users file that does not parse is refused before any link is shown, and
-/// it is never overwritten (the other delegations would lose their user).
+/// it is never overwritten (the other delegations would lose their user). The same holds for
+/// the pending file.
 #[tokio::test]
 async fn an_unreadable_users_file_is_refused_and_never_overwritten() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join(USERS_FILE), b"not json").unwrap();
-    assert_eq!(vault(dir.path()).err(), Some(ErrorCode::Unavailable));
-    assert_eq!(
-        std::fs::read(dir.path().join(USERS_FILE)).unwrap(),
-        b"not json"
-    );
+    for file in [USERS_FILE, PENDING_FILE] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(file), b"not json").unwrap();
+        assert_eq!(vault(dir.path()).err(), Some(ErrorCode::Unavailable));
+        assert_eq!(std::fs::read(dir.path().join(file)).unwrap(), b"not json");
+    }
 }
 
 /// Review a11 F3: the users file is written before the resume bundle, so a failure between the
@@ -738,11 +868,10 @@ async fn a_delegation_is_never_kept_without_its_user() {
     assert!(ceremony(&cli, &wallet, vec![target("garden")])
         .await
         .is_err());
-    let store = cvlt::NativeResume::new(dir.path(), BINDING, None);
-    assert!(delegated_start(&store, dir.path(), "garden")
-        .await
+    assert!(delegated_start(resume(dir.path()), dir.path(), "garden")
         .unwrap()
         .is_none());
+    assert!(!dir.path().join(PENDING_FILE).exists());
     let wallet = wallet.borrow();
     let key = wallet.offers["garden"].device;
     assert_eq!(
@@ -751,49 +880,165 @@ async fn a_delegation_is_never_kept_without_its_user() {
     );
 }
 
-/// Review a11 F3: what the CLI kept for a ceremony that then does not finish (here every
-/// activation fails) is withdrawn. The resume bundle and the users file are as they were, so
-/// the CLI keeps no delegation whose key never became active.
+/// Manager condition (1) on the F3 write-ahead: every write of the vault replaces its file
+/// atomically. The new bytes arrive by renaming a synced temporary file of the same directory
+/// (a hard link to the old file keeps the old bytes, so the file is never rewritten in place),
+/// no temporary file stays behind after a ceremony or a restore, and the files are the user's
+/// only.
 #[tokio::test]
-async fn an_unfinished_ceremony_leaves_the_vault_as_it_was() {
+async fn the_vault_replaces_its_files_atomically() {
     let dir = tempfile::tempdir().unwrap();
-    let wallet = Rc::new(RefCell::new(Wallet::new(&["garden", "orchard"]).await));
-    let orchard = target("orchard");
+    let path = dir.path().join(USERS_FILE);
+    std::fs::write(&path, b"old").unwrap();
+    std::fs::hard_link(&path, dir.path().join("old-link")).unwrap();
+    write_private(&path, b"new").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"new");
+    assert_eq!(std::fs::read(dir.path().join("old-link")).unwrap(), b"old");
+    assert!(snapshot(dir.path()).3.is_empty());
+    let (dir, wallet) = with_orchard().await;
+    assert!(snapshot(dir.path()).3.is_empty());
+    let cli = vault(dir.path()).unwrap();
+    unfinished(&cli, &wallet, Exit::RoundFourLost).await;
+    // Written ahead: the pending file lists garden, and it is the user's only.
+    #[cfg(unix)]
+    for file in [USERS_FILE, PENDING_FILE] {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(dir.path().join(file))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o077, 0, "{file}");
+    }
+    assert!(snapshot(dir.path()).3.is_empty());
+    cli.settle(false).unwrap();
+    assert!(snapshot(dir.path()).3.is_empty());
+}
+
+/// Manager condition (2) on the F3 write-ahead: every exit without round 4 restores the vault
+/// as it was (the users and pending files byte for byte, the bundle's entries): an activation
+/// failure, an expiry (round 4 never arrives), the CLI's own refusal of round 4, and a cancel
+/// (the vault dropped unsettled, as when `login_delegated` is dropped).
+#[tokio::test]
+async fn every_exit_without_round_four_restores_the_vault() {
+    for exit in [
+        Exit::ActivationFails,
+        Exit::RoundFourLost,
+        Exit::RoundFourRefused,
+        Exit::Cancelled,
+    ] {
+        let (dir, wallet) = with_orchard().await;
+        let before = snapshot(dir.path());
+        assert_eq!(before.2.len(), 1);
+        let cli = vault(dir.path()).unwrap();
+        unfinished(&cli, &wallet, exit).await;
+        // Round 3 was answered: garden was written ahead.
+        assert_ne!(snapshot(dir.path()), before, "{exit:?}");
+        if matches!(exit, Exit::Cancelled) {
+            drop(cli);
+        } else {
+            assert!(cli.settle(false).unwrap().is_empty());
+            // Settled once: the drop restores nothing more.
+            drop(cli);
+        }
+        assert_eq!(snapshot(dir.path()), before, "{exit:?}");
+        assert!(delegated_start(resume(dir.path()), dir.path(), "garden")
+            .unwrap()
+            .is_none());
+    }
+}
+
+/// Manager condition (3) on the F3 write-ahead: a crash between round 3 and round 4 does not
+/// wedge the start. The delegation the CLI wrote ahead was never activated; the start finds it
+/// pending, the server refuses its key, and the start fails once with that refusal and removes
+/// it (no retry, no panic). The next start is no delegated one there, and orchard stays.
+#[tokio::test]
+async fn a_crash_before_round_four_does_not_wedge_the_start() {
+    let (dir, wallet) = with_orchard().await;
+    let orchard = snapshot(dir.path());
+    crashed(dir.path(), &wallet, false).await;
+    let start = delegated_start(resume(dir.path()), dir.path(), "garden")
+        .unwrap()
+        .unwrap();
+    assert!(start.provisional.is_some());
     assert_eq!(
-        ceremony(&vault(dir.path()).unwrap(), &wallet, vec![orchard.clone()])
-            .await
-            .unwrap(),
-        vec!["orchard".to_string()]
+        start.opened(Err(ErrorCode::Unauthorized)).err(),
+        Some(ErrorCode::Unauthorized)
     );
-    let users = std::fs::read(dir.path().join(USERS_FILE)).unwrap();
-    let store = cvlt::NativeResume::new(dir.path(), BINDING, None);
-    let held = store
-        .load()
+    // Removed: it opens nothing more in this process either.
+    assert_eq!(start.opened(Ok(1)).err(), Some(ErrorCode::Unauthorized));
+    assert!(delegated_start(resume(dir.path()), dir.path(), "garden")
         .unwrap()
-        .delegation(&orchard.fingerprint, "orchard")
+        .is_none());
+    assert_eq!(snapshot(dir.path()), orchard);
+    let held = delegated_start(resume(dir.path()), dir.path(), "orchard")
         .unwrap()
-        .device_public_key();
-    wallet.borrow_mut().fail_activation = true;
+        .unwrap();
+    assert!(held.provisional.is_none());
+    // An unreachable server decides nothing: the pending delegation is tried again next time.
+    crashed(dir.path(), &wallet, false).await;
+    let start = delegated_start(resume(dir.path()), dir.path(), "garden")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        start.opened(Err(ErrorCode::Unavailable)).err(),
+        Some(ErrorCode::Unavailable)
+    );
+    assert!(delegated_start(resume(dir.path()), dir.path(), "garden")
+        .unwrap()
+        .unwrap()
+        .provisional
+        .is_some());
+}
+
+/// Manager condition (3), the other case: the wallet activated the key before the CLI went
+/// down. The first session open succeeds, so the delegation is confirmed and held from then on.
+#[tokio::test]
+async fn a_pending_delegation_the_server_knows_is_confirmed() {
+    let (dir, wallet) = with_orchard().await;
+    crashed(dir.path(), &wallet, true).await;
+    assert!(!vault(dir.path()).unwrap().held.contains_key("garden"));
+    let start = delegated_start(resume(dir.path()), dir.path(), "garden")
+        .unwrap()
+        .unwrap();
+    assert!(start.provisional.is_some());
+    assert_eq!(start.opened(Ok(7)), Ok(7));
+    assert!(!dir.path().join(PENDING_FILE).exists());
+    assert!(delegated_start(resume(dir.path()), dir.path(), "garden")
+        .unwrap()
+        .unwrap()
+        .provisional
+        .is_none());
+    assert!(vault(dir.path()).unwrap().held.contains_key("garden"));
+}
+
+/// Manager condition (3) with F1a: the delegation a crash left pending is not held, so a fresh
+/// ceremony of the same member succeeds (it replaces nothing, so it needs no registry
+/// revocation), and the pending delegation gives way to the new one.
+#[tokio::test]
+async fn a_crash_before_round_four_does_not_block_a_fresh_ceremony() {
+    let (dir, wallet) = with_orchard().await;
+    crashed(dir.path(), &wallet, false).await;
+    let stale = wallet.borrow().offers["garden"].device;
+    assert!(!vault(dir.path()).unwrap().held.contains_key("garden"));
     assert_eq!(
         ceremony(&vault(dir.path()).unwrap(), &wallet, vec![target("garden")])
             .await
-            .err(),
-        Some(ErrorCode::Unavailable)
+            .unwrap(),
+        vec!["garden".to_string()]
     );
-    assert_eq!(std::fs::read(dir.path().join(USERS_FILE)).unwrap(), users);
-    let bundle = store.load().unwrap();
-    assert_eq!(bundle.memberships().count(), 1);
-    assert_eq!(
-        bundle
-            .delegation(&orchard.fingerprint, "orchard")
-            .unwrap()
-            .device_public_key(),
-        held
-    );
-    assert!(delegated_start(&store, dir.path(), "garden")
-        .await
-        .unwrap()
-        .is_none());
+    let fresh = wallet.borrow().offers["garden"].clone();
+    assert_eq!(fresh.replaces, None);
+    assert_ne!(fresh.device, stale);
+    let (users, pending, mut entries, temporary) = snapshot(dir.path());
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(entries[0].0, "garden");
+    assert_eq!(entries[0].1, fresh.device);
+    assert_eq!(entries[1].0, "orchard");
+    assert_eq!(entries.len(), 2);
+    let users: BTreeMap<String, String> = serde_json::from_slice(&users.unwrap()).unwrap();
+    assert_eq!(users.len(), 2);
+    assert!(pending.is_none() && temporary.is_empty());
+    assert!(vault(dir.path()).unwrap().held.contains_key("garden"));
 }
 
 /// Review a11 F1a at the CLI's vault: a ceremony of another identity leaves the held
@@ -805,31 +1050,14 @@ async fn a_ceremony_of_another_identity_leaves_the_vault_untouched() {
     ceremony(&vault(dir.path()).unwrap(), &first, vec![target("garden")])
         .await
         .unwrap();
-    let users = std::fs::read(dir.path().join(USERS_FILE)).unwrap();
-    let store = cvlt::NativeResume::new(dir.path(), BINDING, None);
-    let garden = target("garden");
-    let held = store
-        .load()
-        .unwrap()
-        .delegation(&garden.fingerprint, "garden")
-        .unwrap()
-        .device_public_key();
+    let before = snapshot(dir.path());
     let other = Rc::new(RefCell::new(Wallet::new(&["garden"]).await));
     other.borrow_mut().ignore_replaces = true;
     assert_eq!(
-        ceremony(&vault(dir.path()).unwrap(), &other, vec![garden.clone()])
+        ceremony(&vault(dir.path()).unwrap(), &other, vec![target("garden")])
             .await
             .err(),
         Some(ErrorCode::Unauthorized)
     );
-    assert_eq!(std::fs::read(dir.path().join(USERS_FILE)).unwrap(), users);
-    assert_eq!(
-        store
-            .load()
-            .unwrap()
-            .delegation(&garden.fingerprint, "garden")
-            .unwrap()
-            .device_public_key(),
-        held
-    );
+    assert_eq!(snapshot(dir.path()), before);
 }
