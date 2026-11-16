@@ -642,9 +642,11 @@ pub fn lazy_wave_capabilities(
             let prewarm = first.prewarm_handle();
             let group = Rc::new(group);
             let provers: Provers = Rc::new(move || {
-                let unavailable = |_| ErrorCode::Unavailable;
+                fn unavailable<E>(_: E) -> ErrorCode {
+                    ErrorCode::Unavailable
+                }
                 let update = BrowserProver::new(update.clone(), Arc::new(WorkerPort))
-                    .map_err(|e| unavailable(e))?;
+                    .map_err(unavailable)?;
                 Ok(BrowserWaveProver {
                     update,
                     wave: group.prover(Program::Wave).map_err(unavailable)?,
@@ -660,7 +662,9 @@ pub fn lazy_wave_capabilities(
         .await;
         match loaded {
             Ok(loaded) => *filling.borrow_mut() = Some(loaded),
-            Err(cause) => web_sys::console::error_1(&format!("wave group refused: {cause:?}").into()),
+            Err(cause) => {
+                web_sys::console::error_1(&format!("wave group refused: {cause:?}").into())
+            }
         }
     });
     let provers_slot = Rc::clone(&slot);
@@ -670,10 +674,12 @@ pub fn lazy_wave_capabilities(
             Some(loaded) => (loaded.provers)(),
             None => Err(ErrorCode::Unavailable),
         }),
-        verifier: Box::new(move |policy, now, until| match verifier_slot.borrow().as_ref() {
-            Some(loaded) => (loaded.verifier)(policy, now, until),
-            None => Err(ErrorCode::Unavailable),
-        }),
+        verifier: Box::new(
+            move |policy, now, until| match verifier_slot.borrow().as_ref() {
+                Some(loaded) => (loaded.verifier)(policy, now, until),
+                None => Err(ErrorCode::Unavailable),
+            },
+        ),
     };
     struct Lazy<F: Fn() -> Option<Rc<dyn crate::door::inbox_waves::WavePrewarm>>>(F);
     impl<F: Fn() -> Option<Rc<dyn crate::door::inbox_waves::WavePrewarm>>>
@@ -686,6 +692,8 @@ pub fn lazy_wave_capabilities(
             }
         }
     }
-    let prewarm = Rc::new(Lazy(move || slot.borrow().as_ref().map(|l| Rc::clone(&l.prewarm))));
+    let prewarm = Rc::new(Lazy(move || {
+        slot.borrow().as_ref().map(|l| Rc::clone(&l.prewarm))
+    }));
     (capabilities, prewarm)
 }
