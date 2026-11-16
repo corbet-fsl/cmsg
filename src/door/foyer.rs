@@ -403,6 +403,18 @@ impl Binding {
     /// A13: renew the global session by K when it is due at `now` (see [`WalletRenewal`]).
     /// Without a renewer, or when not due, nothing is sent. Returns whether it renewed.
     pub(super) async fn renew_wallet_if_due(&mut self, now: u64) -> Result<bool> {
+        self.renew_wallet(now, false).await
+    }
+
+    /// A13 F1: the wallet refused a forwarded call with this session. A device clock behind the
+    /// wallet's lets the session expire before the device thinks it is due, so ask the wallet's
+    /// clock ONCE and renew by K if it is due there. Returns whether it renewed (the caller then
+    /// resends the call once); without a renewer nothing is sent.
+    pub(super) async fn renew_wallet_after_refusal(&mut self, now: u64) -> Result<bool> {
+        self.renew_wallet(now, true).await
+    }
+
+    async fn renew_wallet(&mut self, now: u64, refused: bool) -> Result<bool> {
         let Some(renewal) = &self.renewal else {
             return Ok(false);
         };
@@ -415,12 +427,17 @@ impl Binding {
             .get_mut(&Scope::Global)
             .ok_or(ErrorCode::Unavailable)?;
         let device = *renewal.key.public_key().value();
-        match client
-            .renew_wallet_session(&renewal.host, now, device, |payload| {
-                renewal.key.sign(payload).ok()
-            })
-            .await
-        {
+        let sign = |payload: &[u8]| renewal.key.sign(payload).ok();
+        let renewed = if refused {
+            client
+                .renew_wallet_session_after_refusal(&renewal.host, now, device, sign)
+                .await
+        } else {
+            client
+                .renew_wallet_session(&renewal.host, now, device, sign)
+                .await
+        };
+        match renewed {
             Ok(renewed) => Ok(renewed),
             // Refused for good: no renewal is tried again; the session ends at its deadline.
             Err(cfyr::Error::Unauthorized) => {
@@ -957,6 +974,25 @@ mod renewal_tests {
         assert!(binding.renewal.is_none());
         // Without a renewer nothing is ever sent either.
         assert_eq!(binding.renew_wallet_if_due(1_800_000_000).await, Ok(false));
+    }
+
+    /// A13 F1: after a refused call the renewer asks the wallet's clock, but a session whose
+    /// family was never anchored still ends the renewer without a request, and without a
+    /// renewer nothing is sent: the refusal reaches the caller unchanged.
+    #[tokio::test]
+    async fn a_refusal_without_an_anchored_family_renews_nothing() {
+        let mut door = door();
+        door.set_wallet_renewal(WALLET, key()).unwrap();
+        let binding = door.foyers.get_mut(WALLET).unwrap();
+        assert_eq!(
+            binding.renew_wallet_after_refusal(1_800_000_000).await,
+            Ok(false)
+        );
+        assert!(binding.renewal.is_none());
+        assert_eq!(
+            binding.renew_wallet_after_refusal(1_800_000_000).await,
+            Ok(false)
+        );
     }
 }
 

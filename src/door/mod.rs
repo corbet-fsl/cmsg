@@ -806,8 +806,16 @@ impl Door {
             let foyer = self.foyers.get_mut(origin).ok_or(ErrorCode::Unavailable)?;
             // A13: a due wallet session renews by K first, silently.
             foyer.renew_wallet_if_due(now).await?;
-            let result = foyer.call(action, body).await?;
-            Ok((result, vec![]))
+            let mut result = foyer.call(action, body.clone()).await;
+            // A13 F1: a refusal may mean the session expired on the wallet's clock while the
+            // device clock lags. Renew once on the wallet's clock; only a renewed session
+            // resends the call, once.
+            if matches!(result, Err(ErrorCode::Unauthorized))
+                && foyer.renew_wallet_after_refusal(now).await?
+            {
+                result = foyer.call(action, body).await;
+            }
+            Ok((result?, vec![]))
         }
     }
 

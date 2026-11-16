@@ -29,9 +29,11 @@ Foyer; there is no frontend-to-cvld bypass or copied administrative action table
 The wallet session renews silently by the wallet device key K (A13): the embedding lends the
 wallet Door's binding ONE `WalletRenewal` (`Door::set_wallet_renewal`, K from the unlocked
 wallet opening, never the PRF); before every forwarded call the binding renews the global session
-through Foyer once it is within 300 s of its deadline. A refused renewal ends the renewer (the
-session then ends at its deadline into the ordinary passkey login); a transient one is retried at
-the next call.
+through Foyer once it is within 300 s of its deadline on the wallet's clock (Foyer corrects the
+device clock by the wallet's offset, A13 F1). A refused renewal ends the renewer (the session then
+ends at its deadline into the ordinary passkey login); a transient one is retried at the next
+call. When the wallet refuses a forwarded call, the binding asks the wallet's clock once and, only
+if that renewed the session, resends the call once.
 
 No member keys or PRF appear in API data, errors or logs. A local paired-client
 capability is distinct from passkeys, remote sessions and member authority.
