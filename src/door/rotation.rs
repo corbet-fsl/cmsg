@@ -11,7 +11,8 @@ use std::future::Future;
 
 /// A custody that can reopen its owners in place under the current epoch.
 pub(crate) trait ReopenAfterRotation {
-    fn reopen(&mut self) -> impl Future<Output = Result<(), WalletRestoreError>>;
+    /// `Ok(true)` when the custody was reopened, `Ok(false)` when nothing had rotated.
+    fn reopen(&mut self) -> impl Future<Output = Result<bool, WalletRestoreError>>;
 }
 
 impl<B, C, E, A, R> ReopenAfterRotation for cvlt::Vault<B, C, E, A, R, cvlt::WalletCustody>
@@ -22,7 +23,7 @@ where
     A: ckmg::Authority,
     R: cvlt::Records,
 {
-    async fn reopen(&mut self) -> Result<(), WalletRestoreError> {
+    async fn reopen(&mut self) -> Result<bool, WalletRestoreError> {
         self.reopen_after_rotation().await
     }
 }
@@ -35,8 +36,14 @@ pub(crate) async fn custody_refusal<V: ReopenAfterRotation>(
     error: WalletRestoreError,
     fallback: ErrorCode,
 ) -> ErrorCode {
-    if matches!(error, WalletRestoreError::Rotated) && custody.reopen().await.is_ok() {
-        return ErrorCode::CustodyReopened;
+    if matches!(error, WalletRestoreError::Rotated) {
+        match custody.reopen().await {
+            Ok(true) => return ErrorCode::CustodyReopened,
+            Ok(false) => {}
+            Err(cause) => {
+                super::cause::print(file!(), line!(), "custody reopen refused", &cause);
+            }
+        }
     }
     super::cause::emit(file!(), line!(), "custody_refusal", fallback, &error)
 }
@@ -50,10 +57,10 @@ mod tests {
         reopened: u32,
     }
     impl ReopenAfterRotation for Fake {
-        async fn reopen(&mut self) -> Result<(), WalletRestoreError> {
+        async fn reopen(&mut self) -> Result<bool, WalletRestoreError> {
             self.reopened += 1;
             if self.reopens {
-                Ok(())
+                Ok(true)
             } else {
                 Err(WalletRestoreError::Scope)
             }
@@ -83,6 +90,22 @@ mod tests {
             refuse(false, WalletRestoreError::Rotated),
             (ErrorCode::Unauthorized, 1)
         );
+    }
+
+    #[test]
+    fn a_reopen_that_found_nothing_rotated_is_not_a_retry() {
+        struct Unmoved;
+        impl ReopenAfterRotation for Unmoved {
+            async fn reopen(&mut self) -> Result<bool, WalletRestoreError> {
+                Ok(false)
+            }
+        }
+        let code = futures_executor::block_on(custody_refusal(
+            &mut Unmoved,
+            WalletRestoreError::Rotated,
+            ErrorCode::Unauthorized,
+        ));
+        assert_eq!(code, ErrorCode::Unauthorized);
     }
 
     #[test]

@@ -77,6 +77,7 @@ pub mod record;
 pub mod record_job;
 mod registry;
 pub(crate) mod rooms;
+#[cfg(any(test, all(feature = "native-prover", not(target_arch = "wasm32"))))]
 mod rotation;
 pub mod runner;
 pub mod tasks;
