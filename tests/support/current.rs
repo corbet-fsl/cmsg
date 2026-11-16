@@ -662,3 +662,84 @@ async fn the_wave_trust_read_refuses_a_clock_behind_the_charter_and_an_unbound_o
     drop(door);
     server.https.shutdown().await.unwrap();
 }
+
+/// `inbox.wave_prewarm` on a real bound Door (signed Charter over loopback HTTPS, the real
+/// Vault, the member origin): inside the current-policy bracket it wakes the origin's wave
+/// worker once, starts the bound warm-up once, and sends nothing (the ports refuse any call).
+struct CountingWarm(std::rc::Rc<std::cell::Cell<u32>>);
+impl crate::door::inbox_waves::WavePrewarm for CountingWarm {
+    fn prewarm(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>> {
+        self.0.set(self.0.get() + 1);
+        Box::pin(async {})
+    }
+}
+struct IdleWorker;
+impl crate::door::wave_job::WaveWorker for IdleWorker {
+    fn round(
+        &self,
+        _: crate::door::courier::SharedDoor,
+        _: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<usize>>>> {
+        unreachable!("the test never runs the worker; it only observes the wake")
+    }
+}
+
+#[tokio::test]
+async fn compose_wakes_the_wave_worker_once_warms_once_and_sends_nothing() {
+    crate::door::with_client_version(env!("CARGO_PKG_VERSION"), async {
+        let now = cbrd::clnk::Clock::now(&crate::door::board::SystemClock).unwrap() / 1000;
+        let server = PublicFeed::new(feed(now, 1)).await;
+        let foyer = server.foyer(now).await;
+        let (owner, _, checks) = open_fixture().await;
+        let mut door = Door::new(
+            Configuration::new(
+                "alpha".into(),
+                BTreeMap::from([(Role::Member, BTreeSet::from([ORIGIN.into()]))]),
+            )
+            .unwrap(),
+        );
+        door.bind_foyer(
+            ORIGIN,
+            Role::Member,
+            foyer::Sessions::new(foyer::Scope::Community, foyer),
+        )
+        .unwrap();
+        door.vaults.insert(ORIGIN.into(), Box::new(owner));
+        // Any wave port call (Terms, Hello, reserve, send) would panic: nothing may be sent.
+        door.bind_waves(ORIGIN, Box::new(NoPorts)).unwrap();
+        door.set_wave_worker(ORIGIN, std::rc::Rc::new(IdleWorker))
+            .unwrap();
+        let warmed = std::rc::Rc::new(std::cell::Cell::new(0));
+        door.bind_wave_prewarm(ORIGIN, std::rc::Rc::new(CountingWarm(warmed.clone())))
+            .unwrap();
+        let wake = door.wave_wake(ORIGIN).expect("the worker has a wake");
+        assert!(!wake.pending(), "no round is requested before the compose");
+        let token = door
+            .pair_client(
+                ORIGIN,
+                Role::Member,
+                registry::catalog()
+                    .into_iter()
+                    .map(|action| action.action)
+                    .collect(),
+                now,
+                now + 120,
+            )
+            .unwrap();
+        let reply = door
+            .dispatch(
+                ORIGIN,
+                token.expose_for_transport(),
+                &request("inbox.wave_prewarm"),
+                live_now(),
+            )
+            .await;
+        assert!(matches!(reply, Output::Ok { .. }), "the compose is answered");
+        assert!(wake.pending(), "the worker's next round is requested");
+        assert_eq!(warmed.get(), 1, "the setup warm-up started exactly once");
+        assert_eq!(checks.get(), 0, "the bracket reads nothing from the vault");
+        door.close_owned().await;
+        server.https.shutdown().await.unwrap();
+    })
+    .await;
+}

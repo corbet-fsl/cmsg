@@ -179,6 +179,11 @@ impl Wake {
     fn take(&self) -> bool {
         self.0.replace(false)
     }
+    /// Whether a wake is waiting (tests only; the worker alone consumes it).
+    #[cfg(test)]
+    pub(crate) fn pending(&self) -> bool {
+        self.0.get()
+    }
 }
 
 /// Cadence of the worker, in seconds.
