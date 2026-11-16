@@ -734,7 +734,10 @@ async fn compose_wakes_the_wave_worker_once_warms_once_and_sends_nothing() {
                 live_now(),
             )
             .await;
-        assert!(matches!(reply, Output::Ok { .. }), "the compose is answered");
+        assert!(
+            matches!(reply, Output::Ok { .. }),
+            "the compose is answered"
+        );
         assert!(wake.pending(), "the worker's next round is requested");
         assert_eq!(warmed.get(), 1, "the setup warm-up started exactly once");
         assert_eq!(checks.get(), 0, "the bracket reads nothing from the vault");
