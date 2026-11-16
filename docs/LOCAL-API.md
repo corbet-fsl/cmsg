@@ -31,6 +31,12 @@ worker). In any other tab the Inbox and Mesh actions answer the typed error
 holder ends its jobs and Mesh at once and its session ends; it can take the
 runner back after unlocking again). A native device is always `here`.
 
+Device removal rotates the member's vault keys. A request that meets the rotation
+(a record save from the custody opened before it) makes the app reopen the custody under
+the new epoch itself and answers the typed, retryable error `custody_reopened` (exit
+code 75, session stays open): the client repeats the same request and it succeeds. It is
+never shown as a failure.
+
 `board.status` and `board.disconnect` return the actual Board Status.
 `vault.lock` consumes and locks the actual Vault before emitting VaultLocked.
 `mesh.disconnect` closes the retained actual Mesh listener before emitting

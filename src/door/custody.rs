@@ -566,9 +566,12 @@ fn pair_base_matches(evidence: &[u8], live: Option<[u8; 32]>) -> bool {
 /// application operation (not a login step) is undetermined: it refuses that
 /// operation and leaves the session open for the next, freshly checked one.
 pub(crate) fn refusal_ends_session(action: &str, error: ErrorCode) -> bool {
-    // `RunnerElsewhere` is a state of this tab, never a fault of the session.
-    !matches!(error, ErrorCode::Unavailable | ErrorCode::RunnerElsewhere)
-        || action.starts_with("login.")
+    // `RunnerElsewhere` is a state of this tab, never a fault of the session; nor is
+    // `CustodyReopened`, the retry of a save that met a rotation (L20261116a).
+    !matches!(
+        error,
+        ErrorCode::Unavailable | ErrorCode::RunnerElsewhere | ErrorCode::CustodyReopened
+    ) || action.starts_with("login.")
 }
 
 #[cfg(test)]

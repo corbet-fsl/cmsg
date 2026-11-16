@@ -77,6 +77,7 @@ pub mod record;
 pub mod record_job;
 mod registry;
 pub(crate) mod rooms;
+mod rotation;
 pub mod runner;
 pub mod tasks;
 mod transient;
@@ -142,6 +143,10 @@ pub enum ErrorCode {
     /// Another tab of this device runs the Mesh and the background jobs: this Door's
     /// Mesh actions are not served here. `runner.take` moves the runner to this tab.
     RunnerElsewhere,
+    /// A device removal rotated this member's vault keys, and the app has reopened the
+    /// custody under the current epoch (L20261116a). Nothing was lost and nothing is wrong:
+    /// the client repeats the same request, which now succeeds. Never shown as a failure.
+    CustodyReopened,
 }
 
 impl ErrorCode {
@@ -162,7 +167,8 @@ impl ErrorCode {
             | Self::Reconcile
             | Self::ProofWindowElapsed
             | Self::SessionExpired
-            | Self::RunnerElsewhere => 75,
+            | Self::RunnerElsewhere
+            | Self::CustodyReopened => 75,
         }
     }
 }

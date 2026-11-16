@@ -628,18 +628,17 @@ where
         )
     })?;
     // The key is durable before proving: a restart proves again with the same key.
-    let key = vault
+    let key = match vault
         .begin_record_epoch(&epoch, accepted.owner(), now(), operation()?)
         .await
-        .map_err(|__cause| {
-            crate::door::cause::emit(
-                file!(),
-                line!(),
-                "ErrorCode::Unauthorized",
-                ErrorCode::Unauthorized,
-                &__cause,
+    {
+        Ok(key) => key,
+        Err(error) => {
+            return Err(
+                super::rotation::custody_refusal(vault, error, ErrorCode::Unauthorized).await,
             )
-        })?;
+        }
+    };
     let evidence = accepted
         .record_epoch(received, key, now())
         .map_err(|__cause| {
@@ -683,18 +682,17 @@ where
     let Some(signed) = accepted.delivered_record_leaf(epoch.epoch) else {
         return Ok(None);
     };
-    let key = vault
+    let key = match vault
         .begin_record_epoch(epoch, accepted.owner(), now(), operation()?)
         .await
-        .map_err(|__cause| {
-            crate::door::cause::emit(
-                file!(),
-                line!(),
-                "ErrorCode::Unauthorized",
-                ErrorCode::Unauthorized,
-                &__cause,
+    {
+        Ok(key) => key,
+        Err(error) => {
+            return Err(
+                super::rotation::custody_refusal(vault, error, ErrorCode::Unauthorized).await,
             )
-        })?;
+        }
+    };
     let evidence = accepted
         .record_epoch_signed(epoch, &signed, key, now())
         .map_err(|__cause| {
@@ -726,18 +724,15 @@ where
     A: Authority,
     R: Records,
 {
-    vault
+    match vault
         .finish_record_epoch(proof.record, proof.proof, operation()?)
         .await
-        .map_err(|__cause| {
-            crate::door::cause::emit(
-                file!(),
-                line!(),
-                "ErrorCode::Unauthorized",
-                ErrorCode::Unauthorized,
-                &__cause,
-            )
-        })
+    {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            Err(super::rotation::custody_refusal(vault, error, ErrorCode::Unauthorized).await)
+        }
+    }
 }
 
 /// The per-epoch preparation the background job runs: skip when the current
