@@ -615,3 +615,50 @@ async fn the_wave_trust_read_takes_its_time_once_the_door_is_held() {
     drop(door);
     server.https.shutdown().await.unwrap();
 }
+
+/// The refusals of the wave worker's trust read: a clock behind what the Charter already
+/// observed, and an origin without a bound community, both answer unavailable/refused
+/// (never a panic), so the worker's cadence retries.
+#[tokio::test]
+async fn the_wave_trust_read_refuses_a_clock_behind_the_charter_and_an_unbound_origin() {
+    let now = 2_000_000_000;
+    let server = PublicFeed::new(feed(now, 1)).await;
+    let foyer = server.foyer(now).await;
+    let mut door = Door::new(
+        Configuration::new(
+            "alpha".into(),
+            BTreeMap::from([(Role::Member, BTreeSet::from([ORIGIN.into()]))]),
+        )
+        .unwrap(),
+    );
+    door.bind_foyer(
+        ORIGIN,
+        Role::Member,
+        foyer::Sessions::new(foyer::Scope::Community, foyer),
+    )
+    .unwrap();
+    // The Charter has observed now + 5; a read at `now` regresses.
+    door.current_policy(ORIGIN)
+        .unwrap()
+        .with_current(now + 5, |_| ())
+        .unwrap();
+    let door: crate::door::courier::SharedDoor = Rc::new(tokio::sync::Mutex::new(door));
+    let behind = crate::door::inbox_waves::feed_trust::with_door_current(
+        &door,
+        ORIGIN,
+        || now,
+        |charter, at| Ok((charter.revision(), at)),
+    )
+    .await;
+    assert_eq!(behind, Err(ErrorCode::Unavailable));
+    let unbound = crate::door::inbox_waves::feed_trust::with_door_current(
+        &door,
+        "https://other.example.test",
+        || now,
+        |charter, at| Ok((charter.revision(), at)),
+    )
+    .await;
+    assert_eq!(unbound, Err(ErrorCode::Unavailable));
+    drop(door);
+    server.https.shutdown().await.unwrap();
+}
