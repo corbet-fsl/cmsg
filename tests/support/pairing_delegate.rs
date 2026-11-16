@@ -10,7 +10,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 const NOW: u64 = 1_000;
-const CEREMONY: &[u8] = b"the one wallet confirmation";
+/// The `DelegateDevice` admission evidence (production: the pre-delegation lineage digest).
+const CEREMONY: &[u8] = b"the pre-delegation lineage digest";
 const PRF: [u8; 32] = [0x5a; 32];
 
 #[derive(Clone, Default)]
@@ -45,7 +46,7 @@ impl ckmg::Clock for Time {
     }
 }
 
-/// Test authority: a delegation needs exactly the ceremony evidence, a target and a statement.
+/// Test authority: a delegation needs exactly that evidence, a target and a statement.
 struct Allow;
 impl ckmg::Authority for Allow {
     async fn check(
@@ -117,6 +118,15 @@ struct Wallet {
     sent: Vec<Vec<u8>>,
     /// Corrupt the grant of this community (seal it to a stranger's key).
     stranger: Option<String>,
+    /// Drop the key the CLI asks to replace (a wallet of another identity, which does not
+    /// list it).
+    ignore_replaces: bool,
+    /// The CLI's kept delegations, counted at each activation.
+    watch: Option<Kept>,
+    /// How many delegations the CLI had kept at each activation.
+    kept_at_activation: Vec<usize>,
+    /// Every activation fails (the community is unreachable).
+    fail_activation: bool,
 }
 
 impl Wallet {
@@ -147,6 +157,10 @@ impl Wallet {
             confirmations: 0,
             sent: Vec::new(),
             stranger: None,
+            ignore_replaces: false,
+            watch: None,
+            kept_at_activation: Vec::new(),
+            fail_activation: false,
         }
     }
 }
@@ -155,8 +169,11 @@ impl DelegatorSteps for Rc<RefCell<Wallet>> {
     async fn confirm_all(&mut self, offers: Vec<(Target, DelegationOffer)>) -> Result<()> {
         let mut wallet = self.borrow_mut();
         wallet.confirmations += 1;
-        for (target, offer) in offers {
+        for (target, mut offer) in offers {
             offer.check().map_err(|_| ErrorCode::Unauthorized)?;
+            if wallet.ignore_replaces {
+                offer.replaces = None;
+            }
             let purposes = [ckmg::Purpose::new(ckmg::Scope::Member, "board", 1).unwrap()];
             let custody = wallet.keys.get_mut(&target.community).unwrap();
             let (receipt, mut sealed) = custody
@@ -165,7 +182,9 @@ impl DelegatorSteps for Rc<RefCell<Wallet>> {
                 .map_err(|_| ErrorCode::Unauthorized)?;
             custody.acknowledge(receipt.operation).await.unwrap();
             if wallet.stranger.as_deref() == Some(target.community.as_str()) {
-                let stranger = DelegationRequest::new(&mut ckmg::SystemEntropy, None).unwrap();
+                let stranger =
+                    DelegationRequest::new(&mut ckmg::SystemEntropy, &target.community, None)
+                        .unwrap();
                 let custody = wallet.keys.get_mut(&target.community).unwrap();
                 let (receipt, other) = custody
                     .delegate_remote_device(&stranger.offer(), &purposes, CEREMONY)
@@ -216,6 +235,11 @@ impl DelegatorSteps for Rc<RefCell<Wallet>> {
 
     async fn activate(&mut self, target: &Target, signature: Vec<u8>) -> Result<()> {
         let mut wallet = self.borrow_mut();
+        let seen = wallet.watch.as_ref().map(|kept| kept.borrow().len());
+        wallet.kept_at_activation.extend(seen);
+        if wallet.fail_activation {
+            return Err(ErrorCode::Unavailable);
+        }
         let key = *wallet.offers[&target.community].device.value();
         let community = wallet.communities.get_mut(&target.community).unwrap();
         if !community.possessed(&target.community, PairingStep::Activate, &key, &signature) {
@@ -237,8 +261,8 @@ type Kept = Rc<RefCell<Vec<Delegated>>>;
 type Cli = Delegate<Box<dyn FnMut(Vec<Delegated>) -> Result<()>>>;
 
 /// The in-process carrier: each call is answered by the CLI's offer, as over the onion.
-struct Wire(Rc<RefCell<Cli>>);
-impl Channel for Wire {
+struct Wire<K: FnMut(Vec<Delegated>) -> Result<()>>(Rc<RefCell<Delegate<K>>>);
+impl<K: FnMut(Vec<Delegated>) -> Result<()>> Channel for Wire<K> {
     async fn call(&mut self, _: &cmsh::Address, message: &[u8]) -> Result<Vec<u8>> {
         let mut cli = self.0.borrow_mut();
         cli.serve(message, NOW).await
@@ -249,19 +273,29 @@ fn address() -> cmsh::Address {
     cmsh::Address::new(cmsh::Scheme::new("tor").unwrap(), vec![7; 35]).unwrap()
 }
 
-/// A CLI offer whose kept delegations land in `kept`; `current` is its resume bundle's keys.
-fn cli(current: BTreeMap<String, ckmg::PublicKey>) -> (Rc<RefCell<Cli>>, String, Kept) {
-    let (offer, link) = Offer::new(&address(), NOW).unwrap();
+/// A CLI offer whose kept delegations land in `kept`; `current` is what its resume bundle holds.
+fn cli(current: BTreeMap<String, Held>) -> (Rc<RefCell<Cli>>, String, Kept) {
     let kept: Kept = Rc::default();
     let sink = kept.clone();
-    let keep: Box<dyn FnMut(Vec<Delegated>) -> Result<()>> = Box::new(move |delegated| {
-        sink.borrow_mut().extend(delegated);
-        Ok(())
-    });
+    let (delegate, link) = cli_with(
+        current,
+        Box::new(move |delegated| {
+            sink.borrow_mut().extend(delegated);
+            Ok(())
+        }),
+    );
+    (delegate, link, kept)
+}
+
+/// A CLI offer with its own `keep`.
+fn cli_with(
+    current: BTreeMap<String, Held>,
+    keep: Box<dyn FnMut(Vec<Delegated>) -> Result<()>>,
+) -> (Rc<RefCell<Cli>>, String) {
+    let (offer, link) = Offer::new(&address(), NOW).unwrap();
     (
         Rc::new(RefCell::new(Delegate::new(offer, current, keep))),
         link,
-        kept,
     )
 }
 
@@ -289,7 +323,7 @@ async fn one_confirmation_delegates_the_cli_which_then_opens_sessions_with_no_pr
         .unwrap();
     assert!(delegate.borrow().finished());
     let wallet = wallet.borrow();
-    // ONE confirmation for both communities (one stamp, the DelegateDevice evidence).
+    // ONE confirmation for both communities (one stamp over both pairing slots).
     assert_eq!(wallet.confirmations, 1);
     let kept = kept.borrow();
     assert_eq!(kept.len(), 2);
@@ -314,7 +348,7 @@ async fn one_confirmation_delegates_the_cli_which_then_opens_sessions_with_no_pr
         let message = [ckmg::DeviceFormat::DeviceSession.tag(), &payload[..]].concat();
         ckmg::verify_ed25519(key.value(), &message, &signature).unwrap();
         // The sealed material opens only with the CLI's one-time key.
-        let stranger = DelegationRequest::new(&mut ckmg::SystemEntropy, None).unwrap();
+        let stranger = DelegationRequest::new(&mut ckmg::SystemEntropy, name, None).unwrap();
         assert!(stranger.open(&wallet.sealed[name]).is_err());
     }
     // The CLI never receives the PRF or the root: nothing the wallet sent holds the PRF, and
@@ -333,7 +367,7 @@ async fn one_confirmation_delegates_the_cli_which_then_opens_sessions_with_no_pr
         assert_eq!(custody.state(), ckmg::State::Delegated);
         let purposes = [ckmg::Purpose::new(ckmg::Scope::Member, "board", 1).unwrap()];
         assert!(custody.delegate_device(&purposes, CEREMONY).await.is_err());
-        let offer = DelegationRequest::new(&mut ckmg::SystemEntropy, None)
+        let offer = DelegationRequest::new(&mut ckmg::SystemEntropy, &entry.target.community, None)
             .unwrap()
             .offer();
         assert!(custody
@@ -356,10 +390,11 @@ async fn re_delegation_revokes_the_previous_key_and_merges_into_the_stored_bundl
         .unwrap();
     let first: Vec<Delegated> = kept.borrow_mut().drain(..).collect();
     let old_garden = first[0].delegation.device_public_key();
+    let held = Held::of(target("garden").fingerprint, &first[0].delegation);
     let orchard = first[1].delegation.device_public_key();
     merge_into(&store, first).await.unwrap();
     // Second ceremony for garden only: the CLI names its current key there.
-    let current = BTreeMap::from([("garden".to_string(), old_garden)]);
+    let current = BTreeMap::from([("garden".to_string(), held)]);
     let (delegate, link, kept) = cli(current);
     Delegator::new(wallet.clone(), Wire(delegate))
         .run(&link, vec![target("garden")])
@@ -421,6 +456,80 @@ async fn a_grant_the_cli_cannot_open_activates_nothing_and_keeps_nothing() {
         wallet.communities["garden"].rows[key.value()],
         (Row::Pending, true)
     );
+}
+
+/// The CLI after one ceremony of `wallet` for garden: its held delegation there.
+async fn delegated_garden(wallet: &Rc<RefCell<Wallet>>) -> Delegated {
+    let (delegate, link, kept) = cli(BTreeMap::new());
+    Delegator::new(wallet.clone(), Wire(delegate))
+        .run(&link, vec![target("garden")])
+        .await
+        .unwrap();
+    let mut kept = kept.borrow_mut();
+    assert_eq!(kept.len(), 1);
+    kept.remove(0)
+}
+
+/// Review a11 F1a (L2: a re-delegation replaces the member's OWN previous key). Whoever reads
+/// the link of a CLI that holds garden cannot replace that delegation with one of another
+/// identity: a second wallet with its own root drives the link and ignores the key it is asked
+/// to replace (it does not list it). The CLI refuses the grant, signs no activation and keeps
+/// nothing.
+#[tokio::test]
+async fn a_delegation_of_another_identity_never_replaces_the_held_one() {
+    let first = Rc::new(RefCell::new(Wallet::new(&["garden"]).await));
+    let held = delegated_garden(&first).await;
+    let other = Rc::new(RefCell::new(Wallet::new(&["garden"]).await));
+    other.borrow_mut().ignore_replaces = true;
+    let theirs = other
+        .borrow_mut()
+        .keys
+        .get_mut("garden")
+        .unwrap()
+        .lineage()
+        .await
+        .unwrap();
+    assert_ne!(theirs.root, held.delegation.lineage().root);
+    assert_ne!(theirs.identity, held.delegation.lineage().identity);
+    let current = BTreeMap::from([(
+        "garden".to_string(),
+        Held::of(target("garden").fingerprint, &held.delegation),
+    )]);
+    let (delegate, link, kept) = cli(current);
+    let result = Delegator::new(other.clone(), Wire(delegate.clone()))
+        .run(&link, vec![target("garden")])
+        .await;
+    assert_eq!(result.err(), Some(ErrorCode::Unauthorized));
+    assert!(kept.borrow().is_empty());
+    assert!(!delegate.borrow().finished());
+    let other = other.borrow();
+    let key = other.offers["garden"].device;
+    assert_eq!(
+        other.communities["garden"].rows[key.value()],
+        (Row::Pending, true)
+    );
+}
+
+/// Review a11 F1a: a target that names another fingerprint for a community the CLI holds is
+/// refused before anything is asked. It would add a second entry of that community, which the
+/// delegated start refuses.
+#[tokio::test]
+async fn a_target_with_another_fingerprint_for_a_held_community_is_refused() {
+    let wallet = Rc::new(RefCell::new(Wallet::new(&["garden"]).await));
+    let held = delegated_garden(&wallet).await;
+    let current = BTreeMap::from([(
+        "garden".to_string(),
+        Held::of(target("garden").fingerprint, &held.delegation),
+    )]);
+    let (delegate, link, kept) = cli(current);
+    let mut moved = target("garden");
+    moved.fingerprint = [0xee; 32];
+    let result = Delegator::new(wallet.clone(), Wire(delegate))
+        .run(&link, vec![moved])
+        .await;
+    assert_eq!(result.err(), Some(ErrorCode::Unauthorized));
+    assert!(kept.borrow().is_empty());
+    assert_eq!(wallet.borrow().confirmations, 1);
 }
 
 #[tokio::test]
@@ -542,4 +651,185 @@ async fn the_delegated_start_builds_its_door_from_the_delegation_and_the_users_f
             .mode();
         assert_eq!(mode & 0o077, 0);
     }
+}
+
+/// Review a11 F3: the CLI keeps its delegations BEFORE any activation possession leaves it, so
+/// no key is ever activated for a delegation the CLI did not keep.
+#[tokio::test]
+async fn the_cli_keeps_its_delegations_before_any_key_is_activated() {
+    let wallet = Rc::new(RefCell::new(Wallet::new(&["garden", "orchard"]).await));
+    let (delegate, link, kept) = cli(BTreeMap::new());
+    wallet.borrow_mut().watch = Some(kept.clone());
+    Delegator::new(wallet.clone(), Wire(delegate.clone()))
+        .run(&link, vec![target("garden"), target("orchard")])
+        .await
+        .unwrap();
+    assert!(delegate.borrow().finished());
+    assert_eq!(wallet.borrow().kept_at_activation, vec![2, 2]);
+}
+
+/// Review a11 F3: a CLI that cannot keep what it was granted signs no activation. The keys
+/// stay PENDING (they expire and grant nothing) and the wallet is never told it is done.
+#[tokio::test]
+async fn a_cli_that_cannot_keep_its_delegations_activates_nothing() {
+    let wallet = Rc::new(RefCell::new(Wallet::new(&["garden"]).await));
+    let (delegate, link) = cli_with(BTreeMap::new(), Box::new(|_| Err(ErrorCode::Unavailable)));
+    let result = Delegator::new(wallet.clone(), Wire(delegate.clone()))
+        .run(&link, vec![target("garden")])
+        .await;
+    assert_eq!(result.err(), Some(ErrorCode::Unavailable));
+    assert!(!delegate.borrow().finished());
+    let wallet = wallet.borrow();
+    let key = wallet.offers["garden"].device;
+    assert_eq!(
+        wallet.communities["garden"].rows[key.value()],
+        (Row::Pending, true)
+    );
+}
+
+const BINDING: &[u8] = b"wallet.example.test\0delegated";
+
+/// The CLI's vault in `dir`, opened as `login_delegated` opens it (without the OS key store).
+fn vault(dir: &std::path::Path) -> Result<CliVault> {
+    CliVault::with_store(cvlt::NativeResume::new(dir, BINDING, None), dir)
+}
+
+/// One ceremony of `wallet` for `targets`, served by `cli` and settled as `login_delegated`
+/// settles it: the delegated communities, or the settlement's or the ceremony's error.
+async fn ceremony(
+    cli: &CliVault,
+    wallet: &Rc<RefCell<Wallet>>,
+    targets: Vec<Target>,
+) -> Result<Vec<String>> {
+    let (offer, link) = Offer::new(&address(), NOW).unwrap();
+    let delegate = Rc::new(RefCell::new(cli.delegate(offer)));
+    let served = Delegator::new(wallet.clone(), Wire(delegate.clone()))
+        .run(&link, targets)
+        .await;
+    let finished = delegate.borrow().finished();
+    let communities = cli.settle(finished)?;
+    served.map(|()| communities)
+}
+
+/// Review a11 F4: a users file that does not parse is refused before any link is shown, and
+/// it is never overwritten (the other delegations would lose their user).
+#[tokio::test]
+async fn an_unreadable_users_file_is_refused_and_never_overwritten() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(USERS_FILE), b"not json").unwrap();
+    assert_eq!(vault(dir.path()).err(), Some(ErrorCode::Unavailable));
+    assert_eq!(
+        std::fs::read(dir.path().join(USERS_FILE)).unwrap(),
+        b"not json"
+    );
+}
+
+/// Review a11 F3: the users file is written before the resume bundle, so a failure between the
+/// two never leaves a delegation without its user (the delegated start refuses that, and cmeet
+/// could not start). Here the users file cannot be written: the ceremony does not complete,
+/// nothing is activated and the start finds no delegation.
+#[tokio::test]
+async fn a_delegation_is_never_kept_without_its_user() {
+    let dir = tempfile::tempdir().unwrap();
+    // The users file's temporary name is taken, so writing the users file fails.
+    std::fs::create_dir(dir.path().join(USERS_FILE).with_extension("tmp")).unwrap();
+    let cli = vault(dir.path()).unwrap();
+    let wallet = Rc::new(RefCell::new(Wallet::new(&["garden"]).await));
+    assert!(ceremony(&cli, &wallet, vec![target("garden")])
+        .await
+        .is_err());
+    let store = cvlt::NativeResume::new(dir.path(), BINDING, None);
+    assert!(delegated_start(&store, dir.path(), "garden")
+        .await
+        .unwrap()
+        .is_none());
+    let wallet = wallet.borrow();
+    let key = wallet.offers["garden"].device;
+    assert_eq!(
+        wallet.communities["garden"].rows[key.value()],
+        (Row::Pending, true)
+    );
+}
+
+/// Review a11 F3: what the CLI kept for a ceremony that then does not finish (here every
+/// activation fails) is withdrawn. The resume bundle and the users file are as they were, so
+/// the CLI keeps no delegation whose key never became active.
+#[tokio::test]
+async fn an_unfinished_ceremony_leaves_the_vault_as_it_was() {
+    let dir = tempfile::tempdir().unwrap();
+    let wallet = Rc::new(RefCell::new(Wallet::new(&["garden", "orchard"]).await));
+    let orchard = target("orchard");
+    assert_eq!(
+        ceremony(&vault(dir.path()).unwrap(), &wallet, vec![orchard.clone()])
+            .await
+            .unwrap(),
+        vec!["orchard".to_string()]
+    );
+    let users = std::fs::read(dir.path().join(USERS_FILE)).unwrap();
+    let store = cvlt::NativeResume::new(dir.path(), BINDING, None);
+    let held = store
+        .load()
+        .unwrap()
+        .delegation(&orchard.fingerprint, "orchard")
+        .unwrap()
+        .device_public_key();
+    wallet.borrow_mut().fail_activation = true;
+    assert_eq!(
+        ceremony(&vault(dir.path()).unwrap(), &wallet, vec![target("garden")])
+            .await
+            .err(),
+        Some(ErrorCode::Unavailable)
+    );
+    assert_eq!(std::fs::read(dir.path().join(USERS_FILE)).unwrap(), users);
+    let bundle = store.load().unwrap();
+    assert_eq!(bundle.memberships().count(), 1);
+    assert_eq!(
+        bundle
+            .delegation(&orchard.fingerprint, "orchard")
+            .unwrap()
+            .device_public_key(),
+        held
+    );
+    assert!(delegated_start(&store, dir.path(), "garden")
+        .await
+        .unwrap()
+        .is_none());
+}
+
+/// Review a11 F1a at the CLI's vault: a ceremony of another identity leaves the held
+/// delegation and the users file untouched.
+#[tokio::test]
+async fn a_ceremony_of_another_identity_leaves_the_vault_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = Rc::new(RefCell::new(Wallet::new(&["garden"]).await));
+    ceremony(&vault(dir.path()).unwrap(), &first, vec![target("garden")])
+        .await
+        .unwrap();
+    let users = std::fs::read(dir.path().join(USERS_FILE)).unwrap();
+    let store = cvlt::NativeResume::new(dir.path(), BINDING, None);
+    let garden = target("garden");
+    let held = store
+        .load()
+        .unwrap()
+        .delegation(&garden.fingerprint, "garden")
+        .unwrap()
+        .device_public_key();
+    let other = Rc::new(RefCell::new(Wallet::new(&["garden"]).await));
+    other.borrow_mut().ignore_replaces = true;
+    assert_eq!(
+        ceremony(&vault(dir.path()).unwrap(), &other, vec![garden.clone()])
+            .await
+            .err(),
+        Some(ErrorCode::Unauthorized)
+    );
+    assert_eq!(std::fs::read(dir.path().join(USERS_FILE)).unwrap(), users);
+    assert_eq!(
+        store
+            .load()
+            .unwrap()
+            .delegation(&garden.fingerprint, "garden")
+            .unwrap()
+            .device_public_key(),
+        held
+    );
 }

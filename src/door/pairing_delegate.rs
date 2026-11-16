@@ -12,15 +12,20 @@
 //!
 //! 1. the wallet names the communities the member chose; the CLI answers with one
 //!    [`ckmg::DelegationOffer`] per community: a fresh `K_d` and a fresh one-time HPKE key made
-//!    ON the CLI (D3), plus the delegate it held before there (re-delegation);
-//! 2. after the member's ONE confirmation (the `Action::DelegateDevice` evidence and the one
-//!    stamp covering every community's pairing slot) the wallet sends each community's fresh
-//!    add challenge; the CLI answers with `K_d`'s possession signatures;
+//!    ON the CLI (D3), plus the delegate it held before there (re-delegation, [`Held`]: the
+//!    same community fingerprint only);
+//! 2. after Keys enrolled each `K_d` under its single-use `Action::DelegateDevice` admission
+//!    (the evidence is the pre-delegation lineage digest) and the member's ONE confirmation
+//!    (the one stamp covering every community's pairing slot), the wallet sends each
+//!    community's fresh add challenge; the CLI answers with `K_d`'s possession signatures;
 //! 3. the wallet registers each `K_d` PENDING as `Delegated` and sends the grants: the
 //!    delegation material SEALED to the CLI's one-time key, and the member's user there; the
-//!    CLI opens and checks each delegation and answers with the activation possessions;
-//! 4. the wallet activates the keys and says so; only then does the CLI keep the delegations
-//!    (merged into its resume bundle, A10b).
+//!    CLI opens and checks each delegation (where it holds one, the new one must be the same
+//!    member's: root, identity and binding), keeps them (merged into its resume bundle, A10b)
+//!    and only then answers with the activation possessions, so no key is ever activated for a
+//!    delegation the CLI does not hold;
+//! 4. the wallet activates the keys and says so, which finishes the ceremony. A ceremony that
+//!    ends before this leaves the CLI's vault as it was (`CliVault::settle`, native).
 //!
 //! The CLI never receives the PRF, the root, the identity, history or anything derived from
 //! them, and the wallet never receives `K_d`. A CLI that restarts loses its offer: the member
@@ -200,7 +205,41 @@ fn possess(
         })
 }
 
-/// One community the CLI is delegated in, kept after round 4.
+/// What the CLI already holds in one community (its resume bundle's entry). A new delegation
+/// there must be the same member's (L2: a re-delegation replaces the member's OWN previous
+/// key): the same community fingerprint, and a lineage of the same root, identity and binding.
+/// Whoever reads the link therefore cannot replace the CLI's delegation with one of another
+/// identity.
+#[derive(Clone)]
+pub struct Held {
+    /// The community's founding-key fingerprint of the held entry.
+    pub fingerprint: [u8; 32],
+    /// The held delegation key, which a new delegation there replaces.
+    pub device: ckmg::PublicKey,
+    /// The held delegation's lineage.
+    pub lineage: ckmg::Lineage,
+}
+
+impl Held {
+    /// The held entry of `delegation`, kept under `fingerprint`.
+    pub fn of(fingerprint: [u8; 32], delegation: &DeviceDelegation) -> Self {
+        Self {
+            fingerprint,
+            device: delegation.device_public_key(),
+            lineage: delegation.lineage().clone(),
+        }
+    }
+
+    /// Whether `lineage` belongs to the member of this entry: same root, identity and binding.
+    /// A root rotation changes the root, so a delegation of another epoch is refused as well.
+    fn same_member(&self, lineage: &ckmg::Lineage) -> bool {
+        lineage.root == self.lineage.root
+            && lineage.identity == self.lineage.identity
+            && lineage.binding == self.lineage.binding
+    }
+}
+
+/// One community the CLI is delegated in, kept in round 3 before any activation is signed.
 pub struct Delegated {
     /// The community and its fingerprint.
     pub target: Target,
@@ -210,31 +249,35 @@ pub struct Delegated {
     pub delegation: DeviceDelegation,
 }
 
-/// The CLI's side of one ceremony: the open offer behind the link it shows, the requests it
-/// made, and the delegations it opened. `keep` is called ONCE, after the wallet reports every
-/// key ACTIVE, with every delegation of this ceremony (the caller merges them into its resume
-/// bundle); its failure leaves round 4 unanswered.
+/// The CLI's side of one ceremony: the open offer behind the link it shows and the requests it
+/// made. `keep` is called in round 3 with every delegation of this ceremony, once each is
+/// opened and checked and BEFORE any activation possession leaves the CLI (the caller persists
+/// them); its failure leaves round 3 unanswered, so no key is activated for a delegation the
+/// CLI does not hold. Only round 4, the wallet's word that every key is ACTIVE, finishes the
+/// ceremony: a caller whose ceremony ends unfinished withdraws what it kept
+/// (`CliVault::settle`, native).
 pub struct Delegate<K: FnMut(Vec<Delegated>) -> Result<()>> {
     offer: Offer,
-    /// The CLI's current delegation key per community (from its resume bundle), which a new
-    /// delegation there replaces.
-    current: BTreeMap<String, ckmg::PublicKey>,
+    /// What the CLI holds per community (from its resume bundle): a new delegation there
+    /// replaces that key and must be the same member's.
+    current: BTreeMap<String, Held>,
     targets: Vec<Target>,
     requests: Vec<DelegationRequest>,
-    opened: Vec<(String, DeviceDelegation)>,
+    /// `keep` accepted this ceremony's delegations.
+    kept: bool,
     keep: K,
 }
 
 impl<K: FnMut(Vec<Delegated>) -> Result<()>> Delegate<K> {
     /// Serve `offer`; `current` maps each community the CLI already holds a delegation in to
-    /// that delegation's key.
-    pub fn new(offer: Offer, current: BTreeMap<String, ckmg::PublicKey>, keep: K) -> Self {
+    /// that entry.
+    pub fn new(offer: Offer, current: BTreeMap<String, Held>, keep: K) -> Self {
         Self {
             offer,
             current,
             targets: Vec::new(),
             requests: Vec::new(),
-            opened: Vec::new(),
+            kept: false,
             keep,
         }
     }
@@ -244,7 +287,7 @@ impl<K: FnMut(Vec<Delegated>) -> Result<()>> Delegate<K> {
         self.offer.expires()
     }
 
-    /// Every round is answered: the delegations are kept.
+    /// Every round is answered: the delegations are kept and their keys ACTIVE.
     pub fn finished(&self) -> bool {
         self.offer.finished()
     }
@@ -265,19 +308,28 @@ impl<K: FnMut(Vec<Delegated>) -> Result<()>> Delegate<K> {
                 checked_targets(&delegate)?;
                 let mut requests = Vec::with_capacity(delegate.len());
                 for target in &delegate {
-                    let replaces = self.current.get(&target.community).copied();
+                    let held = self.current.get(&target.community);
+                    // A held community keeps its fingerprint: another one would make a second
+                    // entry of the same community, which the delegated start refuses.
+                    if held.is_some_and(|held| held.fingerprint != target.fingerprint) {
+                        return Err(ErrorCode::Unauthorized);
+                    }
+                    let replaces = held.map(|held| held.device);
                     requests.push(
-                        DelegationRequest::new(&mut ckmg::SystemEntropy, replaces).map_err(
-                            |__cause| {
-                                crate::door::cause::emit(
-                                    file!(),
-                                    line!(),
-                                    "ErrorCode::Unavailable",
-                                    ErrorCode::Unavailable,
-                                    &__cause,
-                                )
-                            },
-                        )?,
+                        DelegationRequest::new(
+                            &mut ckmg::SystemEntropy,
+                            &target.community,
+                            replaces,
+                        )
+                        .map_err(|__cause| {
+                            crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unavailable",
+                                ErrorCode::Unavailable,
+                                &__cause,
+                            )
+                        })?,
                     );
                 }
                 let offers = requests.iter().map(DelegationRequest::offer).collect();
@@ -311,7 +363,8 @@ impl<K: FnMut(Vec<Delegated>) -> Result<()>> Delegate<K> {
                 let grants = values(&self.targets, grants)?;
                 let challenges = values(&self.targets, challenges)?;
                 // Every delegation opens and names its community before any activation is
-                // signed: a key is never activated for material the CLI cannot use.
+                // signed: a key is never activated for material the CLI cannot use. Where the
+                // CLI holds a delegation, the new one must be the same member's.
                 let mut opened = Vec::with_capacity(grants.len());
                 for ((target, request), grant) in
                     self.targets.iter().zip(&self.requests).zip(&grants)
@@ -325,7 +378,13 @@ impl<K: FnMut(Vec<Delegated>) -> Result<()>> Delegate<K> {
                             &__cause,
                         )
                     })?;
-                    if delegation.community() != target.community || grant.user.is_empty() {
+                    if delegation.community() != target.community
+                        || grant.user.is_empty()
+                        || self
+                            .current
+                            .get(&target.community)
+                            .is_some_and(|held| !held.same_member(delegation.lineage()))
+                    {
                         return Err(ErrorCode::Unauthorized);
                     }
                     opened.push((grant.user.clone(), delegation));
@@ -341,28 +400,31 @@ impl<K: FnMut(Vec<Delegated>) -> Result<()>> Delegate<K> {
                         challenge,
                     )?);
                 }
-                self.opened = opened;
-                encode(&SignaturesMessage {
-                    signatures: entries(&self.targets, signatures),
-                })?
-            }
-            4 => {
-                let Done { done } = decode(&payload)?;
-                if done != 1 || self.opened.len() != self.targets.len() {
-                    return Err(ErrorCode::InvalidRequest);
-                }
-                let kept = self
+                // Kept BEFORE any activation possession leaves the CLI: if keeping fails the
+                // round stays unanswered and no key is activated for a delegation the CLI
+                // does not hold.
+                let delegated = self
                     .targets
                     .iter()
                     .cloned()
-                    .zip(std::mem::take(&mut self.opened))
+                    .zip(opened)
                     .map(|(target, (user, delegation))| Delegated {
                         target,
                         user,
                         delegation,
                     })
                     .collect();
-                (self.keep)(kept)?;
+                (self.keep)(delegated)?;
+                self.kept = true;
+                encode(&SignaturesMessage {
+                    signatures: entries(&self.targets, signatures),
+                })?
+            }
+            4 => {
+                let Done { done } = decode(&payload)?;
+                if done != 1 || !self.kept {
+                    return Err(ErrorCode::InvalidRequest);
+                }
                 // The requests held K_d before the delegations did; nothing of them is needed.
                 self.requests.clear();
                 encode(&Done { done: 1 })?
@@ -390,10 +452,10 @@ impl<K: FnMut(Vec<Delegated>) -> Result<()>> super::pairing_onion::Serve for Del
 /// human-facing step; a failure ends the ceremony (the member starts a new link).
 #[allow(async_fn_in_trait)]
 pub trait DelegatorSteps {
-    /// The member's ONE confirmation over every offer together: it is the
-    /// `Action::DelegateDevice` evidence of each enrolment and the one stamp that covers
-    /// each community's pairing slot of its `K_d`. Each offer is checked before anything is
-    /// asked of the member.
+    /// Enrol every offer's `K_d` (Keys, under its single-use `Action::DelegateDevice`
+    /// admission, whose evidence is the pre-delegation lineage digest), then the member's ONE
+    /// confirmation over every offer together: the one stamp that covers each community's
+    /// pairing slot of its `K_d`. Each offer is checked before anything is asked of the member.
     async fn confirm_all(&mut self, offers: Vec<(Target, DelegationOffer)>) -> Result<()>;
     /// A fresh one-use community challenge of `target`, fetched after the round's human
     /// steps so it is fresh when the CLI signs it.
@@ -503,6 +565,20 @@ pub async fn merge_into<S: super::unlock_once::UnlockStore>(
     delegated: Vec<Delegated>,
 ) -> Result<()> {
     let mut bundle = store.load().await.unwrap_or_default();
+    insert_all(&mut bundle, delegated)?;
+    store.save(&bundle).await.map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
+}
+
+/// Insert each delegation into `bundle`, replacing the entry of its community and fingerprint.
+fn insert_all(bundle: &mut cvlt::ResumeBundle, delegated: Vec<Delegated>) -> Result<()> {
     for entry in delegated {
         bundle
             .insert(
@@ -520,15 +596,20 @@ pub async fn merge_into<S: super::unlock_once::UnlockStore>(
                 )
             })?;
     }
-    store.save(&bundle).await.map_err(|__cause| {
-        crate::door::cause::emit(
-            file!(),
-            line!(),
-            "ErrorCode::Unavailable",
-            ErrorCode::Unavailable,
-            &__cause,
-        )
-    })
+    Ok(())
+}
+
+/// What `bundle` holds per community.
+#[cfg(not(target_arch = "wasm32"))]
+fn held_in(bundle: &cvlt::ResumeBundle) -> BTreeMap<String, Held> {
+    bundle
+        .memberships()
+        .filter_map(|(fingerprint, scope)| {
+            bundle
+                .delegation(fingerprint, scope)
+                .map(|delegation| (scope.to_owned(), Held::of(*fingerprint, delegation)))
+        })
+        .collect()
 }
 
 /// The fragment route of the wallet-origin page that opens a CLI delegation link. The
@@ -545,11 +626,147 @@ pub fn page_link(page: &str, link: &str) -> String {
 /// directory.
 pub const USERS_FILE: &str = "delegated-users.json";
 
+/// The CLI's delegations of one deployment (native): the resume bundle of its binding and the
+/// users file beside it, in its private vault directory ([`login_delegated`]).
+///
+/// A ceremony's delegations are written ahead in round 3, before any key is activated: the
+/// users file first, then the bundle, so a failure between the two never leaves a delegation
+/// without its user (the delegated start would refuse it). What the vault held when it was
+/// opened is remembered, and a ceremony that ends unfinished restores it ([`Self::settle`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub struct CliVault {
+    store: cvlt::NativeResume,
+    vault: std::path::PathBuf,
+    held: BTreeMap<String, Held>,
+    /// The users file as it was (`None`: absent).
+    users: Option<Vec<u8>>,
+    /// Its entries.
+    known: BTreeMap<String, String>,
+    /// The resume bundle as it was (`None`: none).
+    previous: Option<cvlt::ResumeBundle>,
+    /// Something of this ceremony was (or may have been) written.
+    written: std::cell::Cell<bool>,
+    communities: std::cell::RefCell<Vec<String>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl CliVault {
+    /// The vault of the resume binding `binding` in the private directory `vault`. A users
+    /// file that cannot be read or does not parse is refused (`Unavailable`) and never
+    /// overwritten: the other delegations would lose their user.
+    pub fn open(vault: &std::path::Path, binding: &[u8]) -> Result<Self> {
+        Self::with_store(super::unlock_once::native_store(vault, binding), vault)
+    }
+
+    fn with_store(store: cvlt::NativeResume, vault: &std::path::Path) -> Result<Self> {
+        let users = users_file(vault)?;
+        let known = users
+            .as_deref()
+            .map(parse_users)
+            .transpose()?
+            .unwrap_or_default();
+        let previous = store.load();
+        let held = previous.as_ref().map(held_in).unwrap_or_default();
+        Ok(Self {
+            store,
+            vault: vault.to_owned(),
+            held,
+            users,
+            known,
+            previous,
+            written: Default::default(),
+            communities: Default::default(),
+        })
+    }
+
+    /// The CLI's side of one ceremony behind `offer`; it keeps into this vault.
+    pub fn delegate(
+        &self,
+        offer: Offer,
+    ) -> Delegate<impl FnMut(Vec<Delegated>) -> Result<()> + '_> {
+        Delegate::new(offer, self.held.clone(), move |delegated| {
+            self.keep(delegated)
+        })
+    }
+
+    /// Write one ceremony's delegations ahead: the users file, then the bundle.
+    fn keep(&self, delegated: Vec<Delegated>) -> Result<()> {
+        let mut users = self.known.clone();
+        for entry in &delegated {
+            users.insert(entry.target.community.clone(), entry.user.clone());
+        }
+        let communities: Vec<String> = delegated
+            .iter()
+            .map(|entry| entry.target.community.clone())
+            .collect();
+        let users = encode(&users)?;
+        let mut bundle = self.store.load().unwrap_or_default();
+        insert_all(&mut bundle, delegated)?;
+        self.written.set(true);
+        write_private(&self.vault.join(USERS_FILE), &users)?;
+        self.store.save(&bundle).map_err(|__cause| {
+            crate::door::cause::emit(
+                file!(),
+                line!(),
+                "ErrorCode::Unavailable",
+                ErrorCode::Unavailable,
+                &__cause,
+            )
+        })?;
+        *self.communities.borrow_mut() = communities;
+        Ok(())
+    }
+
+    /// After the ceremony: whether it `finished` (round 4, every key ACTIVE). A finished one
+    /// returns the delegated communities; an unfinished one restores what the vault held when
+    /// it was opened (the bundle first, then the users file) and returns none.
+    pub fn settle(&self, finished: bool) -> Result<Vec<String>> {
+        if finished {
+            return Ok(self.communities.take());
+        }
+        if self.written.get() {
+            let unavailable = |__cause: cvlt::ResumeError| {
+                crate::door::cause::emit(
+                    file!(),
+                    line!(),
+                    "ErrorCode::Unavailable",
+                    ErrorCode::Unavailable,
+                    &__cause,
+                )
+            };
+            match &self.previous {
+                Some(bundle) => self.store.save(bundle).map_err(unavailable)?,
+                None => self.store.forget().map_err(unavailable)?,
+            }
+            let path = self.vault.join(USERS_FILE);
+            match &self.users {
+                Some(bytes) => write_private(&path, bytes)?,
+                None => {
+                    if let Err(error) = std::fs::remove_file(&path) {
+                        if error.kind() != std::io::ErrorKind::NotFound {
+                            return Err(crate::door::cause::emit(
+                                file!(),
+                                line!(),
+                                "ErrorCode::Unavailable",
+                                ErrorCode::Unavailable,
+                                &error,
+                            ));
+                        }
+                    }
+                }
+            }
+            self.written.set(false);
+        }
+        Ok(Vec::new())
+    }
+}
+
 /// `cmeet login --delegated`: the CLI's side of the ceremony on this device. It makes the
 /// offer behind a fresh ephemeral onion service (never a member key), hands the page link to
 /// `show`, serves the four rounds until they finish or the offer expires, and merges what it
-/// was granted into the native resume bundle of `binding` in `vault` (L2). Returns the
-/// delegated communities. Nothing here holds the PRF, a root or a wallet session.
+/// was granted into the native resume bundle of `binding` in `vault` (L2) before any key is
+/// activated ([`CliVault`]); a ceremony that does not finish leaves the vault as it was.
+/// Returns the delegated communities. Nothing here holds the PRF, a root or a wallet session.
 #[cfg(all(feature = "native-tor", not(target_arch = "wasm32")))]
 pub async fn login_delegated(
     tor: &super::native::deployment::TorDeployment,
@@ -559,21 +776,7 @@ pub async fn login_delegated(
     clock: impl Fn() -> u64,
 ) -> Result<Vec<String>> {
     use super::pairing_onion::{ephemeral::ephemeral_tor, OnionOffer};
-    let vault = tor.store_directory.clone();
-    let store = super::unlock_once::native_store(&vault, binding);
-    let current: BTreeMap<String, ckmg::PublicKey> = super::unlock_once::UnlockStore::load(&store)
-        .await
-        .map(|bundle| {
-            bundle
-                .memberships()
-                .filter_map(|(fingerprint, scope)| {
-                    bundle
-                        .delegation(fingerprint, scope)
-                        .map(|delegation| (scope.to_owned(), delegation.device_public_key()))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let cli = CliVault::open(&tor.store_directory, binding)?;
     // The offer's own Tor state, apart from the member's community onion.
     let ephemeral = ephemeral_tor(
         tor_rtcompat::tokio::TokioRustlsRuntime::current().map_err(|__cause| {
@@ -598,25 +801,11 @@ pub async fn login_delegated(
     )
     .await?;
     let (service, offer, link) = OnionOffer::open(&*ephemeral.backend, clock()).await?;
-    let kept: std::rc::Rc<std::cell::RefCell<Vec<Delegated>>> = Default::default();
-    let sink = kept.clone();
-    let mut delegate = Delegate::new(offer, current, move |delegated| {
-        sink.borrow_mut().extend(delegated);
-        Ok(())
-    });
+    let mut delegate = cli.delegate(offer);
     show(&page_link(page, &link));
-    service.serve(&mut delegate, &clock).await?;
-    let delegated = std::mem::take(&mut *kept.borrow_mut());
-    let communities: Vec<String> = delegated
-        .iter()
-        .map(|entry| entry.target.community.clone())
-        .collect();
-    let mut users = read_users(&vault);
-    for entry in &delegated {
-        users.insert(entry.target.community.clone(), entry.user.clone());
-    }
-    merge_into(&store, delegated).await?;
-    write_private(&vault.join(USERS_FILE), &encode(&users)?)?;
+    let served = service.serve(&mut delegate, &clock).await;
+    let communities = cli.settle(delegate.finished())?;
+    served?;
     Ok(communities)
 }
 
@@ -627,13 +816,45 @@ pub fn cli_binding(runtime: &super::browser::Configuration) -> Option<Vec<u8>> {
     Some([page.origin.as_bytes(), b"\0delegated"].concat())
 }
 
-/// The users file of `vault` (empty when absent or unreadable).
+/// The users file of `vault` as it is (`None`: absent); `Unavailable` when it cannot be read.
 #[cfg(not(target_arch = "wasm32"))]
-fn read_users(vault: &std::path::Path) -> BTreeMap<String, String> {
-    std::fs::read(vault.join(USERS_FILE))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+fn users_file(vault: &std::path::Path) -> Result<Option<Vec<u8>>> {
+    match std::fs::read(vault.join(USERS_FILE)) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(__cause) => Err(crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )),
+    }
+}
+
+/// The entries of a users file; `Unavailable` when it does not parse.
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_users(bytes: &[u8]) -> Result<BTreeMap<String, String>> {
+    serde_json::from_slice(bytes).map_err(|__cause| {
+        crate::door::cause::emit(
+            file!(),
+            line!(),
+            "ErrorCode::Unavailable",
+            ErrorCode::Unavailable,
+            &__cause,
+        )
+    })
+}
+
+/// The users file of `vault`: empty when absent; `Unavailable` when it cannot be read or
+/// does not parse.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_users(vault: &std::path::Path) -> Result<BTreeMap<String, String>> {
+    Ok(users_file(vault)?
+        .as_deref()
+        .map(parse_users)
+        .transpose()?
+        .unwrap_or_default())
 }
 
 /// What a delegated CLI holds for one community: its delegation (sealed form, for every
@@ -667,7 +888,7 @@ pub async fn delegated_start<S: super::unlock_once::UnlockStore>(
         [delegation] => *delegation,
         _ => return Err(ErrorCode::InvalidRequest),
     };
-    let user = read_users(vault)
+    let user = read_users(vault)?
         .remove(community)
         .ok_or(ErrorCode::Unavailable)?;
     let sealed = delegation.to_sealed_bytes().map_err(|__cause| {
