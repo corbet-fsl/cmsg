@@ -50,4 +50,4 @@ cblc_manifest=$(grep -o '"manifest_path":"[^"]*/cblc[^"/]*/Cargo.toml"\|"manifes
 verifier_target="${CARGO_TARGET_DIR:-target}/cblc-verifier-worker"
 nix-shell native-prover-owner/check-shell.nix --run 'set -euo pipefail; export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }${BB_NATIVE_RUSTFLAGS:?Missing original native loader configuration}"; CARGO_TARGET_DIR="'"$verifier_target"'" cargo build --locked --manifest-path "'"$cblc_manifest"'" --example czkp_bb_worker'
 export CMSG_NATIVE_VERIFIER_WORKER="$verifier_target/debug/examples/czkp_bb_worker"
-nix-shell native-prover-owner/check-shell.nix --run 'set -euo pipefail; export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }${BB_NATIVE_RUSTFLAGS:?Missing original native loader configuration}"; cargo test --locked --lib --features native-prover inbox_waves::verifier -- --include-ignored'
+nix-shell native-prover-owner/check-shell.nix --run 'set -euo pipefail; export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }${BB_NATIVE_RUSTFLAGS:?Missing original native loader configuration}"; cargo test --locked --lib --features native-prover inbox_waves:: -- --include-ignored'
