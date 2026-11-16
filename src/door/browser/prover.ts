@@ -160,9 +160,9 @@ export async function storeMillis(circuitId: string, millis: number): Promise<vo
 // --- the one worker of a proof (or of a calibration, a counterpart verification or a warm-up)
 
 /** `preemptible`: a real proof ends it (calibration, warm-up); `quiet`: no progress reaches the frame. */
-type Running = { cancel: () => void; preemptible: boolean };
+type Running = { cancel: () => void; preemptible: boolean; verifying: boolean };
 let running: Running | null = null;
-/** Verifications waiting for the device: a counterpart's proof is never refused for a busy device. */
+/** Verifications and proofs waiting for a running verification or proof to end: a counterpart's proof is never refused for a busy device. */
 const waiting: (() => void)[] = [];
 
 function release(): void {
@@ -194,7 +194,7 @@ function runWorker(
   job: Job,
   transfer: ArrayBuffer[],
   timeoutMs: number,
-  mode: { quiet: boolean; preemptible: boolean },
+  mode: { quiet: boolean; preemptible: boolean; verifying?: boolean },
 ): Promise<{ reply: string; millis: number }> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./prover.worker.js', import.meta.url), { type: 'module', name: 'cmsg-prover' });
@@ -215,7 +215,7 @@ function runWorker(
       }
     };
     const timer = setTimeout(() => finish(unavailable(), undefined, 'timeout'), timeoutMs);
-    running = { cancel: () => finish(unavailable(), undefined, 'cancelled'), preemptible: mode.preemptible };
+    running = { cancel: () => finish(unavailable(), undefined, 'cancelled'), preemptible: mode.preemptible, verifying: mode.verifying === true };
     worker.onmessage = (event: MessageEvent<FromWorker>) => {
       const message = event.data;
       if (message.type === 'progress') {
@@ -236,12 +236,17 @@ export function proveInWorker(setup: string, input: Uint8Array): Promise<string>
   return provedMillis(setup, input).then((done) => done.reply);
 }
 
-/** Milliseconds a real proof took, from the setup being in the worker's hands to its reply. */
-export function provedMillis(setup: string, input: Uint8Array): Promise<{ reply: string; millis: number }> {
+/**
+ * Milliseconds a real proof took, from the setup being in the worker's hands to its reply. A running
+ * counterpart verification is not preemptible but is short: the proof queues behind it instead of
+ * being refused; a running proof of the member still refuses (one proof at a time).
+ */
+export async function provedMillis(setup: string, input: Uint8Array): Promise<{ reply: string; millis: number }> {
   if (running?.preemptible) running.cancel();
-  if (running !== null) return Promise.reject(unavailable());
+  while (running?.verifying) await new Promise<void>((resolve) => waiting.push(resolve));
+  if (running !== null) throw unavailable();
   const timeoutMs = timeoutOf(setup);
-  if (timeoutMs === null) return Promise.reject(unavailable());
+  if (timeoutMs === null) throw unavailable();
   const buffer = transferable(input);
   return runWorker(setup, { input: buffer }, [buffer], timeoutMs, { quiet: false, preemptible: false });
 }
@@ -259,7 +264,7 @@ export async function verifyInWorker(setup: string, fields: Uint8Array, proof: U
   const fieldBuffer = fields.slice().buffer as ArrayBuffer;
   const proofBuffer = proof.slice().buffer as ArrayBuffer;
   try {
-    const { reply } = await runWorker(setup, { verify: { fields: fieldBuffer, proof: proofBuffer } }, [fieldBuffer, proofBuffer], timeoutMs, { quiet: true, preemptible: false });
+    const { reply } = await runWorker(setup, { verify: { fields: fieldBuffer, proof: proofBuffer } }, [fieldBuffer, proofBuffer], timeoutMs, { quiet: true, preemptible: false, verifying: true });
     return (JSON.parse(reply) as { verified?: unknown }).verified === true;
   } catch {
     return false;

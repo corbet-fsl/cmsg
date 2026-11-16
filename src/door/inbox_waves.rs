@@ -20,6 +20,11 @@ mod desk;
 pub mod device;
 pub(crate) mod engine;
 pub mod feed_trust;
+#[cfg(any(
+    all(feature = "native-prover", not(target_arch = "wasm32")),
+    all(feature = "browser-prover", target_arch = "wasm32")
+))]
+pub mod lazy;
 #[cfg(all(feature = "native-prover", not(target_arch = "wasm32")))]
 pub mod native;
 mod ports;

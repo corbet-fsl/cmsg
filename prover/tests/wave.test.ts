@@ -210,6 +210,30 @@ describe('the browser wave stack in headless Chromium (wasm probe)', () => {
     }
   });
 
+  test('a member proof queues behind a running counterpart verification instead of being refused', { timeout: 10 * MINUTES }, async () => {
+    const { context, page, pageErrors } = await open(harness);
+    try {
+      const args = [DEPLOYMENT, JSON.stringify(policy), now, until, 'wave', JSON.stringify(reservation), proofHex(byKind.wave), JSON.stringify(reservation.context), '', ''];
+      const [verdict, proved] = await probe(
+        page,
+        async (p, d, input, ...a) => {
+          // Both start in the same turn: the verification takes the device first, the proof must wait for it.
+          const checked = p.waveVerify(d!, ...a);
+          const proving = p.waveProve(d!, 'wave', input!);
+          return [await checked, await proving];
+        },
+        DEPLOYMENT,
+        WITNESS.wave,
+        ...args.slice(1),
+      );
+      assert.deepEqual(pageErrors, []);
+      assert.deepEqual(verdict, { ok: true, value: 'accepted' });
+      assert.ok((proved as { ok: boolean }).ok, JSON.stringify(proved));
+    } finally {
+      await context.close();
+    }
+  });
+
   test('a served key group that differs from the pinned digest is refused before any worker starts', { timeout: 2 * MINUTES }, async () => {
     const { context, page } = await open(harness);
     try {

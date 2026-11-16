@@ -402,7 +402,7 @@ pub async fn drain<J: WaveJobs, P: worker::Prover>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::door::inbox_waves::types::{Blob, Work};
     use cwlt::wave::{ExtensionPolicy, PublicField};
@@ -439,7 +439,7 @@ mod tests {
             .to_vec()
     }
 
-    fn wave_policy() -> WavePolicy {
+    pub(crate) fn wave_policy() -> WavePolicy {
         WavePolicy {
             community: [1; 32],
             extension: ExtensionPolicy {
